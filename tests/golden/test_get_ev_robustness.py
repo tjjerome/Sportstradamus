@@ -133,32 +133,6 @@ class _CaptureArchive:
         self.rungs.extend(rungs)
 
 
-def test_add_dfs_boost_only_offer_prices_symmetric_never_blown_or_clamped():
-    """A ``Boost``-only DFS pick prices as a symmetric standard pick, never a blown mean.
-
-    A Rivals/H2H-style pick carries a single both-ways Boost and no per-side
-    multipliers, so its payout-implied quote is the even 50/50 (the boost value
-    cancels in a symmetric devig). BLK's high zero rate floors that price below
-    the gate, so the inversion has no solution and lands on ``get_ev``'s ceiling
-    — which must be stored as NULL, never a bound dressed as a mean.
-    """
-    offer = {
-        "Player": "Nikola Jokic",
-        "League": "NBA",
-        "Market": "BLK",
-        "Line": 1.5,
-        "Date": "2025-12-23",
-        "Boost": 1,
-    }
-    cap = _CaptureArchive()
-    Archive.add_dfs(cap, [offer], "Underdog", {})
-    assert len(cap.evs) == 1
-    assert cap.under_probs == [pytest.approx(0.5)]
-    assert cap.evs[0] is None or 0 < cap.evs[0] < SN_MAX_MEAN_FACTOR * 1.5, (
-        f"stored a clamped or blown ev as a mean: {cap.evs}"
-    )
-
-
 def test_add_dfs_one_sided_underdog_offer_converts_through_baseline():
     """An Underdog one-sided boost is a payout *modifier*, not decimal odds.
 

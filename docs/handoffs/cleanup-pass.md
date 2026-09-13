@@ -1,19 +1,21 @@
 # Cleanup Pass
 
-> Status: ACTIVE — stage 1 not started (briefed 2026-09-12 off the dashboard-ux close-out)
+> Status: DONE — all five stages landed 2026-09-12 (briefed the same day off the
+> dashboard-ux close-out). Unpushed on `devel`; §10 carries the measured deltas.
 
 ## 1. Mission & money logic
 
-Retire the five debts the dashboard-ux close-out routed instead of fixing
-([`../archive/dashboard-ux.md`](../archive/dashboard-ux.md) §11). Two touch money.
-`add_dfs` writes Sleeper's lowest alt rung as that platform's `odds` row, and DFS
-rows carry a real line with a pinned price, so every consensus that includes a
-Sleeper quote leans toward the easiest rung. `merge_archives` never touches the
-`ladder` table, so every dev↔prod archive sync silently drops the ladder history
-that `dfs-products` stage 3 will price from. The other three are hygiene the
-owner reads every night: Rivals residue in a retired product's code path, a dead
-MLB depth recompute the model trains straight through, and voice-bank /
-display-name gaps that render raw codes or bare letters in prose.
+Retired the five debts the dashboard-ux close-out routed instead of fixing
+([`../archive/dashboard-ux.md`](../archive/dashboard-ux.md) §11). Two touched money.
+`add_dfs` ranked a multi-rung DFS offer by `|Boost_Over - 1|`, but `Boost_Over` is a
+full decimal payout — 1.0 implies certainty, not a neutral price — so the rule kept the
+lowest rung on 93% of multi-tier Sleeper keys. It now keeps the rung priced nearest even
+money, the same main-rung rule `prediction.line_movement` applies. `merge_archives` never
+touched the `ladder` table, so every dev↔prod sync silently dropped the ladder history
+`dfs-products` stage 3 will price from; the union now covers it. The other three were
+hygiene the owner reads every night: Rivals residue in a retired product's code path, a
+dead MLB depth recompute, and voice-bank / display-name gaps that rendered raw codes or
+bare letters in prose.
 
 ## 2. Read first (in order)
 
@@ -41,16 +43,23 @@ display-name gaps that render raw codes or bare letters in prose.
 
 ## 3. Verify before you trust
 
+Each line below returns the closed state; a different answer means something regressed.
+
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-grep -n "lowest alt rung\|def _dedup_offers_by_boost" src/sportstradamus/helpers/archive.py
-grep -n '"odds", "lines"' src/sportstradamus/scripts/merge_archives.py      # ladder absent = stage 1 open
-grep -rn -i "rival" src/sportstradamus tests --include=*.py                  # 5 hits = stage 2 open
-grep -n "playerProfile.depth\|\"Player depth\"" src/sportstradamus/stats/base.py
-grep -c "k's" src/sportstradamus/data/config/voice_bank.json                 # basketball cells still there?
-poetry run python -c "from sportstradamus.helpers.market_display import market_display_name as m; print(m('NBA','PRA'), m('WNBA','RA'))"   # identity = stage 5 open
-poetry run python -c "from sportstradamus.helpers import Archive; print(Archive().to_pandas('odds').query('market.str.startswith(\"H2H\")', engine='python').shape)"   # H2H rows in history?
+grep -c "_dedup_offers_by_boost" src/sportstradamus/helpers/archive.py       # 0 — survivor ranks on |p_over - 0.5|
+grep -n '_LADDER_COLS' src/sportstradamus/scripts/merge_archives.py          # present — ladder is in the union
+grep -rn -i "rival" src/sportstradamus tests --include=*.py                  # nothing
+grep -n "\"Player depth\"" src/sportstradamus/stats/base.py                  # 2 hits, both joins; no depth write in _game_context
+grep -c "k's" src/sportstradamus/data/config/voice_bank.json                 # hockey + shared only, no basketball
+poetry run python -c "from sportstradamus.helpers.market_display import market_display_name as m; print(m('NBA','PRA'), m('WNBA','RA'))"   # prose, not the slug
 ```
+
+The `H2H` question §4 left open is settled: the archive holds **zero** `H2H %` rows in
+`odds`, `lines` or `ladder` and zero `'% vs. %'` entities, so no read path depends on
+that history. Both `H2H ` strips survive anyway — `parlay.resolve_leg_stat` is pinned by
+`tests/golden/test_parlay_search.py` and reads persisted parlay descriptions, not the
+archive.
 
 ### Volatile product assumptions
 
@@ -91,66 +100,40 @@ poetry run python -c "from sportstradamus.helpers import Archive; print(Archive(
 No dashboard modules, no `Archive()` at import anywhere new (the archive-lock golden
 auto-discovers dashboard imports).
 
-## 6. Stage plan
+## 6. What landed
 
-Stages are independent; one session each; any can be parked.
+All five stages are on `devel` (unpushed). Each was one commit-sized change; the
+measured numbers behind stage 1 are in §10.
 
-1. **Sleeper `odds` row + ladder-aware merge.** (a) Measure first: over the
-   last 30 days of the local archive, for each Sleeper `(Player, Market)` how far
-   does the surviving `odds` line sit from the multi-book consensus line, and how
-   often is Sleeper the only book? Put both numbers in the ledger. (b) Then pick
-   the survivor rule in `_dedup_offers_by_boost` / `add_dfs`: the tier whose
-   implied over-probability is nearest 0.5 when the price is real; the ladder's
-   median line when the price is pinned; or no Sleeper `odds` row at all if (a)
-   shows it never moves a consensus — smallest change that fixes the lean wins.
-   Ladder rows keep every tier. Re-pin
-   `test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier`.
-   (c) `merge_archives`: add `ladder` to `_require_tables` and `_merge_table`
-   with the same union + dedupe on the table's natural key; the report dict gains
-   `ladder`; one round-trip pin in `tests/test_merge_archives.py`.
-   Acceptance: measured delta in the ledger; a two-archive merge keeps both
-   sides' ladder rows.
-2. **Rivals residue.** Remove the symmetric single-`Boost` branch in
-   `_dfs_offer_probs` and its pin
-   (`test_add_dfs_boost_only_offer_prices_symmetric_never_blown_or_clamped`);
-   true the `_strong_legs` docstring in `stories/menu.py` and the two comments in
-   `tests/golden/test_correlation_helpers.py`. Run the §3 `H2H` query before
-   touching the strip in `_resolve_market` / `resolve_leg_stat`: rows present →
-   keep it with a one-line why; none → delete it too. Acceptance: the §3 grep
-   returns nothing outside `src/deprecated/`.
-3. **Dead depth recompute.** Delete the MLB batting-order rebuild in
-   `_game_context` (`self.playerProfile.depth = battingOrder`): the in-frame
-   consumer is overwritten by `_join_defense_and_parks` (`Player depth` =
-   position for MLB) before `get_stats` returns, and both instance readers call
-   `get_depth` first. Prove it: dump an MLB `get_stats` vector for a fixture
-   offer before and after — byte-equal — and grep for any other
-   `playerProfile["depth"]` reader on the MLB path. No matrix regen (the feature
-   value does not change). Acceptance: byte-equal vector; fake-mode integration green.
-4. **Voice bank + unit words.** (a) Drop the six basketball `k's` cells
-   (`basketball/player/{shootout,grind,blowout,coinflip,even}/Over` +
-   `even/Under`) — no NBA/WNBA slug resolves to `k's`; recount the
-   `test_basketball_player_bank_depth` floors rather than lowering them by hand.
-   (b) Add `("NHL", "D")` and `("NHL", "G")` to `_UNIT_GROUP_DISPLAY` so prose
-   stops reading "the D room" / "the Gs"; extend the `test_engine.py` unit-word
-   pins from NFL-only to every group in `correlation._LEAGUE_POSITIONS`.
-   (c) Categorization divergence: the prophecize story path categorizes on the
-   pre-remap display name (`"INTs Thrown"` → `production`) while the dashboard
-   path sees the slug (`interceptions` → `mistakes`). Fix on the side that
-   changes fewer persisted artifacts — remap `Market` in the `story_sink`
-   capture, or resolve display names through `stat_map` inside `enrich_legs`
-   before `_stat_category` — and say which in the ledger (`leg_schema.build_leg`
-   persists the pre-remap market; `stories/thesis.py` re-enriches). Pin: one
-   golden runs `enrich_legs` on an NFL interceptions leg from both paths and
-   asserts `mistakes` for both. Acceptance: `test_bank_coverage.py` green,
-   `test_no_prose_literals_in_stories_source` green.
-5. **`market_display.json`.** The recorded debt was stale: the fallback is the
-   slug itself (not `stat_map` names) and every `stat_meta` cell, shipped or
-   withheld, already has a label. The real gap is five NBA/WNBA identity
-   mappings — `BLST`, `PA`, `PR`, `PRA`, `RA` — that render combo slugs as raw
-   codes on Board chips, the constellation card and Receipts. Replace them with
-   prose labels; check every `combo_props.json` slug the same way; leave the 14
-   orphan entries alone (harmless). Pin: no NBA/WNBA value equals its key.
-   Acceptance: the §3 check prints prose for both.
+1. **Sleeper survivor rule + ladder-aware merge.** `_dedup_offers_by_boost` is gone;
+   `add_dfs` computes each offer's `p_over` once and ranks tiers by `|p_over - 0.5|`
+   (higher line on a tie) — the rule `line_movement._main_rungs` already used, so the
+   archived tier and the tracked line now agree by construction. Every tier still
+   ladders. The dedupe key moved from the raw market to the resolved one.
+   `merge_archives` unions `ladder` too; a source that predates the ladder DDL
+   soft-skips (`report["ladder"] is None`, CLI prints `ladder: skipped`) rather than
+   being rejected.
+2. **Rivals residue.** The symmetric single-`Boost` branch in `_dfs_offer_probs` is
+   deleted — `dfs_boost_probs(0, 0)` already returned the same `[0.5, 0.5]`, proven by
+   watching the old pin stay green before deleting it. Prose trued in three places.
+   Both `H2H ` strips stay (§3).
+3. **Dead MLB depth recompute.** The `battingOrder` rebuild in `_game_context` is gone.
+   `tests/golden/test_mlb_batting_order_not_a_feature.py` drives the real `get_stats`
+   with a posted lineup and without one and asserts the frames are equal — it passed
+   *before* the deletion, which is the proof. `correlation.py`'s comment now names the
+   real reason the `get_depth` re-resolve is needed: `base_profile` rebuilds
+   `playerProfile` and zeroes depth for the date.
+4. **Voice bank, unit words, categorization.** Six unreachable basketball `k's` cells
+   dropped (hockey and `shared` keep theirs); the depth floor re-counted 44 → 40 from
+   the bank. `_UNIT_GROUP_DISPLAY` gained `("NHL","D"): "defender"` and
+   `("NHL","G"): "goalie"` — `defenseman` was rejected because the templates inflect
+   `{grp}s`. `lower_leg` now carries the resolved slug and `enrich_legs` falls back to
+   it, so a leg that misses the offers join no longer categorizes off the display name;
+   that miss used to invert the valence flag `narrative_side` reads, not just the
+   category.
+5. **`market_display.json`.** Ten identity mappings (five slugs × NBA/WNBA) became
+   prose. The pin already existed: deleting `_SLUG_COMBOS` from
+   `tests/golden/test_market_display.py` turned its coverage test into the gate.
 
 ## 7. Working rules
 
@@ -191,4 +174,9 @@ only if the owner wants a carved PR (stages are small enough for direct devel co
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
-- 2026-09-12 · stage 0 · brief written off the archived dashboard-ux brief §11; five debts located (§2/§6); `market_display` debt re-read as five identity mappings, not missing coverage · next: stage 1 (a) measure
+- 2026-09-12 · stages 1-5 · all five landed, gates green (golden 4720, integration 34); `ladder` is 22.5M rows, 2nd-biggest table, so the merge debt was bigger than briefed · next: push
+- 2026-09-12 · stage 1(a) measure · Sleeper sole book on 44.3% of keys (kills the "drop the odds row" option); where a sportsbook overlaps, mean line delta −0.233, 10.8% below, concentrated (MLB hits allowed −1.69 at 99% below, WNBA PRA −4.95); survivor was the lowest rung on 93% of multi-tier keys
+- 2026-09-12 · stage 1(b) delta · new rule cuts mean \|p_over−0.5\| of the archived tier 0.157 → 0.100 and lifts the archived line +0.43; real leak was `lines` (no `book` column, so neither `sportsbook_cohort` nor `_drop_divergent_lines` reaches it — 8.0% of keys moved consensus, mean 0.753)
+- 2026-09-12 · stage 2 · zero `H2H` rows and zero `'% vs. %'` entities in the archive; branch deletion proven behavior-preserving before the pin was removed
+- 2026-09-12 · stage 4(c) · brief's premise was half wrong — `enrich_legs` prefers the offers-frame market, so the divergence only bit on a join miss; the miss also inverted valence, not just the category
+- 2026-09-12 · stage 0 · brief written off the archived dashboard-ux brief §11; five debts located (§2/§6); `market_display` debt re-read as five identity mappings, not missing coverage

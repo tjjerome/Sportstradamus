@@ -2,9 +2,9 @@
 
 The line-movement snapshot picks each poll's main rung from these rows, so the reader
 must hand back every rung with its de-vigged ``p_over`` — not the single tier ``add_dfs``
-archives to ``odds``, which for Sleeper is the lowest alt rung. Rungs only become visible
-once :meth:`Archive.write` flushes them, which is why prophecize snapshots line movement
-after its flush.
+archives to ``odds``, which is one poll's main rung and nothing else. Rungs only become
+visible once :meth:`Archive.write` flushes them, which is why prophecize snapshots line
+movement after its flush.
 """
 
 from __future__ import annotations

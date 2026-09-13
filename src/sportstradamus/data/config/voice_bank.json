@@ -870,15 +870,6 @@
             "The {g} sprint leaves gaps and {p} steps into them",
             "Speed costs {g} some possessions, and {p} collects them"
           ],
-          "k's": [
-            "The {g} pace sends everyone to the rim, and {p} is there",
-            "A fast {g} game means rushed finishes, and {p} meets them",
-            "Transition drives in {g} run into {p} at the rim",
-            "The {g} total climbs on paint touches and {p} guards the rim",
-            "Early offense in {g} attacks the rim where {p} waits",
-            "More shots in {g} mean more chances for {p} to block one",
-            "{p} holds the rim while {g} runs"
-          ],
           "production": [
             "The {g} pace runs through {p} in every column",
             "A loud number in {g} keeps {p} on the floor and busy",
@@ -947,14 +938,6 @@
             "Nothing clean happens in {g} and {p} collects the rest",
             "A slow {g} game keeps {p} home in the passing lanes"
           ],
-          "k's": [
-            "A low {g} number sends everything to the rim, and {p} waits",
-            "The {g} grind lives in the paint, and {p} guards it",
-            "Half-court possessions in {g} die at {p}'s rim",
-            "Forced late looks in {g} come straight into {p}",
-            "{p} anchors the paint while {g} slows to a crawl",
-            "The {g} defense funnels every drive to {p}"
-          ],
           "production": [
             "A low {g} number leaves the honest work to {p}",
             "The {g} grind hands {p} usage on every possession",
@@ -1019,14 +1002,6 @@
             "{p} gambles freely once the {g} margin is settled",
             "Rushed trailing possessions in {g} end in {p}'s hands"
           ],
-          "k's": [
-            "The {g} margin sends the trailing side into {p} at the rim",
-            "A lopsided {g} game produces forced drives into {p}",
-            "Chasing the {g} spread means bad shots at {p}'s rim",
-            "{p} guards the rim while the {g} margin grows",
-            "Late-clock desperation in {g} finds {p} standing there",
-            "The {g} rout funnels everything to the paint where {p} lives"
-          ],
           "production": [
             "{p} fills the sheet before the {g} margin ends the night",
             "The {g} spread is wide and {p} does the early work",
@@ -1088,14 +1063,6 @@
             "Nobody gets a clean pass late in {g} with {p} there",
             "{p} closes a tight {g} game on the defensive end",
             "A thin {g} margin keeps {p} on the floor and working"
-          ],
-          "k's": [
-            "A tight {g} game ends at the rim, and {p} protects it",
-            "The {g} clock tightens and every drive meets {p}",
-            "Late possessions in {g} go downhill into {p}",
-            "{p} closes a one-possession {g} game at the rim",
-            "One stop decides {g}, and {p} makes it at the rim",
-            "A thin {g} margin keeps {p} guarding the paint late"
           ],
           "production": [
             "A tight {g} game keeps {p} on the floor all night",
@@ -1160,14 +1127,6 @@
             "The board sets {p}'s defensive number below the routine",
             "Nothing on the {g} card keeps {p} out of the play"
           ],
-          "k's": [
-            "{p} guards the rim every night, and {g} is no different",
-            "The {g} card sets a light number on {p}'s rim work",
-            "Drives keep coming to the rim where {p} waits in {g}",
-            "{p} protects the paint in {g} and the blocks come",
-            "Verticality is {p}'s whole game, and the {g} board misses it",
-            "The rim belongs to {p} for a full {g} night"
-          ],
           "production": [
             "The {g} card sits below what {p} does most nights",
             "{p} fills every column in {g} without forcing anything",
@@ -1219,14 +1178,6 @@
             "The number sits above {p}'s usual defensive night in {g}",
             "{p} guards the ball in {g} and never gambles",
             "Careful passing in {g} keeps {p} out of the box score"
-          ],
-          "k's": [
-            "The {g} card asks {p} for rim work that stays scarce",
-            "{p} defends the perimeter in {g} and never leaves it",
-            "Nobody drives at {p} in {g}",
-            "The number sits above {p}'s usual paint night in {g}",
-            "Jump shooting in {g} keeps {p} away from the rim",
-            "{p} plays it safe at the rim all night in {g}"
           ],
           "production": [
             "The {g} card asks more of {p} than the minutes allow",

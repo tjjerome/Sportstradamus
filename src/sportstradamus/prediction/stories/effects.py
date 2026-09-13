@@ -59,7 +59,7 @@ def _prose_case(board: str) -> str:
     """A board name lowercased for mid-clause prose, acronyms left alone.
 
     "Total Bases" reads as a title in a column header and as shouting inside a
-    sentence, but "PRA" and "RBIs" are how those boards are spelled anywhere.
+    sentence, but "FG" and "RBIs" are how those boards are spelled anywhere.
     """
     return " ".join(
         word if word.isupper() or (word.endswith("s") and word[:-1].isupper()) else word.lower()

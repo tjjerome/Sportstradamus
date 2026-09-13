@@ -5,10 +5,14 @@ server (continuously appending today's odds via `confer`) and a dev machine (whe
 historical backfills run). They drift apart: each holds observations the other lacks.
 
 `merge-archives` reconciles them losslessly. The archive is append-only time-series
-(the same `(league, market, game_date, entity, book)` key recurs with different
-`observed_at` timestamps), so the merge is a **set-union of full rows**: every row in
-either database is kept, and only bit-identical duplicates collapse. No observation is
-ever dropped, and distinct timestamps for the same key both survive.
+(the same observation key recurs with different `observed_at` timestamps), so the merge
+is a **set-union of full rows** over `odds`, `lines` and `ladder`: every row in either
+database is kept, and only bit-identical duplicates collapse. No observation is ever
+dropped, and distinct timestamps for the same key both survive.
+
+`ladder` is optional — a snapshot taken off a box predating its schema merges with the
+ladder step skipped, reported as `ladder: skipped`. It is also the expensive table
+(~22.5M rows), so an in-place merge's peak disk grows by roughly its size.
 
 The source archive is opened read-only and never modified. The target is rebuilt in
 place — with a timestamped `.bak-<epoch>` written first — unless `--output` sends the

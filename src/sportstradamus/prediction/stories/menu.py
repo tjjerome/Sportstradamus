@@ -127,7 +127,7 @@ def _stories_for_game(
     seen: set[str] = set()
     for rank, (_cluster, builder, moon) in enumerate(scored[:_MAX_STORIES]):
         story_id = f"{sctx.game}#{rank}"
-        headline, dek = _story_prose(builder, moon, sctx, offers, ctxs, seen)
+        headline, dek = _story_prose(builder, moon, sctx, offers, ctxs, new_map, seen)
         rows.append(_row(sctx, story_id, "builder", builder, headline, dek))
         rows.append(_row(sctx, story_id, "moon", moon, headline, dek))
     return rows
@@ -136,9 +136,9 @@ def _stories_for_game(
 def _strong_legs(sctx: GameScoringContext) -> dict[int, float]:
     """Bet-eligible, model-favored legs mapped to their per-$1 edge.
 
-    Every leg in ``leg_indices`` is already a player-prop or Rivals leg (game
-    lines are L3-gated, not yet in the candidate set), so eligibility reduces to
-    the strong-edge floor.
+    Every leg in ``leg_indices`` is already a player prop (game lines are
+    L3-gated, not yet in the candidate set), so eligibility reduces to the
+    strong-edge floor.
     """
     return {
         i: sctx.bet_df[i]["Model EV"]
@@ -351,6 +351,7 @@ def _story_prose(
     sctx: GameScoringContext,
     offers: pd.DataFrame,
     ctxs: Mapping[str, GameCtx],
+    new_map: dict,
     seen: set[str],
 ) -> tuple[str, str]:
     """One (headline, dek) per story — the mode chips swap legs, never the prose.
@@ -360,9 +361,11 @@ def _story_prose(
     the union and blank rather than name a player only one side carries.
     ``seen`` dedupes headlines within the (platform, game) menu.
     """
-    per_sub = [[lower_leg(sctx.bet_df[i]) for i in sub["bet_id"]] for sub in (builder, moon)]
+    per_sub = [
+        [lower_leg(sctx.bet_df[i], new_map) for i in sub["bet_id"]] for sub in (builder, moon)
+    ]
     core = sorted(set(builder["bet_id"]) & set(moon["bet_id"]))
-    parsed = [lower_leg(sctx.bet_df[i]) for i in core] if core else per_sub[0] + per_sub[1]
+    parsed = [lower_leg(sctx.bet_df[i], new_map) for i in core] if core else per_sub[0] + per_sub[1]
     variants, vi, subject = thesis_variants(enrich_legs(parsed, offers), ctxs)
     dek = story_dek(core, sctx, offers)
     named = subject.get("p")

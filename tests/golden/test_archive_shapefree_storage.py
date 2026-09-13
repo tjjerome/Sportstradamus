@@ -277,8 +277,16 @@ def test_one_sided_discounted_offer_stores_payout_implied_under(archive):
 
 def test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier(archive):
     """Two-plus lines for one (Player, Market): exactly one odds row — the tier
-    whose boost sits nearest a neutral 1.0, higher line winning the tie — while
-    every tier's (line, p_over) lands in the ladder table."""
+    priced nearest even money, higher line winning the tie — while every tier's
+    (line, p_over) lands in the ladder table.
+
+    A proportional devig prices each rung at ``p_over = under_payout / (over_payout
+    + under_payout)``, so this ladder runs 0.83 / 0.67 / 0.51 over: the platform's
+    real number is the near-even 24.5 rung, and that is the rung
+    ``prediction.line_movement`` tracks. Ranking on the raw ``Boost_Over`` instead
+    would keep the cheap 20.5 rung — a full payout of 1.0 implies certainty, not a
+    neutral price.
+    """
     base = {
         "League": "WNBA",
         "Market": "PRA",
@@ -286,9 +294,9 @@ def test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier(archive):
         "Date": "2026-08-28",
     }
     offers = [
-        {**base, "Line": 24.5, "Boost_Over": 1.35, "Boost_Under": 0.0},
-        {**base, "Line": 20.5, "Boost_Over": 1.06, "Boost_Under": 1.06},
-        {**base, "Line": 22.5, "Boost_Over": 1.06, "Boost_Under": 1.06},
+        {**base, "Line": 24.5, "Boost_Over": 1.95, "Boost_Under": 2.05},
+        {**base, "Line": 20.5, "Boost_Over": 1.20, "Boost_Under": 6.00},
+        {**base, "Line": 22.5, "Boost_Over": 1.50, "Boost_Under": 3.00},
     ]
     archive.add_dfs(offers, "Sleeper", {})
     archive.write()
@@ -296,20 +304,20 @@ def test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier(archive):
     odds = archive._connection.execute(
         "SELECT line, under_prob FROM odds WHERE entity='Tier Player'"
     ).fetchall()
-    assert odds == [(22.5, pytest.approx(0.5))]
+    assert odds == [(24.5, pytest.approx(1.95 / (1.95 + 2.05)))]
 
     lines = archive._connection.execute(
         "SELECT line FROM lines WHERE entity='Tier Player'"
     ).fetchall()
-    assert lines == [(22.5,)]
+    assert lines == [(24.5,)]
 
     ladder = archive._connection.execute(
         "SELECT line, p_over FROM ladder WHERE entity='Tier Player' ORDER BY line"
     ).fetchall()
     assert ladder == [
-        (20.5, pytest.approx(0.5)),
-        (22.5, pytest.approx(0.5)),
-        (24.5, pytest.approx(1 / 1.35)),
+        (20.5, pytest.approx(6.00 / (1.20 + 6.00))),
+        (22.5, pytest.approx(3.00 / (1.50 + 3.00))),
+        (24.5, pytest.approx(2.05 / (1.95 + 2.05))),
     ]
 
 

@@ -6,8 +6,6 @@ from sportstradamus.helpers import market_display_name, stat_meta
 from sportstradamus.helpers.market_display import _market_display
 from sportstradamus.leg_schema import build_leg, leg_label
 
-_SLUG_COMBOS = {"PRA", "PR", "RA", "PA", "BLST"}
-
 _FANTASY_CELLS = [
     (league, slug)
     for league, markets in _market_display().items()
@@ -20,9 +18,7 @@ def test_every_stat_meta_cell_has_a_display_mapping():
     for league, markets in stat_meta.items():
         for market in markets:
             display = market_display_name(league, market)
-            assert display != market or market in _SLUG_COMBOS, (
-                f"{league}/{market} has no display mapping"
-            )
+            assert display != market, f"{league}/{market} has no display mapping"
 
 
 @pytest.mark.parametrize(("league", "slug"), _FANTASY_CELLS)

@@ -212,7 +212,9 @@ def story_dek(core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame) -> str:
     sub-2-leg core carries no cluster clause and missing offer facts drop
     their clauses; everything deterministic via the md5 rotation.
     """
-    descs = [leg_label(lower_leg(sctx.bet_df[i])) for i in core_bet_ids]
+    # The label reads the display Market, so the seed needs no platform map to
+    # resolve the slug lower_leg carries for enrich_legs.
+    descs = [leg_label(lower_leg(sctx.bet_df[i], {})) for i in core_bet_ids]
     seed_tail = "|".join(sorted(descs)) + f"|{sctx.date}"
     clauses = _cluster_clause(core_bet_ids, sctx, seed_tail)
     anchor = _dek_anchor(core_bet_ids, sctx, offers)

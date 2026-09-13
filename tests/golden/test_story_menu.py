@@ -361,14 +361,14 @@ def test_empty_core_guard_blanks_foreign_subject(monkeypatch):
         menu_mod, "thesis_variants", lambda _legs, _ctxs: (["Ghost rules"], 0, {"p": "Ghost"})
     )
     sctx, offers = _ctx([0.66, 0.64], np.eye(2))
-    headline, dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, set())
+    headline, dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, {}, set())
     assert headline == ""
     assert dek == ""  # a sub-2-leg core carries no cluster clause and no anchor row facts
     # An unnamed (game-script) subject survives the same disjoint presets.
     monkeypatch.setattr(
         menu_mod, "thesis_variants", lambda _legs, _ctxs: (["The game tilts over"], 0, {"g": "X/Y"})
     )
-    headline, _dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, set())
+    headline, _dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, {}, set())
     assert headline == "The game tilts over"
 
 

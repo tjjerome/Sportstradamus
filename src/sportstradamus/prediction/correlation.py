@@ -368,9 +368,9 @@ def _resolve_player_positions(league_df, league, stat_data):
         league_df["Player position"] = league_df.Player.map(player_df)
     else:
         # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
-        # only for non-MLB leagues — and the depth process_offers resolved has since
-        # been overwritten by _game_context from posted lineups alone, so it is all
-        # zeros on any run preceding the lineup post. Re-resolve it here.
+        # only for non-MLB leagues — and base_profile has since rebuilt playerProfile
+        # from scratch for this date, zeroing the depth process_offers resolved.
+        # Re-resolve it here.
         stat_data.get_depth(league_df[["Player", "Team"]].drop_duplicates().to_dict("records"))
         depth = stat_data.playerProfile["depth"].to_dict()
         slot_labels = []

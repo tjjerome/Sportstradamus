@@ -85,7 +85,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
-| `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | ACTIVE | — | [handoffs/cleanup-pass.md](handoffs/cleanup-pass.md) |
+| `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | DONE | — | [handoffs/cleanup-pass.md](handoffs/cleanup-pass.md) |
 | `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | ACTIVE | prod cron waits on the owner clearing each league's CDN | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
 | `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
 

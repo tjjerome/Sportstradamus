@@ -203,7 +203,8 @@ def test_early_returns_never_read_the_spread_columns():
 
 
 def test_main_line_is_the_rung_priced_nearest_even_not_the_lowest():
-    # add_dfs archives Sleeper's lowest rung; the trend follows the balanced one.
+    # Sleeper posts cheap rungs either side of even money; add_dfs archives the balanced
+    # one on the same rule, so its quote and this trend follow the same line.
     ladder = _ladder((0, [(0.5, 0.72), (1.5, 0.48), (2.5, 0.20)]), book="Sleeper")
     row = build_line_movement(ladder, _offers(Platform="Sleeper")).iloc[0]
 

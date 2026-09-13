@@ -621,16 +621,16 @@ def test_effect_clauses_read_a_negative_market_as_the_thriving_side():
 
 
 def test_effect_clauses_keep_acronym_board_names_capitalised():
-    """A board name reads as prose mid-clause, but PRA and RBIs are spelled that way anywhere."""
+    """A board name reads as prose mid-clause, but FG and RBIs are spelled that way anywhere."""
     nba = split_effects(
         [
-            _effect_leg("Jayson Tatum", "Over", "PRA", "scoring", 0.60),
+            _effect_leg("Jayson Tatum", "Over", "FGM", "scoring", 0.60),
             _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.57),
         ],
         "basketball",
         "NBA",
     )
-    assert nba["up"] == "Jayson Tatum clears the PRA number"
+    assert nba["up"] == "Jayson Tatum clears the FG made number"
     mlb = split_effects(
         [
             _effect_leg("Aaron Judge", "Over", "hits+runs+rbi", "scoring", 0.60),

@@ -16,6 +16,8 @@ from itertools import combinations
 import pandas as pd
 import pytest
 
+from sportstradamus.analysis import _leg_market_map
+from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.correlation import _LEAGUE_POSITIONS
 from sportstradamus.prediction.stories import engine
 from sportstradamus.prediction.stories.context import GameCtx, Leg
@@ -29,7 +31,7 @@ from sportstradamus.prediction.stories.engine import (
     route,
     thesis_variants,
 )
-from sportstradamus.prediction.stories.legs import enrich_legs
+from sportstradamus.prediction.stories.legs import enrich_legs, lower_leg, narrative_side
 
 
 def test_enrich_legs_joins_offer_context():
@@ -72,6 +74,31 @@ def test_enrich_legs_unmatched_falls_back_to_parsed():
     leg = legs[0]
     assert leg.market == "Points" and leg.game is None and leg.team is None
     assert leg.category == "scoring"
+
+
+def test_enrich_legs_reads_the_slug_when_the_offer_join_misses():
+    """A display-name leg categorizes as the negative market it stands for.
+
+    The menu path hands ``enrich_legs`` a platform display name ("INTs Thrown"),
+    and the offers frame it joins against is post-remap. On a miss the leg used to
+    fall back to that display name, which categorizes as ``production`` and can
+    never match the exact-equality ``_NEGATIVE_MARKETS`` table — so the direction
+    ``narrative_side`` hands the bank silently inverted. ``lower_leg`` carries the
+    resolved slug, so both spellings of the same leg read the same.
+    """
+    new_map = _leg_market_map("NFL", "Underdog", stat_map)
+    rows = [
+        {"Player": "Pocket Passer", "Bet": "Under", "Line": 0.5, "Market": name}
+        for name in ("INTs Thrown", "interceptions")
+    ]
+    for leg in enrich_legs(
+        [lower_leg(row, new_map) for row in rows],
+        pd.DataFrame(columns=["Player", "Bet", "Line"]),
+    ):
+        assert leg.market == "interceptions"
+        assert leg.category == "mistakes"
+        assert leg.negative is True
+        assert narrative_side(leg) == "Over"
 
 
 def _legs(*specs: tuple) -> list[Leg]:
@@ -345,19 +372,31 @@ def test_unit_subject_filters_group_and_maps_display():
     assert [leg.player for leg in sub] == ["A", "B"]
 
 
-@pytest.mark.parametrize("position", _LEAGUE_POSITIONS["NFL"])
-def test_nfl_unit_headline_names_the_position_group(position):
-    """Every NFL depth-chart group the resolver emits renders as a word, never its letters."""
+# Every (league, depth-chart group) pair the resolver can emit. MLB is absent from
+# _LEAGUE_POSITIONS because correlation labels its slots B1..B9 / P separately;
+# _pos_group strips the rank digit, so the display lookup still sees a bare letter.
+_UNIT_GROUPS = [
+    (league, position)
+    for league, positions in (*_LEAGUE_POSITIONS.items(), ("MLB", ["B", "P"]))
+    for position in positions
+]
+
+
+@pytest.mark.parametrize(("league", "position"), _UNIT_GROUPS)
+def test_unit_headline_names_the_position_group(league, position):
+    """Every depth-chart group the resolver emits renders as a word, never its letters."""
     legs = _legs(
-        ("A", "Over", 60.5, "receiving yards", "KC/LV", "KC", f"{position}1", "scoring"),
-        ("B", "Over", 40.5, "receiving yards", "KC/LV", "KC", f"{position}2", "scoring"),
+        ("A", "Over", 60.5, "yards", "AAA/BBB", "AAA", f"{position}1", "scoring"),
+        ("B", "Over", 40.5, "yards", "AAA/BBB", "AAA", f"{position}2", "scoring"),
     )
-    ctx = GameCtx(league="NFL", game="KC/LV", pos_edges={"KC": {position: {"dvpoa": 0.12, "n": 2}}})
-    archetype, subject = route(legs, {"KC/LV": ctx})
+    ctx = GameCtx(
+        league=league, game="AAA/BBB", pos_edges={"AAA": {position: {"dvpoa": 0.12, "n": 2}}}
+    )
+    archetype, subject = route(legs, {"AAA/BBB": ctx})
     assert archetype == "unit"
-    word = engine._UNIT_GROUP_DISPLAY[("NFL", position)]
+    word = engine._UNIT_GROUP_DISPLAY[(league, position)]
     assert subject["grp"] == word
-    rendered, _, _ = thesis_variants(legs, {"KC/LV": ctx})
+    rendered, _, _ = thesis_variants(legs, {"AAA/BBB": ctx})
     for variant in rendered:
         assert word in variant
         assert not re.search(rf"\b{position}s?\b", variant)

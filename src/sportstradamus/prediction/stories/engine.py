@@ -56,11 +56,12 @@ _DIRECTIONS_BY_ARCHETYPE = {
     "game-script": ("Over", "Under", "Mixed"),
 }
 
-# Unit {grp} display words where the raw depth-chart letter reads poorly in
-# prose; unmapped labels (NHL G, D) pass through raw. Letters per
-# correlation._LEAGUE_POSITIONS. The unit templates inflect the word as
-# "{grp}s", "{grp} room", "{grp} group", so a bare "back" (reads as a place)
-# takes its two-word form.
+# Unit {grp} display words: a raw depth-chart letter reads poorly in prose, so
+# every group correlation._LEAGUE_POSITIONS emits carries one, as do MLB's B/P
+# (labelled B1..B9/P there, rank digit stripped by _pos_group). Anything else
+# passes through raw. The unit templates inflect the word as "{grp}s",
+# "{grp} room", "{grp} group", so a bare "back" (reads as a place) takes its
+# two-word form and an irregular plural ("defensemen") is out.
 _UNIT_GROUP_DISPLAY = {
     ("MLB", "B"): "bat",
     ("MLB", "P"): "arm",
@@ -78,6 +79,8 @@ _UNIT_GROUP_DISPLAY = {
     ("NFL", "TE"): "tight end",
     ("NHL", "C"): "center",
     ("NHL", "W"): "wing",
+    ("NHL", "D"): "defender",
+    ("NHL", "G"): "goalie",
 }
 
 # Archetype firing gates (named per CLAUDE.md §9). A player must hold a *unique*

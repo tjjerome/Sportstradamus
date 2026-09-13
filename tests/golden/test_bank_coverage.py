@@ -274,18 +274,20 @@ def test_terminal_period_only_after_a_second_sentence():
 def test_basketball_player_bank_depth():
     """The depth floor outlived the v1 wording it was measured from.
 
-    Its 44 Over/Under cells and 107 variants are a floor no re-authoring may
-    drop below, but no line is pinned verbatim any more: the bank has since
-    been rewritten twice — once to repair broken "against {g}" strings, once
-    for the calm register — and a letter-for-letter pin only ever recorded
-    which sentence happened to be first.
+    No line is pinned verbatim any more: the bank has since been rewritten
+    twice — once to repair broken "against {g}" strings, once for the calm
+    register — and a letter-for-letter pin only ever recorded which sentence
+    happened to be first. The 40-cell floor is today's exact count, re-derived
+    after the unreachable ``k's`` cells were culled; the 107-variant floor is
+    still v1's measurement, left loose so re-authoring has room to trade one
+    line for another.
     """
     cells = [
         variants
         for voice, archetype, _, direction, _, variants in _walk_variants()
         if voice == "basketball" and archetype == "player" and direction in ("Over", "Under")
     ]
-    assert len(cells) >= 44
+    assert len(cells) >= 40
     assert sum(len(variants) for variants in cells) >= 107
 
 
@@ -453,6 +455,29 @@ def test_football_voice_authors_no_stops_cell():
     assert "stops" not in {legs._stat_category(name) for name in names}
     authored = {category for voice, *_node, category, _ in _walk_variants() if voice == "football"}
     assert "stops" not in authored
+
+
+def test_basketball_voice_authors_no_ks_cell():
+    """No NBA or WNBA market reads as ``k's``, so the basketball voice carries no ``k's`` cell.
+
+    Both leagues share the voice, so the reachability fact has to hold over the union
+    of their slugs and display names. ``blocks`` is the near miss: it carries the
+    ``ks`` needle and only lands in ``stops`` because ``_STAT_CATEGORY`` is
+    insertion-ordered and ``block`` is checked first, so reordering that dict would
+    resurrect six cells of rim-protection prose no route ever asked for.
+    """
+    hoops_slugs = set(stat_meta["NBA"]) | set(stat_meta["WNBA"])
+    names = hoops_slugs | {
+        name
+        for platform in ("Underdog", "Sleeper")
+        for name, slug in stat_map[platform].items()
+        if slug in hoops_slugs
+    }
+    assert "k's" not in {legs._stat_category(name) for name in names}
+    authored = {
+        category for voice, *_node, category, _ in _walk_variants() if voice == "basketball"
+    }
+    assert "k's" not in authored
 
 
 def test_hockey_voice_speaks_hockey():

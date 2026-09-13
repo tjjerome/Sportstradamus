@@ -7,14 +7,20 @@ consistent across the scrape/predict pipeline.
 
 Schema (created on first connect):
 
-* ``odds(league, market, game_date, entity, book, ev, observed_at)`` — one
-  row per (slate-entry, book, observation). ``entity`` is a player name for
-  player props or a team name for moneyline / totals / spreads / team
-  markets. ``observed_at`` is set at write time so successive polls accrue
-  a time-series rather than overwriting per-book EVs.
+* ``odds(league, market, game_date, entity, book, ev, observed_at, under_prob,
+  line)`` — one row per (slate-entry, book, observation). ``entity`` is a
+  player name for player props or a team name for moneyline / totals /
+  spreads / team markets. ``observed_at`` is set at write time so successive
+  polls accrue a time-series rather than overwriting per-book EVs.
+  ``under_prob``/``line`` are the shape-free quote (see the DDL below).
 * ``lines(league, market, game_date, entity, line, observed_at)`` — every
   observed line value with its observation timestamp. Skipped for
   moneyline / totals / spreads / team-only markets, which are pure EV.
+  No ``book`` column, so a reader cannot tell a DFS line from a sharp one.
+* ``ladder(league, market, game_date, entity, book, line, p_over,
+  observed_at)`` — every rung a book posted on every poll. ``odds`` keeps
+  only one tier per player-market, so this is the sole record of how a
+  book's own number moved (``prediction.line_movement``).
 
 :func:`clean_archive` drops dates older than ``cutoff_date`` and prunes
 combo / matchup pseudo-entities (``" + "``, ``" vs. "``).
@@ -84,6 +90,10 @@ _DIVERGENCE_ABS_FLOOR = 2.0
 # High lines jitter proportionally, so the tolerance also scales with the median.
 _DIVERGENCE_REL_FACTOR = 0.25
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
+
+# clean_archive's default cutoff: the retention window carried over from the
+# original klepto-backed archive.
+_ARCHIVE_RETENTION_DAYS = 365 * 4
 
 # get_book_line_histories joins the caller's key frame through this DuckDB view.
 _KEY_JOIN_VIEW = "book_line_history_keys"
@@ -186,16 +196,12 @@ def _dfs_offer_probs(offer: dict, platform: str) -> list[float]:
 
     ``Boost_Over``/``Boost_Under`` are full decimal payouts on Sleeper but
     modifiers on the standard slot payout on Underdog, so Underdog converts
-    through ``UNDERDOG_BOOST_BASELINE`` before the devig. An offer with no
-    positive side multiplier (rivals carry a single both-ways ``Boost``)
-    prices as a symmetric standard pick; a genuinely one-sided offer keeps
-    its missing side missing — fabricating the symmetric twin let moved
-    lines archive as fair 50/50 quotes.
+    through ``UNDERDOG_BOOST_BASELINE`` before the devig. A genuinely one-sided
+    offer keeps its missing side missing — fabricating the symmetric twin let
+    moved lines archive as fair 50/50 quotes.
     """
     over = offer.get("Boost_Over", 0)
     under = offer.get("Boost_Under", 0)
-    if not (over > 0 or under > 0):
-        over = under = offer.get("Boost", 1)
     if platform == "Underdog":
         over, under = over * UNDERDOG_BOOST_BASELINE, under * UNDERDOG_BOOST_BASELINE
     return dfs_boost_probs(over, under)
@@ -221,27 +227,6 @@ def _drop_divergent_lines(
         for row in rows
         if row[2] is None or not np.isfinite(row[2]) or abs(float(row[2]) - median_line) <= allowed
     ]
-
-
-def _dedup_offers_by_boost(offers) -> list[dict]:
-    """Normalize ``offers`` to records, one per ``(Player, Market)``.
-
-    Accepts a single dict or a list. Duplicate tiers resolve in favor of the
-    offer whose ``Boost_Over`` (``Boost`` when absent) sits closest to a
-    neutral 1.0; a boost tie keeps the higher line. Empty list when no offers
-    survive.
-    """
-    if not isinstance(offers, list):
-        offers = [offers]
-    df = pd.DataFrame(offers)
-    if df.empty:
-        return []
-    boost = df["Boost_Over"] if "Boost_Over" in df.columns else pd.Series(np.nan, index=df.index)
-    if "Boost" in df.columns:
-        boost = boost.fillna(df["Boost"])
-    df["Boost Factor"] = np.abs(boost - 1)
-    ranked = df.sort_values(["Boost Factor", "Line"], ascending=[True, False])
-    return df.loc[~ranked.duplicated(["Player", "Market"])].to_dict(orient="records")
 
 
 def _resolve_market(league: str, raw_market: str, key: dict) -> str:
@@ -281,7 +266,9 @@ def clean_archive(cutoff_date: datetime.date | None = None) -> None:
     defaults to four years before today (the original klepto window).
     """
     if cutoff_date is None:
-        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365 * 4)).date()
+        cutoff_date = (
+            datetime.datetime.today() - datetime.timedelta(days=_ARCHIVE_RETENTION_DAYS)
+        ).date()
     a = Archive()
     con = a._connection
     con.execute("DELETE FROM odds WHERE game_date < ?", [cutoff_date])
@@ -1032,10 +1019,11 @@ class Archive:
 
         Reads ``ladder``, the one table that keeps every rung a DFS book posted on
         every poll together with its de-vigged ``p_over``. ``odds`` cannot say how a
-        book's own number moved: ``add_dfs`` archives a single tier per player-market
-        there, and for Sleeper that tier is the lowest alt rung rather than the main
-        line. ``lines`` has no book column at all. Choosing each poll's main rung is
-        the caller's job (``prediction.line_movement``).
+        book's own number moved: ``add_dfs`` keeps only the nearest-even-money rung
+        there per player-market — the same rung ``build_line_movement`` calls the
+        main line — and drops every other tier. ``lines`` has no book column at
+        all. Choosing each poll's main rung is the caller's job
+        (``prediction.line_movement``).
 
         One scan joins every key at once; a per-entity loop over a full slate is
         thousands of round trips against the same table pages. Rungs staged this run
@@ -1262,20 +1250,27 @@ class Archive:
 
         ``offers`` is accepted as a list or single dict. Every tier's
         ``(line, p_over)`` is appended to the ladder table; per
-        ``(Player, Market)`` the tier whose boost sits closest to a neutral
-        1.0 (higher line on a tie) additionally becomes the platform's odds
-        and lines rows, storing its payout-implied under-probability beside
-        the encoded ``ev``. The ``key`` mapping renames sportsbook-native
-        market strings into the canonical per-league market names used
-        elsewhere in the pipeline.
+        ``(Player, Market)`` the tier priced nearest even money (higher line
+        on a tie) additionally becomes the platform's odds and lines rows,
+        storing its payout-implied under-probability beside the encoded
+        ``ev``. That is the rule ``prediction.line_movement`` picks a poll's
+        main rung by, so the archived tier and the tracked line agree. The
+        ``key`` mapping renames sportsbook-native market strings into the
+        canonical per-league market names used elsewhere in the pipeline.
         """
         if not isinstance(offers, list):
             offers = [offers]
-        kept = {(o["Player"], o["Market"], o["Line"]) for o in _dedup_offers_by_boost(offers)}
 
-        for o in offers:
-            if not o["Line"]:
-                continue
+        # Rank tiers by distance from even money, higher line breaking a tie: the main-rung
+        # rule prediction.line_movement applies, so the archived tier is the one that book's
+        # tracked line follows. The raw boost can't rank them — a 1.0 payout is certainty.
+        priced = sorted(
+            ((o, *_dfs_offer_probs(o, platform)) for o in offers if o["Line"]),
+            key=lambda tier: (abs(tier[1] - 0.5), -float(tier[0]["Line"])),
+        )
+
+        quoted: set[tuple[str, str]] = set()
+        for o, p_over, p_under in priced:
             d = _safe_date(o["Date"])
             if d is None:
                 continue
@@ -1283,13 +1278,11 @@ class Archive:
             league = o["League"]
             market = _resolve_market(league, o["Market"], key)
             line = float(o["Line"])
-            p_over, p_under = _dfs_offer_probs(o, platform)
             self.add_ladder(league, market, d, o["Player"], platform, [(line, p_over)])
 
-            tier = (o["Player"], o["Market"], o["Line"])
-            if tier not in kept:
+            if (o["Player"], market) in quoted:
                 continue
-            kept.discard(tier)
+            quoted.add((o["Player"], market))
 
             cv = stat_cv.get(league, {}).get(market, 1)
             dist = stat_dist.get(league, {}).get(market, "Gamma")

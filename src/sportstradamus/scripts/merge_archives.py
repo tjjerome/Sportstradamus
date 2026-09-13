@@ -2,18 +2,25 @@
 """Losslessly merge one DuckDB odds archive into another.
 
 The archive (``archive/archive.duckdb``) is append-only time-series: the same
-``(league, market, game_date, entity, book)`` key recurs with different
-``observed_at`` timestamps and readers pick the latest. Two copies of the
-archive — e.g. the production server's live one and a dev machine's — drift
-apart, each holding observations the other lacks. The lossless reconciliation
-is a *set-union of full rows*: keep every row present in either database,
+observation key recurs with different ``observed_at`` timestamps and readers pick
+the latest. Two copies of the archive — e.g. the production server's live one and
+a dev machine's — drift apart, each holding observations the other lacks. The
+lossless reconciliation is a *set-union of full rows* over all three tables
+(``odds``, ``lines``, ``ladder``): keep every row present in either database,
 collapsing only bit-identical duplicates. DuckDB's ``UNION`` does exactly that;
 re-sorting in the same statement restores the on-disk order zone-map pruning
 relies on (same table-rebuild as ``migrate_archive_to_duckdb``).
 
 The odds union dedups on the observation identity (not the full row) so the WS1 shape-free
 quote columns (``under_prob``/``line``, derived from ``ev``) survive a merge of a migrated
-target with a not-yet-migrated source — see ``_odds_select``.
+target with a not-yet-migrated source — see ``_odds_select``. ``lines`` and ``ladder`` carry
+no derived columns, so both union on the full row.
+
+``ladder`` (sportsbook alt-lines plus the Underdog/Sleeper DFS polls) is optional: a
+snapshot taken off a box that predates its DDL merges with the ladder step skipped. It is
+also the expensive table — ~22.5M rows rebuilt by ``CREATE TABLE ... ORDER BY`` before the
+old copy is dropped, so an in-place merge's peak disk grows by about that much on top of
+the ~1.8 GB file.
 
 The source is attached read-only and never modified. The target is rebuilt in
 place (a timestamped ``.bak-<epoch>`` is written first) unless ``--output``
@@ -44,6 +51,9 @@ from sportstradamus.helpers.locks import ARCHIVE_LOCK_FILE, file_lock
 # and reconciles the quote columns separately (see _odds_select).
 _ODDS_KEY = "league, market, game_date, entity, book, ev, observed_at"
 _LINES_COLS = "league, market, game_date, entity, line, observed_at"
+# Every ladder column is identity: p_over is NOT NULL, never backfilled and derived from
+# nothing, so a plain full-row union is the correct dedupe (no _odds_select reconciliation).
+_LADDER_COLS = "league, market, game_date, entity, book, line, p_over, observed_at"
 # ev is omitted from the sort: equal-ev rows with different observed_at are distinct
 # observations and sort order only needs the key fields.
 _ODDS_SORT = "league, market, game_date, entity, book, observed_at"
@@ -68,8 +78,12 @@ def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
         ) from exc
 
 
-def _require_tables(con: duckdb.DuckDBPyConnection, alias: str) -> None:
-    """Fail loud if a database is missing the odds/lines tables."""
+def _require_tables(con: duckdb.DuckDBPyConnection, alias: str) -> bool:
+    """Fail loud if a database is missing the odds/lines tables; report whether it has ladder.
+
+    ``ladder`` is optional rather than required because a snapshot copied off a box that
+    predates its DDL used to merge fine; rejecting those archives would be a regression.
+    """
     prefix = f"{alias}." if alias else ""
     label = "source" if alias else "target"
     for table in ("odds", "lines"):
@@ -79,6 +93,11 @@ def _require_tables(con: duckdb.DuckDBPyConnection, alias: str) -> None:
             raise RuntimeError(
                 f"{label} archive missing '{table}' table — not a valid odds archive."
             ) from exc
+    try:
+        con.execute(f"SELECT 1 FROM {prefix}ladder LIMIT 1")
+    except duckdb.CatalogException:
+        return False
+    return True
 
 
 def _has_shapefree(con: duckdb.DuckDBPyConnection, table_ref: str) -> bool:
@@ -144,14 +163,15 @@ def merge_archives(
     *,
     dry_run: bool = False,
     backup: bool = True,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, dict[str, int] | None]:
     """Merge the ``source`` archive into ``target`` as a lossless union of rows.
 
     ``source`` is opened read-only and left untouched. With ``output`` set the
     union is written to that new file and ``target`` is also left untouched;
     otherwise ``target`` is rebuilt in place (backed up first unless
     ``backup=False``). Returns ``{table: {target_before, source, merged, added,
-    shared}}``.
+    shared}}``, with ``ladder`` mapped to ``None`` when either side lacks that
+    table and the ladder union is skipped.
     """
     source, target = Path(source), Path(target)
     if not source.is_file():
@@ -176,15 +196,24 @@ def merge_archives(
     writable = target if (output is None or dry_run) else output
     con = _connect(writable, read_only=dry_run)
     try:
-        _require_tables(con, "")
+        target_has_ladder = _require_tables(con, "")
         safe_source = str(source).replace("'", "''")
         con.execute(f"ATTACH '{safe_source}' AS src (READ_ONLY)")
-        _require_tables(con, "src")
+        source_has_ladder = _require_tables(con, "src")
+        merge_ladder = target_has_ladder and source_has_ladder
 
         lines_select = f"SELECT {_LINES_COLS} FROM lines UNION SELECT {_LINES_COLS} FROM src.lines"
+        ladder_select = (
+            f"SELECT {_LADDER_COLS} FROM ladder UNION SELECT {_LADDER_COLS} FROM src.ladder"
+        )
         report = {
             "odds": _merge_table(con, "odds", _odds_select(con), _ODDS_SORT, dry_run),
             "lines": _merge_table(con, "lines", lines_select, _LINES_COLS, dry_run),
+            "ladder": (
+                _merge_table(con, "ladder", ladder_select, _LADDER_COLS, dry_run)
+                if merge_ladder
+                else None
+            ),
         }
 
         if not dry_run:
@@ -224,7 +253,7 @@ def merge_archives(
 )
 def main(source: Path, target: Path, output: Path | None, dry_run: bool, no_backup: bool) -> None:
     """Merge the SOURCE odds archive into TARGET as a lossless set-union of rows."""
-    # An in-place merge drops and recreates both tables, so it must not race a cron
+    # An in-place merge drops and recreates every table, so it must not race a cron
     # write. The flock is what _connect's error message has always told operators to
     # hold; holding it here means sync_from_prod.sh no longer relies on them doing so.
     with file_lock(
@@ -237,6 +266,9 @@ def main(source: Path, target: Path, output: Path | None, dry_run: bool, no_back
     if dry_run:
         click.echo("DRY RUN — no changes written.")
     for table, r in report.items():
+        if r is None:
+            click.echo(f"{table + ':':7} skipped — one side has no {table} table.")
+            continue
         click.echo(
             f"{table + ':':7} target {r['target_before']:,} + source {r['source']:,} "
             f"-> merged {r['merged']:,} (added {r['added']:,}; shared {r['shared']:,})"

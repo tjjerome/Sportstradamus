@@ -211,13 +211,13 @@ Routed debts (recorded here so no session rediscovers them; the archive, Rivals,
 lane's scope since 2026-09-12, the silhouettes the
 [`constellation-art`](../handoffs/constellation-art.md) lane's):
 
-- `add_dfs` archives Sleeper's lowest tier as its `odds` row (a consensus input) and
-  `merge_archives` skips `ladder` — archive/dfs-products territory.
-- Rivals residue outside the dashboard (`prediction/stories/menu.py`, `helpers/archive.py`) —
-  the Underdog-scraper lane retired the product 2026-09-10.
-- Dead depth recompute in `stats/base.py` — stats footprint.
-- `market_display.json` covers the fantasy slugs only; other opaque codes fall back to
-  `stat_map` names.
+- ~~`add_dfs` archives Sleeper's lowest tier as its `odds` row; `merge_archives` skips
+  `ladder`~~ — CLOSED 2026-09-12 by `cleanup-pass` stage 1.
+- ~~Rivals residue outside the dashboard~~ — CLOSED 2026-09-12 by `cleanup-pass` stage 2.
+- ~~Dead depth recompute in `stats/base.py`~~ — CLOSED 2026-09-12 by `cleanup-pass` stage 3.
+- ~~`market_display.json` covers the fantasy slugs only~~ — the recorded debt was stale (the
+  fallback is the slug itself); the real gap was ten NBA/WNBA identity mappings, CLOSED
+  2026-09-12 by `cleanup-pass` stage 5.
 - Constellation residuals: 5–6 games in one vertical sky band can still graze by ≤ 12 px on
   desktop; one phone band in four lands near an even pitch by its draw.
 - Dashboard files still over the ~300-line guidance after the close-out split (`data.py` 666,
@@ -225,10 +225,9 @@ lane's scope since 2026-09-12, the silhouettes the
   `constellation_slate.py` is owner-exempted.
 - Voice-bank reachability, settled at close: the `player` archetype is reachable only from the
   live `slip_headline` path (two legs of one player before Lock it in), so it stays; the seven
-  football `stops` cells were pruned (no NFL market maps there). Same pattern, not pruned:
-  six basketball `k's` cells (no NBA/WNBA market), and NHL `D`/`G` unit groups still render as
-  letters. The prophecize story path categorizes on pre-remap display names while the dashboard
-  path uses slugs ("INTs Thrown" → production, `interceptions` → mistakes).
+  football `stops` cells were pruned (no NFL market maps there). ~~Same pattern, not pruned:
+  six basketball `k's` cells; NHL `D`/`G` render as letters; the two story paths categorize on
+  different market spellings.~~ — CLOSED 2026-09-12 by `cleanup-pass` stage 4.
 - Phone tap card under Chromium *touch* emulation: one tap fires two `plotly_click`s (the
   `dragmode=False` figure never `preventDefault`s the touch, so the browser synthesizes mouse
   events) and `main.js` reads the second as the confirm tap. The owner's real-phone pass did

@@ -563,8 +563,9 @@ def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
     ]
 
 
-# Underdog Rivals builds MLB "A vs. B" legs, and unlike the other leagues' combo
-# legs those survive into the correlation stage, so the slate carries one.
+# No live product posts an MLB "A vs. B" leg any more, but the shape survives the
+# correlation stage where other leagues' combo legs don't, so the slate keeps one as
+# a pin against it reaching persist unhandled.
 def _mlb_offers() -> list[dict]:
     raw = [
         # player, team, opp, market, line
@@ -602,7 +603,7 @@ def test_find_correlation_mlb_position_stays_a_string_column() -> None:
     """The ``Position`` writeback must not leak a combo leg's list of labels.
 
     ``persist`` writes the offers frame to parquet, and pyarrow refuses a column
-    mixing lists with strings, so a single Rivals leg would take prophecize down.
+    mixing lists with strings, so a single "A vs. B" leg would take prophecize down.
     Combo legs get ``""`` — what ``stories/context._pos_edges`` already expects —
     while ``Player position`` keeps the list ``_build_cmarket`` splits on.
     """
