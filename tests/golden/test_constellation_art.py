@@ -200,7 +200,7 @@ def test_shipped_row_is_complete_and_its_layer_is_web_sized(slug, row):
     assert row["mode"] in ("ink", "edges")
     # Downloads are gitignored (megabytes); a missing one must be one URL away.
     if not (_SHIPPED / row["source"]).is_file():
-        assert row["source_url"].startswith("https://"), f"{slug} names a missing source"
+        assert row["source_url"].startswith("https://"), f"{slug}: source missing, no https URL"
     with Image.open(_SHIPPED / row["file"]) as layer:
         assert layer.mode == "RGBA"
         assert max(layer.size) <= art._LAYER_MAX_PX

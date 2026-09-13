@@ -77,7 +77,7 @@ _CROP_MARGIN = 0.06
 # Brief §7: commit web-sized files only — git keeps every version of a binary.
 _LAYER_MAX_PX = 600
 
-# Sixteen alpha steps are invisible at the layer's on-screen opacity and shrink the PNGs
+# Sixteen alpha levels band invisibly at the layer's on-screen opacity and shrink the PNGs
 # by about two thirds — what keeps a hundred layers under the brief's §8 line.
 _ALPHA_LEVELS = 16
 
@@ -178,7 +178,7 @@ def mask(rgb: Image.Image, mode: str) -> np.ndarray:
 
 
 def layer(rgb: Image.Image, mode: str) -> Image.Image:
-    """The finished layer: the blurred mask as alpha over the constant tint, cropped, capped."""
+    """The finished layer: the blurred mask as alpha over the tint, cropped, capped, stepped."""
     soft = ndimage.gaussian_filter(mask(rgb, mode), _BLUR_SIGMA_PX)
     alpha = soft / soft.max() * _ALPHA_PEAK
     rows, cols = np.nonzero(alpha > _ALPHA_FLOOR)
@@ -194,9 +194,9 @@ def layer(rgb: Image.Image, mode: str) -> Image.Image:
     alpha_band = Image.fromarray(np.round(alpha * 255).astype(np.uint8), "L").crop(box)
     alpha_band.thumbnail((_LAYER_MAX_PX, _LAYER_MAX_PX), Image.Resampling.LANCZOS)
     step = 255 // (_ALPHA_LEVELS - 1)
-    stepped = (np.round(np.asarray(alpha_band) / step) * step).astype(np.uint8)
+    alpha_band = alpha_band.point(lambda pixel: round(pixel / step) * step)
     out = Image.new("RGBA", alpha_band.size, _TINT)
-    out.putalpha(Image.fromarray(stepped, "L"))
+    out.putalpha(alpha_band)
     return out
 
 
