@@ -70,6 +70,8 @@ def slip_pairs(legs: list[Leg], platform_mods: dict) -> list[Pair]:
     (league -> team/opponent tables). Cross-game pairs are skipped (modifier 1
     by construction); same-game legs share a league. Slot 0 is
     same-direction, slot 1 opposite — the ``_leg_pair_corr_boost`` contract.
+    A banned (0.0) modifier reads as unknown, because a real app quote on
+    that pair proves the ban stale.
     """
     pairs = []
     for i, j in combinations(range(len(legs)), 2):
@@ -83,7 +85,7 @@ def slip_pairs(legs: list[Leg], platform_mods: dict) -> list[Pair]:
             (k for k in (f"{a.key} & {b.key}", f"{b.key} & {a.key}") if k in table),
             None,
         )
-        value = table[disk_key][slot] if disk_key else None
+        value = (table[disk_key][slot] or None) if disk_key else None
         pairs.append(Pair(a.league, relation, f"{a.key} & {b.key}", disk_key, slot, value, (i, j)))
     return pairs
 

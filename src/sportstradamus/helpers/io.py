@@ -36,6 +36,11 @@ PARLAY_HIST_DIR = _RUNTIME_DIR / "parlay_hist"
 CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
+# Per-platform pair payout modifiers prophecize priced with, sparse (1.0 rows
+# dropped), keyed Player|Market|Bet like the corr slice so the dashboard joins
+# without positions.
+CURRENT_PAIR_MODIFIERS_PATH = _RUNTIME_DIR / "current_pair_modifiers.parquet"
+PAIR_MODIFIER_COLS = ["Platform", "League", "Game", "leg_a", "leg_b", "modifier"]
 CURRENT_GAME_CONTEXT_PATH = _RUNTIME_DIR / "current_game_context.parquet"
 CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
 # Per-offer deep-dive detail prerender (comps-vs-opponent, volume trend, SHAP "other
