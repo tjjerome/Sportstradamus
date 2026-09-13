@@ -1,5 +1,13 @@
 {
   "templates": {
+    "the-baseball": {
+      "artist": "Gerald_G",
+      "file": "the-baseball.png",
+      "licence": "Public domain",
+      "mode": "ink",
+      "source": "sources/Gerald_G_Baseball_2.svg",
+      "source_url": "http://openclipart.org/detail/8297/baseball-by-gerald_g-8297"
+    },
     "the-bat": {
       "artist": "Gerald G",
       "file": "the-bat.png",

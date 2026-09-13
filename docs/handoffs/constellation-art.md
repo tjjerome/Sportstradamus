@@ -89,6 +89,9 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 - 2026-09-12 — **Template vertices may be re-authored to fit the images**
   (owner); the star grammar (DESIGN.md §4a), the dealer's guarantees (no repeats
   per night, league wall, deterministic deal) and the bank-depth floors do not move.
+- 2026-09-13 — **Templates may be remade to fit the artwork** (owner): vertices,
+  outline, topology, and new templates for art the bank has no shape for (the
+  crossed bats), inside the dealer guarantees and the bank-depth floors.
 - **No AI-generated imagery** (CLAUDE.md, DESIGN.md NEVER list): human-drawn clip
   art through filters is fine; nothing model-made.
 - **Palette**: the tint is the theme's light blue `#7FAAE8`
@@ -112,18 +115,19 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 ## 6. Stage plan
 
-0. **Proof of concept** — done 2026-09-12 (§1). The owner holds three sample
-   files (openclipart baseball by Gerald_G, a crossed-bats line-art PNG, a
-   football gridiron SVG); asked for on 2026-09-13, not yet received. They go
-   through `process` like any other input (baseball → `the-baseball`; the
-   crossed bats match no template yet, so that file waits under `sources/`).
+0. **Proof of concept** — done 2026-09-12 (§1). The owner's three sample files:
+   the openclipart baseball (Gerald_G, public domain) is `the-baseball` (ink);
+   the football gridiron SVG is byte-for-byte Commons' CC0 copy already under
+   `sources/`; the crossed-bats line-art PNG has been shown but not handed over
+   as a file — it needs a path, then a template of its own (§4 remake authority).
 1. **Processing tool** — done 2026-09-13.
    `poetry run python -m sportstradamus.scripts.constellation_art process <src>
    --slug <slug> --mode ink|edges --source-url … --artist … --licence …` writes
    the layer, its manifest row and the source copy; `sheet --out <png>` tiles
    every layer over the page ground with dust. Every recipe number is a named
    constant in the module. Pins: `tests/golden/test_constellation_art.py`.
-   First layers: `the-bat` and `the-gridiron` from Commons CC0 art, both `edges`.
+   First layers: `the-bat` and `the-gridiron` (Commons CC0, `edges`), `the-baseball`
+   (the owner's openclipart file, `ink`).
 2. **Sourcing** (1–2 sessions + one owner sitting). For each template, query
    Commons (`generator=search`, namespace 6, `iiextmetadatafilter=LicenseShortName|Artist`)
    with the label's nouns plus "svg" / "line art" / "clip art"; keep CC0 and
@@ -187,5 +191,5 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
-- 2026-09-13 · stage 1 · `src/sportstradamus/scripts/constellation_art.py` (`process`, `sheet`) + golden pins; first two layers committed from Commons CC0 art (the-bat, the-gridiron, both edges) with manifest rows + sources; `render` folded into `process`, `search` deferred to stage 2; chromium synthesises a viewBox for width/height-only SVGs, so `object-fit: contain` scales every Commons file seen so far · next: stage 2 sourcing; the owner's three POC files still to land
+- 2026-09-13 · stage 1 · `src/sportstradamus/scripts/constellation_art.py` (`process`, `sheet`) + golden pins; first three layers committed (the-bat + the-gridiron from Commons CC0 art, edges; the-baseball from the owner's openclipart file, ink) with manifest rows + sources; `render` folded into `process`, `search` deferred to stage 2; chromium synthesises a viewBox for width/height-only SVGs, so `object-fit: contain` scales every Commons file seen so far · next: stage 2 sourcing; the crossed-bats PNG still needs a file path
 - 2026-09-12 · stage 0 · brief written; POC on the owner's baseball SVG + a CC0 Commons bat (ink and edge masks, blur, tint, alpha) reads right over the starfield; Commons API confirmed as the automated source, openclipart API dead from the dev box · next: stage 1 processing tool
