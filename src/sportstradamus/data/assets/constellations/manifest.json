@@ -1,5 +1,21 @@
 {
   "templates": {
+    "the-alley-oop": {
+      "artist": "Lorc",
+      "file": "the-alley-oop.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/lorc__arrow-dunk.svg",
+      "source_url": "https://game-icons.net/1x1/lorc/arrow-dunk.html"
+    },
+    "the-arc": {
+      "artist": "GateKeeperX",
+      "file": "the-arc.png",
+      "licence": "Public domain",
+      "mode": "edges",
+      "source": "sources/three-point-arc.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Basketball_positions.svg"
+    },
     "the-arrow": {
       "artist": "qubodup",
       "file": "the-arrow.png",
@@ -103,6 +119,22 @@
       "mode": "edges",
       "source": "sources/boomerang.svg",
       "source_url": "https://openclipart.org/detail/330484"
+    },
+    "the-bowtie": {
+      "artist": "Delapouite",
+      "file": "the-bowtie.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__bow-tie.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/bow-tie.html"
+    },
+    "the-bracket": {
+      "artist": "Delapouite",
+      "file": "the-bracket.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__family-tree.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/family-tree.html"
     },
     "the-cage": {
       "artist": "j4p4n",
@@ -224,6 +256,14 @@
       "source": "sources/dumbbell.svg",
       "source_url": "https://openclipart.org/detail/340219"
     },
+    "the-elbows": {
+      "artist": "GateKeeperX",
+      "file": "the-elbows.png",
+      "licence": "Public domain",
+      "mode": "edges",
+      "source": "sources/the-paint.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Basketball_positions.svg"
+    },
     "the-facemask": {
       "artist": "Simanek",
       "file": "the-facemask.png",
@@ -248,6 +288,14 @@
       "source": "sources/lutz-a-fan-outline.svg",
       "source_url": "https://openclipart.org/detail/353964"
     },
+    "the-firework": {
+      "artist": "Delapouite",
+      "file": "the-firework.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__sparkles.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/sparkles.html"
+    },
     "the-gloves": {
       "artist": "NicholasJudy567",
       "file": "the-gloves.png",
@@ -264,6 +312,14 @@
       "source": "sources/Goal-Light.svg",
       "source_url": "https://openclipart.org/detail/215515"
     },
+    "the-goal-line": {
+      "artist": "Delapouite",
+      "file": "the-goal-line.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__finish-line.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/finish-line.html"
+    },
     "the-goalie-mask": {
       "artist": "Gerald_G",
       "file": "the-goalie-mask.png",
@@ -279,6 +335,14 @@
       "mode": "edges",
       "source": "sources/Hockey_Goalie.svg",
       "source_url": "https://commons.wikimedia.org/wiki/File:Hockey_Goalie.svg"
+    },
+    "the-goalposts": {
+      "artist": "Delapouite",
+      "file": "the-goalposts.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__rugby-conversion.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/rugby-conversion.html"
     },
     "the-goggles": {
       "artist": "liftarn",
@@ -373,8 +437,16 @@
       "file": "the-key.png",
       "licence": "Public domain",
       "mode": "edges",
-      "source": "sources/Basketball_positions.svg",
+      "source": "sources/half-court.svg",
       "source_url": "https://commons.wikimedia.org/wiki/File:Basketball_positions.svg"
+    },
+    "the-kicking-tee": {
+      "artist": "Delapouite",
+      "file": "the-kicking-tee.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__golf-tee.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/golf-tee.html"
     },
     "the-ladder": {
       "artist": "Viscious-Speed",
@@ -536,6 +608,14 @@
       "source": "sources/catcher-0033065axwlow.svg",
       "source_url": "https://openclipart.org/detail/327114"
     },
+    "the-shot-clock": {
+      "artist": "Skoll",
+      "file": "the-shot-clock.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/skoll__stopwatch.svg",
+      "source_url": "https://game-icons.net/1x1/skoll/stopwatch.html"
+    },
     "the-shoulder-pads": {
       "artist": "Firkin",
       "file": "the-shoulder-pads.png",
@@ -695,6 +775,14 @@
       "mode": "edges",
       "source": "sources/Hand-Drawn-Wings-Silhouette.svg",
       "source_url": "https://openclipart.org/detail/281296"
+    },
+    "the-wristbands": {
+      "artist": "Delapouite",
+      "file": "the-wristbands.png",
+      "licence": "CC BY 3.0",
+      "mode": "ink",
+      "source": "sources/delapouite__headband-knot.svg",
+      "source_url": "https://game-icons.net/1x1/delapouite/headband-knot.html"
     },
     "the-zamboni": {
       "artist": "j4p4n",

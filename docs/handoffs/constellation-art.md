@@ -1,6 +1,6 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 2 in progress (sourcing, 2026-09-13): 88 of 101 templates have a layer; MLB + NHL complete; 10 league templates + 3 general on the owner's hand-hunt list (§6)
+> Status: ACTIVE — stage 2 in progress (sourcing, 2026-09-13): 99 of 101 templates have a layer; MLB, NHL and general complete; `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list (§6)
 
 ## 1. Mission & money logic
 
@@ -74,8 +74,11 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
   answer from the dev box, and every upload is CC0 by the site's terms. Commons
   is the fallback: licence metadata is user-entered (the owner spot-checks), its
   API 429s after about ten quick calls, and its CC0/PD yield for sports nouns is
-  thin — icon sets, logos and maps; game-icons.net's near-complete sports set
-  there is CC BY 3.0 (an owner call, §8).
+  thin — icon sets, logos and maps. game-icons.net (CC BY 3.0, in per §4)
+  ships its whole set as one zip,
+  `https://game-icons.net/archives/svg/zip/ffffff/000000/game-icons.net.svg.zip`
+  (4181 icons as `1x1/<author>/<name>.svg`, a white glyph on a black square);
+  the credit page is `https://game-icons.net/1x1/<author>/<name>.html`.
 - Dev-box tooling: PIL (WebP yes), numpy, scipy, playwright chromium; no
   cairosvg, rsvg-convert, inkscape, cv2 or skimage. Rasterize SVG through
   chromium; edge-detect with `scipy.ndimage`.
@@ -96,6 +99,10 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 - 2026-09-12 — **Template vertices may be re-authored to fit the images**
   (owner); the star grammar (DESIGN.md §4a), the dealer's guarantees (no repeats
   per night, league wall, deterministic deal) and the bank-depth floors do not move.
+- 2026-09-13 — **game-icons.net art is in** (owner): its icons are CC BY 3.0, so
+  stage 3 renders an attribution line on Games naming the authors (Delapouite,
+  Lorc, Skoll …) and game-icons.net. Rows carry `licence: "CC BY 3.0"`; the
+  archive is in §3, the recolour recipe in §6.
 - 2026-09-13 — **Templates may be remade to fit the artwork** (owner): vertices,
   outline, topology, and new templates for art the bank has no shape for (the
   crossed bats), inside the dealer guarantees and the bank-depth floors.
@@ -112,7 +119,7 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 | Module | Role |
 |---|---|
-| `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, the owner's files) — openclipart and Commons downloads run to megabytes |
+| `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, the owner's files, the court crops) — openclipart, Commons and game-icons downloads run to megabytes |
 | `src/sportstradamus/scripts/constellation_art.py` (dev-side; never a prod job) | `search` (openclipart HTML search per template → `candidates.json`, `thumbs/`, one review sheet per league group and page), `pick` (one openclipart id → download under `sources/`, artist off the detail page, CC0 → the same write path as `process`), `process` (an owner-supplied SVG through chromium or PNG through PIL → mask → blur → tint → alpha → crop; writes the layer, its manifest row and the source copy), `sheet` (contact sheet of the processed layers over the page ground) |
 | `data/config/constellation_shapes.json` | `image` per template replaces `silhouette`; vertices re-fit where needed |
 | `components/constellation_shapes.py` | schema: `image` (nullable) validated, file must exist; path rules retire with the last silhouette |
@@ -142,7 +149,7 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
    line. Pins: `tests/golden/test_constellation_art.py`.
    First layers: `the-bat` and `the-gridiron` (Commons CC0, `edges`), `the-baseball`
    (the owner's openclipart file, `ink`).
-2. **Sourcing** — in progress (first pass 2026-09-13: 88 of 101 templates).
+2. **Sourcing** — in progress (2026-09-13: 99 of 101 templates).
    `search --out <folder>` asks openclipart per template with its label
    (sport-prefixed for a league template; `--query "…" <slug>` re-asks one) and
    writes `candidates.json`, `thumbs/` and `sheet-<group>-<n>.png` review pages;
@@ -150,25 +157,33 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
    CC0; a Commons hit goes through `process` with the licence and artist read
    off its file page (eight landed that way: route tree, field with hashmarks,
    backboard, half court, hockey goalie, field overview, goalkeeper glove,
-   bleachers glyph). MLB 13/13 and NHL 12/12 complete (`the-crossed-sticks` is
-   two mirrored copies of J_Alves's stick, like the bats); NFL 8/12, NBA+WNBA
-   6/12, general 49/52.
-   **Hand-hunt list** (neither source has a CC0/PD drawing; the owner finds a
-   file or remakes the template around art that exists, §4): NFL
-   `the-goalposts`, `the-kicking-tee`, `the-chain-gang`, `the-goal-line`; NBA
-   `the-shot-clock`, `the-arc`, `the-crossover`, `the-alley-oop`,
-   `the-wristbands`, `the-elbows` (`the-arc` and `the-elbows` could share
-   `the-key`'s half-court drawing if the three merge); general `the-firework`,
-   `the-bracket`, `the-bowtie` (openclipart offered a starburst blob, a curly
-   brace and a portrait). A found file lands with one call:
+   bleachers glyph). A game-icons.net icon (§4) goes the same way: unzip the
+   archive (§3), delete the icon's `<path d="M0 0h512v512H0z"/>` background,
+   turn `fill="#fff"` into `fill="#000"`, then `process <svg> --slug <slug>
+   --mode ink --licence "CC BY 3.0" --artist <Author> --source-url <credit page>`
+   (nine landed that way: goalposts, kicking tee, goal line, shot clock,
+   alley-oop, wristbands, firework, bracket, bowtie). MLB 13/13, NHL 12/12 and
+   general 52/52 complete (`the-crossed-sticks` is two mirrored copies of
+   J_Alves's stick, like the bats); NFL 11/12, NBA+WNBA 11/12. The court trio
+   share one public-domain Commons drawing (`File:Basketball_positions.svg`,
+   GateKeeperX): `the-key` is the full half court, `the-arc` and `the-elbows`
+   are crops of it (`sources/half-court.svg`, `three-point-arc.svg`,
+   `the-paint.svg`; the tan floor fill is removed so the crop borders don't
+   edge), and all three had their stars re-authored on the overlay sheet under
+   the §4 remake authority — folding them into one template is blocked by the
+   dealer's deck-depth pin (NBA keeps three templates per topology class).
+   Weak fits to swap when better art turns up: `the-kicking-tee` (a golf tee),
+   `the-wristbands` (a headband knot).
+   **Hand-hunt list** (no drawing on any of the three sources; the owner finds
+   a file or remakes the template around art that exists, §4): NFL
+   `the-chain-gang`, NBA `the-crossover`. A found file lands with one call:
    `process <file> --slug <slug> --mode ink|edges --source-url … --artist … --licence …`.
-   **Owner call:** game-icons.net's complete sports set on Commons is CC BY 3.0
-   (an attribution line on Games); it would fill most of the list.
    Acceptance unchanged: manifest rows for every league-specific template.
 3. **Render path** (1 session). `add_decoration` emits `layout.images` instead
    of the path shape; the desktop/mobile `SHAPE_SCALE` inversion and the
    `focus_scale` coupling carry through `sizex`/`sizey`; opacity knob; goldens
-   re-pinned; DESIGN.md's decoration sentence trued. Live-verify on Games
+   re-pinned; DESIGN.md's decoration sentence trued; the CC BY attribution
+   line (§4) rendered on Games. Live-verify on Games
    (playwright, desktop + phone, main/deeper/wider, iframe height on every
    toggle, zero page errors). Acceptance: verdict in the ledger.
 4. **Star re-fit** (1–2 sessions). Templates whose vertex graph no longer sits
@@ -194,10 +209,10 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 ## 8. Escalation & stop conditions
 
-**Stop and ask the owner:** any image that is not CC0 / public domain (CC-BY
-means an attribution line on the surface — a design call); the committed image
-set passing ~5 MB; `layout.images` unable to honour the desktop/mobile aspect
-contract; a re-fit that would breach the bank-depth floors.
+**Stop and ask the owner:** any image that is not CC0 / public domain and not
+game-icons.net (§4; CC-BY means an attribution line on the surface); the
+committed image set passing ~5 MB; `layout.images` unable to honour the
+desktop/mobile aspect contract; a re-fit that would breach the bank-depth floors.
 
 **Park and pivot:** stages 2 and 4 can pause per template (`image: null` keeps
 the outline-only fallback); stage 3 can land on the POC images alone.
@@ -218,6 +233,7 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · stage 2, second round · game-icons.net in (CC BY 3.0, §4): nine hand-hunt layers off its archive zip (background dropped, fill flipped, ink); `the-key` re-authored on the full half court, `the-arc` and `the-elbows` on crops of the same public-domain Commons court (merging the three blocked by the NBA deck-depth pin), stars checked on overlays; 99/101 — `the-chain-gang` and `the-crossover` left; weak fits: kicking tee (golf tee), wristbands (headband knot) · next: owner hunts the last two; stage 3 render path + the attribution line
 - 2026-09-13 · stage 2 · openclipart `search`/`pick` (every upload CC0; HTML search, 400 px thumbs — the 250 px ones are placeholders for recent ids — `/download` + `/detail`) + per-group review sheets; 80 layers picked in one sitting, 8 more from Commons by hand through `process`, `the-crossed-sticks` composed; 88/101 with MLB and NHL complete, 13 on the hand-hunt list; downloads gitignored (one huddle SVG is 6.8 MB), only compositions and the owner's files committed · next: owner hand-hunt + the CC BY 3.0 call; stage 3 render path
 - 2026-09-13 · crossed bats · `the-crossed-bats` template (MLB, twin/chain, 9 stars: tips, knobs, barrel and handle mids, the crossing) + its layer composed from two mirrored copies of Gerald_G's public-domain openclipart bat (8300, ink); stars checked on an overlay of the layer at its own aspect; catalog 100 → 101, MLB eligible 65 · next: stage 2 sourcing
 - 2026-09-13 · stage 1 · `src/sportstradamus/scripts/constellation_art.py` (`process`, `sheet`) + golden pins; first three layers committed (the-bat + the-gridiron from Commons CC0 art, edges; the-baseball from the owner's openclipart file, ink) with manifest rows + sources; `render` folded into `process`, `search` deferred to stage 2; chromium synthesises a viewBox for width/height-only SVGs, so `object-fit: contain` scales every Commons file seen so far · next: stage 2 sourcing; the crossed-bats PNG still needs a file path
