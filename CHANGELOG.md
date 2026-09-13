@@ -5,7 +5,16 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ## [Unreleased]
 
+### Added
+- Dashboard slips price the apps' pair rules (`current_pair_modifiers.parquet`): a
+  refused pair prices $0, blocks Lock it in! and crosses its stars.
+
+### Fixed
+- Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
+
 ### Changed
+- Games star click ~0.9 s → ~0.4 s: pair maps prebuilt once, one script run per click,
+  Streamlit's post-run full GC off (`.streamlit/config.toml`).
 - Dependency bumps: optuna 4.9, shap 0.49.1, mypy 2.3, playwright 1.62,
   optuna-dashboard 0.20; CI actions checkout/setup-python to v7. The Optuna 4 move
   swaps the sweep's journal storage to `JournalFileBackend`; existing journals resume.

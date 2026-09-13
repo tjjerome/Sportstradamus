@@ -62,12 +62,15 @@ minor correctness, parked into parlay-dependence stage 3.
 
 ### 1.3 Banned-combos usage
 
-`banned_combos.json` is a soft-modifier table (`[same_side, opp_side]` multipliers
-keyed by frozenset of position-markets); no entry ≤ 0.7, so nothing is hard-banned
-today — the `boost <= _MIN_PRODUCT_BOOST` gate (`parlay.py:325`) is a back-door ban no
-pair triggers. The missing piece is **ground truth**: the apps' actual
-pairing/rejection rules have never been captured. Disposition: pairing-rule capture is
-a `dfs-products` stage-0 acceptance item; enforcement changes wait on it.
+`banned_combos.json` holds per-platform `[same-direction, opposite-direction]` pair
+payout multipliers keyed by position-market pair, and `0.0` is a hard ban: every Sleeper
+entry carries one, and Underdog's NFL, NHL and MLB sections carry a few. A banned pair
+zeroes the parlay's product boost, so the `boost <= _MIN_PRODUCT_BOOST` gate
+(`parlay.py:133`) drops it from the beam search. prophecize publishes the modifiers it
+priced with to `current_pair_modifiers.parquet`, so the dashboard slip prices the same
+pairs and refuses to lock a banned one. The map is hand-documented and drifts.
+Disposition: corrections come from real app quotes through the Modifiers reconciler
+(dfs-products brief §3 and §4).
 
 ---
 
@@ -187,5 +190,5 @@ it early.
 | Substring same-player guard (§1.2) | minor correctness | parked | here + parlay-dependence stage-3 scope |
 | Shrink-to-zero credibility (§1.1) | superseded by R3 hierarchical Fisher-z EB | resolved-by-design pending D3 | R3 brief / model track §6.11 |
 | Production calibration never run (§3) | only empirical check + D3 stage-4 baseline | YES (owner-assisted) | hygiene-closeout stage 2 + here |
-| banned_combos soft-only (§1.3) | product-rule ground truth missing | capture → dfs-products stage 0 | here + dfs-products stage 0 |
+| banned_combos drift (§1.3) | hand-documented; `0.0` bans enforced in beam search + live slip | ongoing — owner quotes via the Modifiers reconciler | here + dfs-products §3/§4 |
 | ρ not line-stratified | tail-dependence question | no new item — R3 t-branch test gates it | R3 brief |

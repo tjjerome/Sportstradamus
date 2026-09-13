@@ -89,8 +89,12 @@ schedule in `prediction/payouts.py` (`payout_curve_for`: Underdog Power/Flex, Sl
 with the ≤ 2-leg full-refund rule) with the per-leg boost product on top — `slip_engine.py` is
 the one sanctioned live calc.
 
-Correlation-block risk (Underdog/Sleeper leg-pairing rejection rules) is a scarred chip on the
-rail — placeholder until the pairing-rule model lands.
+The apps' leg-pairing rules price in too, from the pair modifiers prophecize priced with
+(`current_pair_modifiers`, §7): each same-game pair's platform modifier multiplies into the boost
+product, and the slip names any pair the platform reprices. A pair the platform refuses
+(modifier 0.0) prices the slip at $0 and disables **Lock it in!** under a warning that names both
+legs, and the constellation puts an orange × on every star the platform won't pair with the slip
+(DESIGN §4a).
 
 ## 5. Evidence chain ("why this pick")
 
@@ -216,6 +220,7 @@ Owned by the pipeline (canonical detail in code; this table is the UI's reading 
 | `current_offers.parquet` + `Kelly`, `Why`, `Game` | columns | Board, Games, deep dive, shelf |
 | `current_parlays.parquet` + `Thesis` | column | Tonight, Games |
 | `data/runtime/current_game_corr.parquet` (League, Game, leg_a, leg_b, rho; leg key `Player\|Market\|Bet`) | new file | shelf math, constellation |
+| `data/runtime/current_pair_modifiers.parquet` (Platform, League, Game, leg_a, leg_b, modifier; only pairs ≠ 1.0, 0.0 = refused) | new file | slip pricing + pair note, constellation × |
 | `data/runtime/current_game_context.parquet` + `current_game_stories.parquet` | new files | Games story menu, Tonight cards |
 | `data/runtime/current_offer_details.parquet` (comps, volume, other stats) | new file | deep dive |
 | `data/runtime/user_slips.parquet` | new file | shelf save, Receipts |
@@ -235,25 +240,24 @@ Every scar renders a real panel with "coming" microcopy, feature-detects its dat
 (flips on when the file/column exists), and is registered in the closed lane brief's follow-ups
 (builds queue behind the producing lane). Filled since this spec was written: the comps panel
 (`current_offer_details`), the Board sparkline (`Move`, line movement), the card's last five,
-the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)), and the ticket
-card's player headshots (§6).
+the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)), the ticket
+card's player headshots (§6), and the rail's pairing rules (§4).
 
-1. Correlation-block risk chip on the rail — needs UD/Sleeper pairing-rule model.
-2. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
+1. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
    (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
    Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
-3. Team marks — skipped by the owner, colours only ([art_assets.md](art_assets.md)).
-4. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
-5. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
-6. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
+2. Team marks — skipped by the owner, colours only ([art_assets.md](art_assets.md)).
+3. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
+4. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
+5. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
    (dfs-products stage 2c).
-7. Combo-EV chips on the rail (§5b) — flip on game-line offer rows (dfs-products stage 4;
+6. Combo-EV chips on the rail (§5b) — flip on game-line offer rows (dfs-products stage 4;
    correlation-aware EV at stage 5).
 
 ## Changelog
 
+- 2026-09-13 — rail prices the apps' pair modifiers; refused pair = $0, lock off, star ×; pairing scar filled, §8 renumbered (§4, §7; DESIGN §4a).
 - 2026-09-13 — star border keyed to the model's Over/Under call, green/red (§5b; DESIGN §4a).
 - 2026-09-12 — product names locked to the DFS apps' own and the game-total star fill to a two-team gradient (§2, §5b; dfs-products §4); headshots routed to the `player-headshots` lane (§6, §8).
 - 2026-09-11 — lane closed: §3 trued to the shipped nav (Games absorbs Game + Slips, Pick'em retired); Sleeper pricing, comps, `Move` spark and the asset layer trued; §8 renumbered; brief archived.
 - 2026-07-10 — §5b new bet-type presentation added (Ladders, game-line combos, alt-line markers); taxonomy + contracts + scars extended; producers = dfs-products lane.
-- 2026-06-11 — spec created from owner-approved mockup review (P0 of the dashboard-ux lane).

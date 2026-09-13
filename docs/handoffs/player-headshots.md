@@ -38,7 +38,7 @@ pipeline that picks up new and rookie headshots as they appear, runnable monthly
 8. `scripts/run_job.sh` (the `case "$JOB"` map) + [`../OPERATIONS.md`](../OPERATIONS.md)
    cron table + `cli.py` (`LazyGroup`, the `fetch` group) — job plumbing.
 9. [`../dashboard_ux_redesign.md`](../dashboard_ux_redesign.md) §6 (player assets)
-   and §8 item 3 — the spec passages this lane closes.
+   and §8's filled-scar list — the spec passages this lane closes.
 
 ## 3. Verify before you trust
 

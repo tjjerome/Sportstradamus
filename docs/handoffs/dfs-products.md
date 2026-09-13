@@ -313,7 +313,7 @@ ingestion + `stat_map`/payout config + new `strategies/` module + standalone `sc
 - Kill: any of the B8 conditions fires (app prices event×pick correlation; pairing rules
   block correlated combos; fees exceed median edge; contract prices are strictly sharper
   than our consensus) → close the combo sub-lane DONE(no-ship); game-line rows stay
-  dashboard-only book-implied per `dashboard_ux_redesign.md` §8 scar item 4.
+  dashboard-only book-implied per the `dashboard_ux_redesign.md` §8 game-line scar.
 
 **Stage 5 — Correlation-engine + snapshot integration.** **CONFLICTED** — queues entirely
 behind `sleeper-parity`; never interleave with `parlay-dependence` (roadmap §5.1).
@@ -324,7 +324,7 @@ behind `sleeper-parity`; never interleave with `parlay-dependence` (roadmap §5.
   beam/slip scoring; snapshot artifacts flip the `dashboard-ux` scars this lane's earlier
   stages left open.
 - Acceptance: held-out joint calibration on team-market pairs beats independence per the
-  copula brief's estimator conventions; `dashboard_ux_redesign.md` §8 scar item 4 clears.
+  copula brief's estimator conventions; the `dashboard_ux_redesign.md` §8 game-line scar clears.
 - Est. 2–3 sessions once unblocked.
 - If-it-fails: `parlay-dependence` replaced Σ assembly first → re-express this stage's ρ
   work on the new path (branch, not kill — the estimator design survives either way).

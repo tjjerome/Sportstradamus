@@ -132,7 +132,7 @@ Sportstradamus/
 | `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves |
 | `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam |
 | `stories/` | Narrative generation for the dashboard: game context, offer "why" text, parlay theses, offer details |
-| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, `write_current_pickem`, game context/stories/details) — the only files the dashboard reads |
+| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, `write_current_pickem`, game corr + pair modifiers, context/stories/details) — the only files the dashboard reads |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays`) |
 
 ### `strategies/` — Bet sizing and contest construction
