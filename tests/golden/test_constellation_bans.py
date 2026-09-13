@@ -14,37 +14,11 @@ import pandas as pd
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_bans import BAN_MARK_MIN, BAN_MARK_SCALE
 from sportstradamus.dashboard.theme import ORANGE
+from tests.golden.constellation_rows import offer_row as _row
+from tests.golden.constellation_rows import star_key as _key
 
-_GAME = "NYK/SAS"
 _WIDER_GAME = "MIA/ORL"
 _STAR_TRACES = ("active", "candidate", "deep", "wider")
-
-
-def _row(
-    player: str,
-    team: str,
-    kelly: float,
-    *,
-    market: str = "PTS",
-    game: str = _GAME,
-    bet: str = "Over",
-) -> dict:
-    return {
-        "Player": player,
-        "Market": market,
-        "Bet": bet,
-        "Line": 10.5,
-        "Game": game,
-        "League": "NBA",
-        "Team": team,
-        "Kelly": kelly,
-        "Win Prob": 0.6,
-        "Boost": 1.5,
-    }
-
-
-def _key(player: str, market: str = "PTS", bet: str = "Over") -> str:
-    return f"{player}|{market}|{bet}"
 
 
 def _banned(*keys: str) -> dict[str, str]:

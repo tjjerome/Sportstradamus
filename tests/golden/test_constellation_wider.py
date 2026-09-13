@@ -40,35 +40,8 @@ from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_STAR_SIZE_MOBILE,
 )
 from sportstradamus.dashboard.theme import GREEN, RED, team_colors
-
-_GAME = "NYK/SAS"
-
-
-def _row(
-    player: str,
-    team: str,
-    kelly: float,
-    *,
-    market: str = "PTS",
-    game: str = _GAME,
-    bet: str = "Over",
-) -> dict:
-    return {
-        "Player": player,
-        "Market": market,
-        "Bet": bet,
-        "Line": 10.5,
-        "Game": game,
-        "League": "NBA",
-        "Team": team,
-        "Kelly": kelly,
-        "Win Prob": 0.6,
-        "Boost": 1.5,
-    }
-
-
-def _key(player: str, market: str = "PTS", bet: str = "Over") -> str:
-    return f"{player}|{market}|{bet}"
+from tests.golden.constellation_rows import offer_row as _row
+from tests.golden.constellation_rows import star_key as _key
 
 
 def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
