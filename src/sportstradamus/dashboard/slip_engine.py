@@ -64,6 +64,10 @@ _CROWN_KELLY: float = 0.03
 # Game -> frozenset of a leg pair's two ``corr_key`` keys -> that pair's ρ or payout modifier.
 PairValues = Mapping[str, Mapping[frozenset, float]]
 
+# current_pair_modifiers sentinel: this value means the platform refuses the pair
+# outright, not just downweights it.
+REFUSED_MODIFIER: float = 0.0
+
 
 @dataclass(frozen=True)
 class SlipScore:
@@ -82,7 +86,7 @@ class SlipScore:
     @property
     def banned(self) -> bool:
         """Whether the platform refuses a pair on the slip (a 0.0 modifier)."""
-        return any(modifier == 0.0 for _, _, modifier in self.pair_mods)
+        return any(modifier == REFUSED_MODIFIER for _, _, modifier in self.pair_mods)
 
 
 def score_slip(
@@ -186,7 +190,7 @@ def banned_partners(
     for leg in legs:
         key = corr_key(leg)
         for pair, modifier in by_game.get(leg["game"], {}).items():
-            if modifier == 0.0 and key in pair:
+            if modifier == REFUSED_MODIFIER and key in pair:
                 (star,) = pair - {key}
                 conflicts[star].append(leg_label(leg))
     return {

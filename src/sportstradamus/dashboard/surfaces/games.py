@@ -303,8 +303,7 @@ def _render_tuning_cockpit(shapes: dict[str, GameShape], focus_game: str) -> Non
 meta = load_current_meta()
 page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no run on record")))
 
-slate = load_current_offers()
-offers = sport_filtered(slate).reset_index(drop=True)
+offers = sport_filtered(load_current_offers()).reset_index(drop=True)
 mods = load_pair_modifiers()
 game_context = load_current_game_context()
 ctxs = load_game_ctxs()
@@ -345,8 +344,8 @@ if focus_game:
     _render_lens_toggles()
 render_constellation_builder(
     offers,
-    mods,
     ctxs,
+    mods,
     focus_game=focus_game,
     shape=shapes[focus_game].template if focus_game in shapes else None,
 )

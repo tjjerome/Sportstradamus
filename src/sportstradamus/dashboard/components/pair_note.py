@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 
 import streamlit as st
 
-from sportstradamus.dashboard.slip_engine import SlipScore
+from sportstradamus.dashboard.slip_engine import REFUSED_MODIFIER, SlipScore
 from sportstradamus.leg_schema import leg_label
 
 
@@ -24,7 +24,7 @@ def render_pair_note(score: SlipScore, legs: Sequence[Mapping], platform: str) -
     refused = [
         f"{leg_label(legs[i])} with {leg_label(legs[j])}"
         for i, j, modifier in score.pair_mods
-        if modifier == 0.0 and legs[i]["player"] != legs[j]["player"]
+        if modifier == REFUSED_MODIFIER and legs[i]["player"] != legs[j]["player"]
     ]
     if refused:
         st.warning(

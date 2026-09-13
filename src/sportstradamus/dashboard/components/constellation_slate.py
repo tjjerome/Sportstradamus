@@ -108,7 +108,7 @@ def rho_map(corr: pd.DataFrame | None, game: str) -> dict[frozenset, float]:
     }
 
 
-def game_edges(keys: list[str], rho: dict[frozenset, float]) -> list[tuple[str, str, float]]:
+def game_edges(keys: list[str], rho: Mapping[frozenset, float]) -> list[tuple[str, str, float]]:
     """Every correlation tie among shown nodes (|ρ| ≥ floor), signed and sorted.
 
     Feeds both the spring *layout* (which pulls on |ρ| so a leg's placement reflects

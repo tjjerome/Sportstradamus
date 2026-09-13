@@ -105,8 +105,8 @@ def _active_lenses(
 
 def render_constellation_builder(
     offers: pd.DataFrame,
-    mods: Mapping,
     ctxs: Mapping,
+    mods: Mapping,
     *,
     focus_game: str,
     key_prefix: str = "cb",
@@ -166,21 +166,15 @@ def render_constellation_builder(
     valid, reason = validate_parlay_legs(legs)
     if not valid:
         st.warning(reason)
-    shrink = slip_shrinkage(legs)
-    score = score_slip(
+    _render_price(
         legs,
         ctxs,
         mods,
         platform=platform,
-        bankroll=Decimal(str(st.session_state[_BANKROLL])),
-        shrinkage=shrink,
+        valid=valid,
+        key_prefix=key_prefix,
+        headline=slip_headline(focus_legs, offers, ctxs),
     )
-    headline = slip_headline(focus_legs, offers, ctxs)
-    if headline:
-        st.markdown(f"#### {headline}")
-    _render_metrics(score, legs, key_prefix=key_prefix)
-    render_pair_note(score, legs, platform)
-    _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid and not score.banned)
 
 
 def render_simple_builder(
@@ -200,6 +194,24 @@ def render_simple_builder(
     valid, reason = validate_parlay_legs(legs, require_both_teams=False)
     if not valid:
         st.warning(reason)
+    _render_price(legs, ctxs, mods, platform=platform, valid=valid, key_prefix=key_prefix)
+
+
+def _render_price(
+    legs: list[dict],
+    ctxs: Mapping,
+    mods: Mapping,
+    *,
+    platform: str,
+    valid: bool,
+    key_prefix: str,
+    headline: str = "",
+) -> None:
+    """Both builders' ending: price the slip, then its headline, readout, pair note and lock.
+
+    **Lock it in!** stays off unless ``valid`` holds and the platform refuses no pair
+    on the slip.
+    """
     shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
@@ -209,9 +221,11 @@ def render_simple_builder(
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
+    if headline:
+        st.markdown(f"#### {headline}")
     _render_metrics(score, legs, key_prefix=key_prefix)
     render_pair_note(score, legs, platform)
-    _render_lock_in(score, "", shrink, key_prefix, can_lock=valid and not score.banned)
+    _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid and not score.banned)
 
 
 def _render_leg_list(
