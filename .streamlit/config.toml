@@ -53,3 +53,10 @@ chartDivergingColors = ["#9A2B2B", "#C0453E", "#D97A6C", "#E8B4A8", "#EEE3DC", "
 # Dataframe chrome tied to the surface/border tokens.
 dataframeHeaderBackgroundColor = "#1A1D24"
 dataframeBorderColor = "#2A2E37"
+
+[runner]
+# Streamlit's default runs a full gc.collect after every script run. The dashboard holds
+# the slate's pair maps in memory, about a million objects, so each collection took a
+# quarter second before the page could update. Python's own generational collector still
+# reclaims cyclic garbage.
+postScriptGC = false

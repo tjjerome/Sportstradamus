@@ -19,7 +19,7 @@ in this repo or on the production box:
 
 To change behavior, edit those files and reload the dashboard — there is nothing to compile.
 `__init__.py` declares the component against `build/` and exposes
-`render_constellation(fig, *, key, sparks, moves, shots, bans, mobile=False)`.
+`render_constellation(fig, *, key, sparks, moves, shots, bans, on_change, mobile=False)`.
 
 ## Contract
 
@@ -40,6 +40,7 @@ To change behavior, edit those files and reload the dashboard — there is nothi
   a player with no `shots` entry gets the initials disc.
 - `mobile` switches the frontend to its touch flow: a docked tap card, no hover, and a taller
   frame so the card clears the map.
-- The component returns `{action, key, nonce}` — `action` is `"click"` (toggle the leg) or
-  `"detail"` (open the offer dialog); `nonce` increments per emit so a repeat click is a fresh
-  value. The caller dedups by `nonce`.
+- The component sends `{action, key, nonce}` only on a user action — `action` is `"click"`
+  (toggle the leg) or `"detail"` (open the offer dialog); `nonce` increments per emit so a
+  repeat click is a fresh value. The value lands in `st.session_state[key]`, and Streamlit runs
+  `on_change` before the rerun draws, so a click redraws the page once.

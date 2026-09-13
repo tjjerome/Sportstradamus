@@ -49,10 +49,10 @@ def _pool_df(*rows) -> pd.DataFrame:
 def setup_function() -> None:
     # A bare (no ScriptRunContext) st.session_state is a genuine process-wide global —
     # xdist reuses one worker process across several tests in this file, so every key
-    # a test can write (the slip, the per-key_prefix click nonce, the detail stack)
-    # must be reset here or a later test can inherit a nonce and get deduped away.
+    # a test can write (the slip, the map's last action, the detail stack) must be
+    # reset here or a later test inherits it.
     st.session_state[_LEGS] = []
-    st.session_state.pop("cb_cst_nonce", None)
+    st.session_state.pop("cb_constellation", None)
     st.session_state.pop("detail_stack", None)
 
 
@@ -150,29 +150,32 @@ def test_active_lenses_wider_only_runs_satellite_groups_and_skips_deep():
     assert wider_groups == [("MIA/ORL", [offers.iloc[1].to_dict()])]
 
 
+def _click(key: str, nonce: int = 1) -> str:
+    """Land a star click in the map's session-state slot; return the slot's key."""
+    st.session_state["cb_constellation"] = {"action": "click", "key": key, "nonce": nonce}
+    return "cb_constellation"
+
+
 def test_apply_constellation_action_click_resolves_pool_key_via_toggle():
     pool = _pool_df(_offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3))
-    action = {"action": "click", "key": "A|PTS|Over", "nonce": 1}
-    changed = _apply_constellation_action(action, pd.DataFrame(), pool, None, "cb")
-    assert changed is True
+    _apply_constellation_action(_click("A|PTS|Over"), pd.DataFrame(), pool, None)
     assert [leg["player"] for leg in st.session_state[_LEGS]] == ["A"]
 
 
 def test_apply_constellation_action_click_falls_back_to_wider_group_add():
     pool = _pool_df(_offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3))
     groups = [("MIA/ORL", [_offer("B", "AST", "Over", 6.5, "MIA/ORL", "MIA", "Underdog", 0.4)])]
-    action = {"action": "click", "key": "B|AST|Over", "nonce": 1}
-    changed = _apply_constellation_action(action, pd.DataFrame(), pool, groups, "cb")
-    assert changed is True
+    _apply_constellation_action(_click("B|AST|Over"), pd.DataFrame(), pool, groups)
     assert [leg["player"] for leg in st.session_state[_LEGS]] == ["B"]
 
 
-def test_apply_constellation_action_dedupes_by_nonce():
+def test_apply_constellation_action_repeat_click_toggles_the_leg_back_off():
+    # The frontend sends only on a click, each with a fresh nonce, so a second click on
+    # the same star is a real second action rather than a re-send to ignore.
     pool = _pool_df(_offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3))
-    action = {"action": "click", "key": "A|PTS|Over", "nonce": 7}
-    assert _apply_constellation_action(action, pd.DataFrame(), pool, None, "cb") is True
-    assert _apply_constellation_action(action, pd.DataFrame(), pool, None, "cb") is False
-    assert len(st.session_state[_LEGS]) == 1  # the repeat send didn't double-add
+    for nonce in (1, 2):
+        _apply_constellation_action(_click("A|PTS|Over", nonce), pd.DataFrame(), pool, None)
+    assert st.session_state[_LEGS] == []
 
 
 def test_open_offer_detail_resolves_a_wider_dot_against_the_full_offers_frame():

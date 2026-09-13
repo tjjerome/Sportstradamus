@@ -7,11 +7,12 @@ untranspiled; plotly.js + fonts load from CDN); ``build/main.js`` speaks the Str
 postMessage protocol directly. The frontend renders the figure JSON, dims a star's incident
 edges + shows a hover card on hover (no rerun), and on a star click or the card's **Full detail**
 button calls back with ``{action, key, nonce}`` — the nonce makes a repeat click a fresh value so
-Streamlit reruns. Import-safe: no Archive, no network at import.
+Streamlit still sees a change. Import-safe: no Archive, no network at import.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -29,13 +30,16 @@ def render_constellation(
     moves: dict[str, str],
     shots: dict[str, str],
     bans: dict[str, str],
+    on_change: Callable[[], None],
     mobile: bool = False,
-) -> dict | None:
-    """Render the star map; return the last ``{action, key, nonce}`` the user fired.
+) -> None:
+    """Render the star map; ``on_change`` acts on each ``{action, key, nonce}`` the user fires.
 
     ``action`` is ``"click"`` (toggle the star's leg) or ``"detail"`` (open the offer
-    dialog); ``key`` is the star's ``Player|Market|Bet``. ``None`` until the user acts.
-    The caller dedups by ``nonce`` — a repeat click re-sends the same value.
+    dialog); ``key`` is the star's ``Player|Market|Bet``. The value lands in
+    ``st.session_state[key]``, and Streamlit runs ``on_change`` before the rerun the action
+    triggers. The frontend sends only on a user action, and ``nonce`` makes a repeat click
+    a fresh value, so ``on_change`` fires once per action.
     ``mobile`` switches the frontend to its touch flow (docked tap card, no hover).
 
     ``sparks`` maps a star's key to its hover card's last-five markup, and ``moves`` to its
@@ -47,7 +51,7 @@ def render_constellation(
     (active, candidate, deep, wider) — a field there would ship the same payload four times
     and renumber every reader of the positional card fields.
     """
-    return _component(
+    _component(
         figure_json=fig.to_json(),
         mobile=mobile,
         sparks=sparks,
@@ -56,4 +60,5 @@ def render_constellation(
         bans=bans,
         key=key,
         default=None,
+        on_change=on_change,
     )

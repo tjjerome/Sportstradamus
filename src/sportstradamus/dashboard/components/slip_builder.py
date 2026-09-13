@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from functools import partial
 
 import pandas as pd
 import streamlit as st
@@ -267,25 +268,28 @@ def _render_constellation(
     shape: dict | None,
     bans: dict[str, str],
 ) -> None:
-    """Draw the interactive star map and act on the component's click/detail callback.
+    """Draw the interactive star map; its ``on_change`` handles clicks and detail opens.
 
-    A star click toggles its leg (rerun to refresh the map); the hover card's **Full
-    detail** seeds the offer dialog, drawn by ``_draw_detail_dialog`` once the map has
-    rendered. The component re-sends its last action on every rerun, so each is deduped
-    by nonce and fires once. ``deep_pool``/``wider_groups`` are the two lens overlays —
-    a clicked deep star resolves the same way as any other star on the map (its key is
-    drawn from that same ``pool`` frame); a clicked sky star from another game falls back
-    to the satellite add path. The hover card's last-five and line-movement rows ride
-    alongside the figure keyed by star, and its headshots keyed by player, since a wider
-    dot from another game has no row in ``pool``. ``bans`` crosses each star the platform
-    won't pair with the slip and fills its card's "won't pair" row.
+    A star click toggles its leg and the hover card's **Full detail** seeds the offer
+    dialog (drawn by ``_draw_detail_dialog`` once the map has rendered), both in
+    :func:`_apply_constellation_action`. Streamlit runs that callback before the next
+    script run draws anything, so a click redraws the page once, with the new slip,
+    instead of twice around an ``st.rerun``. ``deep_pool``/``wider_groups`` are the two
+    lens overlays — a clicked deep star resolves the same way as any other star on the
+    map (its key is drawn from that same ``pool`` frame); a clicked sky star from another
+    game falls back to the satellite add path. The hover card's last-five and
+    line-movement rows ride alongside the figure keyed by star, and its headshots keyed
+    by player, since a wider dot from another game has no row in ``pool``. ``bans``
+    crosses each star the platform won't pair with the slip and fills its card's "won't
+    pair" row.
     """
     mobile = is_mobile()
     # The wider lens draws other games' legs as sky stars, and their cards open like any
     # other — so they need sparks too, and they need not share the focus game's league.
     wider_rows = [row for _, rows in wider_groups or [] for row in rows]
     sparked = pd.concat([pool, pd.DataFrame(wider_rows)]) if wider_rows else pool
-    action = render_constellation(
+    key = f"{key_prefix}_constellation"
+    render_constellation(
         constellation_figure(
             legs,
             rho,
@@ -296,15 +300,14 @@ def _render_constellation(
             shape=shape,
             banned=bans,
         ),
-        key=f"{key_prefix}_constellation",
+        key=key,
         sparks=form_sparks(sparked),
         moves=move_sparks(sparked),
         shots=headshot_uris(sparked),
         bans=bans,
+        on_change=partial(_apply_constellation_action, key, offers, pool, wider_groups),
         mobile=mobile,
     )
-    if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):
-        st.rerun()
 
 
 def _draw_detail_dialog(offers: pd.DataFrame) -> None:
@@ -325,32 +328,24 @@ def _draw_detail_dialog(offers: pd.DataFrame) -> None:
 
 
 def _apply_constellation_action(
-    action: Mapping | None,
+    component_key: str,
     offers: pd.DataFrame,
     pool: pd.DataFrame,
     wider_groups: list[tuple[str, list[dict]]] | None,
-    key_prefix: str,
-) -> bool:
-    """Process the component's last action once; return True if the slip changed.
+) -> None:
+    """The map's ``on_change``: act on the ``{action, key, nonce}`` the component just sent.
 
-    A ``click`` toggles the star's leg (caller reruns); a ``detail`` seeds the offer
-    dialog and leaves the slip alone. The nonce is deduped against the last handled,
-    since the component re-sends the same value until the user acts again. A key
-    ``_toggle_leg`` can't resolve (an ordinary or deep star) falls back to
-    ``wider_groups`` — the only other trace on the figure — for the satellite
-    add-only path.
+    A ``click`` toggles the star's leg; a ``detail`` seeds the offer dialog and leaves the
+    slip alone. The frontend sends only on a user action, and its nonce makes a repeat
+    click on one star a fresh value, so each call is a new action. A key ``_toggle_leg``
+    can't resolve (an ordinary or deep star) falls back to ``wider_groups`` — the only
+    other trace on the figure — for the satellite add-only path.
     """
-    if not action:
-        return False
-    nonce_key = f"{key_prefix}_cst_nonce"
-    if action.get("nonce") == st.session_state.get(nonce_key):
-        return False
-    st.session_state[nonce_key] = action.get("nonce")
-    key = action.get("key")
-    if action.get("action") == "detail":
-        _open_offer_detail(key, offers, pool, wider_groups)
-        return False
-    return _toggle_leg(key, pool) or _add_wider_leg(key, wider_groups)
+    action = st.session_state[component_key]
+    if action["action"] == "detail":
+        _open_offer_detail(action["key"], offers, pool, wider_groups)
+    elif not _toggle_leg(action["key"], pool):
+        _add_wider_leg(action["key"], wider_groups)
 
 
 def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
