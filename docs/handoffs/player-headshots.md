@@ -1,7 +1,6 @@
 # Player Headshots
 
-> Status: ACTIVE — stages 1-3 built and live-verified ∥ stage 0 (owner clears the CDNs) still
-> open, and gates only the production cron row, not the code
+> Status: COMPLETE — all four stages closed; the monthly cron row is the owner's to install
 
 ## 1. Mission & money logic
 
@@ -92,6 +91,11 @@ every decoded image is colour-count probed before it reaches the cache.
 - 2026-09-12 — **Team marks stay skipped** (owner) — this lane is faces only.
 - 2026-09-12 — **Licence checking is the owner's, no code gate** — the same rule
   the ambient art follows.
+- 2026-09-13 — **All five leagues cleared for this deployment** (owner). The box is
+  private and single-user, no commercial licence is being sought, and the cache is
+  disk-held, gitignored and never hot-linked or redistributed. Exposing the dashboard
+  publicly would reopen the question; the fallback makes that a cache deletion, not a
+  code change.
 
 ## 5. Module footprint & canonical paths
 
@@ -110,9 +114,9 @@ flock for every job regardless, so schedule it off `reflect`'s window like `gate
 
 ## 6. Stage plan
 
-0. **Owner clears the CDNs** — OPEN (owner, minutes; gates the prod cron, not the
-   build): yes / no per league for the five patterns in §3. A "no" league keeps the
-   initials disc and is skipped by `--league` on the job's command.
+0. **Owner clears the CDNs** — CLOSED: all five cleared for this private deployment
+   (§4). A league the owner later withdraws is dropped with `--league` and keeps the
+   initials disc.
 1. **Fetcher + cache** — BUILT. `sportstradamus fetch headshots [--league …] [--force]`
    enumerates ids per league from the gamelog parquet (NFL unions `load_rosters` so
    rookies land pre-season), downloads through `Scrape.get_bytes`, crops square to the
@@ -173,5 +177,6 @@ stage 0.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
-- 2026-09-13 · stages 1-3 · `fetch headshots` + monthly job + card render built and live-verified (desktop + phone, both the face and the initials fallback); three §3 claims corrected in place · next: owner clears the CDNs, then the cron row goes live
+- 2026-09-13 · stage 0 · owner cleared all five leagues for this private box, no commercial licence sought (§4) · lane COMPLETE
+- 2026-09-13 · stages 1-3 · `fetch headshots` + monthly job + card render built and live-verified (desktop + phone, both the face and the initials fallback); three §3 claims corrected in place
 - 2026-09-12 · stage 0 · brief written; five CDN patterns verified `200` from the dev box (§3), NFL via nflverse `headshot_url`; render path chosen = `shots` side channel, not customdata · next: owner clears CDNs ∥ stage 1 fetcher
