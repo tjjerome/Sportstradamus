@@ -66,6 +66,18 @@ def _process(src: Path, slug: str, mode: str = "ink"):
     )
 
 
+def _ring_source(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    """Patch ``ASSETS_DIR`` under ``tmp_path`` and save the ring fixture as its source.
+
+    Returns ``(assets, src)``.
+    """
+    assets = tmp_path / "constellations"
+    monkeypatch.setattr(art, "ASSETS_DIR", assets)
+    src = tmp_path / "ring.png"
+    _ring().save(src)
+    return assets, src
+
+
 def test_ink_mask_keeps_only_dark_pixels():
     mask = art.mask(_ring(), "ink")
     assert mask.shape == (art._RENDER_PX, art._RENDER_PX)
@@ -98,10 +110,7 @@ def test_layer_caps_the_longest_side():
 
 
 def test_process_writes_layer_manifest_row_and_source_copy(tmp_path, monkeypatch):
-    assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
-    src = tmp_path / "ring.png"
-    _ring().save(src)
+    assets, src = _ring_source(tmp_path, monkeypatch)
 
     result = _process(src, "the-ring")
 
@@ -126,10 +135,7 @@ def test_process_writes_layer_manifest_row_and_source_copy(tmp_path, monkeypatch
 
 
 def test_process_merges_rows_sorted_by_slug(tmp_path, monkeypatch):
-    assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
-    src = tmp_path / "ring.png"
-    _ring().save(src)
+    assets, src = _ring_source(tmp_path, monkeypatch)
 
     _process(src, "the-ring")
     _process(src, "the-bat", mode="edges")
@@ -153,9 +159,7 @@ def test_process_reruns_from_the_sources_folder(tmp_path, monkeypatch):
 
 
 def test_process_rejects_a_slug_off_the_catalog(tmp_path, monkeypatch):
-    monkeypatch.setattr(art, "ASSETS_DIR", tmp_path / "constellations")
-    src = tmp_path / "ring.png"
-    _ring().save(src)
+    _, src = _ring_source(tmp_path, monkeypatch)
 
     result = _process(src, "the-unicorn")
 
@@ -164,10 +168,7 @@ def test_process_rejects_a_slug_off_the_catalog(tmp_path, monkeypatch):
 
 
 def test_sheet_tiles_every_layer(tmp_path, monkeypatch):
-    assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
-    src = tmp_path / "ring.png"
-    _ring().save(src)
+    _, src = _ring_source(tmp_path, monkeypatch)
     _process(src, "the-ring")
     _process(src, "the-bat")
     out = tmp_path / "sheet.png"
