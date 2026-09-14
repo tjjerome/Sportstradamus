@@ -15,6 +15,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
 
 ### Changed
+- Games constellation stars sit on their template's drawing; a narrow shape's extra stars
+  spread across the team's half.
 - Games star click ~0.9 s → ~0.4 s: pair maps prebuilt once, one script run per click,
   Streamlit's post-run full GC off (`.streamlit/config.toml`).
 - Dependency bumps: optuna 4.9, shap 0.49.1, mypy 2.3, playwright 1.62,

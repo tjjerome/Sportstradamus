@@ -1,6 +1,6 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 3 done 2026-09-13: Games draws the art; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; stage 4 star re-fit next, stage 5 unblocked (§6)
+> Status: ACTIVE — stage 4 done 2026-09-13: every drawn template's stars sit on its drawing; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; stage 5 (retire the silhouettes) next (§6)
 
 ## 1. Mission & money logic
 
@@ -51,7 +51,7 @@ works too, with a noisier interior. The recipe lives as named constants in
 9. Goldens: `tests/golden/test_constellation.py` (decoration block: one layout
    image below everything at `ART_OPACITY`, the layer's aspect under both frame
    scales, outline alone without art, `focus_scale` coupling, decoration inert and
-   never gold); `test_constellation_shapes.py` (schema, S-rules, hot reload,
+   never gold); `test_constellation_shapes.py` (schema, S-rules, every star on its drawing, hot reload,
    dealer determinism, bank depth ≥ 100 / ≥ 60 eligible per league);
    `test_constellation_art.py` (the tool, the shipped manifest, every drawn image
    recorded, the §3 ceiling, the layer loader, the credit).
@@ -125,14 +125,15 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 | Module | Role |
 |---|---|
-| `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, the owner's files, the court crops) — openclipart, Commons and game-icons downloads run to megabytes |
+| `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, pose wrappers, the owner's files, the court crops) — openclipart, Commons and game-icons downloads run to megabytes |
 | `src/sportstradamus/scripts/constellation_art.py` (dev-side; never a prod job) | `search` (openclipart HTML search per template → `candidates.json`, `thumbs/`, one review sheet per league group and page), `pick` (one openclipart id → download under `sources/`, artist off the detail page, CC0 → the same write path as `process`), `process` (an owner-supplied SVG through chromium or PNG through PIL → mask → blur → tint → alpha → crop; writes the layer, its manifest row and the source copy), `sheet` (contact sheet of the processed layers over the page ground) |
-| `data/config/constellation_shapes.json` | `image` per template: a layer file (two templates may share one) or `null`; `silhouette` still in the file, unrendered, until stage 5; vertices re-fit where needed |
-| `components/constellation_shapes.py` | `ART_DIR`; S5: a non-null `image` must be a file there; the silhouette grammar check retires with the key |
+| `data/config/constellation_shapes.json` | `image` per template: a layer file (two templates may share one) or `null`; `silhouette` still in the file, unrendered, until stage 5; `vertices` fit to the drawing (stage 4) |
+| `components/constellation_shapes.py` | `ART_DIR`; S5: a non-null `image` must be a file there, and every star sits on its drawing; the silhouette grammar check retires with the key |
+| `components/constellation_layout.py` | `_field_box`: a side's field stars run out to the edge of its half, so a narrow drawing never pens them into a column |
 | `components/constellation_slate.py` | `add_decoration`: one `layout.images` entry (data URI, data `xref`/`yref`, centred on the origin, `sizex`/`sizey` = 2 × the layer's side shares × the frame's `sx, sy`, `sizing="stretch"`, `layer="below"`, `ART_OPACITY`); `image: null` draws the outline alone |
 | `dashboard/assets.py` | `constellation_layer` (data URI through `_data_uri`, sides as shares of the longer), `constellation_credit` (markdown credit for CC BY rows: artists, site, licence link) |
 | `surfaces/games.py` | the credit caption under the map and cockpit |
-| `tests/golden/test_constellation.py`, `test_constellation_shapes.py`, `test_constellation_art.py` | decoration pins on `layout.images`; every catalog `image` a recorded layer; every layer under the §3 ceiling at `ART_OPACITY`; the credit names every CC BY artist |
+| `tests/golden/test_constellation.py`, `test_constellation_shapes.py`, `test_constellation_art.py` | decoration pins on `layout.images`; every catalog `image` a recorded layer and every star on its drawing; every layer under the §3 ceiling at `ART_OPACITY`; the credit names every CC BY artist |
 
 ## 6. Stage plan
 
@@ -196,13 +197,24 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
    sits under the map; DESIGN.md §4a trued. The render keeps each layer's
    aspect, so the stars authored on non-square layers moved with it: the arc's y
    and the paint's x scaled by the layer's side share. Verdict in the ledger.
-4. **Star re-fit** (1–2 sessions). Templates whose vertex graph no longer sits
-   on the image get `vertices`/`outline` re-authored against an overlay sheet at
-   the real figure aspect (the offline authoring sheet, never string surgery);
-   dealer goldens stay green. The render keeps each layer's aspect, so the overlay
-   puts vertex `(x, y)` at layer pixel `(W/2 + x·L/2, H/2 − y·L/2)` with `L` the
-   longer side: a tall layer fills the box's height and only `±W/L` of its width. Acceptance: every filled template's stars land on
-   the drawing in the sheet.
+4. **Star re-fit** — done 2026-09-13. Every drawn template's `vertices` were
+   re-authored on an overlay of its layer at the render's aspect (vertex `(x, y)`
+   at layer pixel `(W/2 + x·L/2, H/2 − y·L/2)`, `L` the longer side) and snapped
+   onto the drawn line, never by string surgery. `test_constellation_shapes.py`
+   pins the result: every star within 0.035 of a line the layer stores at alpha
+   34 or more, none above |y| 0.90 or nearer than 0.18 to another (`settle`
+   would nudge it off its line), and each axis spanning 1.0, or 80 % of a
+   drawing narrower than that. A centre vertex stays on the axis, because both
+   teams draw from it. Five layers were re-posed to carry their shape, each a
+   committed SVG wrapper around the unchanged download: the ladder leans, the
+   arrow and the comet climb, the clipboard stands clip-up, and the medal is a
+   darkened ink silhouette instead of edges. Under the §4 authority `the-laurels`
+   and `the-clipboard` lost a centre star their art has no line for, `the-key`
+   gained one, `the-banner` was re-meshed, `the-bolt` and `the-staircase` were
+   re-sided and `the-stick` mirrored to follow their art. A drawing narrower than
+   the old ±0.8 reach penned a busy side's field stars into a column, so
+   `constellation_layout._field_box` runs each side's field out to the edge of
+   its half. Verdict in the ledger.
 5. **Retire the SVG silhouettes.** Drop the `silhouette` keys and the loader's
    path-grammar check — unblocked since stage 3 gave every template an `image` or
    a deliberate `null` (`scale_path` went with the path shape); `art_assets.md`
@@ -246,6 +258,7 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · stage 4 · every drawn template's stars re-fit on an overlay of its layer at the render's aspect and snapped onto the line; `test_constellation_shapes.py` pins it (each star within 0.035 of alpha ≥ 34, |y| ≤ 0.90, stars ≥ 0.18 apart, each axis spanning 1.0 or 0.8 of a narrower drawing); five layers re-posed through committed SVG wrappers (ladder, arrow, comet and clipboard rotated, medal darkened to ink); laurels and clipboard lost a centre star, key gained one, banner re-meshed, bolt and staircase re-sided, stick mirrored; narrow drawings penned the field stars into a column and turned the hourglass clearance and caption pins red, so `_field_box` runs each side's field to its half's edge · bank stress check (101 templates, ladder pools, old → new catalog, both with the field fix): stars drifting past their radius under wider desktop 4 → 7, phone 45 → 58; slip star uncaptioned desktop 9 → 11, phone 78 → 80; a y-band floor (±0.7 or full height) cut phone drift to 46 or 35 and desktop misses to 4 but raised phone misses to 87, left for the owner · playwright verdict from a worktree at HEAD + this stage's files (a peer session had the shared tree mid-edit): desktop 1440×900 + phone 390×844 through main → deeper → deeper+wider → wider → main on an NFL night dealt `the-gridiron`; one image per mode, ×0.8 under wider, stars on the sidelines and yard lines, iframe heights as in stage 3, credit present, zero page errors; offline `constellation_figure` renders of the hourglass, torch, scoreboard, ladder, medal, key and banner put every vertex star on its drawing, the short ones (scoreboard, banner) crowded on the phone · next: stage 5 retire the silhouettes; owner call on the y band; owner hunts the last two
 - 2026-09-13 · stage 3 · Games draws the art: `image` key per template (99 files, 2 null), one `layout.images` entry at `ART_OPACITY` 0.36 (peak ≈ 0.19, under the §3 ceiling), layer aspect kept and scaled like the vertices, outline alone without art, CC BY credit caption from the manifest; `scale_path` and the silhouette fill removed, keys left for stage 5 · playwright verdict: desktop 1440×900 + phone 390×844 through main → deeper → deeper+wider → wider → main on an NFL night dealt `the-gridiron`; one image in every mode, shrunk ×0.8 with the stars under wider, iframe = figure + 8 (desktop) and + 208 (phone, 380 → 739 px sky), credit with both links, zero page errors (two Streamlit `/games/_stcore` 404s from the deep link itself) · next: stage 4 star re-fit; owner hunts the last two
 - 2026-09-13 · stage 2, second round · game-icons.net in (CC BY 3.0, §4): nine hand-hunt layers off its archive zip (background dropped, fill flipped, ink); `the-key` re-authored on the full half court, `the-arc` and `the-elbows` on crops of the same public-domain Commons court (merging the three blocked by the NBA deck-depth pin), stars checked on overlays; 99/101 — `the-chain-gang` and `the-crossover` left; weak fits: kicking tee (golf tee), wristbands (headband knot) · next: owner hunts the last two; stage 3 render path + the attribution line
 - 2026-09-13 · stage 2 · openclipart `search`/`pick` (every upload CC0; HTML search, 400 px thumbs — the 250 px ones are placeholders for recent ids — `/download` + `/detail`) + per-group review sheets; 80 layers picked in one sitting, 8 more from Commons by hand through `process`, `the-crossed-sticks` composed; 88/101 with MLB and NHL complete, 13 on the hand-hunt list; downloads gitignored (one huddle SVG is 6.8 MB), only compositions and the owner's files committed · next: owner hand-hunt + the CC BY 3.0 call; stage 3 render path
