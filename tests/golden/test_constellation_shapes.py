@@ -62,6 +62,7 @@ _SANE_TEMPLATES = {
             {"id": 4, "x": 0.9, "y": -0.6, "side": "R", "prominence": 5},
         ],
         "outline": [[0, 1], [1, 2], [2, 3], [3, 4]],
+        "image": None,
         "silhouette": "M -0.9 -0.6 L 0 0.9 L 0.9 -0.6 Z",
     }
 }
@@ -132,6 +133,7 @@ def test_template_obeys_authoring_rules(raw, slug):
     for a, b in tpl["outline"]:
         assert a in ids and b in ids and a != b, "S4: outline refs real, distinct ids"
 
+    assert tpl["image"] is None or (cs.ART_DIR / tpl["image"]).is_file(), "S5: a shipped layer"
     assert tpl["silhouette"].startswith("M"), "S5: one SVG path"
     assert tpl["silhouette"].rstrip().endswith("Z"), "S5: the gesture is filled, so closed"
 
@@ -196,6 +198,7 @@ def test_catalog_hot_reloads_on_an_owner_edit(tmp_path, monkeypatch):
         ("noncontiguous_ids", "contiguous"),
         ("unknown_topology", "topology"),
         ("coord_out_of_box", r"\[-1, 1\]"),
+        ("art_not_on_disk", "image"),
     ],
 )
 def test_a_malformed_catalog_fails_loud_naming_the_field(tmp_path, monkeypatch, break_, needle):
@@ -217,6 +220,8 @@ def test_a_malformed_catalog_fails_loud_naming_the_field(tmp_path, monkeypatch, 
         templates["the-wedge"]["topology"]["primary"] = "spiral"
     elif break_ == "coord_out_of_box":
         verts[1]["x"] = 4.2
+    elif break_ == "art_not_on_disk":
+        templates["the-wedge"]["image"] = "the-nowhere.png"
 
     path = tmp_path / "constellation_shapes.json"
     _write_catalog(path, tuning, templates)
@@ -257,6 +262,7 @@ def _stub_deck(tmp_path, monkeypatch, per_class=8, min_nodes=2):
                 "min_nodes": min_nodes,
                 "vertices": vertices,
                 "outline": [[i, i + 1] for i in range(count - 1)],
+                "image": None,
                 "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
             }
     path = tmp_path / "constellation_shapes.json"
@@ -331,6 +337,7 @@ def _mixed_league_deck(tmp_path, monkeypatch):
             "min_nodes": 2,
             "vertices": vertices,
             "outline": [[i, i + 1] for i in range(3)],
+            "image": None,
             "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
         }
         for slug, leagues in (("mitt", ["MLB"]), ("net", "all"), ("backboard", ["NBA"]))

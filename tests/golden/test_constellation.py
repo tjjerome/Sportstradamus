@@ -21,6 +21,7 @@ import math
 
 import pandas as pd
 import pytest
+from PIL import Image
 
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_deep import (
@@ -29,14 +30,13 @@ from sportstradamus.dashboard.components.constellation_deep import (
     DEEP_SIZE_MIN,
     DEEP_SIZE_MIN_MOBILE,
 )
-from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_shapes import ART_DIR, shape_catalog
 from sportstradamus.dashboard.components.constellation_slate import (
+    ART_OPACITY,
     DECORATION,
     FILLER_SIZE,
     SHAPE_SCALE,
     SHAPE_SCALE_MOBILE,
-    SILHOUETTE_ALPHA,
-    scale_path,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
     _STAR_GAP_PX,
@@ -662,14 +662,12 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
 _HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
 
 
-def _shaped(*, wider=None, mobile=False):
+def _shaped(*, wider=None, mobile=False, shape=_HOURGLASS):
     """A four-leg two-team game rendered onto a real template."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3), ("C|AST|Over", 0.2), ("D|PTS|Over", 0.1))
     corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
-    return constellation_figure(
-        legs, corr, pool, shape=_HOURGLASS, wider_groups=wider, mobile=mobile
-    )
+    return constellation_figure(legs, corr, pool, shape=shape, wider_groups=wider, mobile=mobile)
 
 
 def test_without_a_template_the_figure_is_exactly_the_spring_map():
@@ -680,15 +678,39 @@ def test_without_a_template_the_figure_is_exactly_the_spring_map():
     fig = constellation_figure(legs, corr, pool)
     assert _decoration_traces(fig) == []
     assert fig.layout.shapes == ()
+    assert fig.layout.images == ()
 
 
-def test_the_silhouette_is_drawn_faintly_beneath_everything():
-    shapes = _shaped().layout.shapes
-    assert len(shapes) == 1
-    assert shapes[0].type == "path"
-    assert shapes[0].layer == "below"
-    assert shapes[0].line.width == 0
-    assert f",{SILHOUETTE_ALPHA})" in shapes[0].fillcolor
+def test_the_art_is_drawn_faintly_beneath_everything():
+    figure = _shaped()
+    assert figure.layout.shapes == ()
+    (art,) = figure.layout.images
+    assert art.layer == "below"
+    assert (art.xref, art.yref) == ("x", "y")
+    assert art.source.startswith("data:image/png;base64,")
+    assert art.opacity == ART_OPACITY
+
+
+def test_the_art_keeps_its_own_aspect_and_takes_the_frame_scale():
+    """The layer's longer side spans the template box and the shorter one is centred, then
+    x and y take the frame's own corrections, exactly as the vertices do — so a star
+    authored on the drawing stays on it, on a laptop and in a hand."""
+    with Image.open(ART_DIR / _HOURGLASS["image"]) as layer:
+        width, height = layer.size
+    longer = max(width, height)
+    for mobile, (sx, sy) in ((False, SHAPE_SCALE), (True, SHAPE_SCALE_MOBILE)):
+        (art,) = _shaped(mobile=mobile).layout.images
+        assert (art.x, art.y, art.xanchor, art.yanchor) == (0, 0, "center", "middle")
+        assert art.sizing == "stretch"
+        assert art.sizex == pytest.approx(2 * sx * width / longer)
+        assert art.sizey == pytest.approx(2 * sy * height / longer)
+
+
+def test_a_template_without_art_draws_its_outline_alone():
+    figure = _shaped(shape={**_HOURGLASS, "image": None})
+    assert figure.layout.images == ()
+    assert figure.layout.shapes == ()
+    assert [t for t in _decoration_traces(figure) if t.mode == "lines"]
 
 
 def test_the_decoration_layer_is_inert_to_the_pointer():
@@ -703,7 +725,6 @@ def test_the_decoration_layer_is_inert_to_the_pointer():
 def test_no_engraved_stroke_is_ever_gold():
     """Gold means correlation and nothing else (DESIGN §4a)."""
     figure = _shaped()
-    assert figure.layout.shapes[0].fillcolor.lower().find(GOLD.lower()) == -1
     for trace in _decoration_traces(figure):
         rendered = f"{trace.line}{trace.marker}".lower()
         assert GOLD.lower() not in rendered
@@ -742,14 +763,9 @@ def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
     span = max(x for x in outline.x if x is not None)
     plain_span = max(x for x in plain.x if x is not None)
     assert span == pytest.approx(plain_span * WIDER_SCALE)
-
-
-def test_a_silhouette_rescales_x_and_y_independently():
-    """The frame is far wider than it is tall, so one uniform scale would leave every
-    round shape a flat lens — x and y take different corrections."""
-    assert scale_path("M -1 0.5 L 1 -0.5 Z", 0.8, 1.32) == "M -0.8 0.66 L 0.8 -0.66 Z"
-    # A cubic's control points are coordinates too, and alternate the same way.
-    assert scale_path("M 0 0 C 1 1 -1 -1 0.5 0.5", 2.0, 4.0) == "M 0 0 C 2 4 -2 -4 1 2"
+    (wider_art,), (plain_art,) = _shaped(wider=[]).layout.images, _shaped().layout.images
+    assert wider_art.sizex == pytest.approx(plain_art.sizex * WIDER_SCALE)
+    assert wider_art.sizey == pytest.approx(plain_art.sizey * WIDER_SCALE)
 
 
 def test_the_phone_frame_stretches_the_other_way():
@@ -765,7 +781,7 @@ def test_the_phone_frame_stretches_the_other_way():
 
 def test_the_shape_frame_correction_keeps_stars_and_engraving_together():
     """Whatever the correction is, both layers must take it — the whole point is that
-    the stars sit on the silhouette."""
+    the stars sit on the drawing."""
     figure = _shaped()
     outline = next(t for t in _decoration_traces(figure) if t.mode == "lines")
     star_xs = [x for x, _ in _node_pos(figure).values()]

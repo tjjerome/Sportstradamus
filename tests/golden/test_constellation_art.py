@@ -4,14 +4,18 @@
 layer a template will render beneath its stars (constellation-art lane, stage 1). The
 pins cover the two masks, the layer contract (tint, alpha peak, crop, size cap), the
 ``process`` command's three outputs (layer, manifest row, source copy), the ``sheet`` command,
-and the stage-2 openclipart pair: ``search`` (query → candidates, thumbnails, review
-sheet) and ``pick`` (one openclipart id → layer + provenance). Every fixture is drawn in
-memory at the render size and every HTTP call goes through the stubbed ``_get`` seam;
-nothing here launches chromium, so the SVG path is accepted by eye on the contact sheet.
+the stage-2 openclipart pair: ``search`` (query → candidates, thumbnails, review
+sheet) and ``pick`` (one openclipart id → layer + provenance), and the stage-3 dashboard
+side: every image a template draws is a recorded layer, every layer renders under the
+DESIGN §3 ambient ceiling, a layer loads as a data URI with its own aspect, and CC BY art
+is credited. Every fixture is drawn in memory at the render size and every HTTP call goes
+through the stubbed ``_get`` seam; nothing here launches chromium, so the SVG path is
+accepted by eye on the contact sheet.
 """
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 from pathlib import Path
@@ -22,7 +26,9 @@ import pytest
 from click.testing import CliRunner
 from PIL import Image, ImageDraw
 
+from sportstradamus.dashboard import assets as dashboard_assets
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_slate import ART_OPACITY
 from sportstradamus.scripts import constellation_art as art
 
 _RUNNER = CliRunner()
@@ -71,12 +77,12 @@ def _process(src: Path, slug: str, mode: str = "ink"):
 
 
 def _ring_source(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
-    """Patch ``ASSETS_DIR`` under ``tmp_path`` and save the ring fixture as its source.
+    """Patch ``ART_DIR`` under ``tmp_path`` and save the ring fixture as its source.
 
     Returns ``(assets, src)``.
     """
     assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
+    monkeypatch.setattr(art, "ART_DIR", assets)
     src = tmp_path / "ring.png"
     _ring().save(src)
     return assets, src
@@ -157,7 +163,7 @@ def test_process_merges_rows_sorted_by_slug(tmp_path, monkeypatch):
 
 def test_process_reruns_from_the_sources_folder(tmp_path, monkeypatch):
     assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
+    monkeypatch.setattr(art, "ART_DIR", assets)
     src = assets / "sources" / "ring.png"
     src.parent.mkdir(parents=True)
     _ring().save(src)
@@ -213,6 +219,57 @@ def test_shipped_set_stays_under_the_budget():
     # beside a few KB-scale compositions.
     total = sum(path.stat().st_size for path in _SHIPPED.iterdir() if path.is_file())
     assert total <= _SHIPPED_BUDGET_BYTES
+
+
+def test_every_drawn_image_is_a_recorded_layer():
+    files = {row["file"] for row in _SHIPPED_ROWS.values()}
+    for slug, template in shape_catalog()["templates"].items():
+        assert template["image"] is None or template["image"] in files, f"{slug}: no provenance"
+
+
+def test_every_layer_renders_under_the_ambient_ceiling():
+    """DESIGN §3: static ambient art stays at or under 0.20 alpha over the page."""
+    for slug, row in _SHIPPED_ROWS.items():
+        with Image.open(_SHIPPED / row["file"]) as layer:
+            peak = layer.getchannel("A").getextrema()[1] / 255
+        assert peak * ART_OPACITY <= dashboard_assets._OPACITY_CEILING, f"{slug} renders too bright"
+
+
+def test_a_layer_loads_as_a_data_uri_with_its_sides_as_shares_of_the_longer(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard_assets, "ART_DIR", tmp_path)
+    Image.new("RGBA", (300, 600), (*art._TINT, 136)).save(tmp_path / "the-tall.png")
+
+    uri, width, height = dashboard_assets.constellation_layer("the-tall.png")
+
+    payload = base64.b64decode(uri.removeprefix("data:image/png;base64,"))
+    assert payload == (tmp_path / "the-tall.png").read_bytes()
+    assert (width, height) == (0.5, 1.0)
+
+
+def test_the_credit_names_every_cc_by_artist_with_the_site_and_the_licence():
+    credit = dashboard_assets.constellation_credit()
+    for row in _SHIPPED_ROWS.values():
+        if row["licence"].startswith("CC BY"):
+            assert row["artist"] in credit
+    assert "adapted" in credit, "CC BY 3.0 asks an adaptation to say it is one"
+    assert "[game-icons.net](https://game-icons.net)" in credit
+    assert "[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)" in credit
+
+
+def test_the_credit_is_empty_when_no_art_asks_for_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard_assets, "ART_DIR", tmp_path)
+    row = {
+        "file": "the-bat.png",
+        "source": "Baseball_bat.svg",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Baseball_bat.svg",
+        "artist": "Gerald G",
+        "licence": "CC0",
+        "mode": "edges",
+    }
+    manifest = {"version": 1, "templates": {"the-bat": row}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert dashboard_assets.constellation_credit() == ""
 
 
 _SEARCH_HTML = """<h2 class="text-center"> 2 clipart for "hockey stick" <small> (Page 1 of 1) </small></h2>
@@ -375,7 +432,7 @@ def test_search_command_merges_into_an_existing_candidates_file(tmp_path, monkey
 
 def test_pick_downloads_the_file_and_records_openclipart_provenance(tmp_path, monkeypatch):
     assets = tmp_path / "constellations"
-    monkeypatch.setattr(art, "ASSETS_DIR", assets)
+    monkeypatch.setattr(art, "ART_DIR", assets)
     _fake_openclipart(monkeypatch)
 
     result = _RUNNER.invoke(
@@ -398,7 +455,7 @@ def test_pick_downloads_the_file_and_records_openclipart_provenance(tmp_path, mo
 
 
 def test_pick_refuses_an_id_openclipart_answers_with_its_logo(tmp_path, monkeypatch):
-    monkeypatch.setattr(art, "ASSETS_DIR", tmp_path / "constellations")
+    monkeypatch.setattr(art, "ART_DIR", tmp_path / "constellations")
     monkeypatch.setattr(
         art,
         "_get",

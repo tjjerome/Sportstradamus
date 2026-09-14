@@ -2,8 +2,8 @@
 
 Each template is one recognizable sports object drawn as a star chart: a set of
 vertices a game's legs get assigned to, the minimal line-work that names the
-object, and one filled SVG gesture behind it. A game is classified by the shape
-of its own correlation graph and dealt a template that matches, so a star map
+object, and a faint drawing of the object behind it. A game is classified by the
+shape of its own correlation graph and dealt a template that matches, so a star map
 gestures at its namesake the way a real constellation does — loosely.
 
 The JSON is the tuning surface, not a build artifact: the owner edits
@@ -24,7 +24,7 @@ mechanical half.
   is ~0.3 tall and a vertex any higher clips the ceiling.
 * **S2** 5–13 vertices. ``prominence`` is the importance order (1 = the star the
   shape can't live without), and mirror pairs tie, so it ranks rather than
-  permutes. Player-outline shapes simplify to ≤ 13 vertices; the silhouette
+  permutes. Player-outline shapes simplify to ≤ 13 vertices; the drawing
   carries the rest.
 * **S3** Sides must let a typical 3+3 two-team split read: mirrored objects get
   mirrored L/R; asymmetric objects (bat, bolt) still tag both halves along their
@@ -32,17 +32,15 @@ mechanical half.
 * **S4** ``outline`` is the minimal line-work that names the object. Every pair
   references real ids; interior vertices (a mound, a bullseye) may be
   outline-free.
-* **S5** ``silhouette`` is one closed SVG path — the filled gesture, ≤ ~8
-  commands. It carries what the line-work can't (the bolt's body, the leaf's
-  lobes). Only ``M L Q C T S Z``, space-separated, every coordinate set
-  re-issuing its command letter: Plotly's shape parser silently drops anything
-  else (an ``A`` arc costs you the curve with no error), and ``H``/``V`` would
-  break the x/y alternation the renderer rescales on. Draw curves as cubics —
-  a circular quadrant of radius ``r`` wants control points at ``0.5523 r``.
-  Draw the object thicker than life: at 13% alpha a hairline shaft or a shoe
-  profile disappears, so long objects (bat, arrow, oar) carry a shaft two or
-  three times its real width, and objects that are all edge and no mass don't
-  belong in the bank at all.
+* **S5** ``image`` is the drawing: a processed art layer under
+  ``data/assets/constellations/`` (``scripts/constellation_art.py`` makes it; the
+  ``manifest.json`` beside it holds its source, artist and licence), or ``null``
+  for a template with no art yet, which draws its outline alone. Two templates may
+  share a layer. The layer keeps its own aspect inside the box: its longer side
+  spans [-1, 1] and the shorter one is centred, so vertices authored against the
+  layer at that aspect land on the drawing. ``silhouette`` is the filled SVG gesture
+  the map drew before the art; nothing renders it, and while the key stays it is
+  one closed path of ``M L Q C T S Z`` only.
 * **S6** ``min_nodes`` = fewest real supernodes that still read as the object
   (2–5).
 * **S7** ``label`` names the object ("The Bolt") for the tuning cockpit — the map
@@ -73,6 +71,7 @@ from pathlib import Path
 from sportstradamus import data
 
 CATALOG_PATH = Path(str(pkg_resources.files(data) / "config" / "constellation_shapes.json"))
+ART_DIR = Path(str(pkg_resources.files(data) / "assets" / "constellations"))
 
 # The four shapes a game's correlation graph can be. "generic" is the classifier's
 # no-match answer and is deliberately not a template tag — nothing is authored for it.
@@ -80,11 +79,9 @@ TOPOLOGY_CLASSES = frozenset({"hub", "chain", "twin", "mesh"})
 
 _SIDES = frozenset({"L", "R", "C"})
 
-# Plotly's shape paths accept only a subset of SVG, and an unsupported command is
-# dropped in silence — an "A" arc costs you the curve with no error anywhere. H and V
-# are supported there but banned here anyway: they take a single coordinate, which
-# would break the strict x/y alternation the renderer's rescale walks on. Write the
-# curve as a cubic and the straight line as an L.
+# The grammar silhouettes were authored in while Plotly drew them as shapes: the subset
+# Plotly parses without dropping a command in silence, minus H and V, which broke the
+# strict x/y alternation the old rescale walked.
 _SVG_COMMANDS = frozenset("MLQCTSZ")
 
 # Owner-editable knob -> the band a hand edit has to stay inside. Bounded knobs
@@ -147,6 +144,8 @@ def _validate_template(slug: str, tpl: dict) -> None:
     for pair in tpl["outline"]:
         if not set(pair) <= set(ids):
             raise ValueError(f"{slug}: outline pair {pair} references a missing vertex id")
+    if tpl["image"] is not None and not (ART_DIR / tpl["image"]).is_file():
+        raise ValueError(f"{slug}: image {tpl['image']!r} is not a layer in {ART_DIR}")
 
     used = {token for token in tpl["silhouette"].split() if token.isalpha()}
     if not used <= _SVG_COMMANDS:

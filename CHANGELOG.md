@@ -6,6 +6,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Added
+- Games constellations draw their template's art beneath the stars: a faint light-blue
+  drawing on 99 of 101 shapes, with a credit line for the CC BY game-icons.net art.
 - Dashboard slips price the apps' pair rules (`current_pair_modifiers.parquet`): a
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 

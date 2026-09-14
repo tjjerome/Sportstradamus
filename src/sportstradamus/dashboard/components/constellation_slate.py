@@ -2,7 +2,7 @@
 
 One night's offers come in; per game this decides which legs are stars, what the
 correlation web among them looks like, which sports-object template the game was
-dealt, where each star lands on it, and how the silhouette and outline get drawn.
+dealt, where each star lands on it, and how its art and outline get drawn.
 ``constellation.py`` owns the figure itself — the stars, the gold edges, the two
 lenses; this owns the shape half. The catalog lives in ``constellation_shapes``
 and the graph maths in ``constellation_layout``.
@@ -28,6 +28,7 @@ from typing import NamedTuple
 import pandas as pd
 import plotly.graph_objects as go
 
+from sportstradamus.dashboard.assets import constellation_layer
 from sportstradamus.dashboard.components.constellation_layout import (
     assign_stars,
     cluster_players,
@@ -50,9 +51,9 @@ _MIN_EDGE_RHO = 0.05
 # The Phase D decoration layer: an engraving under the stars, never gold. Gold is
 # the correlation-edge color and nothing else, so no engraved stroke can be
 # misread as a ρ tie.
-SILHOUETTE_ALPHA = 0.13  # faint intent signal, below the ambient-decoration ceiling
-# constellation_deep._DEEP_COLOR #5f6b80
-_SILHOUETTE_FILL = f"rgba(95,107,128,{SILHOUETTE_ALPHA})"
+# Art layers bake a 0.55 alpha peak (scripts/constellation_art.py); this opacity renders
+# that peak at about 0.19, under the DESIGN §3 ceiling of 0.20 for static ambient art.
+ART_OPACITY = 0.36
 _OUTLINE_COLOR = "rgba(230,233,239,0.22)"  # theme TEXT #E6E9EF
 _OUTLINE_GLOW_COLOR = "rgba(230,233,239,0.08)"  # the same stroke, wider and fainter
 _FILLER_COLOR = "rgba(138,145,160,0.30)"  # theme GRAY #8A91A0
@@ -157,8 +158,8 @@ def template_positions(
     A player's tightly-tied legs first collapse into a supernode so a three-leg knot
     claims a single vertex rather than eating three, then the supernodes take
     vertices and explode back into their legs. Template coordinates never go through
-    the spring layout's ``_rescale``: the stars have to land on the silhouette, which
-    is authored in the same [-1, 1] box, and the same template has to stay visibly
+    the spring layout's ``_rescale``: the stars have to land on the drawing, which
+    sits in the same [-1, 1] box, and the same template has to stay visibly
     the same shape from one game to the next. The only thing applied to them is
     ``scale``, the viewport's aspect correction, which the engraving takes too.
     """
@@ -218,24 +219,6 @@ def slate_shapes(
     }
 
 
-def scale_path(path: str, sx: float, sy: float) -> str:
-    """Rescale a silhouette path's coordinates onto the frame.
-
-    Every command the catalog allows (S5) takes strictly alternating x, y pairs,
-    which is why ``H``/``V`` are banned there — they would break the alternation
-    this walk depends on.
-    """
-    scaled, axis = [], 0
-    for token in path.split():
-        if token.isalpha():
-            scaled.append(token)
-            axis = 0
-            continue
-        scaled.append(f"{float(token) * (sx if axis % 2 == 0 else sy):g}")
-        axis += 1
-    return " ".join(scaled)
-
-
 def add_decoration(
     fig: go.Figure,
     template: dict,
@@ -243,26 +226,36 @@ def add_decoration(
     scale: tuple[float, float],
     focus_scale: float,
 ) -> None:
-    """Draw the game's constellation beneath its stars: silhouette, engraved
-    outline, and faint stars on the vertices no leg filled.
+    """Draw the game's constellation beneath its stars: its art, engraved outline,
+    and faint stars on the vertices no leg filled. A template with no art yet
+    (``image`` null) draws the outline and fillers alone.
 
     Three deliberate constraints. The palette is the cool engraving family and
     never gold, so nothing here can be misread as a correlation edge. Every trace
     is named ``decoration`` with ``hoverinfo="skip"`` and carries no
     ``customdata``, which is what the component's JS gates click and hover on — so
-    the layer is inert to the pointer without needing a guard. And it takes both
-    the viewport aspect correction and ``focus_scale``, exactly as the stars do,
-    or the shape would detach from the map it belongs to under the "look wider"
-    lens.
+    the layer is inert to the pointer without needing a guard, and the art is a
+    layout image the pointer never reaches. And it takes both the viewport aspect
+    correction and ``focus_scale``, exactly as the stars do, or the shape would
+    detach from the map it belongs to under the "look wider" lens.
     """
     sx, sy = scale[0] * focus_scale, scale[1] * focus_scale
-    fig.add_shape(
-        type="path",
-        path=scale_path(template["silhouette"], sx, sy),
-        fillcolor=_SILHOUETTE_FILL,
-        line={"width": 0},
-        layer="below",
-    )
+    if template["image"]:
+        source, width, height = constellation_layer(template["image"])
+        fig.add_layout_image(
+            source=source,
+            xref="x",
+            yref="y",
+            x=0,
+            y=0,
+            xanchor="center",
+            yanchor="middle",
+            sizex=2 * width * sx,
+            sizey=2 * height * sy,
+            sizing="stretch",
+            opacity=ART_OPACITY,
+            layer="below",
+        )
     xy = {v["id"]: (v["x"] * sx, v["y"] * sy) for v in template["vertices"]}
     xs, ys = [], []
     for a, b in template["outline"]:

@@ -1,9 +1,10 @@
-"""Image loaders for the dashboard's two optional asset families — the scar mechanism.
+"""Image loaders for the dashboard's optional art — the scar mechanism.
 
 Streamlit serves no arbitrary static files, so every image here travels to the browser as
-a base64 data URI. Both families are dressing: ambient art falls back to a token gradient
-and a headshot falls back to the card's initials disc, so a box holding neither renders
-exactly as it did before either landed.
+a base64 data URI. All of it is dressing: ambient art falls back to a token gradient, a
+headshot falls back to the card's initials disc, and a constellation template with no art
+draws its outline alone, so a box holding none of it renders exactly as it did before any
+of it landed.
 
 Ambient art is optional dressing over a token gradient: a slot with no file renders its
 caller's fallback gradient byte-identical to today. A slot that names a real file on
@@ -21,6 +22,11 @@ surface, not a build artifact — same mtime-cached, validate-on-load contract a
 Headshots are the gitignored per-box cache ``fetch headshots`` fills, read through the
 index parquet beside it. They are already cropped and sized for the disc, so ``_data_uri``
 embeds them whole.
+
+Constellation art is the faint drawing a dealt template shows beneath its stars: one
+committed layer per template under ``data/assets/constellations/``, named by the shape
+catalog's ``image`` key, with its provenance in the ``manifest.json`` beside it — which is
+also where the Games page's credit line for attribution-licensed art comes from.
 """
 
 from __future__ import annotations
@@ -31,11 +37,13 @@ import importlib.resources as pkg_resources
 import io
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pandas as pd
 from PIL import Image, ImageOps
 
 from sportstradamus import data
+from sportstradamus.dashboard.components.constellation_shapes import ART_DIR
 from sportstradamus.helpers.io import read_parquet_safe
 from sportstradamus.helpers.text import remove_accents
 
@@ -76,6 +84,10 @@ _MIME_BY_SUFFIX = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+
+# Where the Games credit links each attribution licence the constellation art carries; a
+# licence missing here fails loud at render rather than shipping a credit with no link.
+_LICENCE_URLS = {"CC BY 3.0": "https://creativecommons.org/licenses/by/3.0/"}
 
 
 def _validate(manifest: dict) -> dict:
@@ -211,3 +223,37 @@ def headshot_uris(pool: pd.DataFrame) -> dict[str, str]:
         path = HEADSHOT_DIR / candidates.pop()
         uris[player] = _data_uri(path, path.stat().st_mtime_ns)
     return uris
+
+
+def constellation_layer(file: str) -> tuple[str, float, float]:
+    """A constellation art layer as ``(data URI, width, height)``, each side a share of the longer.
+
+    The shares place the layer in its template's [-1, 1]² box with its own aspect kept: the
+    longer side spans the box and the shorter one is centred on it.
+    """
+    path = ART_DIR / file
+    with Image.open(path) as layer:
+        width, height = layer.size
+    longer = max(width, height)
+    return _data_uri(path, path.stat().st_mtime_ns), width / longer, height / longer
+
+
+def constellation_credit() -> str:
+    """Markdown credit for the constellation art whose licence asks for one; ``""`` if none does.
+
+    The CC BY family asks for a credit and CC0 / public-domain art does not. Every layer is a
+    recoloured, blurred adaptation of its source, so the line says so, then names each
+    artist with the site the art came from and a link to the licence.
+    """
+    manifest = json.loads((ART_DIR / "manifest.json").read_text(encoding="utf-8"))
+    artists: dict[tuple[str, str], set[str]] = {}
+    for row in manifest["templates"].values():
+        if row["licence"].startswith("CC BY"):
+            site = urlsplit(row["source_url"]).netloc
+            artists.setdefault((site, row["licence"]), set()).add(row["artist"])
+    credits = [
+        f"works by {', '.join(sorted(names))} ([{site}](https://{site}), "
+        f"[{licence}]({_LICENCE_URLS[licence]}))"
+        for (site, licence), names in sorted(artists.items())
+    ]
+    return f"Constellation art adapted from {'; '.join(credits)}." if credits else ""

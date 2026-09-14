@@ -11,7 +11,7 @@ import html
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.assets import ambient_css
+from sportstradamus.dashboard.assets import ambient_css, constellation_credit
 from sportstradamus.dashboard.components.constellation_slate import GameShape
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
@@ -351,6 +351,8 @@ render_constellation_builder(
 )
 if shapes:
     _render_tuning_cockpit(shapes, focus_game)
+    if credit := constellation_credit():
+        st.caption(credit)
 
 # Reconciler handoff: the Modifiers page defaults to the session rail, so the
 # current slip arrives loaded. Two legs is the reconciler's minimum.

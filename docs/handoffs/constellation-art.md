@@ -1,13 +1,13 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 2 in progress (sourcing, 2026-09-13): 99 of 101 templates have a layer; MLB, NHL and general complete; `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list (§6)
+> Status: ACTIVE — stage 3 done 2026-09-13: Games draws the art; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; stage 4 star re-fit next, stage 5 unblocked (§6)
 
 ## 1. Mission & money logic
 
-Replace the generated constellation silhouettes with real imagery. Today each of
-the 100 shape templates carries a hand-authored SVG `silhouette` path, rendered
-as a filled Plotly shape at 13 % alpha under the stars; the owner rates them the
-weakest visual in the app. The replacement: licence-free clip art, turned into a
+Replace the generated constellation silhouettes with real imagery. Each shape
+template carried a hand-authored SVG `silhouette` path, rendered as a filled
+Plotly shape at 13 % alpha under the stars; the owner rated them the weakest
+visual in the app. The replacement: licence-free clip art, turned into a
 line drawing where it is not one already, recoloured to the theme's light blue,
 gaussian-blurred and made translucent, so it reads as the faint figure the stars
 trace. No money logic — the Games surface is the owner's nightly product. The
@@ -24,41 +24,44 @@ works too, with a noisier interior. The recipe lives as named constants in
 ## 2. Read first (in order)
 
 1. `src/sportstradamus/dashboard/components/constellation_shapes.py` — the
-   docstring rules S1–S9, the `silhouette` path grammar (`M L Q C T S Z` only,
-   `scale_path` walks strict x/y alternation), `eligible_templates`,
-   `assign_templates` (one deck per night, no repeats, league wall, md5-seeded).
+   docstring rules S1–S9 (S5: `image`, a layer file under `ART_DIR` or `null`),
+   `eligible_templates`, `assign_templates` (one deck per night, no repeats,
+   league wall, md5-seeded).
 2. `data/config/constellation_shapes.json` — `{version, tuning, templates}`;
    per template `label`, `leagues`, `topology`, `min_nodes`, `vertices` in
-   `[-1, 1]²`, `outline`, `silhouette`. Labels are the search vocabulary ("The
+   `[-1, 1]²`, `outline`, `image` (and the unrendered `silhouette`). Labels are
+   the search vocabulary ("The
    Hoop", "The Plate", "The Goalie Mask", "The Catcher's Mask", "The Goal Line",
    "The Trophy", …).
-3. `constellation_slate.py` — `add_decoration` (the `layout.shapes` path entry,
-   `layer="below"`, `_SILHOUETTE_FILL`), `scale_path`, `SHAPE_SCALE` /
-   `SHAPE_SCALE_MOBILE` (desktop/mobile aspect inversion), the render knobs,
-   `template_positions`.
+3. `constellation_slate.py` — `add_decoration` (one `layout.images` entry,
+   `layer="below"`, `ART_OPACITY`), `SHAPE_SCALE` / `SHAPE_SCALE_MOBILE`
+   (desktop/mobile aspect inversion), the render knobs, `template_positions`.
 4. `constellation_layout.py` `assign_stars` — the star fit reads `vertices`,
    never the path, so the image can change without touching the fitter, but
    `vertices`/`outline` must survive.
 5. `constellation_component/__init__.py` + `build/main.js` — `Plotly.react` on
    every render wipes any DOM node injected into the plot; blur must be baked
    into the image, and the figure JSON is the only Python→JS channel.
-6. `dashboard/assets.py` — `_data_uri`: the base64 embed + downscale precedent.
-7. [`../../DESIGN.md`](../../DESIGN.md) §3 palette tokens and §4a star grammar
-   (FIXED; the decoration layer is not the grammar, and its sentence about "the
-   dealt template's filled silhouette" is trued at stage 3).
+6. `dashboard/assets.py` — `constellation_layer` (the base64 embed plus the
+   layer's sides as shares of its longer one) and `constellation_credit` (the CC BY
+   line under the Games map).
+7. [`../../DESIGN.md`](../../DESIGN.md) §3 palette tokens and ambient ceiling,
+   §4a star grammar (FIXED; the decoration layer is not the grammar).
 8. [`../art_assets.md`](../art_assets.md) `constellation_silhouettes` row.
-9. Goldens: `tests/golden/test_constellation.py` (decoration block: one shape,
-   `layer == "below"`, alpha string, `scale_path` exactness, `focus_scale`
-   coupling, mobile inversion, decoration inert and never gold);
-   `test_constellation_shapes.py` (schema, S-rules, hot reload, dealer
-   determinism, bank depth ≥ 100 / ≥ 60 eligible per league).
+9. Goldens: `tests/golden/test_constellation.py` (decoration block: one layout
+   image below everything at `ART_OPACITY`, the layer's aspect under both frame
+   scales, outline alone without art, `focus_scale` coupling, decoration inert and
+   never gold); `test_constellation_shapes.py` (schema, S-rules, hot reload,
+   dealer determinism, bank depth ≥ 100 / ≥ 60 eligible per league);
+   `test_constellation_art.py` (the tool, the shipped manifest, every drawn image
+   recorded, the §3 ceiling, the layer loader, the credit).
 
 ## 3. Verify before you trust
 
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-poetry run python -c "import json; d=json.load(open('src/sportstradamus/data/config/constellation_shapes.json')); t=d['templates']; print(len(t), sum('silhouette' in v for v in t.values()), sum('image' in v for v in t.values()))"
-grep -n "layout.images\|add_layout_image\|images=" src/sportstradamus/dashboard/components/constellation*.py   # empty = stage 3 open
+poetry run python -c "import json; d=json.load(open('src/sportstradamus/data/config/constellation_shapes.json')); t=d['templates']; print(len(t), 'with art:', sum(v['image'] is not None for v in t.values()), 'silhouettes left:', sum('silhouette' in v for v in t.values()))"
+grep -n "add_layout_image" src/sportstradamus/dashboard/components/constellation_slate.py   # the stage-3 render path
 ls src/sportstradamus/data/assets/constellations/*.png 2>/dev/null | wc -l                                     # processed layers so far
 poetry run python -c "import cairosvg" 2>&1 | tail -1     # not on the dev box; playwright chromium rasterizes SVG instead
 curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://openclipart.org/search/?query=hockey%20stick' | grep -o 'href="/detail/[0-9]*/[^"]*"' | head -3   # openclipart HTML search; empty = the source is down
@@ -82,8 +85,10 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 - Dev-box tooling: PIL (WebP yes), numpy, scipy, playwright chromium; no
   cairosvg, rsvg-convert, inkscape, cv2 or skimage. Rasterize SVG through
   chromium; edge-detect with `scipy.ndimage`.
-- Plotly `layout.images` sizing (`sizex`/`sizey`, `xanchor`/`yanchor`) under the
-  pinned plotly version — never used in this repo yet.
+- Plotly `layout.images` (plotly 6.9.0, live-verified 2026-09-13): data
+  `xref`/`yref` with `sizing="stretch"` fills `sizex` × `sizey` exactly, and
+  `layer="below"` draws under every trace on the transparent plot; the image rides
+  `Plotly.react` with no `main.js` change.
 
 ## 4. Locked decisions
 
@@ -109,8 +114,9 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 - **No AI-generated imagery** (CLAUDE.md, DESIGN.md NEVER list): human-drawn clip
   art through filters is fine; nothing model-made.
 - **Palette**: the tint is the theme's light blue `#7FAAE8`
-  (`theme.SEQUENTIAL_COLORS`); no new hex. Opacity stays a named knob beside
-  `SILHOUETTE_ALPHA`.
+  (`theme.SEQUENTIAL_COLORS`); no new hex. Opacity is the named knob
+  `ART_OPACITY` (`constellation_slate.py`), sized so the layers' baked 0.55 alpha
+  peak renders under the DESIGN §3 ceiling of 0.20.
 - **Incremental fill**: a template with `image: null` renders outline-only
   (engraved outline + fillers, no silhouette), so the bank never waits on the
   last image.
@@ -121,11 +127,12 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 |---|---|
 | `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, the owner's files, the court crops) — openclipart, Commons and game-icons downloads run to megabytes |
 | `src/sportstradamus/scripts/constellation_art.py` (dev-side; never a prod job) | `search` (openclipart HTML search per template → `candidates.json`, `thumbs/`, one review sheet per league group and page), `pick` (one openclipart id → download under `sources/`, artist off the detail page, CC0 → the same write path as `process`), `process` (an owner-supplied SVG through chromium or PNG through PIL → mask → blur → tint → alpha → crop; writes the layer, its manifest row and the source copy), `sheet` (contact sheet of the processed layers over the page ground) |
-| `data/config/constellation_shapes.json` | `image` per template replaces `silhouette`; vertices re-fit where needed |
-| `components/constellation_shapes.py` | schema: `image` (nullable) validated, file must exist; path rules retire with the last silhouette |
-| `components/constellation_slate.py` | `add_decoration`: a `layout.images` entry (data URI, `xref`/`yref` data, `sizex`/`sizey` from the same `sx, sy`, `layer="below"`, opacity knob) replaces the path shape; `scale_path` retires |
-| `dashboard/assets.py` | `_data_uri` reused for the embed |
-| `tests/golden/test_constellation.py`, `test_constellation_shapes.py` | decoration pins re-targeted to `layout.images`; every referenced image exists; manifest licence non-empty |
+| `data/config/constellation_shapes.json` | `image` per template: a layer file (two templates may share one) or `null`; `silhouette` still in the file, unrendered, until stage 5; vertices re-fit where needed |
+| `components/constellation_shapes.py` | `ART_DIR`; S5: a non-null `image` must be a file there; the silhouette grammar check retires with the key |
+| `components/constellation_slate.py` | `add_decoration`: one `layout.images` entry (data URI, data `xref`/`yref`, centred on the origin, `sizex`/`sizey` = 2 × the layer's side shares × the frame's `sx, sy`, `sizing="stretch"`, `layer="below"`, `ART_OPACITY`); `image: null` draws the outline alone |
+| `dashboard/assets.py` | `constellation_layer` (data URI through `_data_uri`, sides as shares of the longer), `constellation_credit` (markdown credit for CC BY rows: artists, site, licence link) |
+| `surfaces/games.py` | the credit caption under the map and cockpit |
+| `tests/golden/test_constellation.py`, `test_constellation_shapes.py`, `test_constellation_art.py` | decoration pins on `layout.images`; every catalog `image` a recorded layer; every layer under the §3 ceiling at `ART_OPACITY`; the credit names every CC BY artist |
 
 ## 6. Stage plan
 
@@ -176,24 +183,30 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
    `the-wristbands` (a headband knot).
    **Hand-hunt list** (no drawing on any of the three sources; the owner finds
    a file or remakes the template around art that exists, §4): NFL
-   `the-chain-gang`, NBA `the-crossover`. A found file lands with one call:
-   `process <file> --slug <slug> --mode ink|edges --source-url … --artist … --licence …`.
+   `the-chain-gang`, NBA `the-crossover`. A found file lands with one call,
+   `process <file> --slug <slug> --mode ink|edges --source-url … --artist … --licence …`,
+   plus `"image": "<slug>.png"` on its template in the catalog (a swapped layer
+   keeps its file name, so a swap needs no catalog edit).
    Acceptance unchanged: manifest rows for every league-specific template.
-3. **Render path** (1 session). `add_decoration` emits `layout.images` instead
-   of the path shape; the desktop/mobile `SHAPE_SCALE` inversion and the
-   `focus_scale` coupling carry through `sizex`/`sizey`; opacity knob; goldens
-   re-pinned; DESIGN.md's decoration sentence trued; the CC BY attribution
-   line (§4) rendered on Games. Live-verify on Games
-   (playwright, desktop + phone, main/deeper/wider, iframe height on every
-   toggle, zero page errors). Acceptance: verdict in the ledger.
+3. **Render path** — done 2026-09-13. `add_decoration` draws the template's
+   layer as one `layout.images` entry instead of the path shape (§5); the
+   desktop/mobile `SHAPE_SCALE` inversion and the `focus_scale` coupling carry
+   through `sizex`/`sizey`; `ART_OPACITY` 0.36 renders the layers' stored 0.53
+   alpha peak at 0.19; `image: null` draws the outline alone; the CC BY credit
+   sits under the map; DESIGN.md §4a trued. The render keeps each layer's
+   aspect, so the stars authored on non-square layers moved with it: the arc's y
+   and the paint's x scaled by the layer's side share. Verdict in the ledger.
 4. **Star re-fit** (1–2 sessions). Templates whose vertex graph no longer sits
    on the image get `vertices`/`outline` re-authored against an overlay sheet at
    the real figure aspect (the offline authoring sheet, never string surgery);
-   dealer goldens stay green. Acceptance: every filled template's stars land on
+   dealer goldens stay green. The render keeps each layer's aspect, so the overlay
+   puts vertex `(x, y)` at layer pixel `(W/2 + x·L/2, H/2 − y·L/2)` with `L` the
+   longer side: a tall layer fills the box's height and only `±W/L` of its width. Acceptance: every filled template's stars land on
    the drawing in the sheet.
-5. **Retire the SVG silhouettes.** Drop `silhouette` keys, `scale_path` and the
-   path-grammar rules once every template has an image or a deliberate `null`;
-   `art_assets.md` row → done.
+5. **Retire the SVG silhouettes.** Drop the `silhouette` keys and the loader's
+   path-grammar check — unblocked since stage 3 gave every template an `image` or
+   a deliberate `null` (`scale_path` went with the path shape); `art_assets.md`
+   row → done.
 
 ## 7. Working rules
 
@@ -233,6 +246,7 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · stage 3 · Games draws the art: `image` key per template (99 files, 2 null), one `layout.images` entry at `ART_OPACITY` 0.36 (peak ≈ 0.19, under the §3 ceiling), layer aspect kept and scaled like the vertices, outline alone without art, CC BY credit caption from the manifest; `scale_path` and the silhouette fill removed, keys left for stage 5 · playwright verdict: desktop 1440×900 + phone 390×844 through main → deeper → deeper+wider → wider → main on an NFL night dealt `the-gridiron`; one image in every mode, shrunk ×0.8 with the stars under wider, iframe = figure + 8 (desktop) and + 208 (phone, 380 → 739 px sky), credit with both links, zero page errors (two Streamlit `/games/_stcore` 404s from the deep link itself) · next: stage 4 star re-fit; owner hunts the last two
 - 2026-09-13 · stage 2, second round · game-icons.net in (CC BY 3.0, §4): nine hand-hunt layers off its archive zip (background dropped, fill flipped, ink); `the-key` re-authored on the full half court, `the-arc` and `the-elbows` on crops of the same public-domain Commons court (merging the three blocked by the NBA deck-depth pin), stars checked on overlays; 99/101 — `the-chain-gang` and `the-crossover` left; weak fits: kicking tee (golf tee), wristbands (headband knot) · next: owner hunts the last two; stage 3 render path + the attribution line
 - 2026-09-13 · stage 2 · openclipart `search`/`pick` (every upload CC0; HTML search, 400 px thumbs — the 250 px ones are placeholders for recent ids — `/download` + `/detail`) + per-group review sheets; 80 layers picked in one sitting, 8 more from Commons by hand through `process`, `the-crossed-sticks` composed; 88/101 with MLB and NHL complete, 13 on the hand-hunt list; downloads gitignored (one huddle SVG is 6.8 MB), only compositions and the owner's files committed · next: owner hand-hunt + the CC BY 3.0 call; stage 3 render path
 - 2026-09-13 · crossed bats · `the-crossed-bats` template (MLB, twin/chain, 9 stars: tips, knobs, barrel and handle mids, the crossing) + its layer composed from two mirrored copies of Gerald_G's public-domain openclipart bat (8300, ink); stars checked on an overlay of the layer at its own aspect; catalog 100 → 101, MLB eligible 65 · next: stage 2 sourcing

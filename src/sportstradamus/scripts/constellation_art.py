@@ -32,7 +32,6 @@ import json
 import re
 import shutil
 import time
-from importlib import resources
 from pathlib import Path
 
 import click
@@ -42,11 +41,8 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps, UnidentifiedI
 from scipy import ndimage
 from tqdm import tqdm
 
-from sportstradamus import data
-from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_shapes import ART_DIR, shape_catalog
 from sportstradamus.dashboard.theme import GRAY, SEQUENTIAL_COLORS
-
-ASSETS_DIR = Path(str(resources.files(data) / "assets" / "constellations"))
 
 # Every mask and blur number below was tuned at this size in the stage-0 proof of
 # concept, so a raster input is brought to it too before anything is measured.
@@ -270,10 +266,10 @@ def _write_layer(
     kept: Path, slug: str, mode: str, source_url: str, artist: str, licence: str
 ) -> None:
     """Process the source already under ``sources/`` into ``<slug>.png``; record its row."""
-    out = ASSETS_DIR / f"{slug}.png"
+    out = ART_DIR / f"{slug}.png"
     layer(rasterize(kept), mode).save(out, optimize=True)
 
-    manifest_path = ASSETS_DIR / "manifest.json"
+    manifest_path = ART_DIR / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -353,7 +349,7 @@ def pick(slug: str, oca_id: int, mode: str) -> None:
     if "/download/" not in download.url:
         # An unknown id is answered with the site's logo, not a 404.
         raise click.BadParameter(f"openclipart has no drawing {oca_id}", param_hint="ID")
-    kept = ASSETS_DIR / "sources" / Path(download.url).name
+    kept = ART_DIR / "sources" / Path(download.url).name
     kept.parent.mkdir(parents=True, exist_ok=True)
     kept.write_bytes(download.content)
     detail = _get(f"{_OPENCLIPART}/detail/{oca_id}")
@@ -381,7 +377,7 @@ def pick(slug: str, oca_id: int, mode: str) -> None:
 @click.option("--licence", required=True, help="As the source states it, e.g. CC0.")
 def process(src: Path, slug: str, mode: str, source_url: str, artist: str, licence: str) -> None:
     """Process one source image into ``<slug>.png`` and record where it came from."""
-    kept = ASSETS_DIR / "sources" / src.name
+    kept = ART_DIR / "sources" / src.name
     kept.parent.mkdir(parents=True, exist_ok=True)
     if src.resolve() != kept.resolve():
         shutil.copy2(src, kept)
@@ -397,7 +393,7 @@ def process(src: Path, slug: str, mode: str, source_url: str, artist: str, licen
 )
 def sheet(out: Path) -> None:
     """Tile every processed layer over the page ground for the owner's review."""
-    rows = json.loads((ASSETS_DIR / "manifest.json").read_text(encoding="utf-8"))["templates"]
+    rows = json.loads((ART_DIR / "manifest.json").read_text(encoding="utf-8"))["templates"]
     n_cols, n_rows = min(len(rows), _SHEET_COLUMNS), -(-len(rows) // _SHEET_COLUMNS)
     canvas = Image.new("RGB", (n_cols * _SHEET_TILE_PX, n_rows * _SHEET_TILE_PX), _GROUND)
     draw = ImageDraw.Draw(canvas)
@@ -408,7 +404,7 @@ def sheet(out: Path) -> None:
     for i, (slug, row) in enumerate(rows.items()):
         left = (i % _SHEET_COLUMNS) * _SHEET_TILE_PX
         top = (i // _SHEET_COLUMNS) * _SHEET_TILE_PX
-        with Image.open(ASSETS_DIR / row["file"]) as image:
+        with Image.open(ART_DIR / row["file"]) as image:
             offset = (
                 left + (_SHEET_TILE_PX - image.width) // 2,
                 top + (_SHEET_TILE_PX - image.height) // 2,
