@@ -9,14 +9,16 @@ desaturated + dim, labelled like the rest. Star size ∝ Kelly edge. Each team's
 template the game was dealt when it has one, on the spring solve when it doesn't. Every tie is a
 gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) drawn as a faint base web that
 brightens when both its stars are in the slip. These assert that grammar, the static layout,
-the size/selection encodings, the hover, the per-edge endpoint ``meta``, the
-click-key + card-field ``customdata`` the in-app editor and its JS card rely on, and
-the Phase D decoration layer's subordination to all of it.
+the size/selection encodings, the hover, the edge records in ``layout.meta``, the fill
+each star's trace ``meta`` flips it to, the click-key + card-field ``customdata`` the
+in-app editor and its JS card rely on, and the Phase D decoration layer's subordination
+to all of it.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
 import math
 
 import pandas as pd
@@ -45,12 +47,15 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     PX_PER_UNIT_MOBILE,
 )
 from sportstradamus.dashboard.components.constellation_traces import (
+    _EDGE_ALPHA_MIN,
     EDGE_BASE_ALPHA,
     INACTIVE_ALPHA,
+    INACTIVE_DESAT,
     LABEL_FONT_SIZE_MOBILE,
     SIZE_MAX,
     SIZE_MIN,
     SIZE_MIN_MOBILE,
+    desaturate,
     star_label,
 )
 from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES, WIDER_SCALE
@@ -101,8 +106,8 @@ def _node_traces(fig) -> list:
     return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != DECORATION]
 
 
-def _edge_traces(fig) -> list:
-    return [t for t in fig.data if t.mode == "lines" and t.name != DECORATION]
+def _edges(fig) -> list[dict]:
+    return fig.layout.meta["edges"]
 
 
 def _decoration_traces(fig) -> list:
@@ -151,6 +156,17 @@ def test_active_full_color_candidate_desaturated_and_dim():
     assert cand.marker.opacity == INACTIVE_ALPHA
     assert cand.marker.color[0] != team_colors("NBA", "SAS")[0]  # blended toward gray, not raw
     assert list(cand.marker.line.color) == [RED]  # B is an Under call
+
+
+def test_star_meta_is_the_fill_a_click_flips_it_to():
+    """The component repaints a clicked star from its trace's ``meta`` before the rerun
+    lands: a candidate lights to its full team fill, a slip star dims to the candidate tint."""
+    legs = _slip("A|PTS|Over")  # NYK, active
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # B = SAS candidate
+    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
+    assert list(_trace(fig, "candidate").meta) == [team_colors("NBA", "SAS")[0]]
+    nyk_dimmed = desaturate(team_colors("NBA", "NYK")[0], INACTIVE_DESAT)
+    assert list(_trace(fig, "active").meta) == [nyk_dimmed]
 
 
 def test_two_team_fixture_resolves_two_distinct_team_primaries():
@@ -286,10 +302,10 @@ def test_layout_bbox_is_centered_on_origin():
 
 
 def _edge_by_pair(fig) -> dict:
-    return {frozenset(e.meta): e for e in _edge_traces(fig)}
+    return {frozenset((e["a"], e["b"])): e for e in _edges(fig)}
 
 
-def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
+def test_all_ties_drawn_with_endpoint_keys_and_dashed_negative():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
     corr = _corr(
@@ -304,25 +320,27 @@ def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
         frozenset(("A|PTS|Over", "C|AST|Over")),
         frozenset(("B|REB|Under", "C|AST|Over")),
     }
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].line.dash == "dot"  # negative
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].line.dash == "solid"  # positive
+    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))]["dash"] == "dot"  # negative
+    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))]["dash"] == "solid"  # positive
 
 
-def test_slip_edges_brighten_over_the_faint_base_web():
-    # Every tie is drawn at a faint base alpha (the base web); a tie whose BOTH endpoints
-    # are in the slip brightens above it. A + B are in the slip, C is a candidate: A-B
-    # brightens; A-C and B-C stay at the faint base.
+def test_slip_edges_brighten_to_their_lit_alpha_over_the_faint_base_web():
+    # Every tie carries its |rho|-scaled lit alpha and is drawn at the faint base alpha (the
+    # base web) unless BOTH its endpoints are in the slip, which draws it lit. The JS reads
+    # lit to brighten a tie on a click before the rerun lands. A + B are in the slip, C is a
+    # candidate: A-B is lit; A-C and B-C stay at the faint base.
     legs = _slip("A|PTS|Over", "B|REB|Under")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
-    corr = _corr(
-        ("A|PTS|Over", "B|REB|Under", 0.4),
-        ("A|PTS|Over", "C|AST|Over", 0.3),
-        ("B|REB|Under", "C|AST|Over", 0.5),
+    ab, ac, bc = (
+        frozenset(("A|PTS|Over", "B|REB|Under")),
+        frozenset(("A|PTS|Over", "C|AST|Over")),
+        frozenset(("B|REB|Under", "C|AST|Over")),
     )
-    edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > EDGE_BASE_ALPHA  # both in slip
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == EDGE_BASE_ALPHA  # candidate
-    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == EDGE_BASE_ALPHA  # candidate
+    rho = {ab: 0.4, ac: -0.3, bc: 0.9}  # -0.3 takes |rho|; 0.9 hits the cap at 1
+    edges = _edge_by_pair(constellation_figure(legs, rho, pool))
+    assert all(edges[pair]["lit"] == min(1.0, _EDGE_ALPHA_MIN + abs(r)) for pair, r in rho.items())
+    assert edges[ab]["opacity"] == edges[ab]["lit"]  # both in slip
+    assert edges[ac]["opacity"] == edges[bc]["opacity"] == EDGE_BASE_ALPHA  # candidate
 
 
 def test_single_slip_leg_leaves_only_the_faint_base_web():
@@ -330,19 +348,30 @@ def test_single_slip_leg_leaves_only_the_faint_base_web():
     # sits at the faint base alpha (bright ties preview only on hover, client-side).
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
-    edges = _edge_traces(
-        constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool)
-    )
-    assert edges and all(e.opacity == EDGE_BASE_ALPHA for e in edges)
+    edges = _edges(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    assert edges and all(e["opacity"] == EDGE_BASE_ALPHA for e in edges)
 
 
 def test_empty_slip_shows_the_faint_base_web():
     # With nothing in the slip no edge brightens — but the whole web is still drawn at the
     # faint base alpha so the correlation structure reads before any pick.
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
-    edges = _edge_traces(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
-    assert edges  # the tie is present as a (base-web) trace
-    assert all(e.opacity == EDGE_BASE_ALPHA for e in edges)
+    edges = _edges(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    assert edges  # the tie is present as a (base-web) record
+    assert all(e["opacity"] == EDGE_BASE_ALPHA for e in edges)
+
+
+def test_edges_ride_in_layout_meta_as_plain_json_never_as_traces():
+    """Plotly.react's cost grows with trace count, so the web is data ``main.js`` strokes
+    itself, in list order: the lens's ties beneath the main web. plotly.js 2.27 can't
+    decode plotly 6's base64 arrays, so the records must survive a JSON round trip."""
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
+    corr = _corr(("A|PTS|Over", "B|REB|Under", -0.5), ("A|PTS|Over", "D|PTS|Under", 0.5))
+    deep_pool = _pool(("D|PTS|Under", -0.1))
+    fig = constellation_figure(_slip("A|PTS|Over"), corr, pool, deep_pool=deep_pool)
+    assert not {"edge", "deep_edge"} & {trace.name for trace in fig.data}
+    assert [edge["lens"] for edge in _edges(fig)] == [True, False]
+    assert json.loads(fig.to_json())["layout"]["meta"]["edges"] == _edges(fig)
 
 
 def test_layout_is_deterministic():
@@ -369,7 +398,7 @@ def test_active_leg_below_k_floor_still_shows():
 def test_no_legs_no_pool_is_blank():
     fig = constellation_figure([], None, None)
     assert _shown_keys(fig) == set()
-    assert _edge_traces(fig) == []
+    assert fig.layout.meta is None
 
 
 def test_deep_pool_none_is_byte_stable_with_no_deep_trace():
@@ -380,16 +409,16 @@ def test_deep_pool_none_is_byte_stable_with_no_deep_trace():
 
 
 def test_deep_stars_take_their_ties_to_main_stars():
-    """A deep star arrives with its correlations, under the name the JS fades."""
+    """A deep star arrives with its correlations, marked as the lens ties the JS fades."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # model-liked candidate pool
     deep_pool = _pool(("D|PTS|Under", -0.1))  # model-passed
     fig = constellation_figure(
         legs, _corr(("A|PTS|Over", "D|PTS|Under", 0.5)), pool, deep_pool=deep_pool
     )
-    tie = next(e for e in _edge_traces(fig) if set(e.meta) == {"A|PTS|Over", "D|PTS|Under"})
-    assert tie.name == "deep_edge"  # a lens trace, so it fades in and out with its star
-    assert tie.opacity == EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
+    tie = next(e for e in _edges(fig) if {e["a"], e["b"]} == {"A|PTS|Over", "D|PTS|Under"})
+    assert tie["lens"]  # a lens tie, so it fades in and out with its star
+    assert tie["opacity"] == EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
 
 
 def test_deep_tier_colors_split_liked_from_passed():
@@ -550,8 +579,22 @@ def test_wider_groups_have_no_edges():
     groups = [("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)])]
     fig = constellation_figure([], _corr(), pool, wider_groups=groups)
     wider_keys = {cd[0] for cd in _trace(fig, "wider").customdata}
-    for edge in _edge_traces(fig):
-        assert not (set(edge.meta) & wider_keys)
+    for edge in _edges(fig):
+        assert not ({edge["a"], edge["b"]} & wider_keys)
+
+
+def test_layout_meta_carries_the_paint_constants_and_the_wider_recede():
+    """``main.js`` repaints edges and dims stars against these and recedes the map by
+    ``focus_scale``, so they ride with every figure instead of living twice."""
+    pool = _pool(("A|PTS|Over", 0.4))
+    meta = constellation_figure([], _corr(), pool).layout.meta
+    assert (meta["edge_base"], meta["dim_alpha"], meta["focus_scale"]) == (
+        EDGE_BASE_ALPHA,
+        INACTIVE_ALPHA,
+        1.0,
+    )
+    wider = constellation_figure([], _corr(), pool, wider_groups=_sky(1, per_game=1))
+    assert wider.layout.meta["focus_scale"] == WIDER_SCALE
 
 
 def _map_footprint(fig, sky: set, px) -> tuple[list, tuple[float, float, float, float]]:
@@ -737,7 +780,7 @@ def test_the_template_does_not_change_how_many_gold_edges_are_drawn():
     corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
     plain = constellation_figure(legs, corr, pool)
     shaped = constellation_figure(legs, corr, pool, shape=_HOURGLASS)
-    assert len(_edge_traces(shaped)) == len(_edge_traces(plain))
+    assert len(_edges(shaped)) == len(_edges(plain))
     assert _shown_keys(shaped) == _shown_keys(plain)
 
 

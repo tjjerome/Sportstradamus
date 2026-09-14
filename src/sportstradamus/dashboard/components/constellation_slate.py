@@ -114,8 +114,9 @@ def game_edges(keys: list[str], rho: Mapping[frozenset, float]) -> list[tuple[st
     """Every correlation tie among shown nodes (|ρ| ≥ floor), signed and sorted.
 
     Feeds both the spring *layout* (which pulls on |ρ| so a leg's placement reflects
-    all its ties) and the *drawn* edges (one trace each, hidden until both endpoints
-    are active). Sorted so the trace order — hence the figure — is deterministic.
+    all its ties) and the *drawn* edges (one ``layout.meta`` record each, faint until
+    both endpoints are active). Sorted so the record order — hence the figure — is
+    deterministic.
     """
     node_set = set(keys)
     out = []

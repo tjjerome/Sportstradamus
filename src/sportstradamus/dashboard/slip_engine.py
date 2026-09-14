@@ -218,7 +218,7 @@ def modifier_map(mods: pd.DataFrame) -> dict[str, dict[str, dict[frozenset, floa
     return out
 
 
-def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
+def astrolabe_payload(score: SlipScore) -> dict:
     """JSON contract for the astrolabe component.
 
     Crowns are the fixed shared reference maxima (spec §4.4c): Win 30% /
@@ -235,7 +235,6 @@ def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
         "ev": score.model_ev - 1,
         "kelly": max(kelly, 0.0),
         "crowns": {"win": _CROWN_WIN, "ev": _CROWN_EV, "kelly": _CROWN_KELLY},
-        "nonce": nonce,
     }
 
 

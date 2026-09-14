@@ -60,3 +60,9 @@ dataframeBorderColor = "#2A2E37"
 # quarter second before the page could update. Python's own generational collector still
 # reclaims cyclic garbage.
 postScriptGC = false
+
+[server]
+# The dashboard is read remotely against the prod box, and every Games click sends a new
+# constellation figure: repetitive JSON that permessage-deflate shrinks several-fold for a
+# little server CPU.
+enableWebsocketCompression = true

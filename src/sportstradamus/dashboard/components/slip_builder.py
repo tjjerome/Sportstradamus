@@ -126,6 +126,11 @@ def render_constellation_builder(
     The caller draws the game's context banner above this, and deals ``shape`` —
     this game's constellation template for the night — from the whole league
     slate, so it can't depend on which platform is showing.
+
+    Below the map the elements keep one order at every leg count — leg panel, notes,
+    astrolabe, then the detail dialog, which inserts a block while open — so Streamlit
+    never moves the astrolabe's iframe and remounts it. Below two legs the notes hold
+    the prompt caption and the astrolabe rests.
     """
     if not focus_game:
         st.info("Pick a game above to see its constellation.")
@@ -151,30 +156,36 @@ def render_constellation_builder(
         shape=shape,
         bans=banned_partners(legs, mods, platform=platform),
     )
-    if legs:
-        with st.container(height=_LEG_PANEL_HEIGHT, border=False, key="constellation_legpanel"):
-            _render_leg_list(key_prefix, focus_game=focus_game, removable=False, columns=2)
-            _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
-    _draw_detail_dialog(offers)
-    if len(legs) < 2:
+    with st.container():
         if legs:
-            _, reason = validate_parlay_legs(legs)
-            st.caption(reason or "Tap a star to add another leg.")
-        else:
-            st.caption("Tap a star to start a slip from this game.")
-        return
+            with st.container(height=_LEG_PANEL_HEIGHT, border=False, key="constellation_legpanel"):
+                _render_leg_list(key_prefix, focus_game=focus_game, removable=False, columns=2)
+                _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
     valid, reason = validate_parlay_legs(legs)
-    if not valid:
-        st.warning(reason)
-    _render_price(
-        legs,
-        ctxs,
-        mods,
-        platform=platform,
-        valid=valid,
-        key_prefix=key_prefix,
-        headline=slip_headline(focus_legs, offers, ctxs),
-    )
+    notes = st.container()
+    if len(legs) < 2:
+        notes.caption(
+            (reason or "Tap a star to add another leg.")
+            if legs
+            else "Tap a star to start a slip from this game."
+        )
+        render_astrolabe({"legs": len(legs)}, key=f"{key_prefix}_astrolabe")
+    else:
+        if not valid:
+            notes.warning(reason)
+        headline = slip_headline(focus_legs, offers, ctxs)
+        if headline:
+            notes.markdown(f"#### {headline}")
+        _render_price(
+            legs,
+            ctxs,
+            mods,
+            platform=platform,
+            valid=valid,
+            key_prefix=key_prefix,
+            headline=headline,
+        )
+    _draw_detail_dialog(offers)
 
 
 def render_simple_builder(
@@ -207,10 +218,11 @@ def _render_price(
     key_prefix: str,
     headline: str = "",
 ) -> None:
-    """Both builders' ending: price the slip, then its headline, readout, pair note and lock.
+    """Both builders' ending: price the slip, then its readout, pair note and lock.
 
-    **Lock it in!** stays off unless ``valid`` holds and the platform refuses no pair
-    on the slip.
+    ``headline`` only rides into the lock; the constellation builder draws it above, in its
+    notes slot. **Lock it in!** stays off unless ``valid`` holds and the platform refuses
+    no pair on the slip.
     """
     shrink = slip_shrinkage(legs)
     score = score_slip(
@@ -221,9 +233,7 @@ def _render_price(
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
-    if headline:
-        st.markdown(f"#### {headline}")
-    _render_metrics(score, legs, key_prefix=key_prefix)
+    _render_metrics(score, key_prefix=key_prefix)
     render_pair_note(score, legs, platform)
     _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid and not score.banned)
 
@@ -282,20 +292,18 @@ def _render_constellation(
     shape: dict | None,
     bans: dict[str, str],
 ) -> None:
-    """Draw the interactive star map; its ``on_change`` handles clicks and detail opens.
+    """Draw the interactive star map and apply the star intents and detail opens it sends.
 
-    A star click toggles its leg and the hover card's **Full detail** seeds the offer
-    dialog (drawn by ``_draw_detail_dialog`` once the map has rendered), both in
-    :func:`_apply_constellation_action`. Streamlit runs that callback before the next
-    script run draws anything, so a click redraws the page once, with the new slip,
-    instead of twice around an ``st.rerun``. ``deep_pool``/``wider_groups`` are the two
-    lens overlays — a clicked deep star resolves the same way as any other star on the
-    map (its key is drawn from that same ``pool`` frame); a clicked sky star from another
-    game falls back to the satellite add path. The hover card's last-five and
-    line-movement rows ride alongside the figure keyed by star, and its headshots keyed
-    by player, since a wider dot from another game has no row in ``pool``. ``bans``
-    crosses each star the platform won't pair with the slip and fills its card's "won't
-    pair" row.
+    :func:`_apply_constellation_action` runs first as the map's ``on_change``, which
+    Streamlit calls before the next script run draws anything, so a click redraws the page
+    once, with the new slip. It runs again right after the map to catch a value whose
+    callback was lost, and then reruns the page once more. The map gets the last applied
+    ``seq`` back as its ``ack``. ``deep_pool``/``wider_groups`` are the two lens overlays —
+    a clicked deep star resolves against the same ``pool`` frame as any other star on the
+    map; a sky star from another game resolves against ``wider_groups``. The hover card's
+    last-five and line-movement rows are keyed by star, and its headshots by player, since
+    a wider dot from another game has no row in ``pool``. ``bans`` crosses each star the
+    platform won't pair with the slip and fills its card's "won't pair" row.
     """
     mobile = is_mobile()
     # The wider lens draws other games' legs as sky stars, and their cards open like any
@@ -315,6 +323,7 @@ def _render_constellation(
             banned=bans,
         ),
         key=key,
+        ack=st.session_state.get(f"{key}_seq", 0),
         sparks=form_sparks(sparked),
         moves=move_sparks(sparked),
         shots=headshot_uris(sparked),
@@ -322,6 +331,10 @@ def _render_constellation(
         on_change=partial(_apply_constellation_action, key, offers, pool, wider_groups),
         mobile=mobile,
     )
+    # A click that interrupts the run before the map registers loses its on_change for the
+    # next run, so it is applied here and the page redrawn once.
+    if _apply_constellation_action(key, offers, pool, wider_groups):
+        st.rerun()
 
 
 def _draw_detail_dialog(offers: pd.DataFrame) -> None:
@@ -346,49 +359,38 @@ def _apply_constellation_action(
     offers: pd.DataFrame,
     pool: pd.DataFrame,
     wider_groups: list[tuple[str, list[dict]]] | None,
-) -> None:
-    """The map's ``on_change``: act on the ``{action, key, nonce}`` the component just sent.
+) -> bool:
+    """Apply the map's ``{seq, lit, detail}`` value if its ``seq`` is new; return whether it did.
 
-    A ``click`` toggles the star's leg; a ``detail`` seeds the offer dialog and leaves the
-    slip alone. The frontend sends only on a user action, and its nonce makes a repeat
-    click on one star a fresh value, so each call is a new action. A key ``_toggle_leg``
-    can't resolve (an ordinary or deep star) falls back to ``wider_groups`` — the only
-    other trace on the figure — for the satellite add-only path.
+    ``lit`` re-sends every intent the frontend hasn't seen acknowledged, so each intent
+    only moves the slip toward its state and a repeat is a no-op: a lit star missing from
+    the slip is added from its ``pool`` row (an ordinary or deep star), else its
+    ``wider_groups`` row (a sky star from another game); an unlit star in the slip is
+    removed. Matches run against the canonical slip (``st.session_state[_LEGS]``) — the
+    map is drawn over the focus game's *filtered* leg view, so matching that throwaway
+    copy would drop an add and mis-index a remove once a slip has cross-game legs.
+    ``detail`` seeds the offer dialog without touching the slip. The applied ``seq`` is
+    kept under ``<component_key>_seq``, which the map reads back as its ``ack``.
     """
-    action = st.session_state[component_key]
-    if action["action"] == "detail":
-        _open_offer_detail(action["key"], offers, pool, wider_groups)
-    elif not _toggle_leg(action["key"], pool):
-        _add_wider_leg(action["key"], wider_groups)
-
-
-def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
-    """Toggle the clicked star against the active slip: a slip leg → remove, a candidate
-    → add. Reads/mutates the canonical slip (``st.session_state[_LEGS]``) directly — the
-    map is drawn over the focus game's *filtered* leg view, so toggling that throwaway
-    copy would drop the add and mis-index the remove once a slip has cross-game legs.
-    """
+    value = st.session_state.get(component_key)
+    applied_key = f"{component_key}_seq"
+    if value is None or value["seq"] <= st.session_state.get(applied_key, 0):
+        return False
+    st.session_state[applied_key] = value["seq"]
     legs = st.session_state[_LEGS]
-    for i, leg in enumerate(legs):
-        if corr_key(leg) == key:
-            remove_leg(i)
-            return True
-    match = _pool_match_for_key(pool, key)
-    if match is None:
-        return False
-    legs.append(build_leg(match[1]))
-    return True
-
-
-def _add_wider_leg(key: str, wider_groups: list[tuple[str, list[dict]]] | None) -> bool:
-    """Add-only path for a clicked "look wider" dot — never a toggle (see the module
-    docstring): ``satellite_groups`` already excludes in-slip keys from its own output,
-    so a wider dot's key can never belong to an already-added leg.
-    """
-    row = _wider_row_for_key(wider_groups, key)
-    if row is None:
-        return False
-    st.session_state[_LEGS].append(build_leg(row))
+    for star, lit in value["lit"].items():
+        keys = [corr_key(leg) for leg in legs]
+        if (star in keys) == lit:
+            continue
+        if not lit:
+            remove_leg(keys.index(star))
+            continue
+        match = _pool_match_for_key(pool, star)
+        row = match[1] if match else _wider_row_for_key(wider_groups, star)
+        if row is not None:
+            legs.append(build_leg(row))
+    if value["detail"]:
+        _open_offer_detail(value["detail"], offers, pool, wider_groups)
     return True
 
 
@@ -435,16 +437,13 @@ def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
     return None
 
 
-def _render_metrics(score: SlipScore, legs: Sequence[Mapping], *, key_prefix: str) -> None:
-    """Draw the astrolabe readout in place of the old flat metric row.
+def _render_metrics(score: SlipScore, *, key_prefix: str) -> None:
+    """Draw the astrolabe readout and the Kelly stake under it.
 
-    The nonce is derived from the current leg-set (not a session-state counter) so the
-    component's CSS dials sweep only on a real add/remove — an unrelated rerun recomputes
-    the identical ``SlipScore`` from the same legs and hashes to the same nonce.
+    The astrolabe tweens from its current pose on every render and snaps only on first
+    mount, so an unrelated rerun that recomputes the identical ``SlipScore`` is a no-op.
     """
-    nonce = hash(tuple(sorted(corr_key(leg) for leg in legs)))
-    payload = astrolabe_payload(score, nonce=nonce)
-    render_astrolabe(payload, key=f"{key_prefix}_astrolabe")
+    render_astrolabe(astrolabe_payload(score), key=f"{key_prefix}_astrolabe")
     bankroll = float(st.session_state[_BANKROLL])
     st.caption(f"Kelly stake ${score.stake} of ${bankroll:,.0f}")
 

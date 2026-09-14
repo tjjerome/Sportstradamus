@@ -32,7 +32,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     Y_RANGE,
 )
 from sportstradamus.dashboard.components.constellation_traces import SIZE_MAX, SIZE_MIN
-from sportstradamus.dashboard.theme import GREEN, RED
+from sportstradamus.dashboard.theme import GREEN, RED, team_colors
 from tests.golden.constellation_rows import offer_row as _row
 from tests.golden.constellation_rows import star_key as _key
 
@@ -186,6 +186,21 @@ def test_deep_star_border_follows_bet_side():
     assert color[_key("L1", bet="Under")] == RED
 
 
+def test_a_deep_star_flips_to_its_full_team_color():
+    """A click puts a deep star in the slip, which burns it at full team color, so that
+    is the fill the component paints from ``meta`` before the rerun — whether the lens
+    showed it with a liked leg's candidate tint or a passed leg's own gray."""
+    pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("Z", "SAS", 0.35)])
+    deep_pool = pd.DataFrame([_row("L0", "NYK", 0.3), _row("X0", "SAS", -0.1)])
+    fig = constellation_figure([], None, pool, deep_pool=deep_pool)
+    trace = next(t for t in fig.data if t.name == "deep")
+    flip = dict(zip((cd[0] for cd in trace.customdata), trace.meta, strict=True))
+    assert flip == {
+        _key("L0"): team_colors("NBA", "NYK")[0],
+        _key("X0"): team_colors("NBA", "SAS")[0],
+    }
+
+
 def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():
     """The cut is a display decision, not a verdict — the lens is where the rest live."""
     pool = _ladder(DEFAULT_STARS + 3)
@@ -262,9 +277,9 @@ def test_a_deep_star_shows_only_its_strongest_ties():
     )
     corr = _corr(*[(_key(c), _key("Z"), 0.6 - i / 20) for i, c in enumerate("ABCDE")])
     fig = constellation_figure([], corr, mains, deep_pool=pd.DataFrame([_row("Z", "NYK", -0.1)]))
-    drawn = [trace for trace in fig.data if trace.name == "deep_edge"]
+    drawn = [edge for edge in fig.layout.meta["edges"] if edge["lens"]]
     assert len(drawn) == DEEP_EDGES_PER_STAR
-    assert {tuple(trace.meta[:2]) for trace in drawn} == {
+    assert {(edge["a"], edge["b"]) for edge in drawn} == {
         (_key("A"), _key("Z")),
         (_key("B"), _key("Z")),
     }

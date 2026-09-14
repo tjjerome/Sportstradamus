@@ -43,13 +43,17 @@ lens on or off, so adding one can never re-deal the template.
 
 The figure is pure (no Streamlit, no Archive): each node carries its
 ``Player|Market|Bet`` key plus its hover-card fields as ``customdata`` (the key at
-index 0 — a plotly click turns into an add/remove), and each edge carries its two
-endpoint keys in ``meta`` so the component's JS can dim-in a star's incident ties on
-hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Positions
-come from ``constellation_slate`` when the game carries a template and from
+index 0 — a plotly click turns into an add/remove), and the main and deep star traces
+carry in ``meta`` the fill a click flips each star to, so the component's JS can light
+or dim it before the rerun lands. Edges are not traces — ``Plotly.react``'s cost grows
+with trace count — but records in ``layout.meta`` that ``main.js`` draws as SVG lines
+beneath the stars: each carries its two endpoint keys, so a hover can dim-in a star's
+incident ties, and ``lens`` marks a deeper-lens tie so the JS fades it with its stars.
+It locks its own axes (no zoom/pan) — the builder hides the modebar. Positions come
+from ``constellation_slate`` when the game carries a template and from
 ``constellation_spring``'s force solve when it doesn't; ``constellation_traces`` owns
-the node and edge traces and the text they carry, ``constellation_deep_layer`` the
-deeper lens's layer. The shape half — which template a night's games are dealt, where
+the node traces, the edge records and the text they carry, ``constellation_deep_layer``
+the deeper lens's layer. The shape half — which template a night's games are dealt, where
 the stars sit on one, and the engraving beneath them — all lives in
 ``constellation_slate``; this module is the figure's orchestrator.
 Team fills read ``theme.team_colors(league, team)`` — real per-team primaries from
@@ -89,14 +93,16 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.components.constellation_spring import star_positions
 from sportstradamus.dashboard.components.constellation_traces import (
+    EDGE_BASE_ALPHA,
+    INACTIVE_ALPHA,
     LABEL_FONT_SIZE,
     LABEL_FONT_SIZE_MOBILE,
     SIZE_MIN,
     SIZE_MIN_MOBILE,
-    add_edge,
     add_node_trace,
     add_team_tags,
     blank_figure,
+    edge_record,
     edge_scale,
     node_info,
 )
@@ -233,6 +239,7 @@ def constellation_figure(
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
     if shape is not None:
         add_decoration(fig, shape, fillers, shape_scale, focus_scale)
+    edge_records: list[dict] = []
     promoted = add_deep_layer(
         fig,
         deep_pool,
@@ -242,6 +249,7 @@ def constellation_figure(
         sizes,
         active=active,
         edges=edges,
+        edge_records=edge_records,
         rho=rho,
         teams=teams,
         team_color=team_color,
@@ -259,8 +267,7 @@ def constellation_figure(
         px,
         font_px=label_size,
     )
-    for a, b, r in edges:
-        add_edge(fig, a, b, pos[a], pos[b], r, active=active)
+    edge_records += [edge_record(a, b, pos[a], pos[b], r, active=active) for a, b, r in edges]
     add_node_trace(
         fig,
         [k for k in keys if k not in active],
@@ -298,4 +305,12 @@ def constellation_figure(
             sky_y=sky_y,
         )
     add_ban_marks(fig, banned)
+    fig.update_layout(
+        meta={
+            "edges": edge_records,
+            "edge_base": EDGE_BASE_ALPHA,
+            "dim_alpha": INACTIVE_ALPHA,
+            "focus_scale": focus_scale,
+        }
+    )
     return fig

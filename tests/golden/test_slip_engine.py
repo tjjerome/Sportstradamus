@@ -402,7 +402,7 @@ def test_astrolabe_payload_shape_and_crowns():
         [focus, candidate], corr, _mods([]), platform="Underdog", bankroll=Decimal("1000")
     )
 
-    payload = astrolabe_payload(score, nonce=3)
+    payload = astrolabe_payload(score)
 
     assert payload == {
         "legs": 2,
@@ -414,7 +414,6 @@ def test_astrolabe_payload_shape_and_crowns():
         "ev": pytest.approx(score.model_ev - 1),
         "kelly": pytest.approx((score.model_ev - 1) / (score.payout - 1)),
         "crowns": {"win": 0.30, "ev": 0.12, "kelly": 0.03},
-        "nonce": 3,
     }
 
 
@@ -427,7 +426,7 @@ def test_astrolabe_payload_clamps_negative_kelly():
     raw_kelly = (score.model_ev - 1) / (score.payout - 1)
     assert raw_kelly < 0.0
 
-    payload = astrolabe_payload(score, nonce=1)
+    payload = astrolabe_payload(score)
     assert payload["kelly"] == 0.0
 
 
@@ -440,7 +439,7 @@ def test_astrolabe_payload_sleeper_play_type_and_payout_passes_through():
     score = score_slip(legs, corr, _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
     assert not score.payout_approximate
 
-    payload = astrolabe_payload(score, nonce=9)
+    payload = astrolabe_payload(score)
     assert payload["payout"] == pytest.approx(1.8 * 2.0)
     assert payload["payout_approximate"] is False
     assert payload["play_type"] == "Max"

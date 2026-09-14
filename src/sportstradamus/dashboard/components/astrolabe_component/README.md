@@ -1,10 +1,10 @@
 # astrolabe_component
 
 A read-only Streamlit component for the slip builders' astrolabe — three orbiting dials
-(win/EV/Kelly) plus the lift arc between the two win dots, animated only when the slip's
-leg-set actually changes. It exists because CSS transitions need a real DOM write to fire,
-and Streamlit's own `st.metric` re-renders flat on every rerun with no way to distinguish
-"the user added a leg" from "an unrelated rerun recomputed the same slip."
+(win/EV/Kelly) plus the lift arc between the two win dots, which sweep toward each new price as
+legs come and go and hold still when a rerun recomputes the same slip. It exists because
+Streamlit's own `st.metric` re-renders flat on every rerun, with no way to ease from one price to
+the next.
 
 ## No build step
 
@@ -26,9 +26,18 @@ To change behavior, edit those files and reload the dashboard — there is nothi
 
 ## Contract
 
-Python passes `slip_engine.astrolabe_payload(...)`'s dict straight through as `payload` — it
-is already plain JSON-primitive values, so (unlike `render_constellation`'s `figure_json`)
-there is nothing to pre-serialize; the component-argument marshalling handles the encoding.
+Python passes one of two plain-JSON dicts straight through as `payload` — unlike
+`render_constellation`'s `figure_json` there is nothing to pre-serialize; the
+component-argument marshalling handles the encoding.
+
+- **Priced** (2+ legs): `slip_engine.astrolabe_payload(score)`'s dict — legs, play type,
+  payout, `win_corr`, `win_indep`, `ev`, `kelly` and the `crowns` scale. `payout_approximate`
+  rides along undrawn.
+- **Rest** (0–1 legs): `{"legs": n}`. Every dial number eases to 0 — both win dots and the EV
+  dot at their value-0 poses, a zero-length lift arc, the gem at its minimum, both crown glows
+  off. Legs shows the count; the other readouts show "—" with no sign colour.
+
+`main.js` tells the two apart by `crowns`, which only a priced payload carries.
 
 ## Design math
 
@@ -39,8 +48,8 @@ there is nothing to pre-serialize; the component-argument marshalling handles th
 - **Lift arc**: drawn as a `pathLength="360"` circle (`stroke-dasharray` in degrees).
   `arc_length = |angle_corr - angle_indep|`; `arc_rotate = min(angle_corr, angle_indep) - 90`
   — the `-90` reconciles the circle path's own dash-start reference (3 o'clock) against the
-  dot angle's convention (0° = 12 o'clock). Green (`bandGreen`) when `win_corr > win_indep`,
-  red (`bandRed`) otherwise. Matches both mockup snapshots exactly.
+  dot angle's convention (0° = 12 o'clock). Green (`bandGreen`) when `win_corr >= win_indep`,
+  red (`bandRed`) below. Matches both mockup snapshots exactly.
 - **EV dot**, crown `crowns.ev`: `angle = -180 * (1 - clamp(value, 0, crown) / crown)` — same
   shape as the win dots, negated per the spec's "opposite angular direction" wording. EV's
   domain is stated as `[0, crown]`; a negative EV clamps to the value=0 pose (bottom) rather
@@ -60,18 +69,31 @@ there is nothing to pre-serialize; the component-argument marshalling handles th
   glow at a time; a live payload can have the win dial pinned while EV isn't (or vice versa).
 - **Threads**: static quadratic-bezier paths living inside each dot's own rotating `<g
   class="grp ...">`, so they rotate with their dot for free — no separate thread-angle math.
-  Their opacity is fixed (not JS-driven): the astrolabe only ever mounts over a real,
-  already-in-progress slip, so it always reads as the mockup's "selected" pose for the
-  thread/halo brightness the demo otherwise toggled on select — the task's four named
-  JS-set readouts are Win/Lift/EV/Kelly, not thread/halo brightness.
+  Their opacity is fixed (not JS-driven) at the mockup's "selected" pose for every slip, the
+  rest pose included: no payload number drives thread/halo brightness.
 
 ## Animation
 
-CSS `transition` is unconditional on the animated elements (`.grp`/`.band`/`.bandglow`/
-`.gem`/etc.) — any inline style change fires it. `main.js` suppresses the sweep only on the
-very first mount (a `.no-anim` class removed on the next animation frame, so the initial pose
-paints instantly) and tracks `payload.nonce` in a closure purely to know when a mount is
-"first" versus a later, real render — the CSS transition itself doesn't need the nonce
-comparison to work correctly on subsequent renders, since an incidental rerun that recomputes
-an identical payload just re-applies the same values (a no-op regardless of nonce).
-`@media (prefers-reduced-motion: reduce)` kills all transitions.
+One `requestAnimationFrame` tween drives every continuous part. `main.js` keeps the numbers on
+screen (`win_corr`, `win_indep`, `ev`, `kelly`, `payout`) and, on each render, eases them from
+wherever they are toward the payload's values (all zero at rest) over `SWEEP_MS`, on the power
+ease-out `EASE_POWER` names. Every frame redraws the dot angles, the lift arc, the gem and the
+readouts from the same in-between numbers, so the arc stays on the dots it spans and the
+readouts tick with them.
+
+- The first render snaps: there is no earlier pose to sweep from.
+- A render landing mid-sweep restarts the ease from the numbers on screen, so the dials change
+  course without a jump. A render with the same targets (an incidental rerun) starts nothing
+  and leaves a running sweep alone.
+- The lift arc's gradient and the EV bead's colour follow the sign of the drawn lift and EV.
+  The lift changes sign only where the arc has shrunk to nothing, so the gradient swap needs no
+  crossfade.
+- `main.js` writes numbers only (`--angle`, `--scale`, `data-sign`); `index.html` turns them
+  into `rotate()`, `scale()`, the gradients and the sign colours. That keeps CSS function
+  notation out of `main.js`'s strings, where the golden call scan in
+  `tests/golden/test_constellation_component.py` would read `rotate(` as an undefined call.
+- Two discrete flips keep CSS transitions: a crown glow's opacity and the EV bead's fill.
+  `main.js` sets `.no-anim` for the first frame so the first pose paints without easing them
+  in.
+- Under `prefers-reduced-motion: reduce` the tween lands on its targets in one frame, and CSS
+  transitions are off.

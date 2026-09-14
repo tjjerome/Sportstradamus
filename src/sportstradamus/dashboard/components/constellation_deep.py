@@ -221,6 +221,7 @@ def add_deep_trace(
     node_info: Mapping[str, dict],
     *,
     colors: Sequence[str],
+    flip_colors: Sequence[str],
     alphas: Sequence[float],
     sizes: Mapping[str, float],
 ) -> None:
@@ -229,7 +230,9 @@ def add_deep_trace(
     Everything arrives per point because the tier carries two readings and a
     ranking inside each: a model-liked leg the cut left behind wears the candidate
     look, a model-passed one the cool gray of the lens itself, and edge sets how
-    big and how bright either is.
+    big and how bright either is. ``flip_colors`` is the full team color each star
+    burns once a click puts it in the slip; it rides as ``meta`` so the component
+    can paint it before the rerun promotes the star.
     """
     if not keys:
         return
@@ -249,5 +252,6 @@ def add_deep_trace(
             customdata=[[key, *node_info[key]["card"], 0] for key in keys],
             hovertext=[node_info[key]["hover"] for key in keys],
             hoverinfo="none",
+            meta=list(flip_colors),
         )
     )

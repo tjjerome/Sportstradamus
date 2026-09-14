@@ -33,8 +33,43 @@
         color: var(--text);
         overflow: visible;
       }
+      /* The map is three stacked layers (main.js): the static engraving, the SVG edges, then
+         the interactive stars. The stars' div stays in flow and sizes the stage, and its
+         position: relative paints it above its absolutely placed siblings. The stage clips
+         the wider lens's glide, which scales the engraving past its own box. */
+      #stage {
+        position: relative;
+        overflow: hidden;
+      }
+      #layers {
+        position: relative;
+      }
+      #lower {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      #edges {
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+      }
+      #edges line {
+        stroke: var(--gold);
+      }
       #chart {
+        position: relative;
         width: 100%;
+      }
+      /* A wider glide starts each star where the old figure drew it, which a figure that shrinks
+         leaves outside its new plot, so plotly's clips give way to the stage's (main.js). */
+      .cst-gliding #chart svg,
+      .cst-gliding #edges {
+        overflow: visible;
+      }
+      .cst-gliding #chart .plot {
+        clip-path: none;
       }
       .cst-card {
         position: absolute;
@@ -48,6 +83,11 @@
         pointer-events: auto;
         font-size: 13px;
         line-height: 1.35;
+      }
+      /* A fresh desktop card lets presses through to the stars under it; main.js adds
+         .cst-held once the pointer has rested on the card's star (HOLD_MS). */
+      .cst-card:not(.cst-docked):not(.cst-held) {
+        pointer-events: none;
       }
       .cst-hidden {
         display: none;
@@ -162,7 +202,13 @@
     </style>
   </head>
   <body>
-    <div id="chart"></div>
+    <div id="stage">
+      <div id="layers">
+        <div id="lower"></div>
+        <svg id="edges"><g class="lens"></g><g class="base"></g></svg>
+        <div id="chart"></div>
+      </div>
+    </div>
     <div id="card" class="cst-card cst-hidden" aria-hidden="true"></div>
     <script src="./main.js"></script>
   </body>

@@ -3,8 +3,9 @@
 ``constellation_deep`` owns the lens's geometry (where a tier star lands) and its
 trace; this module runs that for one figure: it folds the lens's rows into the
 node info, promotes the slip's beyond-the-cut legs to full stars whether the lens
-is on or not, sizes and places the tier, and brings in its ties — capped per star,
-named ``deep_edge`` so ``main.js`` fades them with the stars they belong to.
+is on or not, sizes and places the tier, and brings in its ties as edge records —
+capped per star, marked ``lens`` so ``main.js`` fades them with the stars they
+belong to.
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ from sportstradamus.dashboard.components.constellation_slate import game_edges
 from sportstradamus.dashboard.components.constellation_traces import (
     INACTIVE_ALPHA,
     INACTIVE_DESAT,
-    add_edge,
     desaturate,
+    edge_record,
     edge_scale,
     node_info,
 )
@@ -45,6 +46,7 @@ def add_deep_layer(
     *,
     active: set[str],
     edges: list[tuple[str, str, float]],
+    edge_records: list[dict],
     rho: dict[frozenset, float],
     teams: list[str],
     team_color: dict[str, str],
@@ -54,13 +56,13 @@ def add_deep_layer(
 ) -> list[str]:
     """Draw the deeper lens and return the slip legs it promotes to full stars.
 
-    ``info``, ``pos`` and ``sizes`` gain the drawn tier in place. An in-slip leg
-    beyond the default cut is promoted whether or not the lens is on, because it
-    has to burn in the spot the lens would have given it — which is why ``drawn``
-    leads with the promoted keys, whose placement priority must not move when the
-    lens grows the tier behind them. The unpicked stars and their ties are gated
-    on the lens itself, so a lens-off figure with nothing beyond the cut stays
-    byte-identical to today's.
+    ``info``, ``pos`` and ``sizes`` gain the drawn tier in place, and ``edge_records``
+    its ties. An in-slip leg beyond the default cut is promoted whether or not the
+    lens is on, because it has to burn in the spot the lens would have given it —
+    which is why ``drawn`` leads with the promoted keys, whose placement priority
+    must not move when the lens grows the tier behind them. The unpicked stars and
+    their ties are gated on the lens itself, so a lens-off figure with nothing
+    beyond the cut stays byte-identical to today's.
 
     Recomputing ``edge_scale`` over the promoted legs cannot move a main star's
     size: the top-Kelly leg is always inside the default cut, so the scale's
@@ -95,6 +97,7 @@ def add_deep_layer(
         px,
     )
     alphas = edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=INACTIVE_ALPHA)
+    team_fills = [team_color.get(info[k]["team"], GRAY) for k in deep]
     add_deep_trace(
         fig,
         deep,
@@ -104,15 +107,14 @@ def add_deep_layer(
         # A liked leg the cut left behind is a candidate, just smaller; only the
         # model-passed tier wears the lens's own gray.
         colors=[
-            desaturate(team_color.get(info[k]["team"], GRAY), INACTIVE_DESAT)
-            if info[k]["edge"] > 0
-            else _DEEP_COLOR
-            for k in deep
+            desaturate(fill, INACTIVE_DESAT) if info[k]["edge"] > 0 else _DEEP_COLOR
+            for k, fill in zip(deep, team_fills, strict=True)
         ],
+        flip_colors=team_fills,
         alphas=[alphas[k] for k in deep],
     )
     _add_lens_edges(
-        fig,
+        edge_records,
         ties,
         {(a, b) for a, b, _ in edges},
         pos,
@@ -123,7 +125,7 @@ def add_deep_layer(
 
 
 def _add_lens_edges(
-    fig: go.Figure,
+    edge_records: list[dict],
     edges: list[tuple[str, str, float]],
     main_pairs: set[tuple[str, str]],
     pos: dict[str, tuple[float, float]],
@@ -133,10 +135,10 @@ def _add_lens_edges(
 ) -> None:
     """The ties the deeper lens brings in, minus the ones the base web already drew.
 
-    A promoted star is lit with the lens off too, so its ties are permanent
-    ``edge`` traces; a deep star's ties carry the ``deep_edge`` name instead, which
-    is how ``main.js`` gates the lens animation on them; a deep star keeps only its
-    ``DEEP_EDGES_PER_STAR`` strongest.
+    A promoted star is lit with the lens off too, so its ties are ordinary records;
+    a deep star's ties are marked ``lens``, which is how ``main.js`` fades them in
+    and out with its stars; a deep star keeps only its ``DEEP_EDGES_PER_STAR``
+    strongest.
     """
     kept = _capped_deep_ties(edges, deep)
     for node_a, node_b, tie in edges:
@@ -145,15 +147,8 @@ def _add_lens_edges(
         lens = node_a in deep or node_b in deep
         if lens and (node_a, node_b) not in kept:
             continue
-        add_edge(
-            fig,
-            node_a,
-            node_b,
-            pos[node_a],
-            pos[node_b],
-            tie,
-            active=active,
-            name="deep_edge" if lens else "edge",
+        edge_records.append(
+            edge_record(node_a, node_b, pos[node_a], pos[node_b], tie, active=active, lens=lens)
         )
 
 

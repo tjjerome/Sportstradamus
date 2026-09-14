@@ -2,7 +2,7 @@
 
 ``constellation.py`` orchestrates the figure; this module owns the pieces it and
 the lenses draw with: the caption, hover text and card fields a node carries
-(:func:`star_label`, :func:`node_info`), the node and edge traces, the two team
+(:func:`star_label`, :func:`node_info`), the node traces and edge records, the two team
 tags, the blank locked frame, and the one edge-proportional scale the main map and
 the deeper lens's tier both rank themselves by (:func:`edge_scale`). Nothing here
 decides where a star sits — positions arrive from ``constellation_spring``,
@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_spacing import X_RANGE, Y_RANGE
-from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED, team_name
+from sportstradamus.dashboard.theme import GRAY, GREEN, RED, team_name
 from sportstradamus.helpers import market_display_name
 from sportstradamus.leg_schema import leg_field, leg_field_float
 
@@ -39,7 +39,7 @@ _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for 
 _EDGE_ALPHA_MIN = 0.25
 # The whole correlation web is drawn barely-there at this alpha so the structure reads
 # before any pick without drowning the field; a tie whose both endpoints are in the slip
-# brightens to full gold (add_edge), well above this base.
+# brightens to full gold (edge_record), well above this base.
 EDGE_BASE_ALPHA = 0.03
 FIG_HEIGHT = 380
 LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
@@ -196,43 +196,38 @@ def add_team_tags(fig: go.Figure, league: str, teams: list[str]) -> None:
         )
 
 
-def add_edge(
-    fig: go.Figure,
+def edge_record(
     a: str,
     b: str,
-    p0,
-    p1,
+    p0: tuple[float, float],
+    p1: tuple[float, float],
     rho: float,
     *,
     active: set[str],
-    name: str = "edge",
-) -> None:
-    """One correlation edge: gold, width/opacity ∝ |ρ|, dashed when ρ < 0.
+    lens: bool = False,
+) -> dict:
+    """One correlation edge as the ``layout.meta`` record ``main.js`` draws as an SVG line.
 
-    Drawn at a faint base alpha (``EDGE_BASE_ALPHA``) so the whole web reads as a
-    sketch; brightens to full ``|ρ|``-scaled gold only when **both** endpoints are in
-    the slip, so the slip's own correlations stand out over the rest. ``meta`` carries
-    the endpoint keys so the component's JS can faint-preview a star's other ties on hover.
-    ``name`` is ``"deep_edge"`` for a tie one of the deeper lens's own stars owns, which
-    is how the JS knows to fade it in and out with them.
+    Width ∝ |ρ|, dotted when ρ < 0, and no color: the JS strokes every edge in the
+    gold design token. ``opacity`` is a faint base alpha (``EDGE_BASE_ALPHA``) so the
+    whole web reads as a sketch, and ``lit`` — ``|ρ|``-scaled — only when **both**
+    endpoints are in the slip, so the slip's own correlations stand out over the rest.
+    Every record carries ``lit`` so a click can brighten a tie before the rerun lands.
+    ``a`` and ``b`` let the JS faint-preview a star's other ties on hover; ``lens`` marks
+    a tie one of the deeper lens's own stars owns, so it fades in and out with them.
     """
-    incident = a in active and b in active
-    fig.add_trace(
-        go.Scatter(
-            x=[p0[0], p1[0]],
-            y=[p0[1], p1[1]],
-            mode="lines",
-            name=name,
-            line={
-                "color": GOLD,
-                "width": _EDGE_WIDTH_MIN + abs(rho) * _EDGE_WIDTH_SPAN,
-                "dash": "dot" if rho < 0 else "solid",
-            },
-            opacity=min(1.0, _EDGE_ALPHA_MIN + abs(rho)) if incident else EDGE_BASE_ALPHA,
-            meta=[a, b],
-            hoverinfo="skip",
-        )
-    )
+    lit = min(1.0, _EDGE_ALPHA_MIN + abs(rho))
+    return {
+        "a": a,
+        "b": b,
+        "x": [p0[0], p1[0]],
+        "y": [p0[1], p1[1]],
+        "width": _EDGE_WIDTH_MIN + abs(rho) * _EDGE_WIDTH_SPAN,
+        "dash": "dot" if rho < 0 else "solid",
+        "opacity": lit if a in active and b in active else EDGE_BASE_ALPHA,
+        "lit": lit,
+        "lens": lens,
+    }
 
 
 def add_node_trace(
@@ -253,11 +248,14 @@ def add_node_trace(
     are labelled and where; the rest carry empty text and read from the hover card.
     Both active and candidate stars are eligible and active stars render on top —
     the active/candidate signal is the star's fill color and opacity, never the label.
+    ``meta`` holds each star's fill in the other state, so the component can light or
+    dim a clicked star before the rerun redraws it.
     """
     if not keys:
         return
     base_colors = [team_color.get(info[k]["team"], GRAY) for k in keys]
-    colors = [c if active else desaturate(c, INACTIVE_DESAT) for c in base_colors]
+    dimmed = [desaturate(c, INACTIVE_DESAT) for c in base_colors]
+    colors, flipped = (base_colors, dimmed) if active else (dimmed, base_colors)
     fig.add_trace(
         go.Scatter(
             x=[pos[k][0] for k in keys],
@@ -278,6 +276,7 @@ def add_node_trace(
                 "size": label_size,
             },
             customdata=[[k, *info[k]["card"], 1 if active else 0] for k in keys],
+            meta=flipped,
             hovertext=[info[k]["hover"] for k in keys],
             hoverinfo="none",  # the component draws the hover card; suppress the native tooltip
         )

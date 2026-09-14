@@ -4,14 +4,15 @@
  * streamlit-component-lib emits) and drives the three orbiting dials (win/EV/Kelly)
  * plus the lift arc off the plain `payload` dict Python passes in — no plotly, no
  * server callback (selection happens on the constellation's own stars; this is a
- * pure readout). Ported from docs/mockups/p8-constellation-lab.html rev 5: the
- * mockup's CSS already declares the transitions unconditionally on .grp/.band/
- * .gem/etc, so any inline style change on those elements animates on its own —
- * the only extra state needed here is suppressing that animation on the very
- * first mount (nothing to sweep in from). After the first render, every render
- * just re-applies the payload's current values: a real add/remove changes them
- * (the transition eases), an incidental rerun with the same leg-set recomputes
- * identical values (the transition fires but has nothing to visibly move).
+ * pure readout). Ported from docs/mockups/p8-constellation-lab.html rev 5.
+ *
+ * Motion is one requestAnimationFrame tween of the payload's numbers, not CSS
+ * transitions: those restarted on every render, eased the lift arc apart from the
+ * dots it spans, and could not tick the readouts. Every frame redraws the dials, arc,
+ * gem and readouts from the same in-between numbers, and a render that lands
+ * mid-sweep eases on from wherever the dials are. This file writes only numbers
+ * (--angle, --scale, data-sign); index.html owns the rotate()/scale()/url()/var()
+ * notation, which the golden call scan would misread as undefined calls in a string.
  */
 (function () {
   "use strict";
@@ -37,7 +38,7 @@
   const astro = document.getElementById("astro");
   const FRAME_PAD = 8; // headroom to match the constellation component's own convention
   const FRAME_HEIGHT = 272 + FRAME_PAD; // the SVG's own fixed height (no dynamic layout here)
-  let lastNonce = null; // null until the first render; then the last handled payload.nonce
+  const PLACEHOLDER = "—"; // index.html's own empty readout, held while the slip is unpriced
 
   const el = {
     legs: document.getElementById("ro-legs"),
@@ -58,44 +59,74 @@
     evbead: astro.querySelectorAll(".evbead"),
   };
 
+  // The mockup's CSS transitions took 0.9 s; the tween keeps that pace.
+  const SWEEP_MS = 900;
+  // Ease-out 1 - (1 - t)^4. It starts at slope 4, near the mockup's
+  // cubic-bezier(0.2, 0.72, 0.15, 1) at 3.6. The closer-fitting power 5 starts at 5,
+  // which jumps ~16deg in the first frame of a full 180deg sweep.
+  const EASE_POWER = 4;
+  const TWEENED = ["win_corr", "win_indep", "ev", "kelly", "payout"];
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  let priced = false; // false at rest (0-1 legs), where the readouts hold PLACEHOLDER
+  let crowns = {}; // the last priced payload's, so a sweep home to rest keeps its scale
+  let cur = null; // the numbers on screen; null until the first render
+  let from = null;
+  let to = null;
+  let t0 = 0;
+  let frame = 0; // the running sweep's requestAnimationFrame id; 0 when none runs
+
   function render(args) {
-    const p = args.payload || {};
-    const crowns = p.crowns || {};
+    setFrameHeight(FRAME_HEIGHT);
+    const p = args.payload;
+    priced = "crowns" in p; // below two legs the builder sends a bare {legs}
+    if (priced) crowns = p.crowns;
+    const target = {};
+    TWEENED.forEach(function (name) {
+      target[name] = priced ? p[name] : 0;
+    });
 
-    el.legs.textContent = (p.legs || 0) + " · " + (p.play_type || "");
-    el.pay.textContent = (Number(p.payout) || 0).toFixed(2) + "x";
-    el.win.textContent = pct(p.win_corr);
-    el.indep.textContent = pct(p.win_indep);
-    el.ev.textContent = signedPct(p.ev);
-    el.ev.style.color = Number(p.ev) >= 0 ? "var(--green)" : "var(--red)";
-    el.kelly.textContent = pct(p.kelly);
+    el.legs.textContent = priced ? p.legs + " · " + p.play_type : p.legs;
+    if (!priced) {
+      [el.pay, el.win, el.indep, el.lift, el.ev, el.kelly].forEach(function (node) {
+        node.textContent = PLACEHOLDER;
+      });
+      el.lift.dataset.sign = "";
+      el.ev.dataset.sign = "";
+    }
 
-    const lift = (Number(p.win_corr) || 0) - (Number(p.win_indep) || 0);
-    el.lift.textContent = signedPct(lift);
-    el.lift.style.color = lift >= 0 ? "var(--green)" : "var(--red)";
-
-    applyDials(p, crowns, lift);
-
-    // Diff payload.nonce against the last-seen value purely to detect "is this the
-    // very first render" (lastNonce still null): that's the one case needing the
-    // sweep suppressed, since there is no prior pose to animate in from. Any later
-    // render — nonce changed (a real add/remove) or unchanged (an incidental
-    // rerun re-deriving the same slip) — can transition normally; the unchanged
-    // case just re-applies identical values, which is a harmless no-op visually.
-    if (lastNonce === null) {
+    if (cur === null) {
+      // Nothing to sweep in from: paint the first pose with the CSS transitions off,
+      // forcing a style flush so the values land untransitioned, then restore them.
       astro.classList.add("no-anim");
-      // Force a style flush so the "no transition" rule applies to the values just
-      // set above, then drop the override on the next frame — every render after
-      // this one (a real nonce change) transitions normally.
-      // eslint-disable-next-line no-unused-expressions
+      cur = to = target;
+      draw();
       astro.offsetHeight;
       requestAnimationFrame(function () {
         astro.classList.remove("no-anim");
       });
+      return;
     }
-    lastNonce = p.nonce;
+    const moved = TWEENED.some(function (name) {
+      return target[name] !== to[name];
+    });
+    if (!moved) return;
+    from = cur;
+    to = target;
+    t0 = performance.now();
+    if (!frame) frame = requestAnimationFrame(step);
+  }
 
-    setFrameHeight(FRAME_HEIGHT);
+  function step() {
+    const t = reducedMotion.matches ? 1 : Math.min(1, (performance.now() - t0) / SWEEP_MS);
+    // "Target minus the eased share still to go", so t = 1 lands exactly on the target.
+    const left = (1 - t) ** EASE_POWER;
+    cur = {};
+    TWEENED.forEach(function (name) {
+      cur[name] = to[name] - (to[name] - from[name]) * left;
+    });
+    draw();
+    frame = t < 1 ? requestAnimationFrame(step) : 0;
   }
 
   // --- Dial math -----------------------------------------------------------------
@@ -133,38 +164,38 @@
     return v / crown;
   }
 
-  function applyDials(p, crowns, lift) {
-    const winCorrT = clamp01(p.win_corr, crowns.win);
-    const winIndepT = clamp01(p.win_indep, crowns.win);
-    const angleCorr = winAngle(p.win_corr, crowns.win);
-    const angleIndep = winAngle(p.win_indep, crowns.win);
-    el.wincorr.style.transform = "rotate(" + angleCorr + "deg)";
-    el.winindep.style.transform = "rotate(" + angleIndep + "deg)";
+  function draw() {
+    const winCorrT = clamp01(cur.win_corr, crowns.win);
+    const winIndepT = clamp01(cur.win_indep, crowns.win);
+    const angleCorr = winAngle(cur.win_corr, crowns.win);
+    const angleIndep = winAngle(cur.win_indep, crowns.win);
+    el.wincorr.style.setProperty("--angle", angleCorr + "deg");
+    el.winindep.style.setProperty("--angle", angleIndep + "deg");
 
     // Lift arc: a pathLength=360 circle drawn via stroke-dasharray (1 unit = 1deg),
     // rotated so the dash-start (the circle path's own 3-o'clock reference) lines up
     // with the smaller of the two dot angles; see README.md "Design math" for the
     // -90 reconciliation between that reference and the dot angles' own convention.
+    const lift = cur.win_corr - cur.win_indep;
     const arcLen = Math.abs(angleCorr - angleIndep);
     const arcRotate = Math.min(angleCorr, angleIndep) - 90;
     const dash = arcLen.toFixed(1) + " " + (360 - arcLen).toFixed(1);
-    const bandUrl = lift >= 0 ? "url(#bandGreen)" : "url(#bandRed)";
     [el.band, el.bandglow].forEach(function (node) {
-      node.style.transform = "rotate(" + arcRotate + "deg)";
+      node.style.setProperty("--angle", arcRotate + "deg");
       node.style.strokeDasharray = dash;
-      node.style.stroke = bandUrl;
+      node.dataset.sign = sign(lift);
     });
 
-    const evT = clamp01(p.ev, crowns.ev);
-    el.ev_g.style.transform = "rotate(" + evAngle(p.ev, crowns.ev) + "deg)";
+    const evT = clamp01(cur.ev, crowns.ev);
+    el.ev_g.style.setProperty("--angle", evAngle(cur.ev, crowns.ev) + "deg");
     el.evbead.forEach(function (node) {
-      node.style.fill = Number(p.ev) >= 0 ? "var(--green)" : "var(--red)";
+      node.dataset.sign = sign(cur.ev);
     });
 
-    const kellyT = clamp01(p.kelly, crowns.kelly);
+    const kellyT = clamp01(cur.kelly, crowns.kelly);
     const gemScale = GEM_SCALE_MIN + (GEM_SCALE_MAX - GEM_SCALE_MIN) * kellyT;
     const gemOpacity = GEM_OPACITY_MIN + (GEM_OPACITY_MAX - GEM_OPACITY_MIN) * kellyT;
-    el.gem.style.transform = "scale(" + gemScale + ")";
+    el.gem.style.setProperty("--scale", gemScale);
     el.gem.style.opacity = String(gemOpacity);
 
     // Crown overflow: at-or-past-crown pins the bead at 12 o'clock (handled by
@@ -173,6 +204,16 @@
     // its win dial pinned+glowing while EV is not.
     el.ovfWin.style.opacity = winCorrT >= 1 || winIndepT >= 1 ? "0.55" : "0";
     el.ovfEv.style.opacity = evT >= 1 ? "0.55" : "0";
+
+    if (!priced) return;
+    el.pay.textContent = cur.payout.toFixed(2) + "x";
+    el.win.textContent = pct(cur.win_corr);
+    el.indep.textContent = pct(cur.win_indep);
+    el.lift.textContent = signedPct(lift);
+    el.lift.dataset.sign = sign(lift);
+    el.ev.textContent = signedPct(cur.ev);
+    el.ev.dataset.sign = sign(cur.ev);
+    el.kelly.textContent = pct(cur.kelly);
   }
 
   // --- Formatting ------------------------------------------------------------
@@ -182,6 +223,10 @@
   function signedPct(v) {
     const n = Number(v) || 0;
     return (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + "%";
+  }
+  // The data-sign value index.html colours by: "up" (green, zero included) or "down" (red).
+  function sign(v) {
+    return v < 0 ? "down" : "up";
   }
 
   renderCallback = render;

@@ -263,6 +263,15 @@ _APP_CSS_TEMPLATE = """
 .st-key-constellation_legpanel{border:1px solid rgba(201,162,39,.42);border-radius:4px;padding:8px 14px;
   background:radial-gradient(ellipse at 50% -30%, rgba(201,162,39,.07), transparent 62%), rgba(26,29,36,.5);
   box-shadow:0 0 0 3px rgba(201,162,39,.05), inset 0 0 12px rgba(201,162,39,.05), 0 2px 14px rgba(0,0,0,.35)}
+/* The Games map and astrolabe paint their own pending state -- a clicked star lights in the
+   frame it was clicked, the dials sweep toward each new price -- so Streamlit's stale-element
+   fade while a rerun is out would only dim a picture that is already current. The card-asset
+   carrier (constellation_component) is a data-only script block and must take no rail space,
+   so the rule hides its layout wrapper: hiding only the keyed block leaves that wrapper behind
+   as an empty flex item, which still takes the column's gap. */
+.st-key-cb_constellation[data-stale="true"],.st-key-cb_astrolabe[data-stale="true"]{
+  opacity:1!important;transition:none!important}
+[data-testid="stLayoutWrapper"]:has(> .st-key-cb_constellation_cards){display:none}
 /* DESIGN §2: gold marks the selected segment of a segmented_control (the global sport
    switch, Board lens/side, Receipts window, and the Games constellation lenses). Streamlit
    has no token slot for the active segment, so reach the gold token on its kind-scoped
