@@ -37,6 +37,9 @@ _CATALOG_PATH = _REPO / "src" / "sportstradamus" / "data" / "config" / "constell
 _LEAGUES = ("NBA", "WNBA", "NFL", "MLB", "NHL")
 _CLASSES = ("hub", "chain", "twin", "mesh")
 
+# The keys the S-rules name; anything else in a template is a key nothing reads.
+_TEMPLATE_KEYS = {"label", "leagues", "topology", "min_nodes", "vertices", "outline", "image"}
+
 # S2's vertex band. Below 5 a template can't name an object; above 13 a real
 # game runs out of legs to fill it and the shape reads as noise.
 _MIN_VERTS, _MAX_VERTS = 5, 13
@@ -86,7 +89,6 @@ _SANE_TEMPLATES = {
         ],
         "outline": [[0, 1], [1, 2], [2, 3], [3, 4]],
         "image": None,
-        "silhouette": "M -0.9 -0.6 L 0 0.9 L 0.9 -0.6 Z",
     }
 }
 
@@ -128,6 +130,7 @@ def test_tuning_block_is_exactly_the_shipped_knobs_in_range(raw):
 def test_template_obeys_authoring_rules(raw, slug):
     tpl = raw["templates"][slug]
     assert slug == slug.lower() and " " not in slug
+    assert set(tpl) == _TEMPLATE_KEYS, "every key a template carries has its S-rule"
     assert tpl["label"].strip(), "S7: the cockpit's name for the shape is non-empty"
 
     leagues = tpl["leagues"]
@@ -157,8 +160,6 @@ def test_template_obeys_authoring_rules(raw, slug):
         assert a in ids and b in ids and a != b, "S4: outline refs real, distinct ids"
 
     assert tpl["image"] is None or (cs.ART_DIR / tpl["image"]).is_file(), "S5: a shipped layer"
-    assert tpl["silhouette"].startswith("M"), "S5: one SVG path"
-    assert tpl["silhouette"].rstrip().endswith("Z"), "S5: the gesture is filled, so closed"
 
 
 def _drawing(tpl: dict) -> tuple[np.ndarray, float] | None:
@@ -333,7 +334,6 @@ def _stub_deck(tmp_path, monkeypatch, per_class=8, min_nodes=2):
                 "vertices": vertices,
                 "outline": [[i, i + 1] for i in range(count - 1)],
                 "image": None,
-                "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
             }
     path = tmp_path / "constellation_shapes.json"
     _write_catalog(path, _SANE_TUNING, templates)
@@ -408,7 +408,6 @@ def _mixed_league_deck(tmp_path, monkeypatch):
             "vertices": vertices,
             "outline": [[i, i + 1] for i in range(3)],
             "image": None,
-            "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
         }
         for slug, leagues in (("mitt", ["MLB"]), ("net", "all"), ("backboard", ["NBA"]))
     }

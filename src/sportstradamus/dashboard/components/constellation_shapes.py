@@ -41,9 +41,7 @@ mechanical half.
   share a layer. The layer keeps its own aspect inside the box: its longer side
   spans [-1, 1] and the shorter one is centred. Author against the layer at that
   aspect, because every star sits on the drawing: within 0.035 of a line the layer
-  stores at alpha 34 or more. ``silhouette`` is the filled SVG gesture the map drew
-  before the art; nothing renders it, and while the key stays it is one closed path
-  of ``M L Q C T S Z`` only.
+  stores at alpha 34 or more.
 * **S6** ``min_nodes`` = fewest real supernodes that still read as the object
   (2–5).
 * **S7** ``label`` names the object ("The Bolt") for the tuning cockpit — the map
@@ -81,11 +79,6 @@ ART_DIR = Path(str(pkg_resources.files(data) / "assets" / "constellations"))
 TOPOLOGY_CLASSES = frozenset({"hub", "chain", "twin", "mesh"})
 
 _SIDES = frozenset({"L", "R", "C"})
-
-# The grammar silhouettes were authored in while Plotly drew them as shapes: the subset
-# Plotly parses without dropping a command in silence, minus H and V, which broke the
-# strict x/y alternation the old rescale walked.
-_SVG_COMMANDS = frozenset("MLQCTSZ")
 
 # Owner-editable knob -> the band a hand edit has to stay inside. Bounded knobs
 # are strict at both ends: a 0 or 1 share makes the classifier answer the same
@@ -149,13 +142,6 @@ def _validate_template(slug: str, tpl: dict) -> None:
             raise ValueError(f"{slug}: outline pair {pair} references a missing vertex id")
     if tpl["image"] is not None and not (ART_DIR / tpl["image"]).is_file():
         raise ValueError(f"{slug}: image {tpl['image']!r} is not a layer in {ART_DIR}")
-
-    used = {token for token in tpl["silhouette"].split() if token.isalpha()}
-    if not used <= _SVG_COMMANDS:
-        raise ValueError(
-            f"{slug}: silhouette uses {sorted(used - _SVG_COMMANDS)}, "
-            f"which Plotly drops without a word; allowed: {sorted(_SVG_COMMANDS)}"
-        )
 
 
 @functools.lru_cache(maxsize=8)
