@@ -758,12 +758,13 @@ def test_unfilled_vertices_get_filler_stars_too_small_to_read_as_legs():
 
 def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
     """Decoration that ignored focus_scale would detach from the map it belongs to."""
-    outline = next(t for t in _decoration_traces(_shaped(wider=[])) if t.mode == "lines")
-    plain = next(t for t in _decoration_traces(_shaped()) if t.mode == "lines")
+    wider, plain = _shaped(wider=[]), _shaped()
+    outline = next(t for t in _decoration_traces(wider) if t.mode == "lines")
+    plain_outline = next(t for t in _decoration_traces(plain) if t.mode == "lines")
     span = max(x for x in outline.x if x is not None)
-    plain_span = max(x for x in plain.x if x is not None)
+    plain_span = max(x for x in plain_outline.x if x is not None)
     assert span == pytest.approx(plain_span * WIDER_SCALE)
-    (wider_art,), (plain_art,) = _shaped(wider=[]).layout.images, _shaped().layout.images
+    (wider_art,), (plain_art,) = wider.layout.images, plain.layout.images
     assert wider_art.sizex == pytest.approx(plain_art.sizex * WIDER_SCALE)
     assert wider_art.sizey == pytest.approx(plain_art.sizey * WIDER_SCALE)
 

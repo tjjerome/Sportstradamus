@@ -51,6 +51,7 @@ _MIN_EDGE_RHO = 0.05
 # The Phase D decoration layer: an engraving under the stars, never gold. Gold is
 # the correlation-edge color and nothing else, so no engraved stroke can be
 # misread as a ρ tie.
+#
 # Art layers bake a 0.55 alpha peak (scripts/constellation_art.py); this opacity renders
 # that peak at about 0.19, under the DESIGN §3 ceiling of 0.20 for static ambient art.
 ART_OPACITY = 0.36
