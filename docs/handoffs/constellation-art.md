@@ -1,6 +1,6 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 4 done 2026-09-13: every drawn template's stars sit on its drawing; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; stage 5 (retire the silhouettes) next (§6)
+> Status: ACTIVE — stage 5 done 2026-09-14, the last in §6: the SVG silhouettes are retired; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; closing the lane is the owner's call
 
 ## 1. Mission & money logic
 
@@ -29,7 +29,7 @@ works too, with a noisier interior. The recipe lives as named constants in
    league wall, md5-seeded).
 2. `data/config/constellation_shapes.json` — `{version, tuning, templates}`;
    per template `label`, `leagues`, `topology`, `min_nodes`, `vertices` in
-   `[-1, 1]²`, `outline`, `image` (and the unrendered `silhouette`). Labels are
+   `[-1, 1]²`, `outline`, `image`. Labels are
    the search vocabulary ("The
    Hoop", "The Plate", "The Goalie Mask", "The Catcher's Mask", "The Goal Line",
    "The Trophy", …).
@@ -63,7 +63,7 @@ works too, with a noisier interior. The recipe lives as named constants in
 
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-poetry run python -c "import json; d=json.load(open('src/sportstradamus/data/config/constellation_shapes.json')); t=d['templates']; print(len(t), 'with art:', sum(v['image'] is not None for v in t.values()), 'silhouettes left:', sum('silhouette' in v for v in t.values()))"
+poetry run python -c "import json; d=json.load(open('src/sportstradamus/data/config/constellation_shapes.json')); t=d['templates']; print(len(t), 'with art:', sum(v['image'] is not None for v in t.values()))"
 grep -n "add_layout_image" src/sportstradamus/dashboard/components/constellation_slate.py   # the stage-3 render path
 ls src/sportstradamus/data/assets/constellations/*.png 2>/dev/null | wc -l                                     # processed layers so far
 poetry run python -c "import cairosvg" 2>&1 | tail -1     # not on the dev box; playwright chromium rasterizes SVG instead
@@ -121,7 +121,7 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
   `ART_OPACITY` (`constellation_slate.py`), sized so the layers' baked 0.55 alpha
   peak renders under the DESIGN §3 ceiling of 0.20.
 - **Incremental fill**: a template with `image: null` renders outline-only
-  (engraved outline + fillers, no silhouette), so the bank never waits on the
+  (engraved outline + fillers), so the bank never waits on the
   last image.
 
 ## 5. Module footprint & canonical paths
@@ -130,8 +130,8 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 |---|---|
 | `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; every input lands under `sources/`, but the directory's `.gitignore` commits only what no `pick` or URL can re-fetch (compositions, pose wrappers, the owner's files, the court crops) — openclipart, Commons and game-icons downloads run to megabytes |
 | `src/sportstradamus/scripts/constellation_art.py` (dev-side; never a prod job) | `search` (openclipart HTML search per template → `candidates.json`, `thumbs/`, one review sheet per league group and page), `pick` (one openclipart id → download under `sources/`, artist off the detail page, CC0 → the same write path as `process`), `process` (an owner-supplied SVG through chromium or PNG through PIL → mask → blur → tint → alpha → crop; writes the layer, its manifest row and the source copy), `sheet` (contact sheet of the processed layers over the page ground) |
-| `data/config/constellation_shapes.json` | `image` per template: a layer file (two templates may share one) or `null`; `silhouette` still in the file, unrendered, until stage 5; `vertices` fit to the drawing (stage 4) |
-| `components/constellation_shapes.py` | `ART_DIR`; S5: a non-null `image` must be a file there, and every star sits on its drawing; the silhouette grammar check retires with the key |
+| `data/config/constellation_shapes.json` | `image` per template: a layer file (two templates may share one) or `null`; `vertices` fit to the drawing (stage 4) |
+| `components/constellation_shapes.py` | `ART_DIR`; S5: a non-null `image` must be a file there, and every star sits on its drawing |
 | `components/constellation_layout.py` | `_field_box`: a side's field stars run out to the edge of its half, so a narrow drawing never pens them into a column |
 | `components/constellation_slate.py` | `add_decoration`: one `layout.images` entry (data URI, data `xref`/`yref`, centred on the origin, `sizex`/`sizey` = 2 × the layer's side shares × the frame's `sx, sy`, `sizing="stretch"`, `layer="below"`, `ART_OPACITY`); `image: null` draws the outline alone |
 | `dashboard/assets.py` | `constellation_layer` (data URI through `_data_uri`, sides as shares of the longer), `constellation_credit` (markdown credit for CC BY rows: artists, site, licence link) |
@@ -218,10 +218,11 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
    the old ±0.8 reach penned a busy side's field stars into a column, so
    `constellation_layout._field_box` runs each side's field out to the edge of
    its half. Verdict in the ledger.
-5. **Retire the SVG silhouettes.** Drop the `silhouette` keys and the loader's
-   path-grammar check — unblocked since stage 3 gave every template an `image` or
-   a deliberate `null` (`scale_path` went with the path shape); `art_assets.md`
-   row → done.
+5. **Retire the SVG silhouettes** — done 2026-09-14. The `silhouette` key left all
+   101 templates and the loader's path-grammar check went with it; nothing had
+   rendered the key since stage 3. `test_constellation_shapes.py` pins each
+   template's keys to the ones the S-rules name, and the `art_assets.md` row is
+   done.
 
 ## 7. Working rules
 
@@ -261,6 +262,7 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-14 · stage 5 · `silhouette` dropped from all 101 templates through a loader-writer that re-emits the one-line-per-vertex layout (only the key lines and the commas before them change), the loader's `M L Q C T S Z` check and its S5 sentence removed, each template's keys pinned to the ones the S-rules name; `art_assets.md` row → done; nothing had rendered the key since stage 3, so no playwright verdict · owner call the same day: the short drawings (scoreboard, banner) stay crowded on the phone, no y-band floor · next: owner hunts `the-chain-gang` and `the-crossover`; closing the lane is the owner's call
 - 2026-09-13 · stage 4 · every drawn template's stars re-fit on an overlay of its layer at the render's aspect and snapped onto the line; `test_constellation_shapes.py` pins it (each star within 0.035 of alpha ≥ 34, |y| ≤ 0.90, stars ≥ 0.18 apart, each axis spanning 1.0 or 0.8 of a narrower drawing); five layers re-posed through committed SVG wrappers (ladder, arrow, comet and clipboard rotated, medal darkened to ink); laurels and clipboard lost a centre star, key gained one, banner re-meshed, bolt and staircase re-sided, stick mirrored; narrow drawings penned the field stars into a column and turned the hourglass clearance and caption pins red, so `_field_box` runs each side's field to its half's edge · bank stress check (101 templates, ladder pools, old → new catalog, both with the field fix): stars drifting past their radius under wider desktop 4 → 7, phone 45 → 58; slip star uncaptioned desktop 9 → 11, phone 78 → 80; a y-band floor (±0.7 or full height) cut phone drift to 46 or 35 and desktop misses to 4 but raised phone misses to 87, left for the owner · playwright verdict from a worktree at HEAD + this stage's files (a peer session had the shared tree mid-edit): desktop 1440×900 + phone 390×844 through main → deeper → deeper+wider → wider → main on an NFL night dealt `the-gridiron`; one image per mode, ×0.8 under wider, stars on the sidelines and yard lines, iframe heights as in stage 3, credit present, zero page errors; offline `constellation_figure` renders of the hourglass, torch, scoreboard, ladder, medal, key and banner put every vertex star on its drawing, the short ones (scoreboard, banner) crowded on the phone · next: stage 5 retire the silhouettes; owner call on the y band; owner hunts the last two
 - 2026-09-13 · stage 3 · Games draws the art: `image` key per template (99 files, 2 null), one `layout.images` entry at `ART_OPACITY` 0.36 (peak ≈ 0.19, under the §3 ceiling), layer aspect kept and scaled like the vertices, outline alone without art, CC BY credit caption from the manifest; `scale_path` and the silhouette fill removed, keys left for stage 5 · playwright verdict: desktop 1440×900 + phone 390×844 through main → deeper → deeper+wider → wider → main on an NFL night dealt `the-gridiron`; one image in every mode, shrunk ×0.8 with the stars under wider, iframe = figure + 8 (desktop) and + 208 (phone, 380 → 739 px sky), credit with both links, zero page errors (two Streamlit `/games/_stcore` 404s from the deep link itself) · next: stage 4 star re-fit; owner hunts the last two
 - 2026-09-13 · stage 2, second round · game-icons.net in (CC BY 3.0, §4): nine hand-hunt layers off its archive zip (background dropped, fill flipped, ink); `the-key` re-authored on the full half court, `the-arc` and `the-elbows` on crops of the same public-domain Commons court (merging the three blocked by the NBA deck-depth pin), stars checked on overlays; 99/101 — `the-chain-gang` and `the-crossover` left; weak fits: kicking tee (golf tee), wristbands (headband knot) · next: owner hunts the last two; stage 3 render path + the attribution line
