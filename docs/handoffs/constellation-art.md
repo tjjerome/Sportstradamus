@@ -39,9 +39,12 @@ works too, with a noisier interior. The recipe lives as named constants in
 4. `constellation_layout.py` `assign_stars` — the star fit reads `vertices`,
    never the path, so the image can change without touching the fitter, but
    `vertices`/`outline` must survive.
-5. `constellation_component/__init__.py` + `build/main.js` — `Plotly.react` on
-   every render wipes any DOM node injected into the plot; blur must be baked
-   into the image, and the figure JSON is the only Python→JS channel.
+5. `constellation_component/__init__.py` + `build/main.js` — the map renders in
+   three stacked layers: the decoration traces and the art `layout.images` in a
+   static lower Plotly graph (re-plotted only when they change), the correlation
+   ties as SVG lines, the stars on top. `Plotly.react` still wipes any DOM node
+   injected into a plot, so blur must be baked into the image, and the figure
+   JSON stays the art's only Python→JS channel.
 6. `dashboard/assets.py` — `constellation_layer` (the base64 embed plus the
    layer's sides as shares of its longer one) and `constellation_credit` (the CC BY
    line under the Games map).

@@ -84,11 +84,15 @@ Altair / Vega-Lite inherit these automatically.
 
 - **Theming**: always via `config.toml`. Reserve `st.html` / `unsafe_allow_html` CSS for targeted
   *structural* gaps only, scoped through a widget's `key=`-generated `.st-key-…` class — never for
-  colors/fonts/backgrounds that a token already covers. Named exceptions, all injected once in
-  `dashboard/app.py`'s `APP_CSS`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`,
-  §2), the ambient-image layer (below), and the Games surface lens toggles (`.st-key-lens_deep_on` /
-  `.st-key-lens_wider_on`, §4a) — `config.toml`'s `[theme]` has no gold slot, so a widget that must
-  read celestial-gold when active reaches the token the same narrow way the other two do.
+  colors/fonts/backgrounds that a token already covers. Named exceptions, all in `theme.APP_CSS`
+  (injected once by `dashboard/app.py`): the display-font CSS (`.celestial-kicker` /
+  `.celestial-headline`, §2), the ambient-image layer (below), the active segment of every
+  `segmented_control`, the Games lenses among them (`stBaseButton-segmented_controlActive`, §4a) —
+  `config.toml`'s `[theme]` has no gold slot, so a widget that must read celestial-gold when active
+  reaches the token the same narrow way the other two do — and two structural rules for the Games
+  map (§4a): the map and its astrolabe skip Streamlit's stale-rerun fade
+  (`.st-key-cb_constellation` / `.st-key-cb_astrolabe`), since both already paint their pending
+  state, and the hidden card-asset carrier takes no space (`.st-key-cb_constellation_cards`).
 - **Nebula wash**: a faint radial gradient inside the surface palette (blue-family stops drawn from
   `chartSequentialColors`, gold highlights ≤ 12% opacity) is permitted on **hero/prophecy cards
   only**. The purple/violet gradient ban (§6) stands untouched.
@@ -176,14 +180,17 @@ lens star stays under the main-star floor, and a slip leg still burns at full op
 lens star. Both lenses scatter by seeded draw, never a grid and never a ring.
 In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
 read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and
-zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates in
-with a brief fade (deeper) or a whole-sky settle (wider — the map recedes slightly and the sky
-fills around it); a bare restyle (lighting a star on a click) does not — the
-animation fires only when the lens actually changes the plotted trace set, and
-`prefers-reduced-motion` disables it. Beneath the stars sits the one **decoration layer** that is
+zoom/pan off (it's a map, not a chart). A clicked star lights or dims in the frame it was clicked,
+its ties with it, before the server has answered, and its card closes. The card sits beside its
+star and lets presses through to any star beneath it until the pointer has rested on that star,
+so a quick run of clicks never lands on a card. Switching lenses animates both ways: *deeper*
+fades its stars and ties in, and back out; *wider* glides the map into its receded pose, or back
+out to full size, while the other games' sky fades in or out. Only a lens change animates, and
+`prefers-reduced-motion` turns all of it off. Beneath the stars sits the one **decoration layer** that is
 *not* data: the dealt template's art (licence-cleared clip art filtered to a faint, blurred
 light-blue drawing, at the §3 ambient ceiling), its engraved outline, and faint filler stars on the
-vertices no leg claimed; a template with no art yet draws the outline alone. It goes
+vertices no leg claimed; a template with no art yet draws the outline alone. The gold ties draw
+above it and under every star. It goes
 **uncaptioned** — a shape that has to be told to you isn't reading, so the drawing carries its own
 name or it doesn't earn one; the licence credit under the map names artists, never the shape. It is engraving, never gold —
 gold stays the correlation-edge color alone, so no engraved stroke can be misread as a ρ tie — it

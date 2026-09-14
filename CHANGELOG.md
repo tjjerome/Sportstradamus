@@ -17,8 +17,11 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ### Changed
 - Games constellation stars sit on their template's drawing; a narrow shape's extra stars
   spread across the team's half.
-- Games star click ~0.9 s → ~0.4 s: pair maps prebuilt once, one script run per click,
-  Streamlit's post-run full GC off (`.streamlit/config.toml`).
+- Games star click ~0.9 s → ~10 ms: the star lights before the server answers (~0.25 s),
+  and quick double clicks both land. Pair maps prebuilt once, one script run per click,
+  Streamlit's post-run full GC off and websocket compression on (`.streamlit/config.toml`).
+- Games astrolabe always shows, at rest below two legs, and sweeps between prices; lens
+  changes fade and glide instead of stuttering.
 - Dependency bumps: optuna 4.9, shap 0.49.1, mypy 2.3, playwright 1.62,
   optuna-dashboard 0.20; CI actions checkout/setup-python to v7. The Optuna 4 move
   swaps the sweep's journal storage to `JournalFileBackend`; existing journals resume.
@@ -58,4 +61,3 @@ in 2023; the affected keys were rotated.
 
 ### Added
 - MIT license, security policy, code of conduct, issue/PR templates, Dependabot config.
-
