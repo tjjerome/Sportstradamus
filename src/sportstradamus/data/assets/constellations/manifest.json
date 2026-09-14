@@ -21,7 +21,7 @@
       "file": "the-arrow.png",
       "licence": "CC0",
       "mode": "edges",
-      "source": "sources/arrow-right.svg",
+      "source": "sources/arrow-rising.svg",
       "source_url": "https://openclipart.org/detail/332083"
     },
     "the-backboard": {
@@ -165,7 +165,7 @@
       "file": "the-clipboard.png",
       "licence": "CC0",
       "mode": "edges",
-      "source": "sources/clipboard.svg",
+      "source": "sources/clipboard-upright.svg",
       "source_url": "https://openclipart.org/detail/330803"
     },
     "the-comet": {
@@ -173,7 +173,7 @@
       "file": "the-comet.png",
       "licence": "CC0",
       "mode": "edges",
-      "source": "sources/Shooting-Star-2.svg",
+      "source": "sources/shooting-star-rising.svg",
       "source_url": "https://openclipart.org/detail/263576"
     },
     "the-compass": {
@@ -453,7 +453,7 @@
       "file": "the-ladder.png",
       "licence": "CC0",
       "mode": "edges",
-      "source": "sources/1408137166.svg",
+      "source": "sources/ladder-leaning.svg",
       "source_url": "https://openclipart.org/detail/196261"
     },
     "the-lantern": {
@@ -484,8 +484,8 @@
       "artist": "Issi",
       "file": "the-medal.png",
       "licence": "CC0",
-      "mode": "edges",
-      "source": "sources/1529054368.svg",
+      "mode": "ink",
+      "source": "sources/medal-darkened.svg",
       "source_url": "https://openclipart.org/detail/303266"
     },
     "the-mitt": {

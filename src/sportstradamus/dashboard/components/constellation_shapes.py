@@ -19,9 +19,11 @@ mechanical half.
 
 * **S1** Coordinates normalized to [-1, 1]², shape centered, and *use the box*:
   the renderer squeezes x hard to undo the frame's own stretch, so anything
-  authored inside ±0.5 collapses into a column. Reach ±0.8 or wider. Keep
+  authored inside ±0.5 collapses into a column. Span at least 1.0 on each axis, or
+  80% of the drawing where the drawing itself is narrower (a banner, a torch). Keep
   star-bearing vertices at |y| ≤ 0.90 — a prominence-1 star at the mobile floor
-  is ~0.3 tall and a vertex any higher clips the ceiling.
+  is ~0.3 tall and a vertex any higher clips the ceiling — and 0.18 apart, or
+  ``constellation_spacing.settle`` nudges one off its vertex.
 * **S2** 5–13 vertices. ``prominence`` is the importance order (1 = the star the
   shape can't live without), and mirror pairs tie, so it ranks rather than
   permutes. Player-outline shapes simplify to ≤ 13 vertices; the drawing
@@ -37,10 +39,11 @@ mechanical half.
   ``manifest.json`` beside it holds its source, artist and licence), or ``null``
   for a template with no art yet, which draws its outline alone. Two templates may
   share a layer. The layer keeps its own aspect inside the box: its longer side
-  spans [-1, 1] and the shorter one is centred, so vertices authored against the
-  layer at that aspect land on the drawing. ``silhouette`` is the filled SVG gesture
-  the map drew before the art; nothing renders it, and while the key stays it is
-  one closed path of ``M L Q C T S Z`` only.
+  spans [-1, 1] and the shorter one is centred. Author against the layer at that
+  aspect, because every star sits on the drawing: within 0.035 of a line the layer
+  stores at alpha 34 or more. ``silhouette`` is the filled SVG gesture the map drew
+  before the art; nothing renders it, and while the key stays it is one closed path
+  of ``M L Q C T S Z`` only.
 * **S6** ``min_nodes`` = fewest real supernodes that still read as the object
   (2–5).
 * **S7** ``label`` names the object ("The Bolt") for the tuning cockpit — the map

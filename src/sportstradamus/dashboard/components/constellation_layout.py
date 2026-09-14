@@ -38,8 +38,8 @@ _MIN_CLASSIFIABLE_NODES = 4
 # also keeps members apart at the 22px mobile touch floor.
 _EXPLODE_R0, _EXPLODE_DR, _EXPLODE_RMAX = 0.05, 0.015, 0.11
 
-# How far past a side's own vertices its field stars may sit: around the figure,
-# not off in a corner of the frame.
+# How far past a side's own vertices its field stars may sit, up, down and toward
+# the axis: around the figure, not off in a corner of the frame.
 _FIELD_PAD = 0.2
 
 # S1's star-bearing ceiling: a glyph any higher clips the frame once the
@@ -218,30 +218,31 @@ def _scatter(
 def _field_box(
     filled: list[tuple[float, float]], side: str | None
 ) -> tuple[float, float, float, float]:
-    """Where a side's field stars may fall: the box its own vertices fill, padded.
+    """Where a side's field stars may fall: its vertices' band, out to the edge of its half.
 
     Anchoring the field on what the side actually filled is what keeps the extras
-    around the figure. A side that filled nothing takes its whole half, and a leg
-    on neither of the matchup's teams floats near the axis — where the layout puts
-    a cross-matchup star anyway. Centre vertices sit in both sides' pools and are
-    authored a little off the axis, so they clamp onto the side that drew them
-    before the box is measured: a box reaching across x=0 would strand a star on
-    the wrong team. x stays inside the S1 [-1, 1] template box and y under its
-    star-bearing ceiling.
+    around the figure: up and down they keep to the band its vertices span, padded,
+    and toward the axis they stop just past its innermost vertex. Outward they take
+    the whole half whatever the figure's width. Stars sit on the drawing, and a
+    narrow drawing (a torch, an hourglass) would otherwise pen a busy side's field
+    into a column where ``settle`` shoves stars apart and captions find no room. A
+    side that filled nothing takes its whole half, and a leg on neither of the
+    matchup's teams floats near the axis — where the layout puts a cross-matchup
+    star anyway. Centre vertices sit in both sides' pools and are authored a little
+    off the axis, so the inner edge caps at the axis whichever side drew them: a box
+    reaching across x=0 would strand a star on the wrong team. x stays inside the S1
+    [-1, 1] template box and y under its star-bearing ceiling.
     """
     if side is None:
         return (-_FIELD_PAD, -_FIELD_Y, _FIELD_PAD, _FIELD_Y)
     lo, hi = (-1.0, 0.0) if side == "L" else (0.0, 1.0)
     if not filled:
         return (lo, -_FIELD_Y, hi, _FIELD_Y)
-    xs = [min(max(x, lo), hi) for x, _ in filled]
-    ys = [y for _, y in filled]
-    return (
-        max(min(xs) - _FIELD_PAD, lo),
-        max(min(ys) - _FIELD_PAD, -_FIELD_Y),
-        min(max(xs) + _FIELD_PAD, hi),
-        min(max(ys) + _FIELD_PAD, _FIELD_Y),
-    )
+    xs, ys = zip(*filled, strict=True)
+    bottom, top = max(min(ys) - _FIELD_PAD, -_FIELD_Y), min(max(ys) + _FIELD_PAD, _FIELD_Y)
+    if side == "L":
+        return (lo, bottom, min(max(xs) + _FIELD_PAD, hi), top)
+    return (max(min(xs) - _FIELD_PAD, lo), bottom, hi, top)
 
 
 def _vertex_pools(vertices: dict[int, dict], teams: list[str]) -> dict[str | None, list[int]]:
