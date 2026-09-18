@@ -44,6 +44,10 @@ class Source:
     # ``None`` — their run has no request body and their ``verify`` is generic.
     render_request_body: Callable[..., Any] | None = None
     verify_fn: Callable[..., dict[str, list]] | None = None
+    # Sources whose credential can be minted from stored login details set
+    # this; it returns a fresh cookie and persists it. Tried before the
+    # interactive curl prompt, so cron self-heals instead of failing.
+    renew_auth: Callable[[], str] | None = None
     auth_fields: AuthFields | None = None
     env_prefix: str | None = None
     modes: tuple[str, ...] | None = None

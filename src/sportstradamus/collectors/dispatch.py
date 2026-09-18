@@ -31,9 +31,11 @@ _AUTH_PROMPT_SEPARATOR_WIDTH = 60
 def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_cache, log):
     """Return ``(body, None)`` or ``(None, err_dict)`` for one spec.
 
-    On 401/403 in a TTY, prompts for a fresh curl and retries once. In
-    non-TTY contexts (cron) the auth failure is returned as an error so the
-    caller can record it and continue.
+    On 401/403 the credential is renewed once and the call retried — from
+    the source's stored login where it has one (so cron recovers on its
+    own), otherwise from a curl pasted at a TTY. When neither works the
+    auth failure is returned as an error so the caller can record it and
+    continue.
     """
     for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
@@ -45,12 +47,31 @@ def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_c
             log.warning(
                 "auth error", extra={"endpoint": spec.name, "attempt": attempt, "error": str(exc)}
             )
-            if attempt == _AUTH_MAX_ATTEMPTS or not _refresh_auth_interactively(source, client):
+            if attempt == _AUTH_MAX_ATTEMPTS or not _refresh_auth(source, client):
                 return None, exc_to_err_dict(exc)
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
             return None, exc_to_err_dict(exc)
     return None, {"error_class": "Unknown", "error_message": "retries exhausted"}
+
+
+def _refresh_auth(source, client) -> bool:
+    """Get a working credential back onto ``client``, or return ``False``.
+
+    Tries the source's own renewal first — that path needs no human and so
+    works under cron, which is the case that matters. Only if the source
+    has no renewal, or it fails, does this fall back to prompting for a
+    pasted curl, which requires a TTY.
+    """
+    if source.renew_auth is not None:
+        try:
+            client.refresh_credentials(cookie=source.renew_auth())
+        except Exception as exc:
+            click.echo(f"Could not renew the session automatically: {exc}", err=True)
+        else:
+            click.echo("Session renewed. Resuming...", err=True)
+            return True
+    return _refresh_auth_interactively(source, client)
 
 
 def _refresh_auth_interactively(source, client) -> bool:
@@ -79,8 +100,8 @@ def _refresh_auth_interactively(source, client) -> bool:
     except ValueError as exc:
         click.echo(f"Failed to parse curl: {exc}", err=True)
         return False
-    if not source.auth_fields.authorization or not updates.get(source.auth_fields.authorization):
-        click.echo("No Authorization header found in pasted curl.", err=True)
+    if not any(updates.values()):
+        click.echo("No Authorization or Cookie header found in pasted curl.", err=True)
         return False
     update_keys(updates)
     client.refresh_credentials(

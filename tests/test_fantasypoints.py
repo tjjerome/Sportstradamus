@@ -236,6 +236,153 @@ def test_client_fails_fast_when_authorization_empty(monkeypatch):
     assert called["n"] == 0, "no HTTP request should have been attempted"
 
 
+# ---------------------------------------------------------------------------
+# session renewal: the cookie is short-lived, so fp-fetch mints its own
+# ---------------------------------------------------------------------------
+
+
+class _FakeLoginResponse:
+    def __init__(self, status_code=200, cookies=None, payload=None, reason="OK"):
+        self.status_code = status_code
+        self.ok = status_code < 400
+        self.cookies = cookies or {}
+        self.reason = reason
+        self._payload = payload
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _patch_login(monkeypatch, response, keys=None):
+    """Point session.renew_session at a fake login; capture the keys.json write."""
+    from sportstradamus.collectors.fantasypoints import session as session_mod
+
+    sent = {}
+    monkeypatch.setattr(
+        session_mod,
+        "load_keys",
+        lambda: (
+            keys
+            if keys is not None
+            else {"fantasypoints_username": "trevor", "fantasypoints_password": "hunter2"}
+        ),
+    )
+    monkeypatch.setattr(session_mod, "update_keys", lambda updates: sent.update(updates))
+    monkeypatch.delenv("FANTASYPOINTS_USERNAME", raising=False)
+    monkeypatch.delenv("FANTASYPOINTS_PASSWORD", raising=False)
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["body"] = json
+        return response
+
+    monkeypatch.setattr(session_mod.requests, "post", fake_post)
+    return sent
+
+
+def test_renew_session_logs_in_and_persists_the_cookie(monkeypatch):
+    from sportstradamus.collectors.fantasypoints.session import renew_session
+
+    sent = _patch_login(monkeypatch, _FakeLoginResponse(cookies={"ds_session": "fresh.token"}))
+    assert renew_session() == "ds_session=fresh.token"
+    assert sent["url"].endswith("/api/auth/login")
+    # The sign-in form posts the account name, not an email field.
+    assert sent["body"] == {"name": "trevor", "password": "hunter2"}
+    # Written back under the same slot a pasted cookie uses, so nothing
+    # downstream can tell a renewed session from a hand-captured one.
+    assert sent["fantasypoints_cookie"] == "ds_session=fresh.token"
+
+
+def test_renew_session_without_stored_credentials_names_the_keys(monkeypatch):
+    from sportstradamus.collectors.fantasypoints.session import (
+        SessionRenewalError,
+        renew_session,
+    )
+
+    _patch_login(monkeypatch, _FakeLoginResponse(), keys={})
+    with pytest.raises(SessionRenewalError, match="fantasypoints_username"):
+        renew_session()
+
+
+def test_renew_session_surfaces_the_api_error_on_a_rejected_login(monkeypatch):
+    from sportstradamus.collectors.fantasypoints.session import (
+        SessionRenewalError,
+        renew_session,
+    )
+
+    _patch_login(
+        monkeypatch,
+        _FakeLoginResponse(status_code=404, payload={"error": "Not found."}),
+    )
+    with pytest.raises(SessionRenewalError, match="Not found"):
+        renew_session()
+
+
+def test_renew_session_rejects_a_login_that_sets_no_cookie(monkeypatch):
+    """A 200 with no Set-Cookie means the login contract moved, not that we are in."""
+    from sportstradamus.collectors.fantasypoints.session import (
+        SessionRenewalError,
+        renew_session,
+    )
+
+    _patch_login(monkeypatch, _FakeLoginResponse(payload={"name": "trevor"}))
+    with pytest.raises(SessionRenewalError, match="ds_session"):
+        renew_session()
+
+
+def test_cli_run_renews_the_session_on_401_without_a_tty(monkeypatch, tmp_path):
+    """The cron case: a lapsed cookie must recover on its own, mid-batch."""
+    import sys as sys_mod
+
+    from sportstradamus.collectors import transport as client_mod
+    from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_coverage_matrix",
+                url="https://fantasypointsdata.com/api/nfl/coverage-matrix",
+                params={"mode": "offense", "seasons": "{season}", "regWeeks": "{week}"},
+                output_subdir="team/coverage_matrix",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "ds_session=expired")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    monkeypatch.setattr(sys_mod.stdin, "isatty", lambda: False)
+    renewals = {"n": 0}
+
+    def fake_renew():
+        renewals["n"] += 1
+        return "ds_session=fresh"
+
+    monkeypatch.setattr(FP_SOURCE, "renew_auth", fake_renew)
+    seen_cookies = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        seen_cookies.append(headers.get("Cookie"))
+        if headers.get("Cookie") == "ds_session=expired":
+            return FakeResponse(401)
+        return FakeResponse(200, body=[{"team": "BLT", "games": 1}])
+
+    monkeypatch.setattr(client_mod.requests, "request", respond)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert renewals["n"] == 1
+    assert seen_cookies == ["ds_session=expired", "ds_session=fresh"]
+    parquet = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "coverage_matrix.parquet"
+    assert parquet.is_file()
+
+
 def test_parse_curl_get_strips_auth_headers_and_splits_query():
     curl_text = (
         "curl 'https://fantasypointsdata.com/api/nfl/coverage-matrix"
@@ -256,6 +403,34 @@ def test_parse_curl_get_strips_auth_headers_and_splits_query():
     assert spec.params == {"mode": "defense", "seasons": "{season}", "regWeeks": "{week}"}
     assert spec.extra_headers == {"Accept": "application/json"}
     assert spec.json_body is None
+
+
+def test_parse_curl_drops_the_browser_noise_the_new_site_sends():
+    """A real "Copy as cURL" off the data app drags a dozen useless headers along.
+
+    ``Referer`` is the one that bites: it records whichever page happened to
+    be open, so two captures of the same tool would produce two different
+    catalog entries — and the client sets its own Referer anyway.
+    """
+    curl_text = (
+        "curl 'https://fantasypointsdata.com/api/nfl/rushing?positions=RB' "
+        "-H 'User-Agent: Mozilla/5.0' "
+        "-H 'Accept: */*' "
+        "-H 'Accept-Language: en-US,en;q=0.9' "
+        "-H 'Accept-Encoding: gzip, deflate, br, zstd' "
+        "-H 'Referer: https://fantasypointsdata.com/team/playcallers?mode=offense' "
+        "-H 'Connection: keep-alive' "
+        "-H 'Cookie: ds_session=secret' "
+        "-H 'Sec-Fetch-Dest: empty' -H 'Sec-Fetch-Mode: cors' -H 'Sec-Fetch-Site: same-origin' "
+        "-H 'DNT: 1' -H 'Sec-GPC: 1' -H 'Priority: u=4' -H 'TE: trailers'"
+    )
+    spec = parse_curl_to_spec(
+        curl_text, name="player_rushing_advanced", output_subdir="player/rushing_advanced"
+    )
+    assert spec.url == "https://fantasypointsdata.com/api/nfl/rushing"
+    assert spec.params == {"positions": "RB", "seasons": "{season}", "regWeeks": "{week}"}
+    # Only the one header that says something about the request survives.
+    assert spec.extra_headers == {"Accept": "*/*"}
 
 
 def test_parse_curl_templates_the_period_even_when_the_capture_omits_it():

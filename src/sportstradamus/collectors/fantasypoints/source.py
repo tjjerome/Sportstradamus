@@ -17,6 +17,7 @@ from sportstradamus import data
 from sportstradamus.collectors.auth import AuthFields, ResolvedAuth
 from sportstradamus.collectors.catalog import EndpointSpec
 from sportstradamus.collectors.cli import Source
+from sportstradamus.collectors.fantasypoints.session import renew_session
 from sportstradamus.collectors.fantasypoints.transform import (
     parquet_path_for_spec,
     parse_table_response,
@@ -149,6 +150,7 @@ FP_SOURCE = Source(
     render_request_body=_render_request_body,
     transform=parse_table_response,
     verify_fn=verify_catalog,
+    renew_auth=renew_session,
     report_prefix="fp_fetch",
     auth_fields=AuthFields(
         cookie="fantasypoints_cookie",

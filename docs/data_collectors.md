@@ -92,6 +92,12 @@ both use `cookie` + `user_agent` only; savant sets `auth_fields=None` (public �
 no keys.json entry, no `refresh-auth` command). No shipped source currently
 uses the bearer `authorization` slot.
 
+A source whose credential can be minted from a stored login sets
+`Source.renew_auth`, a no-argument callable returning a fresh cookie. The
+401 path tries it before prompting for a pasted curl, so those sources
+recover under cron. FP is the one that does (its cookie lapses weekly);
+see [fantasypoints.md](fantasypoints.md).
+
 `read_auth` resolves each slot from the env (`{ENV_PREFIX}_COOKIE`, …) first,
 then keys.json, defaulting to `""` when a key is absent — so a source works
 before its slot is populated (it just fails the request with a clear "empty

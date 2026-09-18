@@ -27,31 +27,45 @@ account suspension is a realistic risk if their ToS forbids this.
 
 ## One-time setup
 
-### 1. Grab a fresh session cookie
+### 1. Store your login
 
-The API authenticates on the `ds_session` cookie alone — there is no
-`Authorization` header. Capture it once per session:
+The API authenticates on the `ds_session` cookie alone. It accepts nothing
+else — an `Authorization` header is ignored, and a request carrying only
+one gets a 401. The cookie is a **seven-day** token (its own payload
+carries the expiry) and it does **not** slide: using it does not push the
+expiry out, so it lapses a week after login no matter how often the
+collector runs.
 
-1. Log in to <https://fantasypointsdata.com/> in a desktop browser.
-2. Open DevTools → **Network** tab, filter to **Fetch/XHR**.
-3. Click any tool so the SPA fires its data call.
-4. Click the request row → **Headers** → **Request Headers**. Copy the
-   *value* of the `Cookie:` header.
-5. Paste into `src/sportstradamus/creds/keys.json`:
+That would mean a DevTools paste every week, so the collector logs in for
+itself instead. Put the account credentials in
+`src/sportstradamus/creds/keys.json`:
 
 ```json
 {
-  "fantasypoints_cookie": "ds_session=..."
+  "fantasypoints_username": "<your Data Suite account name>",
+  "fantasypoints_password": "<your password>"
 }
 ```
 
-Optionally set `fantasypoints_user_agent` to your browser's UA in the
-same file — the default Firefox UA is fine for most users.
-`fantasypoints_authorization` is no longer read; delete it from both
-boxes.
+Then prove they work:
 
-The cookie rotates on a schedule we don't control. When it expires the
-weekly job alerts via Healthchecks.io and you redo this step.
+```bash
+sportstradamus fetch fp login
+```
+
+That posts to `/api/auth/login`, writes the fresh cookie into
+`fantasypoints_cookie`, and reports the length. From then on `run` renews
+the cookie by itself the first time a call comes back 401 — under cron
+too, with no TTY — so nothing has to be pasted again.
+
+`fantasypoints_authorization` is no longer read; delete it from both
+boxes. Optionally set `fantasypoints_user_agent` to your browser's UA —
+the default Firefox UA is fine for most users.
+
+If you would rather not store the password, paste a cookie into
+`fantasypoints_cookie` by hand (DevTools → Network → any `/api/nfl/` XHR →
+copy the `Cookie:` header value) and accept the weekly refresh; without
+credentials there is nothing for the collector to renew from.
 
 ### 2. Register endpoints
 
@@ -81,8 +95,12 @@ old `/v2/ds/all/tools` — so every entry comes from a captured request:
    The endpoint lands in
    `src/sportstradamus/data/config/fantasypoints_endpoints.json`.
 
-`Authorization`, `Cookie` and `User-Agent` headers are stripped
-automatically — they come from `creds/keys.json`.
+`Authorization`, `Cookie` and `User-Agent` are stripped automatically (they
+come from `creds/keys.json`), along with the browser telemetry a "Copy as
+cURL" drags in — `Referer`, `Origin`, `Accept-Language`, `Sec-Fetch-*`, `DNT`,
+`Sec-GPC`, `Priority`, `TE` and the rest. `Referer` is the one that matters:
+it records whichever page you had open, so keeping it would make two captures
+of the same tool produce two different entries, and the client sets its own.
 
 **Name the entry `player_` / `team_` / `opponent_` + the file kind you
 want**, because the prefix picks `player_data/` vs `team_data/` and the
@@ -223,12 +241,14 @@ if any spec hits an error so you can chain it into a script.
 
 ### Cookie expired mid-run
 
-If the cookie expires partway through `fp-fetch run`, the CLI pauses,
-prints a banner, and waits for you to paste a fresh DevTools curl on
-stdin (end with EOF / Ctrl+D). It updates `creds/keys.json` and the
-in-memory client, then retries the failing call and resumes the batch.
-Non-TTY contexts (cron) skip the prompt and fail fast so Healthchecks.io
-pings `/fail`.
+The first 401 triggers a login, and the failing call is retried with the
+fresh cookie — the batch continues and `keys.json` is updated in passing.
+This needs no terminal, so the weekly cron recovers on its own.
+
+Only when there are no stored credentials (or the login is rejected) does
+it fall back to the old behaviour: at a TTY it pauses and waits for a
+fresh DevTools curl on stdin (end with EOF / Ctrl+D); under cron it fails
+fast so Healthchecks.io pings `/fail`.
 
 ## Historical backfill
 
@@ -264,14 +284,19 @@ Wednesday 10:00 server time — after Monday/Tuesday stat corrections
 settle, well before Sunday games. Set `HEALTHCHECK_URL_FP_FETCH` in
 the environment so token-expiry failures alert via Healthchecks.io.
 
-## When the cookie expires
+## When auth fails anyway
 
-The healthcheck alert (`/fail` ping with the last 50 log lines) quotes a `401`
-message pointing here. Refresh in one paste with
-`sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
-then confirm with `fp-fetch run --only team_coverage_matrix`. The extract-headers,
-preserve-other-keys, redacted-preview mechanics are the shared refresh-auth flow
-documented in [data_collectors.md](data_collectors.md#auth).
+A `/fail` healthcheck quoting a `401` now means the *login* failed, not that the
+cookie lapsed — the cookie renews itself. Check the password first
+(`sportstradamus fetch fp login` prints the API's own error, e.g. `Not found.`
+for a wrong account name).
+
+The manual paths still work if you need them:
+`sportstradamus fetch fp login` to re-mint from credentials, or
+`sportstradamus fetch fp refresh-auth /tmp/fresh.curl` to install a cookie
+captured by hand. The extract-headers, preserve-other-keys, redacted-preview
+mechanics are the shared refresh-auth flow documented in
+[data_collectors.md](data_collectors.md#auth).
 
 ## Output layout
 
