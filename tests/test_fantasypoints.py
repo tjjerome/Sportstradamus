@@ -255,8 +255,8 @@ class _FakeLoginResponse:
         return self._payload
 
 
-def _patch_login(monkeypatch, response, keys=None):
-    """Point session.renew_session at a fake login; capture the keys.json write."""
+def _patch_login(monkeypatch, response, keys=None, firebase=None):
+    """Point session.renew_session at fake sign-in hops; capture the keys.json write."""
     from sportstradamus.collectors.fantasypoints import session as session_mod
 
     sent = {}
@@ -266,30 +266,42 @@ def _patch_login(monkeypatch, response, keys=None):
         lambda: (
             keys
             if keys is not None
-            else {"fantasypoints_username": "trevor", "fantasypoints_password": "hunter2"}
+            else {
+                "fantasypoints_email": "trevor@example.com",
+                "fantasypoints_password": "hunter2",
+            }
         ),
     )
     monkeypatch.setattr(session_mod, "update_keys", lambda updates: sent.update(updates))
-    monkeypatch.delenv("FANTASYPOINTS_USERNAME", raising=False)
+    monkeypatch.delenv("FANTASYPOINTS_EMAIL", raising=False)
     monkeypatch.delenv("FANTASYPOINTS_PASSWORD", raising=False)
+    firebase = firebase or _FakeLoginResponse(payload={"idToken": "firebase.id.token"})
 
     def fake_post(url, json=None, headers=None, timeout=None):
-        sent["url"] = url
-        sent["body"] = json
-        return response
+        hop = "firebase" if url.startswith(session_mod.FIREBASE_SIGNIN_URL) else "login"
+        sent[f"{hop}_url"] = url
+        sent[f"{hop}_body"] = json
+        return firebase if hop == "firebase" else response
 
     monkeypatch.setattr(session_mod.requests, "post", fake_post)
     return sent
 
 
-def test_renew_session_logs_in_and_persists_the_cookie(monkeypatch):
-    from sportstradamus.collectors.fantasypoints.session import renew_session
+def test_renew_session_signs_in_through_firebase_and_persists_the_cookie(monkeypatch):
+    from sportstradamus.collectors.fantasypoints import session as session_mod
 
     sent = _patch_login(monkeypatch, _FakeLoginResponse(cookies={"ds_session": "fresh.token"}))
-    assert renew_session() == "ds_session=fresh.token"
-    assert sent["url"].endswith("/api/auth/login")
-    # The sign-in form posts the account name, not an email field.
-    assert sent["body"] == {"name": "trevor", "password": "hunter2"}
+    assert session_mod.renew_session() == "ds_session=fresh.token"
+    # Hop one is Firebase's own REST sign-in, keyed by the project's public
+    # web API key; hop two trades the resulting idToken for the cookie.
+    assert sent["firebase_url"].endswith(session_mod.FIREBASE_API_KEY)
+    assert sent["firebase_body"] == {
+        "email": "trevor@example.com",
+        "password": "hunter2",
+        "returnSecureToken": True,
+    }
+    assert sent["login_url"].endswith("/api/auth/firebase-login")
+    assert sent["login_body"] == {"idToken": "firebase.id.token"}
     # Written back under the same slot a pasted cookie uses, so nothing
     # downstream can tell a renewed session from a hand-captured one.
     assert sent["fantasypoints_cookie"] == "ds_session=fresh.token"
@@ -302,7 +314,26 @@ def test_renew_session_without_stored_credentials_names_the_keys(monkeypatch):
     )
 
     _patch_login(monkeypatch, _FakeLoginResponse(), keys={})
-    with pytest.raises(SessionRenewalError, match="fantasypoints_username"):
+    with pytest.raises(SessionRenewalError, match="fantasypoints_email"):
+        renew_session()
+
+
+def test_renew_session_surfaces_the_firebase_error_on_a_bad_password(monkeypatch):
+    """Firebase nests its machine code, so the message must be unwrapped, not printed."""
+    from sportstradamus.collectors.fantasypoints.session import (
+        SessionRenewalError,
+        renew_session,
+    )
+
+    _patch_login(
+        monkeypatch,
+        _FakeLoginResponse(),
+        firebase=_FakeLoginResponse(
+            status_code=400,
+            payload={"error": {"code": 400, "message": "INVALID_LOGIN_CREDENTIALS"}},
+        ),
+    )
+    with pytest.raises(SessionRenewalError, match="INVALID_LOGIN_CREDENTIALS"):
         renew_session()
 
 
@@ -314,9 +345,9 @@ def test_renew_session_surfaces_the_api_error_on_a_rejected_login(monkeypatch):
 
     _patch_login(
         monkeypatch,
-        _FakeLoginResponse(status_code=404, payload={"error": "Not found."}),
+        _FakeLoginResponse(status_code=401, payload={"error": "Could not verify that sign-in."}),
     )
-    with pytest.raises(SessionRenewalError, match="Not found"):
+    with pytest.raises(SessionRenewalError, match="Could not verify"):
         renew_session()
 
 

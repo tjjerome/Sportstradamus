@@ -52,7 +52,7 @@ The creds stub is just empty strings:
 
 ```json
 {"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "",
- "fantasypoints_username": "", "fantasypoints_password": "",
+ "fantasypoints_email": "", "fantasypoints_password": "",
  "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}
 ```
 

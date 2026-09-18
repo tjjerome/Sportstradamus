@@ -162,7 +162,7 @@ no token on public reads and a fresh one on the rest.
 **Getting a token for the authed endpoints.** Log in at `app.underdogsports.com`,
 open DevTools → Network → any `api.underdogfantasy.com` request → Request Headers, and
 copy the `Authorization` value. Paste it into `src/sportstradamus/creds/keys.json` as
-`underdog_authorization` (same naming as `fantasypoints_authorization`, see
+`underdog_authorization` (the `{source}_{slot}` naming every collector uses, see
 [data_collectors.md](data_collectors.md#auth)). It dies after ten minutes, which makes
 it useless for cron; an automated client would have to run the password grant itself,
 which is the ToS-adjacent step §2.2 of the edge suite warns about, and this task did

@@ -29,8 +29,8 @@ def login() -> None:
     """Mint a fresh session cookie from the stored credentials.
 
     ``run`` does this by itself the moment a call comes back 401, so this
-    exists to prove the stored username and password work — right after you
-    set them, rather than a week later when the cookie lapses mid-cron.
+    exists to prove the stored email and password work — right after you set
+    them, rather than a week later when the cookie lapses mid-cron.
     """
     try:
         cookie = renew_session()

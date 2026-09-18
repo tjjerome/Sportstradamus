@@ -36,13 +36,14 @@ carries the expiry) and it does **not** slide: using it does not push the
 expiry out, so it lapses a week after login no matter how often the
 collector runs.
 
-That would mean a DevTools paste every week, so the collector logs in for
-itself instead. Put the account credentials in
+That would mean a DevTools paste every week, so the collector signs in for
+itself instead. Put your **fantasypoints.com** account credentials — the
+email and password the site's sign-in form takes — in
 `src/sportstradamus/creds/keys.json`:
 
 ```json
 {
-  "fantasypoints_username": "<your Data Suite account name>",
+  "fantasypoints_email": "<your fantasypoints.com email>",
   "fantasypoints_password": "<your password>"
 }
 ```
@@ -53,10 +54,20 @@ Then prove they work:
 sportstradamus fetch fp login
 ```
 
-That posts to `/api/auth/login`, writes the fresh cookie into
-`fantasypoints_cookie`, and reports the length. From then on `run` renews
-the cookie by itself the first time a call comes back 401 — under cron
-too, with no TTY — so nothing has to be pasted again.
+That makes the same two hops the sign-in form makes — Firebase trades the
+email and password for an `idToken`, then `/api/auth/firebase-login` trades
+that for the cookie — writes the result into `fantasypoints_cookie`, and
+reports the length. From then on `run` renews the cookie by itself the first
+time a call comes back 401 — under cron too, with no TTY — so nothing has to
+be pasted again.
+
+Firebase is the only way in, so the email must be the one the account was
+created with. The sign-in page also shows an account-name form posting to
+`/api/auth/login`, but that path is disabled site-wide and answers `404 Not
+found.` for any Firebase-backed account, which is every account now.
+Google and Apple sign-in are not supported here — they need an interactive
+popup — so an account created that way has to be given a password on
+fantasypoints.com before the collector can use it.
 
 `fantasypoints_authorization` is no longer read; delete it from both
 boxes. Optionally set `fantasypoints_user_agent` to your browser's UA —
@@ -286,10 +297,12 @@ the environment so token-expiry failures alert via Healthchecks.io.
 
 ## When auth fails anyway
 
-A `/fail` healthcheck quoting a `401` now means the *login* failed, not that the
-cookie lapsed — the cookie renews itself. Check the password first
-(`sportstradamus fetch fp login` prints the API's own error, e.g. `Not found.`
-for a wrong account name).
+A `/fail` healthcheck quoting a `401` now means the *sign-in* failed, not that
+the cookie lapsed — the cookie renews itself. Run `sportstradamus fetch fp
+login`; it prints the failing service's own error, and Firebase's codes say
+which half is wrong: `EMAIL_NOT_FOUND` means the stored email is not an
+account, `INVALID_PASSWORD` means the email is right and only the password is
+stale.
 
 The manual paths still work if you need them:
 `sportstradamus fetch fp login` to re-mint from credentials, or
