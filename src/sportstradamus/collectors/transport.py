@@ -51,6 +51,20 @@ class CollectorAuthError(RuntimeError):
     """Source returned 401/403; the stored Authorization token is expired."""
 
 
+class CollectorAuthRecoveryError(RuntimeError):
+    """No working credential could be restored, so the whole run is dead.
+
+    Distinct from :class:`CollectorAuthError`, which is one call's 401. By
+    the time this is raised the renewal has been tried and refused, and the
+    credential is shared by every remaining endpoint — so continuing buys a
+    report full of identical failures and, where the source renews from a
+    stored login, one more rejected sign-in per endpoint. Dozens of refused
+    sign-ins in a burst is the access pattern providers lock accounts over,
+    which makes finishing the walk actively harmful rather than merely
+    pointless.
+    """
+
+
 class CollectorDecodeError(RuntimeError):
     """Source returned 2xx but the body couldn't be decoded as JSON.
 

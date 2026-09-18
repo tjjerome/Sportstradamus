@@ -298,11 +298,18 @@ the environment so token-expiry failures alert via Healthchecks.io.
 ## When auth fails anyway
 
 A `/fail` healthcheck quoting a `401` now means the *sign-in* failed, not that
-the cookie lapsed — the cookie renews itself. Run `sportstradamus fetch fp
-login`; it prints the failing service's own error, and Firebase's codes say
-which half is wrong: `EMAIL_NOT_FOUND` means the stored email is not an
-account, `INVALID_PASSWORD` means the email is right and only the password is
-stale.
+the cookie lapsed — the cookie renews itself. The alert quotes the reason
+directly, and Firebase's codes say which half is wrong: `EMAIL_NOT_FOUND`
+means the stored email is not an account, `INVALID_PASSWORD` means the email
+is right and only the password is stale. `sportstradamus fetch fp login`
+reproduces it on demand.
+
+A rejected sign-in **stops the run** rather than moving to the next endpoint.
+The credential is shared by every endpoint, so finishing the walk cannot
+succeed — it would only fire one more refused sign-in per endpoint, and
+dozens of those in a burst is what gets an account locked. The run report is
+still written, so whatever was fetched before the credential died stays
+visible.
 
 The manual paths still work if you need them:
 `sportstradamus fetch fp login` to re-mint from credentials, or

@@ -35,6 +35,7 @@ from sportstradamus.collectors.report import (
     summarize,
     truncate_for_preview,
 )
+from sportstradamus.collectors.transport import CollectorAuthRecoveryError
 
 PathFor = Callable[[EndpointSpec], Path]
 FetchOne = Callable[[EndpointSpec], "tuple[Any | None, dict[str, Any] | None]"]
@@ -155,23 +156,31 @@ def run_specs(
     ``fetch_one(spec) -> (body, err_dict|None)`` is the source's dispatch,
     already bound to this run's context. Echoes the ok/skip/empty/failed
     summary to stderr and raises :class:`click.ClickException` if any spec
-    failed so cron surfaces a non-zero exit.
+    failed so cron surfaces a non-zero exit — the same happens early, before
+    the remaining specs run, if the shared credential can't be renewed.
     """
     results: list[RunResult] = []
-    for spec in tqdm(specs, desc=desc, unit="endpoint"):
-        results.append(
-            fetch_and_write_one(
-                spec,
-                path_for=path_for,
-                fetch_one=fetch_one,
-                transform=transform,
-                log=log,
-                season=season,
-                week=week,
-                request_body=request_body_for(spec),
-                refetch=refetch,
+    try:
+        for spec in tqdm(specs, desc=desc, unit="endpoint"):
+            results.append(
+                fetch_and_write_one(
+                    spec,
+                    path_for=path_for,
+                    fetch_one=fetch_one,
+                    transform=transform,
+                    log=log,
+                    season=season,
+                    week=week,
+                    request_body=request_body_for(spec),
+                    refetch=refetch,
+                )
             )
-        )
+    except CollectorAuthRecoveryError as exc:
+        log.error("auth unrecoverable — stopping", extra={"error": str(exc)})
+        summarize(results, report_prefix=report_prefix, command=command, extra=extra)
+        raise click.ClickException(
+            f"Stopped after {len(results)} of {len(specs)} endpoints: {exc}."
+        ) from exc
     report_path, failures = summarize(
         results, report_prefix=report_prefix, command=command, extra=extra
     )
@@ -202,31 +211,40 @@ def backfill_specs(
     ``make_fetch_one`` and ``request_body_for`` are called per (spec, season,
     week) cell. Pacing is conservative: a short pause between endpoints in the
     same week, a longer one on a week transition; cached cells skip the pause
-    so resuming a half-finished backfill is near-instant.
+    so resuming a half-finished backfill is near-instant. If the shared
+    credential can't be renewed mid-walk, the backfill stops early and raises
+    :class:`click.ClickException` instead of finishing the remaining cells.
     """
     total = len(seasons) * len(weeks) * len(specs)
     results: list[RunResult] = []
     prev_week_key: tuple[int, int] | None = None
-    with tqdm(total=total, desc=desc, unit="call") as bar:
-        for season in seasons:
-            for week in weeks:
-                prev_week_key = _backfill_week(
-                    specs,
-                    season,
-                    week,
-                    prev_week_key,
-                    results,
-                    bar,
-                    make_fetch_one=make_fetch_one,
-                    request_body_for=request_body_for,
-                    path_for_cell=path_for_cell,
-                    would_skip=would_skip,
-                    transform=transform,
-                    log=log,
-                    refetch=refetch,
-                    request_range=request_range,
-                    week_range=week_range,
-                )
+    try:
+        with tqdm(total=total, desc=desc, unit="call") as bar:
+            for season in seasons:
+                for week in weeks:
+                    prev_week_key = _backfill_week(
+                        specs,
+                        season,
+                        week,
+                        prev_week_key,
+                        results,
+                        bar,
+                        make_fetch_one=make_fetch_one,
+                        request_body_for=request_body_for,
+                        path_for_cell=path_for_cell,
+                        would_skip=would_skip,
+                        transform=transform,
+                        log=log,
+                        refetch=refetch,
+                        request_range=request_range,
+                        week_range=week_range,
+                    )
+    except CollectorAuthRecoveryError as exc:
+        log.error("auth unrecoverable — stopping", extra={"error": str(exc)})
+        summarize(results, report_prefix=report_prefix, command="backfill", extra=extra)
+        raise click.ClickException(
+            f"Stopped after {len(results)} of {total} backfill calls: {exc}."
+        ) from exc
     report_path, failures = summarize(
         results, report_prefix=report_prefix, command="backfill", extra=extra
     )

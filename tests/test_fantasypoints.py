@@ -33,6 +33,28 @@ from sportstradamus.collectors.transport import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_live_sign_in(monkeypatch):
+    """Fail any test that would sign in to the real account.
+
+    ``renew_session`` posts straight to Firebase with whatever credentials
+    keys.json holds, so a test that exercises the 401 path without stubbing
+    ``renew_auth`` silently authenticates for real on every suite run —
+    dozens of sign-ins a day against a live account. That happened. Tests
+    that mean to drive the renewal stub ``requests.post`` themselves, which
+    overrides this.
+    """
+    from sportstradamus.collectors.fantasypoints import session as session_mod
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(
+            "A test reached the live Fantasy Points sign-in. Stub renew_auth "
+            "(or requests.post in the session module) instead."
+        )
+
+    monkeypatch.setattr(session_mod.requests, "post", refuse)
+
+
 class FakeResponse:
     """Minimal stand-in for :class:`requests.Response`."""
 
@@ -412,6 +434,62 @@ def test_cli_run_renews_the_session_on_401_without_a_tty(monkeypatch, tmp_path):
     assert seen_cookies == ["ds_session=expired", "ds_session=fresh"]
     parquet = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "coverage_matrix.parquet"
     assert parquet.is_file()
+
+
+def test_cli_run_stops_the_walk_when_the_stored_login_is_rejected(monkeypatch, tmp_path):
+    """A stale password must cost one refused sign-in, not one per endpoint.
+
+    The credential is shared by every spec, so finishing the walk cannot
+    succeed — it only burns dozens of rejected sign-ins in a burst, which is
+    what gets an account locked.
+    """
+    import sys as sys_mod
+
+    from sportstradamus.collectors import transport as client_mod
+    from sportstradamus.collectors.fantasypoints.session import SessionRenewalError
+    from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name=f"team_coverage_matrix_{n}",
+                url="https://fantasypointsdata.com/api/nfl/coverage-matrix",
+                params={"mode": "offense", "seasons": "{season}", "regWeeks": "{week}"},
+                output_subdir=f"team/coverage_matrix_{n}",
+            )
+            for n in range(3)
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "ds_session=expired")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    monkeypatch.setattr(sys_mod.stdin, "isatty", lambda: False)
+    renewals = {"n": 0}
+
+    def fake_renew():
+        renewals["n"] += 1
+        raise SessionRenewalError("Firebase rejected the sign-in (400): INVALID_PASSWORD")
+
+    monkeypatch.setattr(FP_SOURCE, "renew_auth", fake_renew)
+    monkeypatch.setattr(
+        client_mod.requests,
+        "request",
+        lambda method, url, headers=None, params=None, json=None, timeout=None: FakeResponse(401),
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code != 0
+    assert renewals["n"] == 1
+    # The alert has to name the cause; "3 spec(s) failed" would not.
+    assert "INVALID_PASSWORD" in result.output
+    assert "Stopped after 0 of 3 endpoints" in result.output
+    # The run report still lands, so the partial walk stays diagnosable.
+    assert "Report:" in result.output
 
 
 def test_parse_curl_get_strips_auth_headers_and_splits_query():
@@ -859,6 +937,7 @@ def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
     monkeypatch.setenv("FANTASYPOINTS_COOKIE", "ds_session=expired")
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
     monkeypatch.setattr(client_mod.requests, "request", lambda *a, **k: FakeResponse(401))
+    monkeypatch.setattr(FP_SOURCE, "renew_auth", None)
     # In a non-TTY context (CliRunner default), the auth-refresh prompt
     # is bypassed and the error propagates as today.
     runner = CliRunner()
@@ -875,7 +954,7 @@ def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
         ],
     )
     assert result.exit_code != 0
-    assert "authorization" in result.output.lower() or "expired" in result.output.lower()
+    assert "expired" in result.output.lower()
 
 
 def test_cli_list_empty_catalog(tmp_path):
@@ -1515,6 +1594,10 @@ def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("FANTASYPOINTS_COOKIE", "ds_session=expired")
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    # The paste prompt is only reached by a source with no stored login, so
+    # this is the contract under test — and it keeps the renewal path, which
+    # signs in for real, out of the run.
+    monkeypatch.setattr(FP_SOURCE, "renew_auth", None)
 
     call_count = {"n": 0}
     good_body = {

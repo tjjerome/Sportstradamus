@@ -98,6 +98,13 @@ A source whose credential can be minted from a stored login sets
 recover under cron. FP is the one that does (its cookie lapses weekly);
 see [fantasypoints.md](fantasypoints.md).
 
+When neither path yields a credential the run **stops** — `_refresh_auth`
+raises `CollectorAuthRecoveryError`, the loop writes its report and exits
+non-zero naming the reason. The credential is shared by every endpoint, so
+continuing cannot succeed; it would only add an identical failure per spec
+and, for a source that renews from a stored login, one more refused sign-in
+per spec.
+
 `read_auth` resolves each slot from the env (`{ENV_PREFIX}_COOKIE`, …) first,
 then keys.json, defaulting to `""` when a key is absent — so a source works
 before its slot is populated (it just fails the request with a clear "empty

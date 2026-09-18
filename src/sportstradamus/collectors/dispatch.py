@@ -16,7 +16,7 @@ import click
 from sportstradamus.collectors.auth import extract_auth_updates, update_keys
 from sportstradamus.collectors.catalog import EndpointSpec
 from sportstradamus.collectors.report import build_url, exc_to_err_dict, existing_parquet_rows
-from sportstradamus.collectors.transport import CollectorAuthError
+from sportstradamus.collectors.transport import CollectorAuthError, CollectorAuthRecoveryError
 
 # One initial attempt plus one retry after an interactive auth-refresh. Cron
 # runs never see the second attempt (stdin is not a TTY), so the effective
@@ -33,9 +33,14 @@ def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_c
 
     On 401/403 the credential is renewed once and the call retried — from
     the source's stored login where it has one (so cron recovers on its
-    own), otherwise from a curl pasted at a TTY. When neither works the
-    auth failure is returned as an error so the caller can record it and
-    continue.
+    own), otherwise from a curl pasted at a TTY. A repeat 401/403 after a
+    successful renewal is returned as an error so the caller can record it
+    and continue.
+
+    Raises:
+        CollectorAuthRecoveryError: The renewal itself failed. The
+            credential is shared by every remaining spec, so this
+            propagates instead of being recorded as a per-spec error.
     """
     for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
@@ -47,31 +52,43 @@ def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_c
             log.warning(
                 "auth error", extra={"endpoint": spec.name, "attempt": attempt, "error": str(exc)}
             )
-            if attempt == _AUTH_MAX_ATTEMPTS or not _refresh_auth(source, client):
+            if attempt == _AUTH_MAX_ATTEMPTS:
                 return None, exc_to_err_dict(exc)
+            _refresh_auth(source, client)
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
             return None, exc_to_err_dict(exc)
     return None, {"error_class": "Unknown", "error_message": "retries exhausted"}
 
 
-def _refresh_auth(source, client) -> bool:
-    """Get a working credential back onto ``client``, or return ``False``.
+def _refresh_auth(source, client) -> None:
+    """Put a working credential back onto ``client``, or raise.
 
     Tries the source's own renewal first — that path needs no human and so
     works under cron, which is the case that matters. Only if the source
     has no renewal, or it fails, does this fall back to prompting for a
     pasted curl, which requires a TTY.
+
+    Raises:
+        CollectorAuthRecoveryError: Neither path produced a credential.
     """
+    renewal_error = None
     if source.renew_auth is not None:
         try:
             client.refresh_credentials(cookie=source.renew_auth())
         except Exception as exc:
+            renewal_error = exc
             click.echo(f"Could not renew the session automatically: {exc}", err=True)
         else:
             click.echo("Session renewed. Resuming...", err=True)
-            return True
-    return _refresh_auth_interactively(source, client)
+            return
+    if _refresh_auth_interactively(source, client):
+        return
+    raise CollectorAuthRecoveryError(
+        f"the stored login was rejected — {renewal_error}"
+        if renewal_error is not None
+        else "the stored credential is expired and no replacement was supplied"
+    )
 
 
 def _refresh_auth_interactively(source, client) -> bool:
