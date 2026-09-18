@@ -69,12 +69,14 @@ from sportstradamus.stats.nfl_fp_loader import (
 _ANY_A_TD_BONUS = 20
 _ANY_A_INT_PENALTY = 45
 
-# Coverage-scheme percentage columns in qb_coverage_matchup.parquet are
-# named ``playerStatsCoverageScheme{Scheme}PassingDropbacksPercentage``;
-# the MAN bucket is the per-game fraction of dropbacks faced against
-# man coverage. Cover2/3/4/6 buckets exist but aren't load-bearing for
-# the current comp config.
-_QB_COV_MAN_PCT_COL = "playerStatsCoverageSchemeManPassingDropbacksPercentage"
+# Man-coverage exposure in qb_coverage_matchup.parquet, as the dropback
+# counts rather than the per-game percentage beside them. The two forms are
+# algebraically the same season-to-date rate -- the percentage IS
+# man-dropbacks over dropbacks -- but only the counts survived FP's API
+# rebuild, and the count form avoids the displayed percentage's rounding.
+# Cover2/3/4/6 buckets exist but aren't load-bearing for the current comp
+# config.
+_QB_COV_MAN_DROPBACKS_COL = "playerStatsCoverageSchemeManPassingDropbacksTotal"
 _QB_COV_DROPBACKS_COL = "playerStatsPassingDropbacksTotal"
 
 # In the season-CSV separation-by-coverage file, the 5th sub-stratum
@@ -630,6 +632,32 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "sum",
         ("playerStatsSnapsOffenseTotal",),
     ),
+    # The inside-N snap columns moved out of the unfiltered snap tool when FP
+    # rebuilt its API -- they are now a filtered request, collected as their
+    # own kinds. Both spellings are listed so archived legacy snapshots and
+    # new pulls aggregate identically; whichever kind carries the column for a
+    # given week wins and the other yields nothing.
+    _Recipe(
+        "off_snaps_INSIDE10",
+        "offense_snaps_inside10",
+        "sum",
+        ("playerStatsInside10SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE20",
+        "offense_snaps_inside20",
+        "sum",
+        ("playerStatsInside20SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE10_pct",
+        "offense_snaps_inside10",
+        "weighted_mean",
+        (
+            "marketShareInside10SnapsOffenseTotal",
+            "playerStatsGamesPlayed",
+        ),
+    ),
     _Recipe(
         "off_snaps_INSIDE10",
         "offense_snaps",
@@ -682,8 +710,8 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
     _Recipe(
         "qb_cov_QB_MAN_pct",
         "qb_coverage_matchup",
-        "weighted_mean",
-        (_QB_COV_MAN_PCT_COL, _QB_COV_DROPBACKS_COL),
+        "weighted_rate",
+        (_QB_COV_MAN_DROPBACKS_COL, _QB_COV_DROPBACKS_COL),
     ),
     # Phase 3+4 asof additions -- QB pressure & throw-away & route-share signal.
     # These are recipe-only additions that the Phase 3+4
@@ -770,6 +798,19 @@ _COVERAGE_YPRR_SCHEMES: dict[str, tuple[str, ...]] = {
     "cover4": ("Cover4",),
     "cover6": ("Cover6",),
 }
+
+# Kinds pooled to build the per-scheme YPRR panel. The archived legacy
+# snapshots carry all five schemes in ``wr_coverage_matchup``; the current API
+# serves the Man leg there and each zone shell as its own filtered pull, so
+# every scheme's columns are present on some subset of the concatenated rows
+# and ``_fold_coverage_schemes`` sums across them either way.
+_COVERAGE_YPRR_KINDS: tuple[str, ...] = (
+    "wr_coverage_matchup",
+    "wr_coverage_matchup_cover2",
+    "wr_coverage_matchup_cover3",
+    "wr_coverage_matchup_cover4",
+    "wr_coverage_matchup_cover6",
+)
 
 # Phase 3+4 per-coverage separation (receiving_separation_by_coverage).
 # Bucket JSON has scheme-keyed inner dicts with
@@ -1249,7 +1290,7 @@ def _aggregate_separation_by_routes(
 def _aggregate_per_coverage_yprr(
     windows: Sequence[tuple[int, int, int]],
 ) -> pd.DataFrame:
-    """Per-(player, coverage-bucket) YPRR from ``wr_coverage_matchup`` snapshots.
+    """Per-(player, coverage-bucket) YPRR aggregated across :data:`_COVERAGE_YPRR_KINDS`.
 
     Emits two columns:
 
@@ -1267,8 +1308,15 @@ def _aggregate_per_coverage_yprr(
     man-vs-zone split is the load-bearing decomposition for the
     pass-catcher matchup signal.
     """
-    df = _load_kind_multi(windows, "wr_coverage_matchup")
-    if df.empty or PLAYER_GROUP_COL not in df.columns:
+    frames = [
+        frame
+        for kind in _COVERAGE_YPRR_KINDS
+        if not (frame := _load_kind_multi(windows, kind)).empty
+    ]
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
+    if PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
 
     pieces: dict[str, pd.Series] = {}

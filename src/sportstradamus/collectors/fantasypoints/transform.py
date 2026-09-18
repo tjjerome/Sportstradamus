@@ -1,38 +1,32 @@
 """JSON-to-parquet pipeline for Fantasy Points tool responses.
 
-FP Data Suite responses carry row data in one of two shapes:
+The API answers each tool with a bare JSON array of flat, snake_case row
+dicts. Every row also carries a ``__raw`` sub-object holding the counts
+behind the displayed rates — the numerators and denominators the
+aggregation recipes need in order to pool weeks correctly.
 
-- v2 ``/values`` endpoints (every discover-generated entry):
-  ``content.rows.values``.
-- Legacy tool endpoints (hand-imported entries that pre-date v2):
-  ``content.table.rows.values``.
+Turning one response into the frame the stats layer expects is three steps,
+all so that layer never learns the upstream schema changed: ``__raw`` is
+flattened up into the row, the identity columns are synthesised from the
+API's own ids, and every column the recipes read is copied to its legacy
+camelCase name by :mod:`collectors.fantasypoints.column_map`.
 
-Each row is a flat dict with ``gameSeason`` / ``gameWeek`` columns;
-column names are camelCase with a source prefix (``playerStats...``,
-``teamStats...``, ``opponentStats...``, ``game*``).
-
-This module turns either response into a pandas DataFrame and routes
-the parquet output to ``player_data/`` vs ``team_data/`` based on
-the spec's context. Routing prefers (in order): the catalog name
-prefix (``player_`` / ``team_`` / ``opponent_`` — what
-``discover.py`` writes), then the URL path
-(``.../tools/{context}/{slug}`` — covers hand-imported entries
-from before the prefix convention existed), then the first segment
-of ``output_subdir``.
+Parquet output routes to ``player_data/`` vs ``team_data/`` from the
+catalog name prefix (``player_`` / ``team_`` / ``opponent_``), falling
+back to the first segment of ``output_subdir``.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pandas as pd
 
 from sportstradamus import data
 from sportstradamus.collectors.catalog import EndpointSpec
+from sportstradamus.collectors.fantasypoints.column_map import apply_column_map
 
 # Base of the package data tree. ``sportstradamus.data`` is a namespace
 # package — its ``importlib.resources.files()`` returns a
@@ -55,20 +49,29 @@ _PLAYER_PREFIX = "player_"
 _TEAM_PREFIX = "team_"
 _OPPONENT_PREFIX = "opponent_"
 
-# Contexts we know how to route. Matches `_KNOWN_CONTEXTS` in
-# discover.py — anything else (``other``) routes to team_data with
-# the raw context as a filename suffix, since we have no evidence
-# of where ``other``-context tools should live.
+# Contexts we know how to route. Anything else routes to team_data with
+# the raw context as a filename suffix, since we have no evidence of where
+# such tools should live.
 _CONTEXT_TO_PREFIX = {
     "player": _PLAYER_PREFIX,
     "team": _TEAM_PREFIX,
     "opponent": _OPPONENT_PREFIX,
 }
 
-# URL fragment that identifies the routing context on hand-imported
-# entries that predate the discover-prefix convention. Pattern:
-# ``/v2/ds/{league}/tools/{context}/{slug}`` — captures both.
-_TOOL_URL_RE = re.compile(r"/tools/(?P<context>[^/]+)/(?P<slug>[^/?#]+)")
+# Per-file-kind new -> legacy column translation, keyed the same way the
+# stats layer's FILE_KINDS are.
+# Sub-object on every new-API row holding the counts behind the rates.
+_RAW_KEY = "__raw"
+
+# Identity columns the stats layer keys on. The new API publishes one
+# 3-letter team code per row and a GSIS-style player id under a per-tool
+# name, so both team id columns are filled with the abbreviation itself:
+# ``_build_team_abbreviation_map`` then resolves to an identity mapping and
+# the recipes' groupby key keeps working unchanged.
+_NEW_PLAYER_ID_COLS = ("passer_id", "rusher_id", "receiver_id", "player_id", "gsis_id")
+_PLAYER_ID_COL = "playerPlayerId"
+_TEAM_ID_COL = "teamTeamId"
+_TEAM_ABBR_COL = "teamAbbreviation"
 
 # Per-mode filename suffix. Empty for ``weekly`` (so existing parquets
 # don't have to be renamed) and ``postseason`` (which gets its own
@@ -90,32 +93,87 @@ _MODE_SUFFIX = {
 _REGULAR_SEASON_WEEKS = 18
 
 
-def parse_table_response(payload: dict) -> pd.DataFrame:
-    """Extract the FP response's row list into a DataFrame.
+def parse_table_response(
+    payload: object,
+    *,
+    spec: EndpointSpec | None = None,
+    season: int | None = None,
+    week: int | None = None,
+) -> pd.DataFrame:
+    """Turn one tool response into the DataFrame the stats layer expects.
 
-    Reads ``content.rows.values`` (v2 ``/values`` endpoints) or
-    ``content.table.rows.values`` (legacy endpoints) — see
-    :func:`_extract_rows`. Columns whose cells contain a ``list`` or
-    ``dict`` are serialised to JSON strings so the parquet writer
-    doesn't have to materialise nested arrow types (which work but
-    balloon the file size and make downstream pandas reads slower).
+    Flattens each row's ``__raw`` counts up alongside the displayed rates,
+    synthesises the identity columns, then copies every mapped column to
+    its legacy name (see the module docstring). Columns whose cells hold a
+    ``list`` or ``dict`` are serialised to JSON strings so the parquet
+    writer doesn't materialise nested arrow types, which work but balloon
+    the file and slow downstream reads.
 
     Args:
-        payload: Decoded JSON body returned by any
-            ``POST /v2/ds/{league}/tools/{context}/{slug}/values`` call.
+        payload: Decoded JSON body — a bare list of row dicts.
+        spec: Catalog entry that produced the body. Without it the frame
+            is returned untranslated, which is what the ad-hoc
+            ``import-curl`` preview wants.
+        season: NFL season the request covered. Stamped onto every row as
+            ``gameSeason``; a response never echoes its own filters, and the
+            stats layer's metadata pass drops a whole kind that lacks it.
+        week: NFL week the request covered, stamped as ``gameWeek``.
 
     Returns:
-        DataFrame with one row per ``values[]`` entry. Returns an
-        empty DataFrame if the response has no rows (e.g. an empty
-        tool or an unexpected shape).
+        DataFrame with one row per response entry, empty when the response
+        carries no rows.
     """
     rows = _extract_rows(payload)
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame.from_records(rows)
+    df = pd.DataFrame.from_records([_flatten_raw(row) for row in rows])
+    df = _add_identity_columns(df)
+    if season is not None:
+        df["gameSeason"] = season
+    if week is not None:
+        df["gameWeek"] = week
+    if spec is not None:
+        df = apply_column_map(df, *_route_spec(spec))
     for col in df.columns:
         if df[col].map(lambda v: isinstance(v, list | dict)).any():
             df[col] = df[col].map(_to_json_string)
+    return df
+
+
+def _flatten_raw(row: dict) -> dict:
+    """Lift a row's ``__raw`` counts up beside its displayed rates.
+
+    Displayed values win on a name collision: where both carry ``games`` or
+    ``dropbacks`` they agree, and the displayed one is what the legacy
+    column was matched against.
+    """
+    raw = row.get(_RAW_KEY)
+    flat = {k: v for k, v in row.items() if k != _RAW_KEY}
+    if isinstance(raw, dict):
+        flat = {**{k: v for k, v in raw.items() if k not in flat}, **flat}
+    return flat
+
+
+def _add_identity_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Synthesise the identity columns the stats layer groups and joins on.
+
+    ``playerPlayerId`` only ever serves as a groupby key before the result
+    is re-keyed to the player's name, so the API's GSIS-style id is a valid
+    substitute. Both team id columns get the 3-letter abbreviation, which
+    makes ``_build_team_abbreviation_map`` an identity mapping.
+    """
+    if "team" in df.columns:
+        df[_TEAM_ID_COL] = df["team"]
+        df[_TEAM_ABBR_COL] = df["team"]
+    id_col = next((c for c in _NEW_PLAYER_ID_COLS if c in df.columns), None)
+    if id_col is not None:
+        df[_PLAYER_ID_COL] = df[id_col]
+    if "name" in df.columns:
+        names = df["name"].astype(str).str.split(n=1)
+        df["playerFirstName"] = names.str[0]
+        df["playerLastName"] = names.str[1].fillna("")
+    if "position" in df.columns:
+        df["playerPosition"] = df["position"]
     return df
 
 
@@ -151,13 +209,10 @@ def parquet_path_for_spec(
 
     1. **Name prefix** — ``player_X`` → ``player_data/...``,
        ``team_X`` → ``team_data/...``, ``opponent_X`` →
-       ``team_data/.../X_opp...``. Discover-generated entries
-       always match this case.
-    2. **URL path** — for hand-imported entries that pre-date the
-       prefix convention, parse ``/tools/{context}/{slug}`` out of
-       ``spec.url`` and route on ``context``.
-    3. **output_subdir** — fall back to the first path segment of
-       the catalog's ``output_subdir`` field.
+       ``team_data/.../X_opp...``.
+    2. **output_subdir** — fall back to the first path segment of
+       the catalog's ``output_subdir`` field, for hand-imported
+       entries that pre-date the prefix convention.
 
     Args:
         spec: Catalog entry.
@@ -200,7 +255,7 @@ def parquet_path_for_spec(
 
 
 def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
-    """Return ``(context, tool_slug)`` for one spec, trying three routing sources."""
+    """Return ``(context, tool_slug)`` for one spec, preferring the name prefix."""
     for prefix, ctx in (
         (_PLAYER_PREFIX, "player"),
         (_TEAM_PREFIX, "team"),
@@ -208,9 +263,6 @@ def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
     ):
         if spec.name.startswith(prefix):
             return ctx, spec.name[len(prefix) :]
-    match = _TOOL_URL_RE.search(urlsplit(spec.url).path)
-    if match and match["context"] in _CONTEXT_TO_PREFIX:
-        return match["context"], match["slug"].replace("-", "_")
     first_segment = (spec.output_subdir or "").split("/", 1)[0]
     if first_segment in _CONTEXT_TO_PREFIX:
         tool_slug = spec.name.removeprefix(f"{first_segment}_")
@@ -230,35 +282,16 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
     df.to_parquet(path, index=False)
 
 
-def _extract_rows(payload: dict) -> list[dict]:
-    """Return the row list from an FP response, tolerating both response shapes.
+def _extract_rows(payload: object) -> list[dict]:
+    """Return the row list from a tool response.
 
-    Two observed shapes for ``rows``:
-
-    - v2 ``/values`` endpoints: ``content.rows.values`` (no ``table``
-      wrapper). This is what every discover-generated entry hits.
-    - Legacy tool endpoints: ``content.table.rows.values`` — kept for
-      hand-imported entries that predate the v2 contract.
-
-    ``rows`` itself is normally ``{count, values: [...]}`` but a few
-    legacy endpoints return a bare list — handle both so callers
-    don't need to.
+    The API answers with a bare JSON array. An error page or an expired
+    session yields some other shape, which becomes zero rows here and an
+    ``empty`` run result with a response preview attached.
     """
-    if not isinstance(payload, dict):
-        return []
-    content = payload.get("content", {})
-    if not isinstance(content, dict):
-        return []
-    rows_node = content.get("rows")
-    if rows_node is None and isinstance(content.get("table"), dict):
-        rows_node = content["table"].get("rows")
-    if isinstance(rows_node, dict):
-        values = rows_node.get("values", [])
-    elif isinstance(rows_node, list):
-        values = rows_node
-    else:
-        values = []
-    return [v for v in values if isinstance(v, dict)]
+    if isinstance(payload, list):
+        return [v for v in payload if isinstance(v, dict)]
+    return []
 
 
 def _to_json_string(value: Any) -> Any:

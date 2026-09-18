@@ -152,8 +152,8 @@ Shared framework (`transport.py`, `auth.py`, `catalog.py`, `runner.py`,
 `tabular.py`, `dispatch.py`, `commands*.py`, `cli.py`) for cookie/bearer
 authenticated sources, plus one subpackage per source: `fantasypoints/`
 (`fp-fetch`), `cleaningtheglass/` (`ctg-fetch`), `baseballsavant/`
-(`savant-fetch`). Each writes date-keyed snapshots that `stats/` loaders fold
-into features. Canonical guide: [docs/data_collectors.md](data_collectors.md).
+(`savant-fetch`). Each writes period-keyed snapshots — by game week for FP, by
+date for the other two — that `stats/` loaders fold into features. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 ### `dashboard/` — Streamlit dashboard
 

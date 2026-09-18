@@ -1,3 +1,11 @@
+# ARCHIVED 2026-09-18 from src/sportstradamus/collectors/fantasypoints/discover.py
+# Reason: Registry endpoint POST /v2/ds/all/tools retired with the legacy API; the new catalog is hand-built from captured requests.
+# Last live SHA: 75602850
+# Original imports (now unresolved here):
+#   from __future__ import annotations
+#   import re
+#   from sportstradamus.collectors.catalog import EndpointSpec
+
 """Auto-discover Fantasy Points Data Suite tool endpoints from the registry.
 
 FP's SPA fetches a tool registry at ``POST /v2/ds/all/tools`` on login.

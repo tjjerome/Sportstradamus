@@ -7,7 +7,6 @@ Options:
 
 Commands:
   backfill      Iterate (season, week) pairs and write per-tool parquets...
-  discover      Auto-populate the catalog from Fantasy Points' tool registry.
   import-curl   Register a new endpoint from a DevTools-copied curl command.
   list          Print the registered endpoint catalog.
   refresh-auth  Update auth fields in creds/keys.json from a fresh curl...

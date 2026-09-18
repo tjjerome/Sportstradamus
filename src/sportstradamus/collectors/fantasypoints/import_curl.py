@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import click
@@ -24,11 +23,11 @@ from sportstradamus.collectors.auth import (
 from sportstradamus.collectors.catalog import EndpointSpec, load_catalog, save_catalog
 from sportstradamus.collectors.fantasypoints.source import CATALOG_PATH
 
-# Sentinel string :mod:`body_substitute` recognises and rewrites to the
-# integer season at call time. Mirrors the constant in :mod:`discover` —
-# kept duplicated here (rather than imported) so ``import-curl`` doesn't
-# depend on the discover module.
-_SEASON_INT_SENTINEL = "__SEASON_INT__"
+# The period is re-derived per call from --season / --week / --mode, so the
+# literal a capture carries would only ever mislead: the dry-run listing and
+# the run report both print the rendered params. Templating them on import
+# keeps those two honest without the human having to edit the catalog.
+_PERIOD_PARAM_TEMPLATES = {"seasons": "{season}", "regWeeks": "{week}"}
 
 
 @click.command("import-curl")
@@ -53,8 +52,8 @@ _SEASON_INT_SENTINEL = "__SEASON_INT__"
     "--replace",
     is_flag=True,
     help="Overwrite an existing entry of this name instead of erroring. "
-    "Use to patch a discover-generated body with the SPA's tool-specific "
-    "filters (position, qualifier, etc.) from a working DevTools curl.",
+    "Use to patch an entry's query filters (mode, position, situational "
+    "slice) from a fresh DevTools curl.",
 )
 @click.option(
     "--catalog",
@@ -68,13 +67,10 @@ def import_curl(
     """Register a new endpoint from a DevTools-copied curl command.
 
     With ``--replace``, overwrite an existing catalog entry instead of
-    appending a new one — useful when a tool needs per-tool filters
-    (position + filterResult qualifier) the SPA injects per tool but
-    discover can't infer from the registry. The pasted body's literal
-    ``game.season`` value is rewritten to the integer sentinel so the entry
-    stays usable across seasons; the ``weeks`` block doesn't need
-    sentinelisation because ``body_substitute`` overrides it per call based
-    on ``--mode``.
+    appending a new one — useful when a tool gains a situational filter
+    that needs capturing from a working request. Every other captured
+    filter is kept verbatim; only the season/week the capture happened to
+    use is templated back out.
     """
     path = catalog_path or CATALOG_PATH
     existing = load_catalog(path)
@@ -93,7 +89,6 @@ def import_curl(
         response_format=response_format,
         weekly=weekly,
     )
-    _sentinelize_season(spec.json_body)
     if name in existing_by_name:
         existing[existing_by_name[name]] = spec
         verb = "Replaced"
@@ -119,8 +114,9 @@ def parse_curl_to_spec(
     cURL (bash)" action. Handles both GET (default) and POST (``-X POST`` +
     ``--data-raw '{...}'``) calls. ``Authorization``, ``Cookie``, and
     ``User-Agent`` headers are stripped (those come from ``creds/keys.json``);
-    the URL query string is split out into ``params``; the POST body is
-    parsed as JSON into ``json_body``.
+    the URL query string is split out into ``params``, with the captured
+    season/week replaced by ``{season}`` / ``{week}`` templates; the POST body
+    is parsed as JSON into ``json_body``.
 
     Args:
         curl_text: Raw text of the curl command.
@@ -139,14 +135,14 @@ def parse_curl_to_spec(
         k: v for k, v in parsed["headers"].items() if k.lower() not in _STRIPPED_CURL_HEADERS
     }
     url_parts = urlsplit(parsed["url"])
-    params = dict(parse_qsl(url_parts.query, keep_blank_values=True))
+    params = dict(parse_qsl(url_parts.query, keep_blank_values=True)) | _PERIOD_PARAM_TEMPLATES
     bare_url = urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, "", ""))
     json_body, method = _curl_body_and_method(parsed["body"], parsed["method"])
     return EndpointSpec(
         name=name,
         url=bare_url,
         method=method,
-        params=params or None,
+        params=params,
         json_body=json_body,
         extra_headers=filtered_headers or None,
         response_format=response_format,
@@ -167,25 +163,3 @@ def _curl_body_and_method(raw_body: str | None, declared_method: str | None) -> 
         json_body = None
     method = (declared_method or ("POST" if json_body is not None else "GET")).upper()
     return json_body, method
-
-
-def _sentinelize_season(body: Any) -> None:
-    """Rewrite a literal ``context.filterMatch.game.season.eq`` int to the sentinel.
-
-    The curl the user pastes was captured for one specific season; if we
-    stored that literal in the catalog the entry would be locked to that
-    season forever. Walking just the canonical path keeps the rewrite
-    surgical — other ``season`` fields elsewhere in the body (if any) stay
-    as the user captured them.
-    """
-    if not isinstance(body, dict):
-        return
-    ctx = body.get("context")
-    if not isinstance(ctx, dict):
-        return
-    filter_match = ctx.get("filterMatch")
-    if not isinstance(filter_match, dict):
-        return
-    season_node = filter_match.get("game.season")
-    if isinstance(season_node, dict) and isinstance(season_node.get("eq"), int):
-        season_node["eq"] = _SEASON_INT_SENTINEL

@@ -37,7 +37,7 @@ class Source:
     default_context: Callable[[int | None, int | None], dict[str, Any]]
     path_for: Callable[..., Path]
     dispatch: Callable[..., Any]
-    transform: Callable[[Any], Any]
+    transform: Callable[..., Any]
     report_prefix: str
     # Week-source-only (Fantasy Points): the request-body renderer for the run
     # report, and the parquet spot-check verifier. Date sources leave these

@@ -52,8 +52,7 @@ The creds stub is just empty strings:
 
 ```json
 {"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "",
- "fantasypoints_authorization": "", "fantasypoints_cookie": "",
- "fantasypoints_user_agent": ""}
+ "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}
 ```
 
 `creds/` is git-ignored — real keys never enter the repo.

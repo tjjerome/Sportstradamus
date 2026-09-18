@@ -38,7 +38,7 @@ from sportstradamus.collectors.report import (
 
 PathFor = Callable[[EndpointSpec], Path]
 FetchOne = Callable[[EndpointSpec], "tuple[Any | None, dict[str, Any] | None]"]
-Transform = Callable[[Any], pd.DataFrame]
+Transform = Callable[..., pd.DataFrame]
 
 
 def fetch_and_write_one(
@@ -110,7 +110,7 @@ def fetch_and_write_one(
         base_result.http_status = err.get("http_status")
         base_result.response_preview = err.get("response_preview")
         return base_result
-    df = transform(body)
+    df = transform(body, spec=spec, season=season, week=week)
     target.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(target, index=False)
     base_result.path = str(target)

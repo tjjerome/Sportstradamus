@@ -1,0 +1,848 @@
+{
+  "coverage_matrix": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "db_man": "teamStatsCoverageSchemeManPassingDropbacksTotal",
+      "db_mof_c": "teamStatsCoverageSchemeSingleHighPassingDropbacksTotal",
+      "db_mof_o": "teamStatsCoverageSchemeTwoHighPassingDropbacksTotal",
+      "db_zone": "teamStatsCoverageSchemeZonePassingDropbacksTotal",
+      "dropbacks": "teamStatsPassingDropbacksTotal"
+    },
+    "scale": {},
+    "tool": "coverage-matrix"
+  },
+  "coverage_matrix_opp": {
+    "params": {
+      "mode": "defense"
+    },
+    "rename": {
+      "db_man": "opponentStatsCoverageSchemeManPassingDropbacksTotal",
+      "db_mof_c": "opponentStatsCoverageSchemeSingleHighPassingDropbacksTotal",
+      "db_mof_o": "opponentStatsCoverageSchemeTwoHighPassingDropbacksTotal",
+      "db_zone": "opponentStatsCoverageSchemeZonePassingDropbacksTotal",
+      "dropbacks": "opponentStatsPassingDropbacksTotal"
+    },
+    "scale": {},
+    "tool": "coverage-matrix"
+  },
+  "efficiency": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "fantasy_points_pg": "playerStatsFantasyPointsPpr",
+      "touches": "playerStatsScrimmageTouchesTotal",
+      "xfp": "playerStatsXfpPprTotal",
+      "yfs": "playerStatsScrimmageYardsTotal"
+    },
+    "scale": {},
+    "tool": "efficiency"
+  },
+  "offense_snap_share_report": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "games": "playerStatsGamesPlayed",
+      "snap_pct": "marketShareSnapsOffenseTotal"
+    },
+    "scale": {
+      "snap_pct": 0.01
+    },
+    "tool": "efficiency"
+  },
+  "offense_snaps": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "games": "playerStatsGamesPlayed",
+      "snaps": "playerStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "efficiency"
+  },
+  "offense_snaps_inside10": {
+    "params": {
+      "ydsToScoreMax": "10"
+    },
+    "rename": {
+      "games": "playerStatsGamesPlayed",
+      "snap_pct": "marketShareInside10SnapsOffenseTotal",
+      "snaps": "playerStatsInside10SnapsOffenseTotal"
+    },
+    "scale": {
+      "snap_pct": 0.01
+    },
+    "tool": "efficiency"
+  },
+  "offense_snaps_inside20": {
+    "params": {
+      "ydsToScoreMax": "20"
+    },
+    "rename": {
+      "games": "playerStatsGamesPlayed",
+      "snaps": "playerStatsInside20SnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "efficiency"
+  },
+  "passing_advanced": {
+    "params": {
+      "positions": "QB"
+    },
+    "rename": {
+      "adot": "playerStatsPassingAverageDepthOfTarget",
+      "attempts": "playerStatsPassingAttemptsTotal",
+      "catchable_throw_pct": "playerStatsPassingAttemptsCatchablePercentage",
+      "cpoe": "playerStatsPassingCompletionsOverExpected",
+      "deep_throws": "playerStatsPassingDeepThrowAttemptsTotal",
+      "depth_target_total": "playerStatsPassingYardsAirTotal",
+      "dropbacks_pg": "playerStatsPassingDropbacksTotal",
+      "first_downs": "playerStatsFirstDownsPassing",
+      "hero_throw_pct": "playerStatsPassingHeroThrowPercentage",
+      "interceptions": "playerStatsPassingInterceptionsTotal",
+      "off_target_throw_pct": "playerStatsPassingOffTargetThrowAttemptsPercentage",
+      "pressure_rate_over_expected": "playerStatsPassingPressuredOverExpected",
+      "pressures": "playerStatsPassingPressuredTotal",
+      "rpo_pct": "playerStatsPassingRunPassOptionPercentage",
+      "sack_yards": "playerStatsPassingSackedYardsLost",
+      "sacks": "playerStatsPassingSackedTotal",
+      "scrambles": "playerStatsPassingScramblesTotal",
+      "throwaways": "playerStatsPassingIncompletionsThrownAway",
+      "time_to_throw": "playerStatsPassingAverageTimeToThrow",
+      "touchdowns": "playerStatsPassingTouchdownsTotal",
+      "turnover_worthy_throw_pct": "playerStatsPassingTowThrowPercentage",
+      "yards": "playerStatsPassingYardsTotal"
+    },
+    "scale": {
+      "catchable_throw_pct": 0.01,
+      "cpoe": 0.01,
+      "hero_throw_pct": 0.01,
+      "off_target_throw_pct": 0.01,
+      "pressure_rate_over_expected": 0.01,
+      "rpo_pct": 0.01,
+      "sack_yards": -1.0,
+      "turnover_worthy_throw_pct": 0.01
+    },
+    "tool": "passing"
+  },
+  "passing_basic": {
+    "params": {
+      "positions": "QB"
+    },
+    "rename": {
+      "rush_yards": "playerStatsRushingYardsTotal"
+    },
+    "scale": {},
+    "tool": "passing"
+  },
+  "proe_report": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "actual_pass_count": "teamStatsPassingDropbacksTotal",
+      "expected_pass_rate_sum": "teamStatsPassingDropbacksExpected"
+    },
+    "scale": {},
+    "tool": "team-stats"
+  },
+  "proe_report_opp": {
+    "params": {
+      "mode": "defense"
+    },
+    "rename": {
+      "actual_pass_count": "opponentStatsPassingDropbacksTotal",
+      "expected_pass_rate_sum": "opponentStatsPassingDropbacksExpected"
+    },
+    "scale": {},
+    "tool": "team-stats"
+  },
+  "qb_coverage_matchup": {
+    "params": {
+      "positions": "QB"
+    },
+    "rename": {
+      "man_dropbacks": "playerStatsCoverageSchemeManPassingDropbacksTotal",
+      "overall_dropbacks": "playerStatsPassingDropbacksTotal"
+    },
+    "scale": {},
+    "tool": "passing-situation"
+  },
+  "receiving_advanced": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "adot": "playerStatsReceivingAverageDepthOfTarget",
+      "air_yard_market_share": "marketShareReceivingYardsAir",
+      "catchable_targets": "playerStatsReceivingTargetsCatchableTotal",
+      "contested_catches": "playerStatsReceivingReceptionsContested",
+      "contested_targets": "playerStatsReceivingTargetsContestedTotal",
+      "deep_targets": "playerStatsReceivingDeepTargetTargetsTotal",
+      "designed_targets": "playerStatsReceivingTargetedReadDesignTotal",
+      "drops": "playerStatsReceivingDropsTotal",
+      "first_downs": "playerStatsFirstDownsReceiving",
+      "first_read_targets": "playerStatsReceivingTargetedReadFirstTotal",
+      "inline_pct": "playerStatsReceivingAlignmentInlineRoutesPercentage",
+      "mtf": "playerStatsReceivingMissedTacklesForcedTotal",
+      "rec_yards": "playerStatsReceivingYardsTotal",
+      "receptions": "playerStatsReceivingReceptionsTotal",
+      "routes": "playerStatsReceivingRoutesTotal",
+      "target_market_share": "marketShareReceivingTargetsTotal",
+      "touchdowns": "playerStatsReceivingTouchdownsTotal",
+      "wr_attempts": "playerStatsReceivingTargetsTotal",
+      "yac": "playerStatsReceivingYardsAfterCatchTotal",
+      "yaco": "playerStatsReceivingYardsAfterContactTotal"
+    },
+    "scale": {
+      "air_yard_market_share": 0.01,
+      "inline_pct": 0.01,
+      "target_market_share": 0.01
+    },
+    "tool": "receiving"
+  },
+  "receiving_basic": {
+    "params": {
+      "positions": "WR,TE"
+    },
+    "rename": {
+      "inside_10_targets": "playerStatsInside10ReceivingTargetsTotal",
+      "receptions": "playerStatsReceivingReceptionsTotal",
+      "redzone_targets": "playerStatsInside20ReceivingTargetsTotal"
+    },
+    "scale": {},
+    "tool": "receiving"
+  },
+  "receiving_man_vs_zone": {
+    "bucket": {
+      "bucketMan": {
+        "playerStatsReceivingAveragesPerRouteYardsTotal": {
+          "den": "man_routes",
+          "num": "man_rec_yards"
+        },
+        "playerStatsReceivingRoutesTotal": {
+          "col": "man_routes"
+        }
+      },
+      "bucketSingleHigh": {
+        "playerStatsReceivingAveragesPerRouteYardsTotal": {
+          "den": "single_high_routes",
+          "num": "single_high_rec_yards"
+        },
+        "playerStatsReceivingRoutesTotal": {
+          "col": "single_high_routes"
+        }
+      },
+      "bucketTwoHigh": {
+        "playerStatsReceivingAveragesPerRouteYardsTotal": {
+          "den": "two_high_routes",
+          "num": "two_high_rec_yards"
+        },
+        "playerStatsReceivingRoutesTotal": {
+          "col": "two_high_routes"
+        }
+      },
+      "bucketZone": {
+        "playerStatsReceivingAveragesPerRouteYardsTotal": {
+          "den": "zone_routes",
+          "num": "zone_rec_yards"
+        },
+        "playerStatsReceivingRoutesTotal": {
+          "col": "zone_routes"
+        }
+      }
+    },
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "overall_rec_yards": "playerStatsReceivingYardsTotal",
+      "overall_routes": "playerStatsReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving-man-vs-zone"
+  },
+  "receiving_route_share_report": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "overall_routes_pct": "marketShareReceivingRoutesTotal"
+    },
+    "scale": {
+      "overall_routes_pct": 0.01
+    },
+    "tool": "receiving-routes-run"
+  },
+  "receiving_routes_run": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "overall_routes": "playerStatsReceivingRoutesTotal",
+      "slot_routes": "playerStatsReceivingAlignmentSlotRoutesTotal",
+      "wide_routes": "playerStatsReceivingAlignmentWideRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving-routes-run"
+  },
+  "receiving_separation_by_alignment": {
+    "bucket": {
+      "bucketReceivingSeparationBackfield": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "backfield_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "backfield_routes",
+          "num": "backfield_sep_sum"
+        },
+        "playerStatsReceivingSeparationWinsPercentage": {
+          "den": "backfield_routes",
+          "num": "backfield_wins"
+        }
+      },
+      "bucketReceivingSeparationInline": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "inline_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "inline_routes",
+          "num": "inline_sep_sum"
+        },
+        "playerStatsReceivingSeparationWinsPercentage": {
+          "den": "inline_routes",
+          "num": "inline_wins"
+        }
+      },
+      "bucketReceivingSeparationSlot": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "slot_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "slot_routes",
+          "num": "slot_sep_sum"
+        },
+        "playerStatsReceivingSeparationWinsPercentage": {
+          "den": "slot_routes",
+          "num": "slot_wins"
+        }
+      },
+      "bucketReceivingSeparationWide": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "wide_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "wide_routes",
+          "num": "wide_sep_sum"
+        },
+        "playerStatsReceivingSeparationWinsPercentage": {
+          "den": "wide_routes",
+          "num": "wide_wins"
+        }
+      }
+    },
+    "derive": {
+      "playerStatsReceivingSeparationWinsPercentage": {
+        "den": "routes",
+        "num": [
+          "wide_wins",
+          "slot_wins",
+          "inline_wins",
+          "backfield_wins"
+        ]
+      }
+    },
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "routes": "playerStatsReceivingSeparationRoutesTotal",
+      "sep_score": "playerStatsReceivingSeparationScorePercentage",
+      "win_rate": "playerStatsReceivingSeparationWinsPercentage"
+    },
+    "scale": {
+      "win_rate": 0.01
+    },
+    "tool": "recsep"
+  },
+  "receiving_separation_by_coverage": {
+    "bucket": {
+      "bucketReceivingSeparationCover2": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "cover2_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "cover2_routes",
+          "num": "cover2_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationCover3": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "cover3_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "cover3_routes",
+          "num": "cover3_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationCover4": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "cover4_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "cover4_routes",
+          "num": "cover4_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationCover6": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "cover6_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "cover6_routes",
+          "num": "cover6_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationMan": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "man_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "man_routes",
+          "num": "man_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRedZone": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "red_zone_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "red_zone_routes",
+          "num": "red_zone_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationZone": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "zone_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "zone_routes",
+          "num": "zone_sep_sum"
+        }
+      }
+    },
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {},
+    "scale": {},
+    "tool": "recsep-coverage"
+  },
+  "receiving_separation_by_routes": {
+    "bucket": {
+      "bucketReceivingSeparationRouteBackfield": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "backfield_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "backfield_routes",
+          "num": "backfield_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteComeback": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "comeback_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "comeback_routes",
+          "num": "comeback_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteCorner": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "corner_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "corner_routes",
+          "num": "corner_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteCrossers": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "crossers_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "crossers_routes",
+          "num": "crossers_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteFlat": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "flat_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "flat_routes",
+          "num": "flat_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteGo": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "go_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "go_routes",
+          "num": "go_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteHitch": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "hitch_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "hitch_routes",
+          "num": "hitch_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteInDig": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "in_dig_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "in_dig_routes",
+          "num": "in_dig_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteOut": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "out_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "out_routes",
+          "num": "out_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteOverall": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "overall_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "overall_routes",
+          "num": "overall_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRoutePost": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "post_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "post_routes",
+          "num": "post_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteScreens": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "screens_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "screens_routes",
+          "num": "screens_sep_sum"
+        }
+      },
+      "bucketReceivingSeparationRouteSlant": {
+        "playerStatsReceivingSeparationRoutesTotal": {
+          "col": "slant_routes"
+        },
+        "playerStatsReceivingSeparationScorePercentage": {
+          "den": "slant_routes",
+          "num": "slant_sep_sum"
+        }
+      }
+    },
+    "params": {
+      "positions": "RB,FB,WR,TE"
+    },
+    "rename": {},
+    "scale": {},
+    "tool": "recsep-routes"
+  },
+  "run_pass_report": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_first_down": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_goalline": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_leading": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_neutral": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_redzone": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_third_down": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "run_pass_report_trailing": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "dropbacks": "teamStatsSnapsOffensePass",
+      "games": "teamStatsGamesPlayed",
+      "plays": "teamStatsSnapsOffenseTotal"
+    },
+    "scale": {},
+    "tool": "playcaller-stats"
+  },
+  "rushing_advanced": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "attempts": "playerStatsRushingAttemptsTotal",
+      "explosive_yards": "playerStatsRushingYardsExplosiveTotal",
+      "first_downs": "playerStatsFirstDownsRushing",
+      "gain_15plus_pct": "playerStatsRushingRunsExplosivePercentage",
+      "gap_att_pct": "playerStatsRushingConceptManAttemptsPercentage",
+      "mtf": "playerStatsRushingMissedTacklesForcedTotal",
+      "stuff_rate": "playerStatsRushingAttemptsStuffsPercentage",
+      "success_rate": "playerStatsRushingAttemptsSuccessPercentage",
+      "touchdowns": "playerStatsRushingTouchdownsTotal",
+      "yaco_total": "playerStatsRushingYardsAfterContactTotal",
+      "yards": "playerStatsRushingYardsTotal",
+      "ybc_per_att": "playerStatsRushingYardsBeforeContactPerAttempt",
+      "zone_att_pct": "playerStatsRushingConceptZoneAttemptsPercentage"
+    },
+    "scale": {
+      "gain_15plus_pct": 0.01,
+      "gap_att_pct": 0.01,
+      "stuff_rate": 0.01,
+      "success_rate": 0.01,
+      "zone_att_pct": 0.01
+    },
+    "tool": "rushing"
+  },
+  "rushing_advanced_opp": {
+    "params": {
+      "mode": "defense"
+    },
+    "rename": {
+      "attempts": "opponentStatsRushingAttemptsTotal",
+      "gain_15plus_pct": "opponentStatsRushingRunsExplosivePercentage",
+      "stuff_rate": "opponentStatsRushingAttemptsStuffsPercentage",
+      "success_rate": "opponentStatsRushingAttemptsSuccessPercentage",
+      "yaco_total": "opponentStatsRushingYardsAfterContactTotal"
+    },
+    "scale": {
+      "gain_15plus_pct": 0.01,
+      "stuff_rate": 0.01,
+      "success_rate": 0.01
+    },
+    "tool": "rushing"
+  },
+  "rushing_advanced_team": {
+    "params": {
+      "mode": "offense"
+    },
+    "rename": {
+      "attempts": "teamStatsRushingAttemptsTotal",
+      "gain_15plus_pct": "teamStatsRushingRunsExplosivePercentage",
+      "stuff_rate": "teamStatsRushingAttemptsStuffsPercentage",
+      "success_rate": "teamStatsRushingAttemptsSuccessPercentage",
+      "yaco_total": "teamStatsRushingYardsAfterContactTotal"
+    },
+    "scale": {
+      "gain_15plus_pct": 0.01,
+      "stuff_rate": 0.01,
+      "success_rate": 0.01
+    },
+    "tool": "rushing"
+  },
+  "rushing_basic": {
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "attempts": "playerStatsRushingAttemptsTotal",
+      "inside_10_attempts": "playerStatsInside10RushingAttemptsTotal",
+      "inside_20_attempts": "playerStatsInside20RushingAttemptsTotal",
+      "inside_5_attempts": "playerStatsInside5RushingAttemptsTotal"
+    },
+    "scale": {},
+    "tool": "rushing"
+  },
+  "rushing_bell_cow": {
+    "params": {
+      "positions": "RB"
+    },
+    "rename": {
+      "attempts_pct": "marketShareRushingAttemptsTotal",
+      "target_pct": "marketShareReceivingTargetsTotal",
+      "team_attempts": "teamStatsRushingAttemptsTotal",
+      "team_targets_pg": "teamStatsReceivingTargetsTotal",
+      "team_xfp": "teamStatsXfpPprTotal",
+      "xfp_pct": "marketShareXfpPprTotal"
+    },
+    "scale": {
+      "attempts_pct": 0.01,
+      "target_pct": 0.01,
+      "xfp_pct": 0.01
+    },
+    "tool": "bell-cow"
+  },
+  "wr_coverage_matchup": {
+    "derive": {
+      "playerStatsCoverageSchemeManReceivingYardsPerRoute": {
+        "den": "man_routes",
+        "num": "man_rec_yards"
+      }
+    },
+    "params": {
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "man_routes": "playerStatsCoverageSchemeManReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "recsep-coverage"
+  },
+  "wr_coverage_matchup_cover2": {
+    "derive": {
+      "playerStatsCoverageSchemeCover2ReceivingYardsPerRoute": {
+        "den": "routes",
+        "num": "rec_yards"
+      }
+    },
+    "params": {
+      "coverageScheme": "Cover 2",
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "routes": "playerStatsCoverageSchemeCover2ReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving"
+  },
+  "wr_coverage_matchup_cover3": {
+    "derive": {
+      "playerStatsCoverageSchemeCover3ReceivingYardsPerRoute": {
+        "den": "routes",
+        "num": "rec_yards"
+      }
+    },
+    "params": {
+      "coverageScheme": "Cover 3",
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "routes": "playerStatsCoverageSchemeCover3ReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving"
+  },
+  "wr_coverage_matchup_cover4": {
+    "derive": {
+      "playerStatsCoverageSchemeCover4ReceivingYardsPerRoute": {
+        "den": "routes",
+        "num": "rec_yards"
+      }
+    },
+    "params": {
+      "coverageScheme": "Cover 4",
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "routes": "playerStatsCoverageSchemeCover4ReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving"
+  },
+  "wr_coverage_matchup_cover6": {
+    "derive": {
+      "playerStatsCoverageSchemeCover6ReceivingYardsPerRoute": {
+        "den": "routes",
+        "num": "rec_yards"
+      }
+    },
+    "params": {
+      "coverageScheme": "Cover 6",
+      "positions": "QB,RB,FB,WR,TE"
+    },
+    "rename": {
+      "routes": "playerStatsCoverageSchemeCover6ReceivingRoutesTotal"
+    },
+    "scale": {},
+    "tool": "receiving"
+  }
+}

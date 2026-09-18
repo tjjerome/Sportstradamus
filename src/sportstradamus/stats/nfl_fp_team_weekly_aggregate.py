@@ -66,25 +66,29 @@ _TEAM_ABBR_COL = "teamAbbreviation"
 _PROE_ACTUAL_COL = "teamStatsPassingDropbacksTotal"
 _PROE_EXPECTED_COL = "teamStatsPassingDropbacksExpected"
 
-# run_pass_report bucket subkeys. Each per-game row's ``bucket`` cell is a
-# JSON object carrying nested entries keyed by bucket name; each nested
-# entry has teamStatsSnapsOffensePass / teamStatsSnapsOffenseRush.
+# run_pass_report snap columns. In the archived legacy snapshots each
+# per-game row's ``bucket`` cell is a JSON object keyed by bucket name whose
+# nested entries carry these two; the current API answers one filtered
+# request per bucket and puts them at the top level of its own kind.
 _RPR_BUCKET_PASS = "teamStatsSnapsOffensePass"
 _RPR_BUCKET_RUSH = "teamStatsSnapsOffenseRush"
+_RPR_BUCKET_TOTAL = "teamStatsSnapsOffenseTotal"
 
 # Spec-aligned subset of FP's situational buckets. ``Inside20`` ≈ redzone,
 # ``Inside10`` ≈ goalline; Leading / Trailing capture game-state pass
 # tendency; FirstDown / ThirdDown capture down-state. Other available
 # buckets (FirstHalf/SecondHalf, Under5/5To9/Over10) are skipped here as
-# largely collinear with the chosen subset.
-_RPR_BUCKETS: tuple[tuple[str, str], ...] = (
-    ("redzone", "bucketInside20"),
-    ("goalline", "bucketInside10"),
-    ("neutral", "bucketNeutral"),
-    ("leading", "bucketLeading"),
-    ("trailing", "bucketTrailing"),
-    ("first_down", "bucketFirstDown"),
-    ("third_down", "bucketThirdDown"),
+# largely collinear with the chosen subset. Each entry names the output
+# suffix, the legacy nested-bucket key, and the per-bucket file kind the
+# current API's filtered pulls land in.
+_RPR_BUCKETS: tuple[tuple[str, str, str], ...] = (
+    ("redzone", "bucketInside20", "run_pass_report_redzone"),
+    ("goalline", "bucketInside10", "run_pass_report_goalline"),
+    ("neutral", "bucketNeutral", "run_pass_report_neutral"),
+    ("leading", "bucketLeading", "run_pass_report_leading"),
+    ("trailing", "bucketTrailing", "run_pass_report_trailing"),
+    ("first_down", "bucketFirstDown", "run_pass_report_first_down"),
+    ("third_down", "bucketThirdDown", "run_pass_report_third_down"),
 )
 
 
@@ -305,15 +309,32 @@ _RECIPES: tuple[_TeamRecipe, ...] = (
 
 
 def _rpr_bucket_recipes() -> tuple[_TeamRecipe, ...]:
+    """Two recipes per bucket -- one per era, both writing the same output column.
+
+    The filtered per-bucket kind exists only for weeks pulled from the
+    current API; the nested ``bucket`` cell only for archived legacy
+    snapshots. Whichever is on disk for a given week produces the column and
+    the other yields nothing, so a window of either era aggregates the same.
+    """
     return tuple(
-        _TeamRecipe(
-            output_col=f"rp_{suffix}_pass_pct",
-            file_kind="run_pass_report",
-            pattern="rpr_bucket_pass_rate",
-            args=(bucket_key,),
-            grain="team",
+        recipe
+        for suffix, bucket_key, bucket_kind in _RPR_BUCKETS
+        for recipe in (
+            _TeamRecipe(
+                output_col=f"rp_{suffix}_pass_pct",
+                file_kind=bucket_kind,
+                pattern="weighted_rate",
+                args=(_RPR_BUCKET_PASS, _RPR_BUCKET_TOTAL),
+                grain="team",
+            ),
+            _TeamRecipe(
+                output_col=f"rp_{suffix}_pass_pct",
+                file_kind="run_pass_report",
+                pattern="rpr_bucket_pass_rate",
+                args=(bucket_key,),
+                grain="team",
+            ),
         )
-        for suffix, bucket_key in _RPR_BUCKETS
     )
 
 
@@ -584,19 +605,29 @@ def _build_team_abbreviation_map(season: int) -> pd.Series:
 
 
 def _abbr_from_team_grain(season: int) -> pd.Series | None:
-    """Try to build the teamTeamId -> abbreviation map from ``line_matchups``."""
+    """Try to build the teamTeamId -> abbreviation map from a team-grain snapshot.
+
+    ``coverage_matrix`` is the preferred source: current pulls put the
+    abbreviation on every team row, which makes this an identity map.
+    ``line_matchups`` is the fallback for the archived legacy seasons, whose
+    team parquets pair ``teamTeamId`` with location / nickname and nowhere
+    else carry the abbreviation. It is consulted second rather than first
+    because the kind is retired — any file still on disk for a season that
+    has since been re-pulled holds the superseded id space.
+    """
     for week in nfl_fp_team_weekly.available_snapshots(season):
-        df = nfl_fp_team_weekly.load_snapshot(season, week, "line_matchups")
-        if df is None or df.empty:
-            continue
-        if TEAM_GROUP_COL not in df.columns or _TEAM_ABBR_COL not in df.columns:
-            continue
-        return (
-            df[[TEAM_GROUP_COL, _TEAM_ABBR_COL]]
-            .dropna()
-            .drop_duplicates(subset=[TEAM_GROUP_COL])
-            .set_index(TEAM_GROUP_COL)[_TEAM_ABBR_COL]
-        )
+        for kind in ("coverage_matrix", "line_matchups"):
+            df = nfl_fp_team_weekly.load_snapshot(season, week, kind)
+            if df is None or df.empty:
+                continue
+            if TEAM_GROUP_COL not in df.columns or _TEAM_ABBR_COL not in df.columns:
+                continue
+            return (
+                df[[TEAM_GROUP_COL, _TEAM_ABBR_COL]]
+                .dropna()
+                .drop_duplicates(subset=[TEAM_GROUP_COL])
+                .set_index(TEAM_GROUP_COL)[_TEAM_ABBR_COL]
+            )
     return None
 
 

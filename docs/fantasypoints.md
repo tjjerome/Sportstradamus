@@ -2,7 +2,15 @@
 
 `fp-fetch` walks a catalog of Fantasy Points Data Suite endpoints and
 writes each tool's response to disk every week. The catalog and the
-session token are the only two things you maintain.
+session cookie are the only two things you maintain.
+
+The API is `fantasypointsdata.com/api/nfl/{tool}` — a GET per tool, filters
+in the query string, and a bare JSON array of flat rows back. The columns it
+returns are **not** the ones the NFL models were trained on; the collector
+translates them back to the legacy vocabulary on the way to parquet. See
+[Column translation](#column-translation) for what that means when you add a
+tool. What the new API makes newly *possible* is surveyed separately in
+[fantasypoints_expansion.md](fantasypoints_expansion.md).
 
 This page covers FP-specific setup. The shared collector framework — the
 `run`/`verify`/`list`/`refresh-auth` CLI surface, curl→keys.json auth rotation,
@@ -19,80 +27,36 @@ account suspension is a realistic risk if their ToS forbids this.
 
 ## One-time setup
 
-### 1. Grab a fresh `Authorization` token
+### 1. Grab a fresh session cookie
 
-The Data Suite v2 API authenticates via a bearer-style `Authorization`
-header (not a cookie). You capture it once per session:
+The API authenticates on the `ds_session` cookie alone — there is no
+`Authorization` header. Capture it once per session:
 
-1. Log in to <https://data.fantasypoints.com/> in a desktop browser.
+1. Log in to <https://fantasypointsdata.com/> in a desktop browser.
 2. Open DevTools → **Network** tab, filter to **Fetch/XHR**.
-3. Click any tool (line matchups is fine) so the SPA fires its data
-   call.
-4. Click the request row in the Network list → **Headers** panel →
-   **Request Headers**. Copy the *value* of the `Authorization:`
-   header (everything after `Authorization: `).
-5. (Optional but recommended) Copy the `Cookie:` header value too —
-   some endpoints want analytics/session cookies alongside the token.
-6. Paste into `src/sportstradamus/creds/keys.json`:
+3. Click any tool so the SPA fires its data call.
+4. Click the request row → **Headers** → **Request Headers**. Copy the
+   *value* of the `Cookie:` header.
+5. Paste into `src/sportstradamus/creds/keys.json`:
 
 ```json
 {
-  "fantasypoints_authorization": "Bearer eyJ...",
-  "fantasypoints_cookie": "_shopify_y=...; ..."
+  "fantasypoints_cookie": "ds_session=..."
 }
 ```
 
 Optionally set `fantasypoints_user_agent` to your browser's UA in the
 same file — the default Firefox UA is fine for most users.
+`fantasypoints_authorization` is no longer read; delete it from both
+boxes.
 
-The tokens rotate on a schedule we don't control. When they expire the
+The cookie rotates on a schedule we don't control. When it expires the
 weekly job alerts via Healthchecks.io and you redo this step.
 
 ### 2. Register endpoints
 
-Two paths — pick one (or combine):
-
-**Bulk: `fp-fetch discover`** — auto-populates from FP's tool registry.
-
-```bash
-sportstradamus fetch fp discover --dry-run    # preview new entries
-sportstradamus fetch fp discover              # write them
-```
-
-`discover` hits `POST /v2/ds/all/tools`, walks every published tool,
-and adds one catalog entry per `(tool, context)` pair (e.g.
-`passingBasic` with `context: ["player","team","opponent"]` becomes
-three entries):
-
-- `player` → `POST .../tools/player/{slug}/values`
-- `team` → `POST .../tools/team/{slug}/values` (team's offensive
-  view — there is no `/offense/` segment, the SPA hits the bare
-  `/team/{slug}` path for offense)
-- `opponent` → `POST .../tools/team/defense/{slug}/values` (team's
-  defensive view, one row per opponent faced)
-
-Existing names are preserved by default — re-run any time and only
-new tools land. Pass `--replace` to discard the existing catalog
-and regenerate from scratch; needed once after upgrading from a
-pre-v2 catalog so old bodies pick up the integer week/season
-sentinels (otherwise FP keeps returning whole-season data
-regardless of `--week`).
-
-Defaults: skips `isPrivate: true` (debug / VIP-only / concept
-tables); pass `--include-private` to keep them. Skips the `other`
-context (no observed URL pattern). League defaults to `nfl`; override
-with `--league wnba` etc. once FP launches one.
-
-Per-tool body matches the v2 `/values` contract observed via
-DevTools: `tableProperty`, `routeContextTarget`, integer
-`weeks: {"REG": [N]}`, `filterMatch.game.season.eq`, plus the
-per-tool `requires*` and `requiredRoles` flags pulled from the
-registry entry. Week + season are stored as sentinel strings
-(`__WEEK_INT__`, `__SEASON_INT__`) and rewritten to integers per
-call by `body_substitute.substitute_runtime`. The `weeks` block is
-also re-shaped per mode (see `--mode` below).
-
-**Manual: `fp-fetch import-curl`** — for the per-tool path:
+There is no tool registry to enumerate — the SPA has no equivalent of the
+old `/v2/ds/all/tools` — so every entry comes from a captured request:
 
 1. Open the tool in your browser with DevTools' **Network** tab open
    and filter by `Fetch/XHR`.
@@ -109,43 +73,40 @@ also re-shaped per mode (see `--mode` below).
 5. Register:
 
    ```bash
-   sportstradamus fetch fp import-curl /tmp/line_matchups.curl \
-       --name line_matchups \
-       --output-subdir team/line_matchups
+   sportstradamus fetch fp import-curl /tmp/coverage_matrix.curl \
+       --name team_coverage_matrix \
+       --output-subdir team/coverage_matrix
    ```
 
    The endpoint lands in
    `src/sportstradamus/data/config/fantasypoints_endpoints.json`.
 
-`import-curl` handles both GET and POST out of the box. POST requests
-with a `--data-raw '{...}'` JSON body are parsed and stored in the
-catalog as `json_body`. `Authorization`, `Cookie`, and `User-Agent`
-headers are stripped automatically (they come from `creds/keys.json`).
+`Authorization`, `Cookie` and `User-Agent` headers are stripped
+automatically — they come from `creds/keys.json`.
 
-Two substitution paths coexist for hand-imported entries:
+**Name the entry `player_` / `team_` / `opponent_` + the file kind you
+want**, because the prefix picks `player_data/` vs `team_data/` and the
+rest becomes the parquet basename, which is what `FILE_KINDS` in
+`stats/nfl_fp_weekly.py` and `stats/nfl_fp_team_weekly.py` look for.
 
-- **Legacy `{week}` / `{season}` string substitution** — recursive
-  through nested dicts and lists; only strings containing the literal
-  placeholders are touched. Useful for v1-style endpoints with a
-  `filters.{week,season}` shape.
-- **Integer sentinels** (`__WEEK_INT__`, `__SEASON_INT__`) — used by
-  discover-generated entries. Rewritten to integers per call so FP's
-  v2 schema (which type-checks these as ints) accepts the body.
+The captured query string is stored as `params` verbatim, minus the
+period: every entry carries `"seasons": "{season}"` and
+`"regWeeks": "{week}"`, templated so the dry-run listing and the run
+report print a URL you can paste into a browser. The source overrides
+both per call from `--season` / `--week` / `--mode`, so a captured
+literal would be a lie rather than a bug — `--replace` normalises it
+either way. Keep every *other* captured filter: `mode=offense|defense`,
+`positions=`, and any situational slice (`down=3`, `ydsToScoreMax=10`,
+`scoreDiffMin=7`) are what define the entry.
 
 For season-long aggregates that should not be re-fetched per week,
 pass `--season-long` at `import-curl` time (or set `"weekly": false`
 in the catalog entry).
 
-#### Patching a discover-generated entry (`--replace`)
+#### Patching an existing entry (`--replace`)
 
-A handful of FP tools return 0 rows when called with the minimal
-body discover generates, because the SPA injects per-tool filters
-(position, stat-availability qualifier) that the registry doesn't
-expose. Symptom: those tools land in the report with `status: "empty"`
-and a `response_preview` showing `"count": 0`.
-
-Fix: capture a working DevTools curl for the failing tool, then
-overlay it onto the existing catalog entry with `--replace`:
+When a tool gains a filter, re-capture it and overlay the new request
+onto the existing catalog entry:
 
 ```bash
 pbpaste > /tmp/passing_advanced.curl
@@ -154,25 +115,20 @@ sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
     --replace
 ```
 
-`--replace` preserves the existing `output_subdir` (so you don't
-have to re-specify it) and rewrites the captured body's literal
-`game.season.eq` value to the `__SEASON_INT__` sentinel — the entry
-stays usable across seasons even though you captured it on one
-specific week. The `weeks` block doesn't need sentinelisation: the
-runtime substitutor overrides it per call based on `--mode`.
+`--replace` preserves the existing `output_subdir`, so you don't have to
+re-specify it.
 
 ### 3. Verify locally
 
 ```bash
 sportstradamus fetch fp list
 sportstradamus fetch fp run --week 5 --season 2025 --dry-run
-sportstradamus fetch fp run --week 5 --season 2025 --only team_line_matchups
+sportstradamus fetch fp run --week 5 --season 2025 --only team_coverage_matrix
 ```
 
-`run` fetches each endpoint, parses `content.rows.values` (v2
-endpoints) or `content.table.rows.values` (legacy) into a pandas
+`run` fetches each endpoint, parses the returned JSON array into a pandas
 DataFrame, and writes one parquet per (tool, week, mode), grouped
-into a per-week subfolder so 45 files don't clutter the season dir:
+into a per-week subfolder so 56 files don't clutter the season dir:
 
 - player-context entries →
   `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
@@ -209,11 +165,17 @@ sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
 sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
 ```
 
-The mode rewrites `context.weeks` in the request body so FP returns
-exactly the slice you ask for. Bodies in the catalog ship with
-`weeks: {"REG": ["__WEEK_INT__"]}` as the canonical shape and
-`body_substitute.substitute_runtime` rewrites both the int and the
-mode shape per call.
+The mode sets the period query parameters, which are merged over the
+catalog entry's own params per call (`source.period_params`):
+
+| mode | parameters |
+|---|---|
+| `weekly` | `seasons=2025&regWeeks=5` |
+| `season_to_date` | `seasons=2025&regWeeks=1,2,3,4,5` |
+| `postseason` | `seasons=2025&regWeeks=&postWeeks=1` |
+
+`regWeeks=` with an empty value returns zero regular-season rows, which is
+how a postseason request excludes them.
 
 Re-running the same (week, mode) **skips** cells that already have a
 non-empty parquet — `run` and `backfill` both default to "don't
@@ -237,35 +199,36 @@ sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
 sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
 ```
 
-For every catalog entry the verifier:
+Each response row is one aggregate per entity over the requested weeks,
+so there is no per-row week column to check. What every row does carry is
+``games`` — how many of that entity's games went into the aggregate — and
+that is exactly what the week filter controls. For every catalog entry the
+verifier:
 
 - Confirms the expected parquet exists at the routed path.
-- Loads the file and checks ``gameSeason`` matches the requested
-  season exactly (no stray rows from other years).
-- Checks ``gameWeek`` matches the week set implied by ``--mode``:
-  ``{N}`` for ``weekly`` / ``postseason``, ``{1..N}`` for
-  ``season_to_date``.
-- When ``gameType`` is present, confirms ``weekly`` /
-  ``season_to_date`` carries only regular-season games and
-  ``postseason`` carries only playoff games.
+- Checks no row aggregates more games than ``--mode`` allows: 1 for
+  ``weekly`` / ``postseason``, N for ``season_to_date`` through week N.
+  This is the check that catches a week filter that didn't bind — an
+  unfiltered response still lands at the right path with a healthy row
+  count, and fails here on 17 games per entity.
+- Confirms the identity columns survived (``playerPlayerId`` /
+  ``playerFirstName`` / ``playerLastName`` on player entries,
+  ``teamTeamId`` / ``teamAbbreviation`` on team ones). A dropped identity
+  column is indistinguishable from an empty week downstream and silently
+  removes every feature built on the file.
 
 Output is one line per spec (``OK`` / ``WARN`` / ``FAIL``) with
 indented issue detail when something's off. Exit code is non-zero
 if any spec hits an error so you can chain it into a script.
 
-This is the check that catches the pre-v2 "no week filter" bug —
-if you upgrade an older catalog without running ``discover
---replace``, ``verify`` will FAIL every spec with ``week_mismatch``
-pointing at the same fix.
+### Cookie expired mid-run
 
-### Token expired mid-run
-
-If the Authorization or Cookie expires partway through `fp-fetch
-run`, the CLI pauses, prints a banner, and waits for you to paste
-a fresh DevTools curl on stdin (end with EOF / Ctrl+D). It updates
-`creds/keys.json` and the in-memory client, then retries the
-failing call and resumes the batch. Non-TTY contexts (cron) skip
-the prompt and fail fast so Healthchecks.io pings `/fail`.
+If the cookie expires partway through `fp-fetch run`, the CLI pauses,
+prints a banner, and waits for you to paste a fresh DevTools curl on
+stdin (end with EOF / Ctrl+D). It updates `creds/keys.json` and the
+in-memory client, then retries the failing call and resumes the batch.
+Non-TTY contexts (cron) skip the prompt and fail fast so Healthchecks.io
+pings `/fail`.
 
 ## Historical backfill
 
@@ -283,7 +246,7 @@ parse + write as `run`. Pacing is conservative by default:
 - **8–28 s** random pause when transitioning to a new week
   (`--week-pause-min` / `--week-pause-max`).
 
-With ~45 tools × 18 weeks × N seasons at the defaults plan for
+With ~56 tools × 18 weeks × N seasons at the defaults plan for
 several hours per season — designed for an overnight one-time
 grab, not a cron job. `--only`, `--dry-run`, and `--mode` work the
 same as on `run` (e.g. `--mode season_to_date` to backfill
@@ -301,12 +264,12 @@ Wednesday 10:00 server time — after Monday/Tuesday stat corrections
 settle, well before Sunday games. Set `HEALTHCHECK_URL_FP_FETCH` in
 the environment so token-expiry failures alert via Healthchecks.io.
 
-## When the token expires
+## When the cookie expires
 
 The healthcheck alert (`/fail` ping with the last 50 log lines) quotes a `401`
 message pointing here. Refresh in one paste with
 `sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
-then confirm with `fp-fetch run --only line_matchups`. The extract-headers,
+then confirm with `fp-fetch run --only team_coverage_matrix`. The extract-headers,
 preserve-other-keys, redacted-preview mechanics are the shared refresh-auth flow
 documented in [data_collectors.md](data_collectors.md#auth).
 
@@ -329,7 +292,86 @@ super bowl). `mode_suffix` is `""` (weekly, default), `_s2d`
 collision because they target different filenames (`_s2d`) or
 different folders (postseason).
 
+## Column translation
+
+The API's column names are its own — `yards`, `cpoe`, `man_routes` — and none
+of them is what the NFL models were trained on. Those names are frozen: the
+`expected_columns` list inside every NFL model pickle is sliced strictly at
+serve time, so a column that stops appearing is a `KeyError` in production,
+not a degraded feature. Rather than rename 104 aggregate outputs and retrain,
+the collector translates back on the way to parquet.
+
+`config/fantasypoints_column_map.json` holds the translation, keyed by file
+kind, and `collectors/fantasypoints/column_map.py` applies it. Three additive
+sections:
+
+- **`rename`** copies a column to its legacy camelCase name, applying any
+  **`scale`**. Those carry the legacy conventions the API dropped: rates
+  stored as fractions where the API reports percents (`scale: 0.01`), and
+  sack yardage stored as a loss (`scale: -1.0`).
+- **`derive`** builds a legacy rate from a numerator/denominator pair in the
+  row's `__raw` block. Preferred wherever the API's displayed rate is
+  pre-rounded, since the counts are exact.
+- **`bucket`** re-nests flat `{bucket}_{stat}` columns into the single JSON
+  cell the legacy schema carried, so the bucket-parsing aggregators read
+  archived legacy snapshots and new pulls alike.
+
+Every section is additive — the new-schema columns stay on the frame, so one
+parquet serves both the frozen feature set and anything built on the wider
+schema later.
+
+`tests/test_fantasypoints.py::test_every_aggregate_output_column_survives_the_new_schema`
+walks the catalog, the map and both recipe tables and fails if any aggregate
+output column has become underivable. It is the gate on the silent chain that
+otherwise ends at a serve-time `KeyError`: a recipe whose source columns are
+missing is skipped without a word.
+
+### What the port cost
+
+The cutover was verified by re-pulling a week that already existed as a legacy
+snapshot and diffing the production aggregates: **team 16/16 and defense 7/7
+columns, zero suspect; player 154/154 columns present**, of which 150 are
+numeric and comparable. Of those 150, four differences are real and the rest is
+±1 charting noise (86–99% of entities exact, near-zero-mean residuals).
+
+The four are FP redefinitions with no closer endpoint or filter, so the port
+takes the substitutes rather than the retrain it exists to avoid:
+
+| aggregate column | correlation | cause |
+|---|---|---|
+| `eff_XFP` | 0.898 | FP redefined expected fantasy points (~2% high) |
+| `rush_bellcow_XFP_pct` | 0.948 | same xFP redefinition |
+| `bellcow_score` | derived | composite of the above |
+| `rush_adv_EXP_YDS` | 0.915 | explosive-run yardage threshold moved |
+
+All four are low-weight inputs. Re-examine if one shows up in a ship-gate
+regression.
+
+### The cross-era identity split
+
+Legacy and new snapshots do not share an identity space. Legacy
+`playerPlayerId` is an FP-internal hex id, the new one is a GSIS id
+(`00-0039424`), and there is **zero** overlap between them; legacy
+`teamTeamId` is an integer, the new one the 3-letter abbreviation.
+
+Within one era this is harmless — the player id is only ever a groupby key
+before the result is re-keyed to the player's name, and the team abbreviation
+makes `_build_team_abbreviation_map` an identity mapping. **Across eras it is
+not.** A lookback window that spans the cutover splits each entity into two
+aggregate rows, and the name-index projection keeps only one of them.
+
+There is no transform that fixes this: the two id spaces carry no shared key.
+The only clean resolution is re-pulling the historical seasons through the new
+API, which `seasons=2022` confirms is possible. Until that happens, treat any
+window straddling the cutover week as unreliable. Scoping that re-pull is the
+first item in
+[fantasypoints_expansion.md](fantasypoints_expansion.md#sequencing-and-the-retrain-rule).
+
 ## Adding new endpoints later
 
 Re-run `fp-fetch import-curl` whenever Fantasy Points adds a new tool
 you want snapshotted. Existing catalog entries are untouched.
+
+If the new tool feeds an existing aggregate recipe, add its file kind to
+`fantasypoints_column_map.json` too — the catalog entry alone gets the file on
+disk under new-schema names, which no recipe reads.

@@ -6,7 +6,7 @@ prediction and training time. Three sources run on this framework today:
 
 | Source | CLI | League | Auth | Period key |
 |---|---|---|---|---|
-| Fantasy Points Data Suite | `fp-fetch` | NFL | bearer + cookie | game **week** |
+| Fantasy Points Data Suite | `fp-fetch` | NFL | cookie | game **week** |
 | Cleaning the Glass | `ctg-fetch` | NBA | session cookie | capture **date** |
 | Baseball Savant (Statcast) | `savant-fetch` | MLB | none (public) | capture **date** |
 
@@ -31,7 +31,7 @@ src/sportstradamus/collectors/
   commands_dated.py  date-centric run/verify builders (cumulative sources)
   cli.py             Source dataclass + build_source_cli(source) -> click.Group
   tabular.py         CSV/JSON→DataFrame parse + dated player/team path routing
-  fantasypoints/     FP_SOURCE + FP-only discover / import-curl / body sentinels
+  fantasypoints/     FP_SOURCE + FP-only import-curl / column translation
   cleaningtheglass/  CTG_SOURCE (cookie, date-keyed)
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
 ```
@@ -87,9 +87,10 @@ provider only serves "as of now".
 ## Auth
 
 `AuthFields` names up to three keys.json slots — `authorization`, `cookie`,
-`user_agent` — and a `None` slot means the source doesn't use it. FP uses a
-bearer `authorization` + `cookie`; CTG uses `cookie` + `user_agent` only; savant
-sets `auth_fields=None` (public — no keys.json entry, no `refresh-auth` command).
+`user_agent` — and a `None` slot means the source doesn't use it. FP and CTG
+both use `cookie` + `user_agent` only; savant sets `auth_fields=None` (public —
+no keys.json entry, no `refresh-auth` command). No shipped source currently
+uses the bearer `authorization` slot.
 
 `read_auth` resolves each slot from the env (`{ENV_PREFIX}_COOKIE`, …) first,
 then keys.json, defaulting to `""` when a key is absent — so a source works
