@@ -6,6 +6,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Added
+- NFL FantasyPoints Tier 1 batch: passing-situation splits (QB), pace ×2 (team + faced),
+  OL lineup-combos units, and the raw-count wins (xTD, RYOE, red-zone carry shares,
+  end-zone attempt rate, xYards) — 47 recipe outputs, 4 catalog entries, `ybc` revived.
 - Games constellations draw their template's art beneath the stars: a faint light-blue
   drawing on 99 of 101 shapes, with a credit line for the CC BY game-icons.net art.
 - Dashboard slips price the apps' pair rules (`current_pair_modifiers.parquet`): a

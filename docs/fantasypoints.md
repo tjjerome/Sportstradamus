@@ -277,11 +277,29 @@ parse + write as `run`. Pacing is conservative by default:
 - **8–28 s** random pause when transitioning to a new week
   (`--week-pause-min` / `--week-pause-max`).
 
-With ~60 entries × 18 weeks × N seasons at the defaults plan for
-several hours per season — designed for an overnight one-time
-grab, not a cron job. `--only`, `--dry-run`, and `--mode` work the
-same as on `run` (e.g. `--mode season_to_date` to backfill
-cumulative weekly snapshots).
+Pacing is not the constraint; the **daily request budget** is. The
+account gets ~1,150 requests per UTC day (measured 2026-09-19); past
+it every call answers `429 {"code":"daily_limit"}` with
+`x-budget-remaining: 0` and `retry-after: <seconds to 00:00 UTC>`.
+Every response carries `x-budget-remaining`, so read it before a
+big pull. A regular season is 60 entries × 18 weeks = 1,080 calls,
+a postseason 240, so a multi-season re-pull spans days:
+
+- Pull **whole seasons**, most recent first. Inside one season every
+  kind must come from the same API era (player ids differ across
+  eras — see *One identity space*), so never leave a season half
+  re-pulled when something downstream reads it.
+- Clear the season's old parquets first, then backfill **without**
+  `--refetch`: a 429 writes nothing, missing files get fetched on
+  the next run, finished ones are skipped, so the pull resumes
+  across resets.
+- Leave ~100 calls of headroom on Wednesdays for the production
+  cron below, which shares the account.
+
+`--only`, `--dry-run`, and `--mode` work the same as on `run`
+(e.g. `--mode season_to_date` to backfill cumulative weekly
+snapshots; `--mode postseason --start-week 1 --end-week 4` for the
+playoff folders `week_19..22`).
 
 ## Weekly cron
 

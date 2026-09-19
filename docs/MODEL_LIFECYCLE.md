@@ -244,7 +244,8 @@ sportstradamus meditate --league NFL --market 'attempts,carries,targets' --froze
     --artifact-output $A --dependency-namespace volume-v1 --bypass-withholding
 mkdir -p src/sportstradamus/data/model_dependencies/volume-v1 && cp $A/NFL_*.mdl src/sportstradamus/data/model_dependencies/volume-v1/
 # 3. every other cell, in ONE process so the per-week snapshot caches amortize
-sportstradamus meditate --league NFL --market '<the remaining markets>' --full-rebuild --matrix-only --matrix-output $Q
+sportstradamus meditate --league NFL --market '<the remaining markets>' --full-rebuild --matrix-only --matrix-output $Q \
+    --dependency-namespace volume-v1 --dependency-root src/sportstradamus/data/model_dependencies
 # 4. promote by hand (there is no promotion command), then the ordinary retrain
 cp -p $Q/NFL_*.parquet src/sportstradamus/data/training_data/ && sportstradamus meditate --league NFL --force
 ```
