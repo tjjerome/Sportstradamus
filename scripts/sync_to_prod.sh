@@ -12,12 +12,18 @@
 #     models/deterministic/ is excluded (and prod's copy protected from --delete).
 #     Before deleting any prod model absent on dev, the script lists them and asks
 #     for confirmation; with no orphans it proceeds silently.
-#   * COLLECTOR SNAPSHOTS (additive, NO --delete): the Cleaning the Glass (NBA)
-#     and Baseball Savant (MLB) dated-snapshot dirs are pushed additively. They
-#     live under player_data/ and team_data/ beside prod-only siblings
-#     (nba_players_*.csv, affinity_*.csv, gamelogs) — a --delete there would wipe
-#     those. Hard rule: NEVER --delete on a player_data/ or team_data/ path.
-#     A collector dir absent on dev (catalog not yet populated) is skipped.
+#   * COLLECTOR SNAPSHOTS (additive, NO --delete): the Cleaning the Glass (NBA),
+#     Baseball Savant (MLB) and FantasyPoints (NFL) snapshot dirs are pushed
+#     additively. They live under player_data/ and team_data/ beside prod-only
+#     siblings (nba_players_*.csv, affinity_*.csv, gamelogs, NFL seasons prod
+#     pulled and dev never did) — a --delete there would wipe those. Hard rule:
+#     NEVER --delete on a player_data/ or team_data/ path. A collector dir absent
+#     on dev (catalog not yet populated) is skipped.
+#     NFL rides here even though prod runs its own weekly fp-fetch: when that job
+#     returns empty (the 2026-09 API change did, for every endpoint), prod's
+#     snapshots silently go blank while dev's stay good, and the NFL models trained
+#     on dev then meet a feature schema prod cannot produce — which took the whole
+#     league out of prophecize for four days.
 #   * SERVING ARTIFACTS (single files, additive): gitignored training outputs the
 #     prod serving pipeline reads — book_weights.json and stat_calibration.json
 #     (consensus weights + per-cell cv/zi read at serve), model_stats.{parquet,csv}
@@ -64,6 +70,8 @@ COLLECTOR_RELS=(
     "src/sportstradamus/data/team_data/NBA/cleaningtheglass"
     "src/sportstradamus/data/player_data/MLB/baseballsavant"
     "src/sportstradamus/data/team_data/MLB/baseballsavant"
+    "src/sportstradamus/data/player_data/NFL"
+    "src/sportstradamus/data/team_data/NFL"
 )
 # Serving artifacts — gitignored files meditate/correlate write on dev and the
 # prod pipelines read at serve (see header). Files absent on dev are skipped.
