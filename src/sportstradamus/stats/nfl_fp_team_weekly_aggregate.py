@@ -43,7 +43,7 @@ reindexes them as all-NaN at consumer side.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -631,23 +631,23 @@ def _missing_cols(df: pd.DataFrame, cols: Sequence[str]) -> bool:
     return any(c not in df.columns for c in cols)
 
 
+# Patterns that forward straight to a shared-shape aggregator: two source
+# columns plus ``group_col``. ``proe_formula`` and ``rpr_bucket_pass_rate``
+# need bespoke arithmetic and stay as explicit branches below.
+_TWO_COLUMN_AGGREGATORS: dict[str, Callable[..., pd.Series]] = {
+    "weighted_rate": weighted_rate,
+    "weighted_mean": weighted_mean,
+    "top_unit_share": top_unit_share,
+}
+
+
 def _dispatch(df: pd.DataFrame, recipe: _TeamRecipe) -> pd.Series | None:
     """Route a recipe to the right helper -- skip if required columns missing."""
-    if recipe.pattern == "weighted_rate":
-        num_col, den_col = recipe.args
+    aggregator = _TWO_COLUMN_AGGREGATORS.get(recipe.pattern)
+    if aggregator is not None:
         if _missing_cols(df, recipe.args):
             return None
-        return weighted_rate(df, num_col, den_col, group_col=TEAM_GROUP_COL)
-    if recipe.pattern == "weighted_mean":
-        value_col, weight_col = recipe.args
-        if _missing_cols(df, recipe.args):
-            return None
-        return weighted_mean(df, value_col, weight_col, group_col=TEAM_GROUP_COL)
-    if recipe.pattern == "top_unit_share":
-        unit_col, weight_col = recipe.args
-        if _missing_cols(df, recipe.args):
-            return None
-        return top_unit_share(df, unit_col, weight_col, group_col=TEAM_GROUP_COL)
+        return aggregator(df, *recipe.args, group_col=TEAM_GROUP_COL)
     if recipe.pattern == "proe_formula":
         actual_col, expected_col = recipe.args
         if _missing_cols(df, recipe.args):
