@@ -1,6 +1,6 @@
 # FP Data Coverage Matrix
 
-_as of 2026-05-25, branch model-research, FP weekly snapshots in `src/sportstradamus/data/player_data/NFL/2025/week_01/`_
+_as of 2026-05-25, branch model-research, FP weekly snapshots in `src/sportstradamus/data/player_data/NFL/2025/week_01/`. The kinds added since (`passing_situation`, `pace`, `pace_opp`, `ol_combos`) and their recipes are described in [fantasypoints_expansion.md](fantasypoints_expansion.md); they are not in the counts below._
 
 ## Summary
 

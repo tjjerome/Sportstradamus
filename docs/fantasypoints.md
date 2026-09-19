@@ -157,7 +157,7 @@ sportstradamus fetch fp run --week 5 --season 2025 --only team_coverage_matrix
 
 `run` fetches each endpoint, parses the returned JSON array into a pandas
 DataFrame, and writes one parquet per (tool, week, mode), grouped
-into a per-week subfolder so 56 files don't clutter the season dir:
+into a per-week subfolder so 60 files don't clutter the season dir:
 
 - player-context entries →
   `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
@@ -277,7 +277,7 @@ parse + write as `run`. Pacing is conservative by default:
 - **8–28 s** random pause when transitioning to a new week
   (`--week-pause-min` / `--week-pause-max`).
 
-With ~56 tools × 18 weeks × N seasons at the defaults plan for
+With ~60 entries × 18 weeks × N seasons at the defaults plan for
 several hours per season — designed for an overnight one-time
 grab, not a cron job. `--only`, `--dry-run`, and `--mode` work the
 same as on `run` (e.g. `--mode season_to_date` to backfill
@@ -340,11 +340,14 @@ different folders (postseason).
 ## Column translation
 
 The API's column names are its own — `yards`, `cpoe`, `man_routes` — and none
-of them is what the NFL models were trained on. Those names are frozen: the
-`expected_columns` list inside every NFL model pickle is sliced strictly at
-serve time, so a column that stops appearing is a `KeyError` in production,
-not a degraded feature. Rather than rename 104 aggregate outputs and retrain,
-the collector translates back on the way to parquet.
+of them is what the 104 aggregate outputs of the port-era recipes read. Those
+names are frozen: the `expected_columns` list inside every NFL model pickle is
+sliced strictly at serve time, so a column that stops appearing is a `KeyError`
+in production, not a degraded feature. Rather than rename those outputs, the
+collector translates back on the way to parquet. Recipes added after the port
+(the `ps_*`, `pace_*`, `ol_*` and expected-TD families) read the new-schema
+names directly, so a kind needs a map entry only when it feeds a legacy-named
+recipe.
 
 `config/fantasypoints_column_map.json` holds the translation, keyed by file
 kind, and `collectors/fantasypoints/column_map.py` applies it. Three additive
@@ -392,31 +395,24 @@ takes the substitutes rather than the retrain it exists to avoid:
 All four are low-weight inputs. Re-examine if one shows up in a ship-gate
 regression.
 
-### The cross-era identity split
+### One identity space
 
-Legacy and new snapshots do not share an identity space. Legacy
-`playerPlayerId` is an FP-internal hex id, the new one is a GSIS id
-(`00-0039424`), and there is **zero** overlap between them; legacy
-`teamTeamId` is an integer, the new one the 3-letter abbreviation.
-
-Within one era this is harmless — the player id is only ever a groupby key
-before the result is re-keyed to the player's name, and the team abbreviation
-makes `_build_team_abbreviation_map` an identity mapping. **Across eras it is
-not.** A lookback window that spans the cutover splits each entity into two
-aggregate rows, and the name-index projection keeps only one of them.
-
-There is no transform that fixes this: the two id spaces carry no shared key.
-The only clean resolution is re-pulling the historical seasons through the new
-API, which `seasons=2022` confirms is possible. Until that happens, treat any
-window straddling the cutover week as unreliable. Scoping that re-pull is the
-first item in
-[fantasypoints_expansion.md](fantasypoints_expansion.md#sequencing-and-the-retrain-rule).
+Every season on disk (2021 onward, postseason included) was pulled through the
+current API, so both trees share one identity space: `playerPlayerId` is the
+GSIS id (`00-0039424`) and `teamTeamId` the 3-letter abbreviation, which makes
+`_build_team_abbreviation_map` an identity mapping. The legacy pulls keyed
+players by an FP-internal hex id and teams by an integer with zero overlap, so
+a lookback window spanning the two eras split each entity into two aggregate
+rows and kept one; the team aggregate still re-keys each window through its own
+season's map (`_pool_windows`), so a stray legacy file cannot reopen the split.
+Keep it that way: never restore a legacy-era week beside current ones.
 
 ## Adding new endpoints later
 
 Re-run `fp-fetch import-curl` whenever Fantasy Points adds a new tool
 you want snapshotted. Existing catalog entries are untouched.
 
-If the new tool feeds an existing aggregate recipe, add its file kind to
-`fantasypoints_column_map.json` too — the catalog entry alone gets the file on
-disk under new-schema names, which no recipe reads.
+Then give the kind a `FILE_KINDS` entry and recipes that read its new-schema
+names (`tests/fixtures/fantasypoints_tool_columns.json` pins the vocabulary the
+schema-survival test checks them against). Add a `fantasypoints_column_map.json`
+entry only when the tool must feed a legacy-named recipe.

@@ -222,3 +222,36 @@ selected cell; the `auto` default honors what the cell has persisted:
 - `--frozen-matrix-dir` — train from lineage-validated matrices without rebuilding or rewriting them.
 - `--artifact-output` — isolated output directory for models and test sets from frozen-matrix training.
 - `--dependency-namespace` — dependency identity stamped onto isolated artifacts, or selected from `--dependency-root` during a full rebuild.
+
+### Rebuilding a league's matrices from scratch
+
+Appending to a cached matrix leaves any new feature column NaN on every
+historical row, so a feature-set bump rebuilds the league's matrices. The cold
+start (delete the cache, plain `meditate --force`) crashes for leagues whose
+cells depend on volume models (NFL: attempts, carries, targets); the rebuild
+resolves those from the versioned registry
+`data/model_dependencies/<namespace>/{LEAGUE}_{market}.mdl` (default namespace
+`volume-v1`), which the same run family bootstraps:
+
+```bash
+Q=/path/quarantine; A=/path/artifacts
+# 1. volume cells first: they need no dependency, and they must not be mixed
+#    with dependent cells in one invocation (the preflight would raise on the empty registry)
+sportstradamus meditate --league NFL --market 'attempts,carries,targets' --full-rebuild --matrix-only --matrix-output $Q
+python -m sportstradamus.training.matrix_audit $Q/NFL_*.parquet
+# 2. stamped volume pickles from the frozen quarantine (its manifests satisfy --frozen-matrix-dir)
+sportstradamus meditate --league NFL --market 'attempts,carries,targets' --frozen-matrix-dir $Q \
+    --artifact-output $A --dependency-namespace volume-v1 --bypass-withholding
+mkdir -p src/sportstradamus/data/model_dependencies/volume-v1 && cp $A/NFL_*.mdl src/sportstradamus/data/model_dependencies/volume-v1/
+# 3. every other cell, in ONE process so the per-week snapshot caches amortize
+sportstradamus meditate --league NFL --market '<the remaining markets>' --full-rebuild --matrix-only --matrix-output $Q
+# 4. promote by hand (there is no promotion command), then the ordinary retrain
+cp -p $Q/NFL_*.parquet src/sportstradamus/data/training_data/ && sportstradamus meditate --league NFL --force
+```
+
+Back up `training_data/`, `models/`, `test_sets/`, `training/model_stats.*`,
+the SHAP CSVs, `stat_calibration.json` and `book_weights.json` first; every
+ship verdict re-rolls because `strategy_matrix_hash` moves. A `--deterministic`
+A/B of the old and new caches isolates the feature effect from HPO noise, but
+deterministic mode resolves `auto` target normalization to `ratio_meanyr`, so
+pass `--target-normalization` explicitly per group of cells.

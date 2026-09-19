@@ -86,6 +86,10 @@ recipes pool correctly.
 Consumers: `passing yards`, `passing tds`, `completions`, `attempts`,
 `interceptions`, `sacks taken`, `qb yards`, `qb tds` — 8 of the 20 NFL cells.
 
+Collected as `player_passing_situation`; 17 `ps_*` recipes (context shares,
+per-context YPA / EPA / INT rates, scramble yards per dropback) pool the
+`__raw` counts.
+
 The mechanism is straightforward. A quarterback's yardage distribution against a
 heavy-blitz defense is a different distribution, and the model currently sees only
 the marginal. Pairing the player-grain split with the opposing defense's
@@ -102,16 +106,23 @@ Team-grain and small, but it supplies the volume-driver term the counting market
 lack. Pace times pass rate is play volume, and play volume is most of the variance
 in `attempts`, `carries` and `targets`.
 
+Collected as `team_pace` / `opponent_pace`; 8 `pace_*` team recipes and 4
+`def_pace_*` / `def_plays_*` defense recipes, all pooled from the `__raw` counts.
+
 ### `lineup-combos/ol` — 27 columns
 
 Offensive-line unit performance keyed by the actual five-man combination:
 `unit_player_ids`, `snaps`, `pressure_rate`, `sack_rate`, `ybc_a`, `ypc`,
 `epa_per_rush`, `epa_per_db`, `expl_rate`.
 
-Nothing in the current feature set represents the line. `sacks taken` and
-`rushing yards` are the obvious consumers, and this is the rare feature with a
-clean causal story: an injury changes the unit, and the unit's historical pressure
-rate is forward-looking information the market prices slowly.
+`sacks taken` and `rushing yards` are the obvious consumers, and this is the rare
+feature with a clean causal story: an injury changes the unit, and the unit's
+historical pressure rate is forward-looking information the market prices slowly.
+
+Collected as `team_ol_combos`; the endpoint publishes rates only (no `__raw`), so
+the 7 `ol_*` recipes are snap-weighted means across the units a team fielded, and
+`ol_top_unit_share` (snaps of the most-used five ÷ all snaps) is the continuity
+term.
 
 ### `cornerback-stats` + `rec-points-allowed`
 
@@ -173,10 +184,11 @@ Cheap in code, moderate in request budget. Ranked:
 4. **`personnel=11|12|13|21`.** Personnel usage exists today as team rates
    (`personnel_11_rate`) but not as per-player conditional production.
 
-**Defense mirrors.** `defenseProfile` currently receives 7 FP columns against the
-offense side's 16. That asymmetry is not principled — it is an artifact of which
-legacy tools happened to have a `team/defense/` path. With `mode=defense` the
-defense profile can carry the same panel as the offense one.
+**Defense mirrors.** `defenseProfile` receives 12 FP columns (the 7 legacy ones,
+the 4 `pace_opp` recipes and the revived `def_rush_ybc_allowed_per_att`) against
+the offense side's 33. That asymmetry is not principled — it is an artifact of
+which tools have been pulled with `mode=defense`, and any of the offense panels
+can be mirrored the same way `pace` was.
 
 ## Tier 3 — structural
 
@@ -185,18 +197,11 @@ directly, where `_lookback_windows` currently pools week parquets client-side.
 Fewer requests and one less class of blending bug, but it changes snapshot
 semantics — a redesign, not a config change. Probably not worth it.
 
-**Backfilling history from the new API.** Since `seasons=` accepts prior years,
-2022–2025 could be re-pulled with the new, wider schema. That would let the whole
-feature set move to new-schema names instead of being translated back, and would
-make the Tier-1 endpoints usable for training rather than only serving.
-
-This is not only an expansion lever. Legacy and new snapshots use different
-identity spaces for both players and teams, with zero overlap, so any lookback
-window spanning the cutover splits each entity into two aggregate rows and keeps
-only one — see
-[The cross-era identity split](fantasypoints.md#the-cross-era-identity-split).
-Nothing in the transform can fix that; re-pulling the history is the only clean
-resolution. It is therefore the first thing to build, not the third.
+**History lives on the new API.** `seasons=` accepts prior years, so every
+season from 2021 (postseason included) is pulled through the current API. That is
+what makes Tier-1 endpoints usable for training rather than only serving, and it
+closed the cross-era identity split the legacy pulls had opened — see
+[One identity space](fantasypoints.md#one-identity-space).
 
 ## Sequencing and the retrain rule
 
@@ -207,21 +212,27 @@ creep. The gate machinery compares cells against their own history, and a moving
 feature set makes that comparison meaningless (see
 [MODEL_LIFECYCLE.md](MODEL_LIFECYCLE.md)).
 
-Recommended order:
+Order, with the state of each step:
 
-1. Re-pull 2022–2025 through the new API. It gates everything else, and it is
-   the only fix for the cross-era identity split that currently makes any
-   window straddling the cutover unreliable.
-2. Tier 1 in one batch: `passing-situation`, `pace`, `lineup-combos/ol` — three
-   endpoints, roughly 40 new features, aimed at the 8 passing cells and the 3
-   volume cells. One retrain, one gate comparison.
-3. Tier 2 filter fan-out, as a fixed slice list.
-4. `injury-reports` last, once the pre-game snapshot discipline is designed.
+1. History on the new API — done (2021–2025 plus postseason).
+2. Tier 1 in one batch — done: `passing-situation`, `pace`, `lineup-combos/ol`
+   plus the raw-count free wins below, 47 new recipe outputs, one rebuild of every
+   NFL matrix and one retrain (`docs/handoffs/model_improvement_track.md` §10 has
+   the verdict).
+3. Tier 2 filter fan-out, as a fixed slice list — open.
+4. `injury-reports` last, once the pre-game snapshot discipline is designed — open.
 
-## Free wins already identified
+Each later batch repeats step 2's shape: catalog entries, `FILE_KINDS`, recipes
+reading the raw names, then the full-rebuild → `volume-v1` → retrain sequence in
+[MODEL_LIFECYCLE.md](MODEL_LIFECYCLE.md); appending to the cached matrices leaves
+every new column NaN on history and silently inert.
 
-Two team recipes, `rush_ybc_per_att` and `def_rush_ybc_allowed_per_att`, are dead
-today: they read `…RushingYardsBeforeContactTotal`, a column the legacy snapshots
-never carried. The new API exposes `ybc_total`, so both come alive for the cost of
-one map entry. They are deliberately left dead through the parity port — reviving
-them moves the feature count, so they belong in the Tier-1 retrain batch.
+## Free wins that shipped with Tier 1
+
+The `__raw` blocks of tools already collected carried features no legacy recipe
+read: `rush_ybc_per_att` / `def_rush_ybc_allowed_per_att` (one `ybc_total` map
+entry each), expected-TD rates for passing / rushing / receiving, RYOE per
+attempt, red-zone carry shares (`inside_10_rushes / team_inside_10_active`,
+inside-5 likewise), the endzone-attempt rate and expected receiving yards per
+target. Anything else still unread in a `__raw` block is the same kind of win:
+a recipe row and a retrain.
