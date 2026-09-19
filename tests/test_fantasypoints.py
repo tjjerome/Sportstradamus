@@ -1262,16 +1262,24 @@ def test_untranslated_when_no_spec_is_given():
     assert "playerStatsPassingYardsTotal" not in df.columns
 
 
-def _legacy_columns_by_file_kind() -> dict[str, dict[str, set[str]]]:
-    """Map ``{grain: {parquet basename: legacy column names the map produces}}``.
+# Every tool's displayed columns plus its ``__raw`` keys, pinned from the HAR
+# captures of the 2026-09 API. Recipes added after the port read these names
+# directly instead of going through the column map.
+_TOOL_COLUMNS_FIXTURE = Path(__file__).parent / "fixtures" / "fantasypoints_tool_columns.json"
+
+
+def _available_columns_by_file_kind() -> dict[str, dict[str, set[str]]]:
+    """Map ``{grain: {parquet basename: column names a recipe may read}}``.
 
     Walks the shipped catalog rather than the column map directly, so the
     whole chain is covered: a catalog entry that routes somewhere unexpected
-    or resolves to no map entry shows up as an empty column set.
+    or resolves to no map entry contributes only its tool's raw schema, and a
+    tool missing from the fixture contributes nothing.
     """
     from sportstradamus.collectors.fantasypoints import column_map
     from sportstradamus.collectors.fantasypoints import transform as transform_mod
 
+    tool_columns = json.loads(_TOOL_COLUMNS_FIXTURE.read_text())
     by_kind: dict[str, dict[str, set[str]]] = {"player": {}, "team": {}}
     for spec in load_catalog(FP_SOURCE.catalog_path):
         path = parquet_path_for_spec(spec, season=2026, week=1)
@@ -1281,16 +1289,9 @@ def _legacy_columns_by_file_kind() -> dict[str, dict[str, set[str]]]:
         legacy = set(entry.get("rename", {}).values()) | set(entry.get("derive", {}))
         if entry.get("bucket"):
             legacy.add("bucket")
-        by_kind[grain][path.stem] = legacy
+        tool = spec.url.split("/api/nfl/", 1)[1]
+        by_kind[grain][path.stem] = legacy | set(tool_columns.get(tool, ()))
     return by_kind
-
-
-# ``…RushingYardsBeforeContactTotal`` was never in the legacy snapshots either
-# — only the per-attempt form was — so these two aggregate columns have been
-# empty in production since before the port. The new API does publish the
-# total, so a naive mapping would silently revive them and move the frozen
-# feature count. Kept dead deliberately.
-_DEAD_BEFORE_THE_PORT = frozenset({"rush_ybc_per_att", "def_rush_ybc_allowed_per_att"})
 
 
 # ``line_matchups`` was retired as a leak (week N's rows carry week N's
@@ -1329,7 +1330,7 @@ def test_every_aggregate_output_column_survives_the_new_schema():
     """
     from sportstradamus.stats import nfl_fp_team_weekly_aggregate, nfl_fp_weekly_aggregate
 
-    available = _legacy_columns_by_file_kind()
+    available = _available_columns_by_file_kind()
     unsatisfiable = {}
     for recipes, grain in (
         (nfl_fp_weekly_aggregate._AGGREGATE_RECIPES, "player"),
@@ -1345,7 +1346,7 @@ def test_every_aggregate_output_column_survives_the_new_schema():
             ):
                 continue
             unsatisfiable[output_col] = [(r.file_kind, r.args) for r in alternatives]
-    assert set(unsatisfiable) == _DEAD_BEFORE_THE_PORT, unsatisfiable
+    assert not unsatisfiable, unsatisfiable
 
 
 def test_data_base_resolves_to_filesystem_path_not_multiplexed_repr():

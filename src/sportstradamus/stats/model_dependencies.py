@@ -72,8 +72,6 @@ def load_model_dependency(
         raise ValueError(f"dependency {league} {market} has no training cutoff")
     if not identity.get("matrix_sha256"):
         raise ValueError(f"dependency {league} {market} has no matrix SHA")
-    if payload.get("distribution") != "SkewNormal":
-        raise ValueError(f"dependency {league} {market} must be SkewNormal")
     columns = payload.get("expected_columns")
     if not isinstance(columns, list) or not columns:
         raise ValueError(f"dependency {league} {market} has no feature schema")

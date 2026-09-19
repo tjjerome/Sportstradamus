@@ -741,6 +741,138 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "game_mean",
         ("marketShareReceivingRoutesTotal",),
     ),
+    # passing_situation -- QB context splits (new-API raw counts, no column-map rename)
+    _Recipe(
+        "ps_blitz_share",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_man_share",
+        "passing_situation",
+        "weighted_rate",
+        ("man_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_two_high_share",
+        "passing_situation",
+        "weighted_rate",
+        ("two_high_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_pa_share",
+        "passing_situation",
+        "weighted_rate",
+        ("pa_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_motion_share",
+        "passing_situation",
+        "weighted_rate",
+        ("motion_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_pressured_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_yards", "pressured_attempts"),
+    ),
+    _Recipe(
+        "ps_clean_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("clean_yards", "clean_attempts"),
+    ),
+    _Recipe(
+        "ps_blitz_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_yards", "blitz_attempts"),
+    ),
+    _Recipe("ps_man_ypa", "passing_situation", "weighted_rate", ("man_yards", "man_attempts")),
+    _Recipe("ps_zone_ypa", "passing_situation", "weighted_rate", ("zone_yards", "zone_attempts")),
+    _Recipe(
+        "ps_two_high_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("two_high_yards", "two_high_attempts"),
+    ),
+    _Recipe("ps_pa_ypa", "passing_situation", "weighted_rate", ("pa_yards", "pa_attempts")),
+    _Recipe(
+        "ps_pressured_epa_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_epa", "pressured_dropbacks"),
+    ),
+    _Recipe(
+        "ps_clean_epa_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("clean_epa", "clean_dropbacks"),
+    ),
+    _Recipe(
+        "ps_blitz_int_rate",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_interceptions", "blitz_attempts"),
+    ),
+    _Recipe(
+        "ps_pressured_int_rate",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_interceptions", "pressured_attempts"),
+    ),
+    _Recipe(
+        "ps_scramble_yards_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("overall_scramble_yards", "overall_dropbacks"),
+    ),
+    # passing/rushing/receiving_basic -- expected-TD, RYOE + red-zone shares (new-API raw counts)
+    _Recipe(
+        "pass_xtd_per_att",
+        "passing_basic",
+        "weighted_rate",
+        ("exp_pass_td_total", "attempts"),
+    ),
+    _Recipe(
+        "pass_endzone_att_rate",
+        "passing_basic",
+        "weighted_rate",
+        ("endzone_attempts", "attempts"),
+    ),
+    _Recipe(
+        "rush_xtd_per_att",
+        "rushing_basic",
+        "weighted_rate",
+        ("exp_rush_td_total", "attempts"),
+    ),
+    _Recipe("rush_ryoe_per_att", "rushing_basic", "weighted_rate", ("ryoe_total", "attempts")),
+    _Recipe(
+        "rush_rz10_carry_share",
+        "rushing_basic",
+        "weighted_rate",
+        ("inside_10_rushes", "team_inside_10_active"),
+    ),
+    _Recipe(
+        "rush_rz5_carry_share",
+        "rushing_basic",
+        "weighted_rate",
+        ("inside_5_rushes", "team_inside_5_active"),
+    ),
+    _Recipe(
+        "rec_xtd_per_target",
+        "receiving_basic",
+        "weighted_rate",
+        ("exp_rec_td_total", "targets"),
+    ),
+    _Recipe(
+        "rec_xyards_per_target",
+        "receiving_basic",
+        "weighted_rate",
+        ("exp_rec_yards_total", "targets"),
+    ),
 )
 
 # Recipes that share a denominator with the season-CSV's separation-by-

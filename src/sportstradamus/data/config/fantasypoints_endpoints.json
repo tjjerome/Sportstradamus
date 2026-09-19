@@ -796,5 +796,60 @@
     "response_format": "json",
     "weekly": true,
     "notes": "Pass-rate bucket; legacy run_pass_report bucket_trailing"
+  },
+  {
+    "name": "player_passing_situation",
+    "url": "https://fantasypointsdata.com/api/nfl/passing-situation",
+    "output_subdir": "player/passing_situation",
+    "method": "GET",
+    "params": {
+      "positions": "QB",
+      "seasons": "{season}",
+      "regWeeks": "{week}"
+    },
+    "response_format": "json",
+    "weekly": true,
+    "notes": "QB context splits (pressured/clean/blitz/man/zone/two-high); ps_* recipes read the __raw counts."
+  },
+  {
+    "name": "team_pace",
+    "url": "https://fantasypointsdata.com/api/nfl/pace",
+    "output_subdir": "team/pace",
+    "method": "GET",
+    "params": {
+      "mode": "offense",
+      "seasons": "{season}",
+      "regWeeks": "{week}"
+    },
+    "response_format": "json",
+    "weekly": true,
+    "notes": "Offensive pace; pace_* recipes read the __raw counts."
+  },
+  {
+    "name": "opponent_pace",
+    "url": "https://fantasypointsdata.com/api/nfl/pace",
+    "output_subdir": "opponent/pace",
+    "method": "GET",
+    "params": {
+      "mode": "defense",
+      "seasons": "{season}",
+      "regWeeks": "{week}"
+    },
+    "response_format": "json",
+    "weekly": true,
+    "notes": "Pace forced on opponents; def_pace_* / def_plays_* recipes."
+  },
+  {
+    "name": "team_ol_combos",
+    "url": "https://fantasypointsdata.com/api/nfl/lineup-combos/ol",
+    "output_subdir": "team/ol_combos",
+    "method": "GET",
+    "params": {
+      "seasons": "{season}",
+      "regWeeks": "{week}"
+    },
+    "response_format": "json",
+    "weekly": true,
+    "notes": "One row per OL unit per team-week; ol_* recipes snap-weight the displayed rates."
   }
 ]

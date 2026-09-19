@@ -702,7 +702,8 @@
       "gain_15plus_pct": "opponentStatsRushingRunsExplosivePercentage",
       "stuff_rate": "opponentStatsRushingAttemptsStuffsPercentage",
       "success_rate": "opponentStatsRushingAttemptsSuccessPercentage",
-      "yaco_total": "opponentStatsRushingYardsAfterContactTotal"
+      "yaco_total": "opponentStatsRushingYardsAfterContactTotal",
+      "ybc_total": "opponentStatsRushingYardsBeforeContactTotal"
     },
     "scale": {
       "gain_15plus_pct": 0.01,
@@ -720,7 +721,8 @@
       "gain_15plus_pct": "teamStatsRushingRunsExplosivePercentage",
       "stuff_rate": "teamStatsRushingAttemptsStuffsPercentage",
       "success_rate": "teamStatsRushingAttemptsSuccessPercentage",
-      "yaco_total": "teamStatsRushingYardsAfterContactTotal"
+      "yaco_total": "teamStatsRushingYardsAfterContactTotal",
+      "ybc_total": "teamStatsRushingYardsBeforeContactTotal"
     },
     "scale": {
       "gain_15plus_pct": 0.01,

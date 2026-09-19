@@ -33,7 +33,7 @@ Layout on disk::
             efficiency.parquet
             fantasy_points_allowed.parquet  <-- see PLACEHOLDER caveat
             fantasy_points_scored.parquet   <-- see PLACEHOLDER caveat
-            ...                             <-- 24 file_kinds total
+            ...                             <-- 31 file_kinds total
 
 Most file_kinds publish per-player-per-game rows. Two kinds currently
 land as 1-row placeholders showing a single (team, opponent, position)
@@ -68,6 +68,7 @@ FILE_KINDS: dict[str, str] = {
     "passing_advanced": "passing_advanced.parquet",
     "passing_basic": "passing_basic.parquet",
     "passing_depth": "passing_depth.parquet",
+    "passing_situation": "passing_situation.parquet",
     "qb_coverage_matchup": "qb_coverage_matchup.parquet",
     "receiving_advanced": "receiving_advanced.parquet",
     "receiving_basic": "receiving_basic.parquet",

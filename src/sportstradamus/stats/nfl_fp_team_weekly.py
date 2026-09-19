@@ -19,7 +19,7 @@ Layout on disk::
             line_matchups.parquet            <-- realized game rows; abbreviation source only
             passing_advanced.parquet
             passing_advanced_opp.parquet
-            ...                              <-- 20 file_kinds total
+            ...                              <-- 30 file_kinds total
 
 The ``*_opp`` variants are defense-faced equivalents of the offensive
 parquets (e.g. ``rushing_advanced_opp`` = "what this team's defense has
@@ -100,6 +100,9 @@ FILE_KINDS: dict[str, str] = {
     "fantasy_points_scored": "fantasy_points_scored.parquet",
     "fantasy_points_scored_opp": "fantasy_points_scored_opp.parquet",
     "line_matchups": "line_matchups.parquet",
+    "ol_combos": "ol_combos.parquet",
+    "pace": "pace.parquet",
+    "pace_opp": "pace_opp.parquet",
     "passing_advanced": "passing_advanced.parquet",
     "passing_advanced_opp": "passing_advanced_opp.parquet",
     "passing_basic": "passing_basic.parquet",

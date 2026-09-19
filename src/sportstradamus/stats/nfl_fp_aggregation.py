@@ -8,7 +8,7 @@ feature values consumers actually need.
 Three aggregation patterns map to the kinds of stats FP publishes; the
 docstrings on the loader modules spell out which file_kinds need which
 pattern, and Phase-1.5 / Phase-2 build features by dispatching through
-the four helpers here:
+the five helpers here:
 
 - :func:`weighted_rate` — Pattern A, the default when both numerator and
   denominator are exposed as per-game raw totals. ``sum(numerator) /
@@ -18,6 +18,9 @@ the four helpers here:
   rate is exposed (e.g. aDOT, pressure-rate-over-expected). Computes
   ``sum(rate * weight) / sum(weight)``, mathematically identical to
   ``weighted_rate`` if ``weight`` is the rate's true denominator.
+- :func:`top_unit_share` — continuity. The share of a group's total
+  weight carried by its single most-used unit (OL five-man units by
+  snaps); 1.0 when one unit took every snap in the window.
 - :func:`total_sum` — raw season-to-date counts (no rate derivation).
   The simplest aggregation; correct for any stat that's a pure tally.
 - :func:`game_mean` — Pattern C, average of per-game outcomes.
@@ -136,6 +139,49 @@ def weighted_mean(
     den = grouped["_weight"].sum(min_count=1)
     out = num.divide(den).where(den != 0, other=np.nan)
     out.name = f"{value_col}_wmean"
+    return out
+
+
+def top_unit_share(
+    df: pd.DataFrame,
+    unit_col: str,
+    weight_col: str,
+    *,
+    group_col: str = TEAM_GROUP_COL,
+) -> pd.Series:
+    """Share of a group's total weight carried by its single most-used unit.
+
+    A continuity measure. For offensive-line continuity pass
+    ``unit_col="row_id"`` (one five-man OL unit per row) and
+    ``weight_col="snaps"``: a team that ran one unit for every snap in the
+    window scores 1.0, and each rotation pulls the score down to the share
+    its most-used unit actually played. "Most-used" is judged over the whole
+    window, so a unit that started every week is credited with all of its
+    games, not just its best one.
+
+    Groups whose summed weight is zero produce ``NaN`` in the output rather
+    than divide-by-zero.
+
+    Args:
+        df: Per-game rows, one per (group, unit).
+        unit_col: Column identifying the unit.
+        weight_col: Column with the per-row weight (snaps).
+        group_col: Group key. Defaults to ``"teamTeamId"``; pass
+            ``"playerPlayerId"`` for player-grain frames.
+
+    Returns:
+        Series indexed by ``group_col`` value with the per-group share in
+        ``[0, 1]``. Empty Series if ``df`` is empty or either required
+        column is missing.
+    """
+    if df.empty or unit_col not in df.columns or weight_col not in df.columns:
+        return pd.Series(dtype="float64", name=f"{unit_col}_top_share")
+
+    per_unit = df.groupby([group_col, unit_col], dropna=False)[weight_col].sum(min_count=1)
+    by_group = per_unit.groupby(level=group_col, dropna=False)
+    total = by_group.sum(min_count=1)
+    out = by_group.max().divide(total).where(total != 0, other=np.nan)
+    out.name = f"{unit_col}_top_share"
     return out
 
 

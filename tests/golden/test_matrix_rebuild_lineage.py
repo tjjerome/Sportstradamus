@@ -309,6 +309,31 @@ def test_dependency_resolution_supports_fresh_named_namespace(tmp_path):
     assert dependency.path.parent == namespace
 
 
+def test_dependency_resolution_accepts_a_count_family_volume_model(tmp_path):
+    """NFL carries is DPO; the decode path is family-agnostic, so the registry must be too."""
+    namespace = tmp_path / DEPENDENCY_NAMESPACE
+    namespace.mkdir()
+    payload = {
+        "dependency_identity": {
+            "namespace": DEPENDENCY_NAMESPACE,
+            "schema_version": 1,
+            "league": "NFL",
+            "market": "carries",
+            "training_cutoff": "2026-09-14",
+            "matrix_sha256": "matrix-sha",
+        },
+        "distribution": "DPO",
+        "expected_columns": ["MeanYr"],
+        "model_version": "test-v3",
+        "trained_at": "2026-09-19T00:00:00+00:00",
+    }
+    (namespace / "NFL_carries.mdl").write_bytes(pickle.dumps(payload))
+
+    dependency = load_model_dependency(tmp_path, "NFL", "carries")
+
+    assert dependency.payload["distribution"] == "DPO"
+
+
 @pytest.mark.parametrize("namespace", ["", ".", "..", "parent/child", "../escape"])
 def test_dependency_resolution_rejects_unsafe_namespace(tmp_path, namespace):
     with pytest.raises(ValueError, match="invalid dependency namespace"):

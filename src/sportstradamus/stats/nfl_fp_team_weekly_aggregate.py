@@ -15,6 +15,9 @@ Pattern dispatches handled by this module:
 * ``weighted_mean`` -- Pattern A variant via
   :func:`sportstradamus.stats.nfl_fp_aggregation.weighted_mean` when the
   per-game row exposes only the rate (e.g. success%, stuffs%).
+* ``top_unit_share`` -- continuity via
+  :func:`sportstradamus.stats.nfl_fp_aggregation.top_unit_share`: the share
+  of a team's snaps its single most-used OL five-man unit played.
 * ``proe_formula`` -- custom Pattern A. PROE is
   ``sum(actual_dropbacks - expected_dropbacks) / sum(expected_dropbacks)``;
   the per-game ratio is biased.
@@ -51,6 +54,7 @@ from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nfl_fp_team_weekly, nfl_fp_weekly
 from sportstradamus.stats.nfl_fp_aggregation import (
     TEAM_GROUP_COL,
+    top_unit_share,
     weighted_mean,
     weighted_rate,
 )
@@ -104,10 +108,11 @@ class _TeamRecipe:
         file_kind: Logical kind name from
             :data:`sportstradamus.stats.nfl_fp_team_weekly.FILE_KINDS`.
         pattern: Dispatch key: ``"weighted_rate"`` / ``"weighted_mean"`` /
-            ``"proe_formula"`` / ``"rpr_bucket_pass_rate"``.
+            ``"top_unit_share"`` / ``"proe_formula"`` / ``"rpr_bucket_pass_rate"``.
         args: Source-column tuple. ``(num, den)`` for weighted_rate /
             ``proe_formula``; ``(value, weight)`` for weighted_mean;
-            ``(bucket_key,)`` for rpr_bucket_pass_rate.
+            ``(unit, weight)`` for top_unit_share; ``(bucket_key,)`` for
+            rpr_bucket_pass_rate.
         grain: ``"team"`` -> output goes into team_features frame.
             ``"defense"`` -> output goes into defense_features frame.
     """
@@ -305,6 +310,149 @@ _RECIPES: tuple[_TeamRecipe, ...] = (
         (_PROE_ACTUAL_COL, _PROE_EXPECTED_COL),
         "team",
     ),
+    # pace -> teamProfile tempo (possession seconds over plays; plays per game and per drive)
+    _TeamRecipe(
+        "pace_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_seconds_sum", "plays_total"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_plays_per_game",
+        "pace",
+        "weighted_rate",
+        ("plays_total", "games"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_plays_per_drive",
+        "pace",
+        "weighted_rate",
+        ("drive_plays_sum", "drives"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_drives_per_game",
+        "pace",
+        "weighted_rate",
+        ("drives", "games"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_neutral_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_neutral", "plays_neutral"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_trailing_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_trail", "plays_trail"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_leading_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_lead", "plays_lead"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_neutral_play_share",
+        "pace",
+        "weighted_rate",
+        ("plays_neutral", "plays_total"),
+        "team",
+    ),
+    # pace_opp -> defenseProfile tempo forced on the offenses faced
+    _TeamRecipe(
+        "def_pace_sec_per_play_forced",
+        "pace_opp",
+        "weighted_rate",
+        ("top_seconds_sum", "plays_total"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_plays_faced_per_game",
+        "pace_opp",
+        "weighted_rate",
+        ("plays_total", "games"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_plays_per_drive_allowed",
+        "pace_opp",
+        "weighted_rate",
+        ("drive_plays_sum", "drives"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_drives_faced_per_game",
+        "pace_opp",
+        "weighted_rate",
+        ("drives", "games"),
+        "defense",
+    ),
+    # ol_combos -> teamProfile OL unit efficiency + continuity (snap-weighted over five-man units)
+    _TeamRecipe(
+        "ol_pressure_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("pressure_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_sack_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("sack_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_ybc_per_att",
+        "ol_combos",
+        "weighted_mean",
+        ("ybc_a", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_ypc",
+        "ol_combos",
+        "weighted_mean",
+        ("ypc", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_epa_per_db",
+        "ol_combos",
+        "weighted_mean",
+        ("epa_per_db", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_epa_per_rush",
+        "ol_combos",
+        "weighted_mean",
+        ("epa_per_rush", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_success_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("success_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_top_unit_share",
+        "ol_combos",
+        "top_unit_share",
+        ("row_id", "snaps"),
+        "team",
+    ),
 )
 
 
@@ -495,6 +643,11 @@ def _dispatch(df: pd.DataFrame, recipe: _TeamRecipe) -> pd.Series | None:
         if _missing_cols(df, recipe.args):
             return None
         return weighted_mean(df, value_col, weight_col, group_col=TEAM_GROUP_COL)
+    if recipe.pattern == "top_unit_share":
+        unit_col, weight_col = recipe.args
+        if _missing_cols(df, recipe.args):
+            return None
+        return top_unit_share(df, unit_col, weight_col, group_col=TEAM_GROUP_COL)
     if recipe.pattern == "proe_formula":
         actual_col, expected_col = recipe.args
         if _missing_cols(df, recipe.args):
