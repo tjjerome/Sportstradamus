@@ -56,7 +56,7 @@ from sportstradamus.stats.nfl_fp_aggregation import (
 )
 
 # Abbreviation column the FP team-grain parquets carry alongside teamTeamId.
-# Used to re-key per-teamId aggregates back to the abbreviation index that
+# Used to re-key each window's rows onto the abbreviation index that
 # teamProfile / defenseProfile uses (matches the NFL gamelog's "team" col).
 _TEAM_ABBR_COL = "teamAbbreviation"
 
@@ -374,17 +374,9 @@ def load_team_and_defense_features(
     if not pattern_a_windows:
         return pd.DataFrame(), pd.DataFrame()
 
-    # Source the abbreviation map from the most recent window season: the
-    # underlying teamTeamId is stable across relocations (OAK->LV, STL->LA)
-    # but the abbreviation is not, and teamProfile / defenseProfile key on
-    # the team's current-day one.
-    abbr_map = _build_team_abbreviation_map(max(season for season, _, _ in pattern_a_windows))
-    if abbr_map.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
     return (
-        _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map),
-        _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map),
+        _aggregate_pattern_a(pattern_a_windows, grain="team"),
+        _aggregate_pattern_a(pattern_a_windows, grain="defense"),
     )
 
 
@@ -402,44 +394,47 @@ def _pool_windows(
 ) -> pd.DataFrame:
     """Pool before the per-team groupby so blended windows are treated as one sample.
 
-    Windows where ``start_week > end_week`` are skipped. Empty frame when no window
-    yields rows.
+    Each window is re-keyed from its own season's ``teamTeamId`` to the team
+    abbreviation *before* the concat: the two snapshot eras don't share an id
+    space (archived legacy pulls key teams numerically, current pulls key them
+    by abbreviation), so pooling the raw ids would split one team across two
+    groups and silently drop whichever era the map didn't cover.
+
+    Windows where ``start_week > end_week``, whose snapshots are absent, or
+    whose season has no usable abbreviation map contribute nothing. Empty frame
+    when no window yields rows.
     """
     frames = []
     for season, start_week, end_week in pattern_a_windows:
         df = nfl_fp_team_weekly.load_window_or_empty(season, start_week, end_week, file_kind)
-        if not df.empty:
-            frames.append(df)
+        if df.empty:
+            continue
+        abbr = _build_team_abbreviation_map(season)
+        if abbr.empty:
+            continue
+        keyed = df.assign(**{TEAM_GROUP_COL: df[TEAM_GROUP_COL].map(abbr)})
+        frames.append(keyed.loc[keyed[TEAM_GROUP_COL].notna()])
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
-
-
-def _rekey_to_abbr(out: pd.DataFrame, abbr_map: pd.Series) -> pd.DataFrame:
-    mapping = abbr_map.to_dict()
-    out.index = [mapping.get(idx) for idx in out.index]
-    return out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
 
 
 def _aggregate_pattern_a(
     pattern_a_windows: Sequence[tuple[int, int, int]],
     *,
     grain: Literal["team", "defense"],
-    abbr_map: pd.Series,
 ) -> pd.DataFrame:
     """Apply every recipe whose ``grain`` matches over pooled per-window per-game rows.
 
-    For each ``file_kind`` referenced by matching recipes, loads all windows,
-    concatenates the raw per-game rows (pooling across windows before the per-team
-    groupby so blended windows are treated as one sample), then dispatches to
-    ``_apply_recipes``. Results are re-keyed from ``teamTeamId`` to team
-    abbreviation via ``abbr_map``.
+    For each ``file_kind`` referenced by matching recipes, loads all windows and
+    concatenates the raw per-game rows — abbreviation-keyed by ``_pool_windows``,
+    pooled across windows before the per-team groupby so blended windows are
+    treated as one sample — then dispatches to ``_apply_recipes``.
 
     Args:
         pattern_a_windows: ``(season, start_week, end_week)`` tuples to pool.
             Windows where ``start_week > end_week`` are skipped.
         grain: ``"team"`` -> collects team-grain recipes; ``"defense"`` -> defense-grain.
-        abbr_map: Series mapping ``teamTeamId`` -> ``teamAbbreviation`` for re-keying.
 
     Returns:
         DataFrame indexed by team abbreviation. Empty when no usable snapshots found.
@@ -457,9 +452,7 @@ def _aggregate_pattern_a(
             continue
         out = kind_frame if out.empty else out.combine_first(kind_frame)
 
-    if out.empty:
-        return out
-    return _rekey_to_abbr(out, abbr_map)
+    return out
 
 
 def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataFrame:
@@ -473,8 +466,9 @@ def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataF
         recipes: Subset of ``_ALL_RECIPES`` filtered to one ``file_kind`` and ``grain``.
 
     Returns:
-        Wide DataFrame indexed by ``TEAM_GROUP_COL`` (``teamTeamId``), one column
-        per surviving recipe. Empty when all recipes return ``None``.
+        Wide DataFrame indexed by ``TEAM_GROUP_COL``, which ``_pool_windows`` has
+        already re-keyed to the team abbreviation, one column per surviving
+        recipe. Empty when all recipes return ``None``.
     """
     out = pd.DataFrame()
     for recipe in recipes:
