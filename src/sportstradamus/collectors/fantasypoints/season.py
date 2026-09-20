@@ -221,7 +221,13 @@ def _fetch_one_week(
     path: Path,
     log: logging.Logger,
 ) -> RunResult:
-    """The per-week command's request for one folder week, on the same client."""
+    """The per-week command's request for one folder week, on the same client.
+
+    Forces ``refetch=True``: every folder week reaching this fallback was
+    already chosen by ``_fetch_season``'s ``wanted`` filter, so this must not
+    let ``fetch_and_write_one``'s own on-disk skip-check re-decide and drop a
+    ``--refetch`` week that already has rows.
+    """
     mode, week = _mode_and_week(folder_week)
     return runner.fetch_and_write_one(
         spec,
