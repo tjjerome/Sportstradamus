@@ -25,6 +25,9 @@
 #   LOG_DIR                 log directory (default: $SPORTSTRADAMUS_DIR/logs)
 #   ARCHIVE_LOCK_TIMEOUT    seconds to wait for the shared archive lock (default: 900)
 #   GIT_PULL                set 0 to skip the pre-job devel pull (default: 1)
+#   DASHBOARD_UNIT          systemd unit to restart when a pull moves dashboard
+#                           code (default: sportstradamus-dashboard.service; set
+#                           empty to skip the restart)
 #
 # Healthchecks pings:
 #   Every ping carries a `?rid=` run ID and a body whose first line is
@@ -48,6 +51,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="${SPORTSTRADAMUS_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
 LOCK_DIR="${LOCK_DIR:-/tmp}"
+DASHBOARD_UNIT="${DASHBOARD_UNIT:-sportstradamus-dashboard.service}"
 
 if [[ $# -lt 1 ]]; then
     echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit> [args...]" >&2
@@ -163,6 +167,18 @@ pull_devel() {
             log "PULL job=$JOB ok"
         else
             log "PULL_WARN job=$JOB reason=fold_failed"
+        fi
+        # The dashboard is the only long-lived process, so a pull that moves its
+        # modules or a config it reads leaves it serving the sys.modules it
+        # imported before the pull.
+        if [[ -n "$DASHBOARD_UNIT" ]] \
+            && git diff --name-only 'HEAD@{1}..HEAD' 2>/dev/null \
+            | grep -qE '^src/sportstradamus/(dashboard/|data/config/)'; then
+            if sudo systemctl restart "$DASHBOARD_UNIT" >>"$LOG_FILE" 2>&1; then
+                log "PULL_RESTART job=$JOB unit=$DASHBOARD_UNIT ok"
+            else
+                log "PULL_WARN job=$JOB reason=dashboard_restart_failed"
+            fi
         fi
     ) 7>"$PULL_LOCK_FILE"
 }

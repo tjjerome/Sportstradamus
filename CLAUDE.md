@@ -275,6 +275,9 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
     configs are reset then re-folded from `modifier_overrides.json` with
     `--prune` so dashboard-captured corrections never block the pull;
     `GIT_PULL=0` skips),
+  - a dashboard restart when that pull moves `dashboard/` or `data/config/`
+    (the only long-lived process, so it otherwise serves pre-pull
+    `sys.modules`; unit from `DASHBOARD_UNIT`, empty to skip),
   - a shared archive `flock -w 900` (serializes against DuckDB's
     single-writer lock so jobs don't collide on `archive.duckdb`),
   - Healthchecks.io `/start` / `/fail` / success pings,

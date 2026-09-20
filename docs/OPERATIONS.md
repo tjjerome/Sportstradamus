@@ -25,8 +25,9 @@ are only fallback seeds. To force a gamelog update in the offseason, set
 
 All jobs run through [`scripts/run_job.sh`](../scripts/run_job.sh), which adds a
 per-job `flock` (an overlapping run of the same job is skipped), a self-deploy
-`git pull` before each job, a shared archive lock (DuckDB allows one writer),
-and Healthchecks.io start/fail/success pings. Each job pings
+`git pull` before each job (restarting the dashboard when that pull moves its
+code — see [Dashboard as a service](#dashboard-as-a-service)), a shared archive
+lock (DuckDB allows one writer), and Healthchecks.io start/fail/success pings. Each job pings
 `HEALTHCHECK_URL_<JOB>` (the job name uppercased, `-` → `_`; e.g. `close-lines`
 → `HEALTHCHECK_URL_CLOSE_LINES`), falling back to the shared `HEALTHCHECK_URL`.
 
@@ -119,6 +120,31 @@ ExecStart=poetry run python -m sportstradamus dashboard
 Restart=always
 RestartSec=5
 ```
+
+The dashboard is the only long-lived process in the system, and every cron job
+self-deploys before it runs, so prod code routinely moves under a running
+dashboard. Streamlit re-execs page scripts on each rerun but never re-imports
+`sys.modules`, so a pulled page meets helper modules and config loaders from
+before the pull — surfacing as an `ImportError` on a symbol that exists only in
+the new module, or a `KeyError` on a config key the new schema dropped.
+
+`run_job.sh` therefore restarts the unit whenever a pull moves anything under
+`src/sportstradamus/dashboard/` or `src/sportstradamus/data/config/`, logging
+`PULL_RESTART`. Two things must line up:
+
+- `DASHBOARD_UNIT` names the unit (default `sportstradamus-dashboard.service`);
+  set it empty to skip the restart.
+- The cron user needs a passwordless restart, since the wrapper runs unattended:
+
+  ```
+  # /etc/sudoers.d/sportstradamus-dashboard, mode 0440
+  sportstradamus ALL=(root) NOPASSWD: /usr/bin/systemctl restart sportstradamus-dashboard.service
+  ```
+
+  The rule is pinned to the literal command, so the unit name here and in
+  `DASHBOARD_UNIT` must match exactly. Validate with `visudo -cf` before it
+  takes effect. A failed restart logs `PULL_WARN reason=dashboard_restart_failed`
+  and never blocks the job.
 
 ## Incident recovery
 

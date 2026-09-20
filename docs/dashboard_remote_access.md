@@ -58,6 +58,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now <unit>
 ```
 
+The unit name matters beyond this file: `run_job.sh` restarts it after a pull
+that moves dashboard code, through `DASHBOARD_UNIT` and a sudoers rule pinned to
+the literal command. See
+[OPERATIONS.md](OPERATIONS.md#dashboard-as-a-service).
+
 ## 2. Join the tailnet
 
 Install Tailscale (https://tailscale.com/download) on the server and on each
