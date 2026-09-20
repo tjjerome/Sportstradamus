@@ -127,11 +127,11 @@ def _fetch_season(
             **split_period_params(season=season, mode=mode),
         },
     )
-    result = partial(RunResult, name=spec.name, url=url, method="GET", season=season)
+    make_result = partial(RunResult, name=spec.name, url=url, method="GET", season=season)
     if not refetch and all(on_disk.values()):
         click.echo(f"  {spec.name}: skip (every week on disk)", err=True)
         return [
-            result(status=RESULT_SKIPPED, week=week, rows=rows, path=str(paths[week]))
+            make_result(status=RESULT_SKIPPED, week=week, rows=rows, path=str(paths[week]))
             for week, rows in on_disk.items()
         ]
     body, err = dispatch.dispatch_capturing_errors(
@@ -147,7 +147,7 @@ def _fetch_season(
     )
     if err is not None:
         click.echo(f"  {spec.name}: {err['error_message']}", err=True)
-        return [result(status=RESULT_FETCH_FAILED, week=0, **err)]
+        return [make_result(status=RESULT_FETCH_FAILED, week=0, **err)]
     by_week = _rows_by_week(body, mode)
     if by_week is None:
         click.echo(
@@ -173,7 +173,7 @@ def _fetch_season(
         df = parse_table_response(by_week.get(week, []), spec=spec, season=season, week=week)
         write_parquet(df.drop(columns=_SPLIT_ONLY_COLS, errors="ignore"), path)
         status = RESULT_EMPTY if df.empty else RESULT_OK
-        results.append(result(status=status, week=week, rows=len(df), path=str(path)))
+        results.append(make_result(status=status, week=week, rows=len(df), path=str(path)))
     click.echo(
         f"  {spec.name}: wrote {sum(r.rows for r in results)} rows across {len(weeks)} weeks",
         err=True,
