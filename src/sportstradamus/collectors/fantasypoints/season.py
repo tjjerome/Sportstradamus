@@ -142,7 +142,7 @@ def _fetch_season(
         week=weeks[0],
         mode=mode,
         use_cache=True,
-        splits=True,
+        window="season",
         log=log,
     )
     if err is not None:

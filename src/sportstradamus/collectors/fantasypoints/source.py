@@ -27,6 +27,9 @@ from sportstradamus.collectors.transport import CookieClient
 
 Mode = Literal["weekly", "season_to_date", "postseason"]
 DEFAULT_MODE: Mode = "weekly"
+# The period window one request covers: the (season, week) cell, or the
+# whole season split per week (``fp-fetch season``).
+Window = Literal["week", "season"]
 
 # Source of truth for the bundled catalog. Committed; humans extend it via
 # the ``fp-fetch import-curl`` CLI rather than by hand-editing.
@@ -134,7 +137,7 @@ def _dispatch(
     week: int,
     mode: Mode = DEFAULT_MODE,
     use_cache: bool = True,
-    splits: bool = False,
+    window: Window = "week",
 ) -> dict | list | str | bytes:
     """GET one endpoint spec with its catalog filters plus the period window.
 
@@ -143,19 +146,19 @@ def _dispatch(
     The season and week parameters are layered on here so a mode change
     doesn't require touching 52 catalog entries.
 
-    ``splits=True`` asks for the whole season in one response, one row per
-    entity-week (``fp-fetch season``); ``week`` then only renders the
+    ``window="season"`` asks for the whole season in one response, one row
+    per entity-week (``fp-fetch season``); ``week`` then only renders the
     catalog's ``{week}`` placeholder, which the season window overrides.
 
     ``use_cache`` is accepted for CLI symmetry; the new API has no cache
     control, so it is ignored.
     """
-    window = (
+    period = (
         split_period_params(season=season, mode=mode)
-        if splits
+        if window == "season"
         else period_params(season=season, week=week, mode=mode)
     )
-    params = {**spec.render_params(season=season, week=week), **window}
+    params = {**spec.render_params(season=season, week=week), **period}
     return client.get(spec.url, params=params, headers=spec.extra_headers, accept="json")
 
 
