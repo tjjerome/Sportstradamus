@@ -16,6 +16,7 @@ token.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from time import sleep
 from typing import Literal
 
@@ -111,6 +112,9 @@ class CookieClient:
             inter_request_sleep_s if inter_request_sleep_s is not None else _INTER_REQUEST_SLEEP_S
         )
         self._first_call = True
+        # Headers of the latest 2xx response, for a source whose API reports
+        # on the body there (Fantasy Points flags a row-capped response).
+        self.last_response_headers: Mapping[str, str] = {}
         if not self._authorization and not self._cookie:
             logger.warning(
                 "collector credentials missing — capture the Authorization header "
@@ -264,6 +268,7 @@ class CookieClient:
                     "source's auth credentials in creds/keys.json."
                 )
             if 200 <= response.status_code < 300:
+                self.last_response_headers = response.headers
                 return self._decode(response, accept)
             is_retryable = response.status_code == 429 or 500 <= response.status_code < 600
             if not is_retryable or backoff is None:

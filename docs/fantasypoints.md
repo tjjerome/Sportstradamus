@@ -264,21 +264,42 @@ fast so Healthchecks.io pings `/fail`.
 ## Historical backfill
 
 ```bash
-sportstradamus fetch fp season --season 2024                    # weeks 1-18, one request per tool
-sportstradamus fetch fp season --season 2024 --mode postseason  # rounds 1-4 -> week_19..22
+sportstradamus fetch fp season --season 2024   # weeks 1-18 + rounds 1-4 -> week_01..22
 ```
 
-`season` asks for the whole season with the API's `splits=week`
-switch, which returns one row per entity-week carrying the values a
-per-week request would (only the `row_id` / `rank` order differs,
-plus a `split_pct` column the command drops), and writes the same
-per-week parquets `run` does. One request per tool replaces 18 (or
-4), so a season costs ~65 calls instead of 1,080.
-`lineup-combos/ol` ignores the switch and answers aggregated rows;
-the command notices the missing `split_week` and falls back to
-per-week calls for that tool. A tool whose every week is already on
-disk is skipped; one with any missing or zero-row week is re-pulled
-whole (`--refetch` re-pulls every tool).
+`season` asks for the whole season, postseason included, with the API's
+`splits=week` switch, which returns one row per entity-week, and writes
+the same per-week parquets `run` does. One request per tool replaces
+22, so a season costs ~180 calls instead of ~1,300. Three API
+behaviours shape it:
+
+- **Row cap.** A response is cut at a per-tool row count (1,500 on the
+  receiving tools, up to 3,700 on the snap tools); past it the
+  lowest-volume players drop out of *every* week asked for. The API
+  flags such a response with `x-result-truncated: 1` (and the cap in
+  `x-result-cap`), also on a server-cache hit. The command halves the
+  window until each part comes back unflagged; team tools and the QB
+  tools fit in one request, the big receiving tools need about ten.
+- **`lineup-combos/ol` ignores the switch** and answers aggregated
+  rows; the command notices the missing `split_week` and falls back to
+  per-week calls for that tool.
+- **Some columns are window-scoped, not per-week**, so a split-pulled
+  parquet differs from a per-week one in them: on team files `snaps`,
+  `routes`, the receiving route rates and the drive block
+  (`drives`, `points_per_drive`, `score_pct`, …); on player files the
+  team-context block of the rushing and receiving tools
+  (`team_targets`, `team_routes`, the personnel / coverage / formation
+  rates, `snap_pct`) goes empty for the weeks a player spent with a
+  second team inside one window, and `sep_market_share` /
+  `*_bucket_share_pct` are shares of the window. No recipe reads any
+  of them: on 2025 weeks 1–15 every aggregated feature from a split
+  pull matched the per-week pull exactly. A recipe that wants one of
+  these columns needs per-week pulls (`backfill`) for its history.
+
+Only weeks that are missing or hold zero rows are asked for
+(`--refetch` asks for all 22), so a rerun costs one request per tool
+with a gap and nothing for a finished one. `split_pct` /
+`split_rte_pct` (a week's share of its window) are dropped on write.
 
 `backfill` is the per-week walk — the same fetch + parse + write as
 `run` over every (season, week) pair — for filling a few cells:
@@ -303,16 +324,16 @@ costs nothing), so read it before a big pull.
   eras — see *One identity space*), so never leave a season half
   re-pulled when something downstream reads it.
 - Clear the season's old parquets first, then pull **without**
-  `--refetch`: a 429 writes nothing, missing weeks get pulled on the
-  next run, finished tools are skipped, so the pull resumes across
+  `--refetch`: a 429 writes nothing, missing weeks get asked for on
+  the next run, finished ones are skipped, so the pull resumes across
   resets.
 - Leave ~100 calls of headroom on Wednesdays for the production
   cron below, which shares the account.
 
-`--only` and `--mode` work the same as on `run` (`backfill` also
-takes `--dry-run`; `--mode season_to_date` backfills cumulative
-weekly snapshots; `--mode postseason --start-week 1 --end-week 4`
-fills the playoff folders `week_19..22`).
+`--only` works the same as on `run`; `backfill` also takes `--mode`
+and `--dry-run` (`--mode season_to_date` backfills cumulative weekly
+snapshots; `--mode postseason --start-week 1 --end-week 4` fills the
+playoff folders `week_19..22`).
 
 ## Weekly cron
 

@@ -9,6 +9,7 @@ builder in :mod:`sportstradamus.collectors`.
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
+from collections.abc import Sequence
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
@@ -27,9 +28,6 @@ from sportstradamus.collectors.transport import CookieClient
 
 Mode = Literal["weekly", "season_to_date", "postseason"]
 DEFAULT_MODE: Mode = "weekly"
-# The period window one request covers: the (season, week) cell, or the
-# whole season split per week (``fp-fetch season``).
-Window = Literal["week", "season"]
 
 # Source of truth for the bundled catalog. Committed; humans extend it via
 # the ``fp-fetch import-curl`` CLI rather than by hand-editing.
@@ -96,21 +94,22 @@ def period_params(*, season: int, week: int, mode: Mode = DEFAULT_MODE) -> dict[
     return {"seasons": str(season), "regWeeks": ",".join(str(w) for w in weeks)}
 
 
-def split_period_params(*, season: int, mode: Mode = DEFAULT_MODE) -> dict[str, str]:
-    """Return the query parameters for one whole season, split per week.
+def split_period_params(*, season: int, folder_weeks: Sequence[int]) -> dict[str, str]:
+    """Return the query parameters for ``folder_weeks`` of one season, split per week.
 
     ``splits=week`` turns a multi-week window into one row per entity-week
-    carrying the values a per-week request returns, so a single request
-    covers the season. Postseason rounds come back labelled ``WC`` / ``DV``
-    / ``CC`` / ``SB`` rather than numbered; :mod:`season` maps them to
-    folder weeks.
+    carrying the values a per-week request returns, so one request covers
+    a whole season. Folder weeks past the regular season are the
+    postseason rounds (``parquet_path_for_spec``); the API takes them in
+    the same request and labels their rows ``WC`` / ``DV`` / ``CC`` /
+    ``SB``, which :mod:`season` maps back to folder weeks.
     """
-    if mode == "postseason":
-        rounds = ",".join(str(r) for r in range(1, POSTSEASON_ROUNDS + 1))
-        window = {"seasons": str(season), "regWeeks": "", "postWeeks": rounds}
-    else:
-        window = period_params(season=season, week=NFL_REGULAR_SEASON_WEEKS, mode="season_to_date")
-    return {**window, "splits": "week"}
+    regular = [w for w in folder_weeks if w <= NFL_REGULAR_SEASON_WEEKS]
+    rounds = [w - NFL_REGULAR_SEASON_WEEKS for w in folder_weeks if w > NFL_REGULAR_SEASON_WEEKS]
+    params = {"seasons": str(season), "regWeeks": ",".join(map(str, regular)), "splits": "week"}
+    if rounds:
+        params["postWeeks"] = ",".join(map(str, rounds))
+    return params
 
 
 def _make_client(resolved: ResolvedAuth, inter_request_sleep_s: float | None) -> CookieClient:
@@ -137,7 +136,7 @@ def _dispatch(
     week: int,
     mode: Mode = DEFAULT_MODE,
     use_cache: bool = True,
-    window: Window = "week",
+    split_weeks: Sequence[int] | None = None,
 ) -> dict | list | str | bytes:
     """GET one endpoint spec with its catalog filters plus the period window.
 
@@ -146,16 +145,17 @@ def _dispatch(
     The season and week parameters are layered on here so a mode change
     doesn't require touching 52 catalog entries.
 
-    ``window="season"`` asks for the whole season in one response, one row
+    ``split_weeks`` asks for those folder weeks in one response, one row
     per entity-week (``fp-fetch season``); ``week`` then only renders the
-    catalog's ``{week}`` placeholder, which the season window overrides.
+    catalog's ``{week}`` placeholder, which the window overrides, and
+    ``mode`` is unused.
 
     ``use_cache`` is accepted for CLI symmetry; the new API has no cache
     control, so it is ignored.
     """
     period = (
-        split_period_params(season=season, mode=mode)
-        if window == "season"
+        split_period_params(season=season, folder_weeks=split_weeks)
+        if split_weeks
         else period_params(season=season, week=week, mode=mode)
     )
     params = {**spec.render_params(season=season, week=week), **period}

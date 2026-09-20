@@ -507,43 +507,111 @@ def _invoke_season(monkeypatch, tmp_path, spec, respond, *args):
     return result
 
 
+def _split_rows(params, per_week):
+    """``per_week`` rows for every week and round a split request names, labelled as the API does."""
+    labels = [w for w in params["regWeeks"].split(",") if w]
+    labels += [
+        ("WC", "DV", "CC", "SB")[int(r) - 1] for r in params.get("postWeeks", "").split(",") if r
+    ]
+    return [
+        {"name": f"P{i} X", "team": "BLT", "split_week": label, "split_pct": 0.1, "yds": i}
+        for label in labels
+        for i in range(per_week)
+    ]
+
+
+_REGULAR_WEEKS = ",".join(str(w) for w in range(1, 19))
+
+
+def _season_spec(name, url, params, output_subdir):
+    return EndpointSpec(
+        name=name,
+        url=f"https://fantasypointsdata.com{url}",
+        params=params,
+        output_subdir=output_subdir,
+    )
+
+
 def test_cli_season_writes_one_parquet_per_week_from_a_single_split_request(monkeypatch, tmp_path):
-    """``splits=week`` covers a season in one call; a rerun finds every week on disk and makes none."""
+    """One split request covers the season and its postseason; a rerun asks only for what is missing."""
     params_seen = []
 
     def respond(method, url, headers=None, params=None, json=None, timeout=None):
         params_seen.append(params)
-        rows = [
-            {
-                "name": "Lamar Jackson",
-                "team": "BLT",
-                "split_week": str(w),
-                "split_pct": 1.0,
-                "yds": 10 * w,
-            }
-            for w in range(1, 19)
-        ]
-        return FakeResponse(200, body=rows)
+        return FakeResponse(200, body=_split_rows(params, per_week=2))
 
-    spec = EndpointSpec(
-        name="player_passing_situation",
-        url="https://fantasypointsdata.com/api/nfl/passing-situation",
-        params={"positions": "QB", "seasons": "{season}", "regWeeks": "{week}"},
-        output_subdir="player/passing_situation",
+    spec = _season_spec(
+        "player_passing_situation",
+        "/api/nfl/passing-situation",
+        {"positions": "QB", "seasons": "{season}", "regWeeks": "{week}"},
+        "player/passing_situation",
     )
     _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
-    every_week = ",".join(str(w) for w in range(1, 19))
     assert params_seen == [
-        {"positions": "QB", "seasons": "2024", "regWeeks": every_week, "splits": "week"}
+        {
+            "positions": "QB",
+            "seasons": "2024",
+            "regWeeks": _REGULAR_WEEKS,
+            "postWeeks": "1,2,3,4",
+            "splits": "week",
+        }
     ]
     season_dir = tmp_path / "player_data" / "NFL" / "2024"
     week_07 = pd.read_parquet(season_dir / "week_07" / "passing_situation.parquet")
-    assert week_07["yds"].tolist() == [70]
-    assert week_07["gameWeek"].tolist() == [7]
+    assert week_07["split_week"].tolist() == ["7", "7"]
+    assert week_07["gameWeek"].tolist() == [7, 7]
     assert "split_pct" not in week_07.columns
+    divisional = pd.read_parquet(season_dir / "week_20" / "passing_situation.parquet")
+    assert divisional["split_week"].tolist() == ["DV", "DV"]
+    assert divisional["gameWeek"].tolist() == [2, 2]
     result = _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
     assert len(params_seen) == 1
-    assert "18 skip" in result.output
+    assert "22 skip" in result.output
+    (season_dir / "week_09" / "passing_situation.parquet").unlink()
+    (season_dir / "week_22" / "passing_situation.parquet").unlink()
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert [(p["regWeeks"], p["postWeeks"]) for p in params_seen[1:]] == [("9", "4")]
+    assert len(pd.read_parquet(season_dir / "week_09" / "passing_situation.parquet")) == 2
+
+
+def test_cli_season_halves_a_window_the_api_truncated(monkeypatch, tmp_path):
+    """The API flags a row-capped response; the window is halved until every part fits."""
+    windows_seen = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        windows_seen.append((params["regWeeks"], params.get("postWeeks")))
+        full = _split_rows(params, per_week=200)
+        # A 1,000-row cap: at most five weeks fit, and a capped response
+        # drops rows from every week it covers.
+        if len(full) > 1000:
+            capped = _split_rows(params, per_week=1000 * 200 // len(full))
+            return FakeResponse(200, body=capped, headers={"x-result-truncated": "1"})
+        return FakeResponse(200, body=full)
+
+    spec = _season_spec(
+        "player_receiving_basic",
+        "/api/nfl/receiving",
+        {"positions": "WR,TE", "seasons": "{season}", "regWeeks": "{week}"},
+        "player/receiving_basic",
+    )
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert windows_seen == [
+        (_REGULAR_WEEKS, "1,2,3,4"),
+        ("1,2,3,4,5,6,7,8,9,10,11", None),
+        ("1,2,3,4,5", None),
+        ("6,7,8,9,10,11", None),
+        ("6,7,8", None),
+        ("9,10,11", None),
+        ("12,13,14,15,16,17,18", "1,2,3,4"),
+        ("12,13,14,15,16", None),
+        ("17,18", "1,2,3,4"),
+        ("17,18", "1"),
+        ("", "2,3,4"),
+    ]
+    season_dir = tmp_path / "player_data" / "NFL" / "2024"
+    for folder_week in (1, 11, 18, 19, 22):
+        path = season_dir / f"week_{folder_week:02d}" / "receiving_basic.parquet"
+        assert len(pd.read_parquet(path)) == 200
 
 
 def test_cli_season_falls_back_to_per_week_calls_when_the_tool_ignores_splits(
@@ -556,57 +624,26 @@ def test_cli_season_falls_back_to_per_week_calls_when_the_tool_ignores_splits(
         params_seen.append(params)
         if "splits" in params:
             return FakeResponse(200, body=[{"team": "BLT", "row_id": "BLT|1|2", "snaps": 900}])
-        snaps = int(params["regWeeks"])
+        snaps = int(params["regWeeks"] or 100 + int(params["postWeeks"]))
         return FakeResponse(200, body=[{"team": "BLT", "row_id": "BLT|1|2", "snaps": snaps}])
 
-    spec = EndpointSpec(
-        name="team_ol_combos",
-        url="https://fantasypointsdata.com/api/nfl/lineup-combos/ol",
-        params={"seasons": "{season}", "regWeeks": "{week}"},
-        output_subdir="team/ol_combos",
+    spec = _season_spec(
+        "team_ol_combos",
+        "/api/nfl/lineup-combos/ol",
+        {"seasons": "{season}", "regWeeks": "{week}"},
+        "team/ol_combos",
     )
     _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
-    assert len(params_seen) == 19
-    assert [p["regWeeks"] for p in params_seen[1:]] == [str(w) for w in range(1, 19)]
-    week_07 = pd.read_parquet(
-        tmp_path / "team_data" / "NFL" / "2024" / "week_07" / "ol_combos.parquet"
-    )
+    assert len(params_seen) == 23
+    assert params_seen[7] == {"seasons": "2024", "regWeeks": "7"}
+    assert params_seen[19] == {"seasons": "2024", "regWeeks": "", "postWeeks": "1"}
+    season_dir = tmp_path / "team_data" / "NFL" / "2024"
+    week_07 = pd.read_parquet(season_dir / "week_07" / "ol_combos.parquet")
     assert week_07["snaps"].tolist() == [7]
     assert week_07["gameWeek"].tolist() == [7]
-
-
-def test_cli_season_postseason_maps_round_labels_to_folder_weeks(monkeypatch, tmp_path):
-    """Postseason splits are labelled by round; they land in week_19..22 like ``--mode postseason``."""
-    params_seen = []
-
-    def respond(method, url, headers=None, params=None, json=None, timeout=None):
-        params_seen.append(params)
-        rows = [
-            {"team": "BLT", "split_week": "WC", "split_season_type": "POST", "plays": 60},
-            {"team": "PHI", "split_week": "SB", "split_season_type": "POST", "plays": 70},
-        ]
-        return FakeResponse(200, body=rows)
-
-    spec = EndpointSpec(
-        name="team_pace",
-        url="https://fantasypointsdata.com/api/nfl/pace",
-        params={"mode": "offense", "seasons": "{season}", "regWeeks": "{week}"},
-        output_subdir="team/pace",
-    )
-    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024", "--mode", "postseason")
-    assert params_seen == [
-        {
-            "mode": "offense",
-            "seasons": "2024",
-            "regWeeks": "",
-            "postWeeks": "1,2,3,4",
-            "splits": "week",
-        }
-    ]
-    season_dir = tmp_path / "team_data" / "NFL" / "2024"
-    assert pd.read_parquet(season_dir / "week_19" / "pace.parquet")["team"].tolist() == ["BLT"]
-    assert pd.read_parquet(season_dir / "week_22" / "pace.parquet")["team"].tolist() == ["PHI"]
-    assert pd.read_parquet(season_dir / "week_20" / "pace.parquet").empty
+    wildcard = pd.read_parquet(season_dir / "week_19" / "ol_combos.parquet")
+    assert wildcard["snaps"].tolist() == [101]
+    assert wildcard["gameWeek"].tolist() == [1]
 
 
 def test_parse_curl_get_strips_auth_headers_and_splits_query():
