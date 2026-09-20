@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +136,43 @@ def fetch_and_write_one(
     return base_result
 
 
+def collect_results(
+    walk: Iterable[RunResult],
+    *,
+    total: int,
+    unit: str,
+    report_prefix: str,
+    command: str,
+    extra: dict[str, Any],
+    log: logging.Logger,
+) -> None:
+    """Drain ``walk``, dump the report, and raise if any call failed.
+
+    Echoes the ok/skip/empty/failed summary to stderr and raises
+    :class:`click.ClickException` on failures so cron surfaces a non-zero
+    exit. The same happens early — report written for what completed —
+    when the shared credential can't be renewed mid-walk, since every
+    remaining call would fail the same way.
+    """
+    results: list[RunResult] = []
+    try:
+        for result in walk:
+            results.append(result)  # noqa: PERF402 — outcomes before the exception must survive it
+    except CollectorAuthRecoveryError as exc:
+        log.error("auth unrecoverable — stopping", extra={"error": str(exc)})
+        summarize(results, report_prefix=report_prefix, command=command, extra=extra)
+        raise click.ClickException(
+            f"Stopped after {len(results)} of {total} {unit}: {exc}."
+        ) from exc
+    report_path, failures = summarize(
+        results, report_prefix=report_prefix, command=command, extra=extra
+    )
+    if failures:
+        raise click.ClickException(
+            f"{len(failures)} of {len(results)} {unit} failed — see {report_path}"
+        )
+
+
 def run_specs(
     specs: list[EndpointSpec],
     *,
@@ -154,38 +192,31 @@ def run_specs(
     """Walk ``specs`` once, writing each parquet, then dump the report.
 
     ``fetch_one(spec) -> (body, err_dict|None)`` is the source's dispatch,
-    already bound to this run's context. Echoes the ok/skip/empty/failed
-    summary to stderr and raises :class:`click.ClickException` if any spec
-    failed so cron surfaces a non-zero exit — the same happens early, before
-    the remaining specs run, if the shared credential can't be renewed.
+    already bound to this run's context.
     """
-    results: list[RunResult] = []
-    try:
-        for spec in tqdm(specs, desc=desc, unit="endpoint"):
-            results.append(
-                fetch_and_write_one(
-                    spec,
-                    path_for=path_for,
-                    fetch_one=fetch_one,
-                    transform=transform,
-                    log=log,
-                    season=season,
-                    week=week,
-                    request_body=request_body_for(spec),
-                    refetch=refetch,
-                )
-            )
-    except CollectorAuthRecoveryError as exc:
-        log.error("auth unrecoverable — stopping", extra={"error": str(exc)})
-        summarize(results, report_prefix=report_prefix, command=command, extra=extra)
-        raise click.ClickException(
-            f"Stopped after {len(results)} of {len(specs)} endpoints: {exc}."
-        ) from exc
-    report_path, failures = summarize(
-        results, report_prefix=report_prefix, command=command, extra=extra
+    walk = (
+        fetch_and_write_one(
+            spec,
+            path_for=path_for,
+            fetch_one=fetch_one,
+            transform=transform,
+            log=log,
+            season=season,
+            week=week,
+            request_body=request_body_for(spec),
+            refetch=refetch,
+        )
+        for spec in tqdm(specs, desc=desc, unit="endpoint")
     )
-    if failures:
-        raise click.ClickException(f"{len(failures)} spec(s) failed — see report at {report_path}")
+    collect_results(
+        walk,
+        total=len(specs),
+        unit="endpoints",
+        report_prefix=report_prefix,
+        command=command,
+        extra=extra,
+        log=log,
+    )
 
 
 def backfill_specs(
@@ -211,57 +242,43 @@ def backfill_specs(
     ``make_fetch_one`` and ``request_body_for`` are called per (spec, season,
     week) cell. Pacing is conservative: a short pause between endpoints in the
     same week, a longer one on a week transition; cached cells skip the pause
-    so resuming a half-finished backfill is near-instant. If the shared
-    credential can't be renewed mid-walk, the backfill stops early and raises
-    :class:`click.ClickException` instead of finishing the remaining cells.
+    so resuming a half-finished backfill is near-instant.
     """
     total = len(seasons) * len(weeks) * len(specs)
-    results: list[RunResult] = []
-    prev_week_key: tuple[int, int] | None = None
-    try:
-        with tqdm(total=total, desc=desc, unit="call") as bar:
-            for season in seasons:
-                for week in weeks:
-                    prev_week_key = _backfill_week(
-                        specs,
-                        season,
-                        week,
-                        prev_week_key,
-                        results,
-                        bar,
-                        make_fetch_one=make_fetch_one,
-                        request_body_for=request_body_for,
-                        path_for_cell=path_for_cell,
-                        would_skip=would_skip,
-                        transform=transform,
-                        log=log,
-                        refetch=refetch,
-                        request_range=request_range,
-                        week_range=week_range,
-                    )
-    except CollectorAuthRecoveryError as exc:
-        log.error("auth unrecoverable — stopping", extra={"error": str(exc)})
-        summarize(results, report_prefix=report_prefix, command="backfill", extra=extra)
-        raise click.ClickException(
-            f"Stopped after {len(results)} of {total} backfill calls: {exc}."
-        ) from exc
-    report_path, failures = summarize(
-        results, report_prefix=report_prefix, command="backfill", extra=extra
+    walk = _backfill_walk(
+        specs,
+        seasons,
+        weeks,
+        total=total,
+        desc=desc,
+        make_fetch_one=make_fetch_one,
+        request_body_for=request_body_for,
+        path_for_cell=path_for_cell,
+        would_skip=would_skip,
+        transform=transform,
+        log=log,
+        refetch=refetch,
+        request_range=request_range,
+        week_range=week_range,
     )
-    if failures:
-        raise click.ClickException(
-            f"{len(failures)} of {len(results)} backfill calls failed — see {report_path}"
-        )
+    collect_results(
+        walk,
+        total=total,
+        unit="backfill calls",
+        report_prefix=report_prefix,
+        command="backfill",
+        extra=extra,
+        log=log,
+    )
 
 
-def _backfill_week(
+def _backfill_walk(
     specs,
-    season,
-    week,
-    prev_week_key,
-    results,
-    bar,
+    seasons,
+    weeks,
     *,
+    total,
+    desc,
     make_fetch_one,
     request_body_for,
     path_for_cell,
@@ -272,27 +289,27 @@ def _backfill_week(
     request_range,
     week_range,
 ):
-    """Fetch every spec for one (season, week); return the updated prev_week_key.
+    """Yield one outcome per (season, week, spec) cell, pausing before each live call.
 
-    The pacing pause fires only for specs that aren't skipped, so a fully-cached
-    week resumes near-instantly. Appends each outcome to ``results`` and ticks ``bar``.
+    The pause fires only for cells that aren't skipped, so a fully-cached
+    week resumes near-instantly.
     """
-    week_key = (season, week)
-    for spec in specs:
-        if not would_skip(spec, season, week):
-            _backfill_pause(
-                prev_week_key,
-                week_key,
-                request_range=request_range,
-                week_range=week_range,
-                log=log,
-            )
-            prev_week_key = week_key
-        results.append(
-            fetch_and_write_one(
+    prev_week_key: tuple[int, int] | None = None
+    with tqdm(total=total, desc=desc, unit="call") as bar:
+        for season, week, spec in product(seasons, weeks, specs):
+            if not would_skip(spec, season, week):
+                _backfill_pause(
+                    prev_week_key,
+                    (season, week),
+                    request_range=request_range,
+                    week_range=week_range,
+                    log=log,
+                )
+                prev_week_key = (season, week)
+            yield fetch_and_write_one(
                 spec,
-                path_for=lambda s: path_for_cell(s, season, week),
-                fetch_one=lambda s: make_fetch_one(s, season, week),
+                path_for=lambda s, season=season, week=week: path_for_cell(s, season, week),
+                fetch_one=lambda s, season=season, week=week: make_fetch_one(s, season, week),
                 transform=transform,
                 log=log,
                 season=season,
@@ -300,9 +317,7 @@ def _backfill_week(
                 request_body=request_body_for(spec, season, week),
                 refetch=refetch,
             )
-        )
-        bar.update(1)
-    return prev_week_key
+            bar.update(1)
 
 
 def _backfill_pause(

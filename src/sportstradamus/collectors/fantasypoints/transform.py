@@ -123,7 +123,7 @@ def parse_table_response(
         DataFrame with one row per response entry, empty when the response
         carries no rows.
     """
-    rows = _extract_rows(payload)
+    rows = extract_rows(payload)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame.from_records([_flatten_raw(row) for row in rows])
@@ -282,7 +282,7 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
     df.to_parquet(path, index=False)
 
 
-def _extract_rows(payload: object) -> list[dict]:
+def extract_rows(payload: object) -> list[dict]:
     """Return the row list from a tool response.
 
     The API answers with a bare JSON array. An error page or an expired

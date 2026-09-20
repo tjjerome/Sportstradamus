@@ -3,10 +3,12 @@
 The standard ``run`` / ``backfill`` / ``verify`` / ``list`` / ``refresh-auth``
 subcommands come from the generic collector builder
 (:func:`sportstradamus.collectors.cli.build_source_cli`) wired to
-:data:`FP_SOURCE`. Two FP-only commands are attached here:
+:data:`FP_SOURCE`. Three FP-only commands are attached here:
 
 * ``fp-fetch import-curl`` — register an endpoint from a DevTools curl.
 * ``fp-fetch login`` — mint a fresh session cookie from stored credentials.
+* ``fp-fetch season`` — one request per tool for a whole season
+  (``splits=week``), the budget-friendly way to backfill history.
 
 See ``docs/fantasypoints.md`` for the end-user runbook (capturing a fresh
 cookie, adding endpoints, refresh schedule).
@@ -18,6 +20,7 @@ import click
 
 from sportstradamus.collectors.cli import build_source_cli
 from sportstradamus.collectors.fantasypoints.import_curl import import_curl
+from sportstradamus.collectors.fantasypoints.season import fetch_season
 from sportstradamus.collectors.fantasypoints.session import SessionRenewalError, renew_session
 from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
 
@@ -41,3 +44,4 @@ def login() -> None:
 
 fp_fetch.add_command(import_curl)
 fp_fetch.add_command(login)
+fp_fetch.add_command(fetch_season)

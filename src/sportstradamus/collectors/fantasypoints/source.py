@@ -41,6 +41,10 @@ _FP_ORIGIN = "https://fantasypointsdata.com"
 # range; the user can always pass --week explicitly.
 NFL_REGULAR_SEASON_WEEKS = 18
 
+# Wildcard, divisional, conference championship, Super Bowl — the four
+# postseason "weeks" the API's ``postWeeks`` filter accepts.
+POSTSEASON_ROUNDS = 4
+
 # A "NFL season" labelled by year Y starts in September of year Y. Before
 # July we're still in the prior year's playoff/offseason tail.
 _SEASON_FLIP_MONTH = 7
@@ -89,6 +93,23 @@ def period_params(*, season: int, week: int, mode: Mode = DEFAULT_MODE) -> dict[
     return {"seasons": str(season), "regWeeks": ",".join(str(w) for w in weeks)}
 
 
+def split_period_params(*, season: int, mode: Mode = DEFAULT_MODE) -> dict[str, str]:
+    """Return the query parameters for one whole season, split per week.
+
+    ``splits=week`` turns a multi-week window into one row per entity-week
+    carrying the values a per-week request returns, so a single request
+    covers the season. Postseason rounds come back labelled ``WC`` / ``DV``
+    / ``CC`` / ``SB`` rather than numbered; :mod:`season` maps them to
+    folder weeks.
+    """
+    if mode == "postseason":
+        rounds = ",".join(str(r) for r in range(1, POSTSEASON_ROUNDS + 1))
+        window = {"seasons": str(season), "regWeeks": "", "postWeeks": rounds}
+    else:
+        window = period_params(season=season, week=NFL_REGULAR_SEASON_WEEKS, mode="season_to_date")
+    return {**window, "splits": "week"}
+
+
 def _make_client(resolved: ResolvedAuth, inter_request_sleep_s: float | None) -> CookieClient:
     return CookieClient(
         authorization=resolved.authorization,
@@ -113,6 +134,7 @@ def _dispatch(
     week: int,
     mode: Mode = DEFAULT_MODE,
     use_cache: bool = True,
+    splits: bool = False,
 ) -> dict | list | str | bytes:
     """GET one endpoint spec with its catalog filters plus the period window.
 
@@ -121,13 +143,19 @@ def _dispatch(
     The season and week parameters are layered on here so a mode change
     doesn't require touching 52 catalog entries.
 
+    ``splits=True`` asks for the whole season in one response, one row per
+    entity-week (``fp-fetch season``); ``week`` then only renders the
+    catalog's ``{week}`` placeholder, which the season window overrides.
+
     ``use_cache`` is accepted for CLI symmetry; the new API has no cache
     control, so it is ignored.
     """
-    params = {
-        **spec.render_params(season=season, week=week),
-        **period_params(season=season, week=week, mode=mode),
-    }
+    window = (
+        split_period_params(season=season, mode=mode)
+        if splits
+        else period_params(season=season, week=week, mode=mode)
+    )
+    params = {**spec.render_params(season=season, week=week), **window}
     return client.get(spec.url, params=params, headers=spec.extra_headers, accept="json")
 
 

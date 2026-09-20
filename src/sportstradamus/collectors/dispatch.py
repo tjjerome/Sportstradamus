@@ -28,8 +28,12 @@ _AUTH_MAX_ATTEMPTS = 2
 _AUTH_PROMPT_SEPARATOR_WIDTH = 60
 
 
-def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_cache, log):
+def dispatch_capturing_errors(source, client, spec, *, log, **context):
     """Return ``(body, None)`` or ``(None, err_dict)`` for one spec.
+
+    ``context`` is the resolved run context (``season`` / ``week`` / ``mode``
+    / ``use_cache``, plus any source-specific switch) and is forwarded to
+    the source's dispatch verbatim.
 
     On 401/403 the credential is renewed once and the call retried — from
     the source's stored login where it has one (so cron recovers on its
@@ -44,9 +48,7 @@ def dispatch_capturing_errors(source, client, spec, *, season, week, mode, use_c
     """
     for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
-            body = source.dispatch(
-                client, spec, season=season, week=week, mode=mode, use_cache=use_cache
-            )
+            body = source.dispatch(client, spec, **context)
             return body, None
         except CollectorAuthError as exc:
             log.warning(

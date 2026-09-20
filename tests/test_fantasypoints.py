@@ -492,6 +492,123 @@ def test_cli_run_stops_the_walk_when_the_stored_login_is_rejected(monkeypatch, t
     assert "Report:" in result.output
 
 
+def _invoke_season(monkeypatch, tmp_path, spec, respond, *args):
+    """Run ``fp-fetch season`` against one catalog entry, ``respond`` answering every request."""
+    from sportstradamus.collectors import transport as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog([spec], catalog_path)
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "ds_session=x")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    monkeypatch.setattr(client_mod.requests, "request", respond)
+    result = CliRunner().invoke(fp_fetch, ["season", "--catalog", str(catalog_path), *args])
+    assert result.exit_code == 0, result.output
+    return result
+
+
+def test_cli_season_writes_one_parquet_per_week_from_a_single_split_request(monkeypatch, tmp_path):
+    """``splits=week`` covers a season in one call; a rerun finds every week on disk and makes none."""
+    params_seen = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        params_seen.append(params)
+        rows = [
+            {
+                "name": "Lamar Jackson",
+                "team": "BLT",
+                "split_week": str(w),
+                "split_pct": 1.0,
+                "yds": 10 * w,
+            }
+            for w in range(1, 19)
+        ]
+        return FakeResponse(200, body=rows)
+
+    spec = EndpointSpec(
+        name="player_passing_situation",
+        url="https://fantasypointsdata.com/api/nfl/passing-situation",
+        params={"positions": "QB", "seasons": "{season}", "regWeeks": "{week}"},
+        output_subdir="player/passing_situation",
+    )
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    every_week = ",".join(str(w) for w in range(1, 19))
+    assert params_seen == [
+        {"positions": "QB", "seasons": "2024", "regWeeks": every_week, "splits": "week"}
+    ]
+    season_dir = tmp_path / "player_data" / "NFL" / "2024"
+    week_07 = pd.read_parquet(season_dir / "week_07" / "passing_situation.parquet")
+    assert week_07["yds"].tolist() == [70]
+    assert week_07["gameWeek"].tolist() == [7]
+    assert "split_pct" not in week_07.columns
+    result = _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert len(params_seen) == 1
+    assert "18 skip" in result.output
+
+
+def test_cli_season_falls_back_to_per_week_calls_when_the_tool_ignores_splits(
+    monkeypatch, tmp_path
+):
+    """``lineup-combos/ol`` answers a split request with aggregated rows, so it goes week by week."""
+    params_seen = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        params_seen.append(params)
+        if "splits" in params:
+            return FakeResponse(200, body=[{"team": "BLT", "row_id": "BLT|1|2", "snaps": 900}])
+        snaps = int(params["regWeeks"])
+        return FakeResponse(200, body=[{"team": "BLT", "row_id": "BLT|1|2", "snaps": snaps}])
+
+    spec = EndpointSpec(
+        name="team_ol_combos",
+        url="https://fantasypointsdata.com/api/nfl/lineup-combos/ol",
+        params={"seasons": "{season}", "regWeeks": "{week}"},
+        output_subdir="team/ol_combos",
+    )
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert len(params_seen) == 19
+    assert [p["regWeeks"] for p in params_seen[1:]] == [str(w) for w in range(1, 19)]
+    week_07 = pd.read_parquet(
+        tmp_path / "team_data" / "NFL" / "2024" / "week_07" / "ol_combos.parquet"
+    )
+    assert week_07["snaps"].tolist() == [7]
+    assert week_07["gameWeek"].tolist() == [7]
+
+
+def test_cli_season_postseason_maps_round_labels_to_folder_weeks(monkeypatch, tmp_path):
+    """Postseason splits are labelled by round; they land in week_19..22 like ``--mode postseason``."""
+    params_seen = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        params_seen.append(params)
+        rows = [
+            {"team": "BLT", "split_week": "WC", "split_season_type": "POST", "plays": 60},
+            {"team": "PHI", "split_week": "SB", "split_season_type": "POST", "plays": 70},
+        ]
+        return FakeResponse(200, body=rows)
+
+    spec = EndpointSpec(
+        name="team_pace",
+        url="https://fantasypointsdata.com/api/nfl/pace",
+        params={"mode": "offense", "seasons": "{season}", "regWeeks": "{week}"},
+        output_subdir="team/pace",
+    )
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024", "--mode", "postseason")
+    assert params_seen == [
+        {
+            "mode": "offense",
+            "seasons": "2024",
+            "regWeeks": "",
+            "postWeeks": "1,2,3,4",
+            "splits": "week",
+        }
+    ]
+    season_dir = tmp_path / "team_data" / "NFL" / "2024"
+    assert pd.read_parquet(season_dir / "week_19" / "pace.parquet")["team"].tolist() == ["BLT"]
+    assert pd.read_parquet(season_dir / "week_22" / "pace.parquet")["team"].tolist() == ["PHI"]
+    assert pd.read_parquet(season_dir / "week_20" / "pace.parquet").empty
+
+
 def test_parse_curl_get_strips_auth_headers_and_splits_query():
     curl_text = (
         "curl 'https://fantasypointsdata.com/api/nfl/coverage-matrix"
