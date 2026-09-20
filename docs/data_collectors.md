@@ -31,7 +31,7 @@ src/sportstradamus/collectors/
   commands_dated.py  date-centric run/verify builders (cumulative sources)
   cli.py             Source dataclass + build_source_cli(source) -> click.Group
   tabular.py         CSV/JSON→DataFrame parse + dated player/team path routing
-  fantasypoints/     FP_SOURCE + FP-only import-curl / column translation
+  fantasypoints/     FP_SOURCE + FP-only import-curl / login / season, column translation
   cleaningtheglass/  CTG_SOURCE (cookie, date-keyed)
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
 ```

@@ -264,42 +264,55 @@ fast so Healthchecks.io pings `/fail`.
 ## Historical backfill
 
 ```bash
-sportstradamus fetch fp backfill \
-    --start-season 2021 --end-season 2024 \
-    --start-week 1 --end-week 18
+sportstradamus fetch fp season --season 2024                    # weeks 1-18, one request per tool
+sportstradamus fetch fp season --season 2024 --mode postseason  # rounds 1-4 -> week_19..22
 ```
 
-Iterates every (season, week) pair and runs the same fetch +
-parse + write as `run`. Pacing is conservative by default:
+`season` asks for the whole season with the API's `splits=week`
+switch, which returns one row per entity-week carrying the values a
+per-week request would (only the `row_id` / `rank` order differs,
+plus a `split_pct` column the command drops), and writes the same
+per-week parquets `run` does. One request per tool replaces 18 (or
+4), so a season costs ~65 calls instead of 1,080.
+`lineup-combos/ol` ignores the switch and answers aggregated rows;
+the command notices the missing `split_week` and falls back to
+per-week calls for that tool. A tool whose every week is already on
+disk is skipped; one with any missing or zero-row week is re-pulled
+whole (`--refetch` re-pulls every tool).
 
-- **2–8 s** random pause between endpoints in the same week
-  (`--request-pause-min` / `--request-pause-max`).
-- **8–28 s** random pause when transitioning to a new week
-  (`--week-pause-min` / `--week-pause-max`).
+`backfill` is the per-week walk — the same fetch + parse + write as
+`run` over every (season, week) pair — for filling a few cells:
 
-Pacing is not the constraint; the **daily request budget** is. The
-account gets ~1,150 requests per UTC day (measured 2026-09-19); past
-it every call answers `429 {"code":"daily_limit"}` with
-`x-budget-remaining: 0` and `retry-after: <seconds to 00:00 UTC>`.
-Every response carries `x-budget-remaining`, so read it before a
-big pull. A regular season is 60 entries × 18 weeks = 1,080 calls,
-a postseason 240, so a multi-season re-pull spans days:
+```bash
+sportstradamus fetch fp backfill \
+    --start-season 2021 --end-season 2021 \
+    --start-week 18 --end-week 18
+```
+
+Its pacing (2–8 s between endpoints, 8–28 s between weeks;
+`--request-pause-*` / `--week-pause-*`) is not the constraint; the
+**daily request budget** is. The account gets 1,000 requests per UTC
+day (measured 2026-09-19); past it every call answers
+`429 {"code":"daily_limit"}` with `x-budget-remaining: 0` and
+`retry-after: <seconds to 00:00 UTC>`. `x-budget-remaining` arrives
+on every uncached response (a server-cache hit carries no header and
+costs nothing), so read it before a big pull.
 
 - Pull **whole seasons**, most recent first. Inside one season every
   kind must come from the same API era (player ids differ across
   eras — see *One identity space*), so never leave a season half
   re-pulled when something downstream reads it.
-- Clear the season's old parquets first, then backfill **without**
-  `--refetch`: a 429 writes nothing, missing files get fetched on
-  the next run, finished ones are skipped, so the pull resumes
-  across resets.
+- Clear the season's old parquets first, then pull **without**
+  `--refetch`: a 429 writes nothing, missing weeks get pulled on the
+  next run, finished tools are skipped, so the pull resumes across
+  resets.
 - Leave ~100 calls of headroom on Wednesdays for the production
   cron below, which shares the account.
 
-`--only`, `--dry-run`, and `--mode` work the same as on `run`
-(e.g. `--mode season_to_date` to backfill cumulative weekly
-snapshots; `--mode postseason --start-week 1 --end-week 4` for the
-playoff folders `week_19..22`).
+`--only` and `--mode` work the same as on `run` (`backfill` also
+takes `--dry-run`; `--mode season_to_date` backfills cumulative
+weekly snapshots; `--mode postseason --start-week 1 --end-week 4`
+fills the playoff folders `week_19..22`).
 
 ## Weekly cron
 

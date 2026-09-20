@@ -6,6 +6,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Added
+- `fetch fp season`: one request per tool pulls a whole NFL season (`splits=week`), so a
+  history re-pull fits the account's 1,000-requests-per-day budget; OL combos fall back
+  to per-week calls.
 - NFL FantasyPoints Tier 1 batch: passing-situation splits (QB), pace ×2 (team + faced),
   OL lineup-combos units, and the raw-count wins (xTD, RYOE, red-zone carry shares,
   end-zone attempt rate, xYards) — 47 recipe outputs, 4 catalog entries, `ybc` revived.

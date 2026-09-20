@@ -215,8 +215,8 @@ feature set makes that comparison meaningless (see
 Order, with the state of each step:
 
 1. History on the new API — 2021 pulled; 2022–2025 plus every postseason pull
-   season by season under the account's daily request budget
-   ([fantasypoints.md](fantasypoints.md) § Historical backfill), most recent season
+   whole through `fetch fp season` (one request per tool, ~65 calls a season;
+   [fantasypoints.md](fantasypoints.md) § Historical backfill), most recent season
    first. Until a season is complete it is new-era-or-missing on disk, never mixed.
 2. Tier 1 in one batch — code landed: `passing-situation`, `pace`,
    `lineup-combos/ol` plus the raw-count free wins below, 47 new recipe outputs.
