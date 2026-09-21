@@ -55,6 +55,7 @@ from sportstradamus.helpers.training_quotes import (
     DFS_PLATFORM_BOOKS,
     PROVENANCE_COLUMNS,
     TrainingQuote,
+    archive_ev_is_runaway,
     quote_pricing_params,
     resolve_training_quote,
 )
@@ -2592,7 +2593,8 @@ class Stats:
         the market's own quoted mean where one exists (``_book_mean_shift``); the
         shape is the component sum's either way.
         The combo line is ``lines[player]`` when a mapping is given, else the
-        combo market's own archived consensus line; no positive line, no quote.
+        combo market's own archived consensus line; no positive line, no quote,
+        and none for an archived line the component sum dwarfs.
         Component inversions pass ``gate=None``: this layer's book-quote
         convention is ungated end to end (see ``_authentic_quote``), and a
         population zero-gate on top of an ungated inversion would break
@@ -2633,7 +2635,8 @@ class Stats:
             if simple and lines is not None
             else archive.get_training_quote_inputs(self.league, market, date, players, at=at)
         )
-        if lines is None:
+        lines_are_archived = lines is None
+        if lines_are_archived:
             lines = {player: combo_inputs.get(player, ([], None))[1] for player in players}
         rho = load_same_player_rho(self.league)
 
@@ -2706,6 +2709,11 @@ class Stats:
             post = spec.post_builder(self, player, date) if spec.post_builder else None
             combo = combo_sum_quote(components, rho, post=post)
             shift = 0.0 if simple else self._book_mean_shift(combo, market, combo_inputs, player)
+            # An archived combo line the component sum dwarfs is some other market's
+            # line (NFL "qb yards" 6.5 under a 239-yard passing + rushing sum). The
+            # pair is the runaway EV the matrix audit rejects, so it earns no quote.
+            if lines_are_archived and archive_ev_is_runaway(combo.mean + shift, line):
+                continue
             under_prob_at = (
                 partial(_relocated_under_prob, combo.under_prob, shift)
                 if shift

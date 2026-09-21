@@ -218,6 +218,22 @@ def test_no_positive_line_omits_player(combo_env):
     assert stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 0.0}) == {}
 
 
+def test_archived_line_the_component_sum_dwarfs_omits_player(combo_env):
+    # The archive held "qb yards" 6.5 for a quarterback whose passing + rushing
+    # quotes sum to 239: some other market's line. Paired, they are the runaway
+    # EV the matrix audit rejects, so the archived line earns no quote. A line
+    # the caller hands in is a real offer and is never second-guessed.
+    inputs = _direct_inputs()
+    foreign_line = (_MEAN_A + _MEAN_B) / 6.0
+    inputs[_FANTASY] = {"P": ([], foreign_line)}
+    combo_env(inputs)
+    stats = _SpecStats(ComboSpec(marginals=(("subA", 1.0), ("subB", 1.0))))
+
+    assert stats.combo_quote(_FANTASY, ["P"], _DATE, _AT) == {}
+    offered = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": foreign_line})
+    assert offered["P"].line == foreign_line
+
+
 def test_combo_props_market_sums_unit_weights(combo_env, monkeypatch):
     monkeypatch.setitem(base.combo_props, "TESTCOMBO", ["subA", "subB"])
     inputs = _direct_inputs()
