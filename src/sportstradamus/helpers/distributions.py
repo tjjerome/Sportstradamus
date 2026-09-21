@@ -304,7 +304,10 @@ def _dp_log_pmf_grid(mu, phi):
     mu = np.clip(np.atleast_1d(np.asarray(mu, dtype=float)), 1e-6, None)
     phi = np.clip(np.atleast_1d(np.asarray(phi, dtype=float)), _DP_PHI_FLOOR, _DP_PHI_CEILING)
     mu, phi = np.broadcast_arrays(mu, phi)
-    span = np.max(mu + _DP_GRID_SIGMAS * np.sqrt(mu / phi))
+    # An empty batch is legal (a slate with no player in a volume model's
+    # positions); ``initial`` keeps the reduction defined and never beats a
+    # real span, which is positive.
+    span = np.max(mu + _DP_GRID_SIGMAS * np.sqrt(mu / phi), initial=0.0)
     kmax = int(np.clip(span + 1, _DP_KMAX_MIN, _DP_KMAX_CAP))
     grid = np.arange(kmax + 1, dtype=float)
     k = grid[:, None]

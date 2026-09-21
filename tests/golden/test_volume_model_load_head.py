@@ -115,6 +115,25 @@ def _seed_frame(index, mean_yr):
     )
 
 
+def test_dpo_head_accepts_a_slate_with_no_player_in_its_positions(_stub_start_values):
+    # A receiving-yards slate can hold no back at all; the carries head then
+    # decodes an empty batch, which the DPO grid has to take like the
+    # elementwise families do (it crashed the 2021+ matrix rebuild).
+    idx = ["A", "B"]
+    params = pd.DataFrame({"mu": [3.0, 8.0], "phi": [1.5, 0.8]}, index=idx)
+    stub = _run(
+        "NFL",
+        "carries",
+        pd.DataFrame({"Home": [1, 0], "Player position": [2, 4], "f1": [0.4, 0.5]}, index=idx),
+        pd.DataFrame({"keep": [1, 2]}, index=idx),
+        {"model": _StubModel(params), "distribution": "DPO", "target_normalization": "none"},
+        position_filter=[1, 3],
+    )
+
+    assert stub.playerProfile["proj carries mean"].isna().all()
+    assert stub.playerProfile["keep"].tolist() == [1, 2]
+
+
 def test_dpo_model_emits_mean_and_std_with_no_loc_anywhere(_stub_start_values):
     # NFL_carries is DPO: it emits mu/phi and never a loc. The head must decode
     # by family rather than renaming SkewNormal columns that do not exist.
