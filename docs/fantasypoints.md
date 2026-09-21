@@ -270,7 +270,7 @@ sportstradamus fetch fp season --season 2024   # weeks 1-18 + rounds 1-4 -> week
 `season` asks for the whole season, postseason included, with the API's
 `splits=week` switch, which returns one row per entity-week, and writes
 the same per-week parquets `run` does. One request per tool replaces
-22, so a season costs ~180 calls instead of ~1,300. Three API
+22, so a season costs ~200 calls instead of ~1,300. Four API
 behaviours shape it:
 
 - **Row cap.** A response is cut at a per-tool row count (1,500 on the
@@ -283,6 +283,13 @@ behaviours shape it:
 - **`lineup-combos/ol` ignores the switch** and answers aggregated
   rows; the command notices the missing `split_week` and falls back to
   per-week calls for that tool.
+- **`bell-cow` split rows are not its per-week rows.** Under
+  `splits=week` the tool counts a carry fewer for some backs (two in
+  2025 weeks 1–15, in a one-week window too), which moves
+  `attempts_pct` and the attempt market share a recipe reads, and it
+  joins a traded player's teams into one `team` string (`"HST, KC"`).
+  The command never sends that tool a split request; it goes week by
+  week.
 - **Some columns are window-scoped, not per-week**, so a split-pulled
   parquet differs from a per-week one in them: on team files `snaps`,
   `routes`, the receiving route rates and the drive block
@@ -292,9 +299,10 @@ behaviours shape it:
   rates, `snap_pct`) goes empty for the weeks a player spent with a
   second team inside one window, and `sep_market_share` /
   `*_bucket_share_pct` are shares of the window. No recipe reads any
-  of them: on 2025 weeks 1–15 every aggregated feature from a split
-  pull matched the per-week pull exactly. A recipe that wants one of
-  these columns needs per-week pulls (`backfill`) for its history.
+  of them: on 2025 weeks 1–15, all 60 tools, every aggregated feature
+  from a `season` pull matched the per-week pull exactly. A recipe
+  that wants one of these columns needs per-week pulls (`backfill`)
+  for its history.
 
 Only weeks that are missing or hold zero rows are asked for
 (`--refetch` asks for all 22), so a rerun costs one request per tool

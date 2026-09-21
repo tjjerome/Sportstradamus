@@ -97,12 +97,12 @@ def period_params(*, season: int, week: int, mode: Mode = DEFAULT_MODE) -> dict[
 def split_period_params(*, season: int, folder_weeks: Sequence[int]) -> dict[str, str]:
     """Return the query parameters for ``folder_weeks`` of one season, split per week.
 
-    ``splits=week`` turns a multi-week window into one row per entity-week
-    carrying the values a per-week request returns, so one request covers
-    a whole season. Folder weeks past the regular season are the
-    postseason rounds (``parquet_path_for_spec``); the API takes them in
-    the same request and labels their rows ``WC`` / ``DV`` / ``CC`` /
-    ``SB``, which :mod:`season` maps back to folder weeks.
+    ``splits=week`` turns a multi-week window into one row per entity-week,
+    so one request covers a whole season (:mod:`season` lists where those
+    rows fall short of a per-week request's). Folder weeks past the
+    regular season are the postseason rounds (``parquet_path_for_spec``);
+    the API takes them in the same request and labels their rows ``WC`` /
+    ``DV`` / ``CC`` / ``SB``, which :mod:`season` maps back to folder weeks.
     """
     regular = [w for w in folder_weeks if w <= NFL_REGULAR_SEASON_WEEKS]
     rounds = [w - NFL_REGULAR_SEASON_WEEKS for w in folder_weeks if w > NFL_REGULAR_SEASON_WEEKS]

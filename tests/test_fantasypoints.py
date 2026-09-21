@@ -646,6 +646,34 @@ def test_cli_season_falls_back_to_per_week_calls_when_the_tool_ignores_splits(
     assert wildcard["gameWeek"].tolist() == [1]
 
 
+def test_cli_season_never_sends_bell_cow_a_split_request(monkeypatch, tmp_path):
+    """``bell-cow`` split rows are not its per-week rows, so every week is its own request."""
+    params_seen = []
+
+    def respond(method, url, headers=None, params=None, json=None, timeout=None):
+        params_seen.append(params)
+        return FakeResponse(200, body=[{"name": "Breece Hall", "team": "NYJ", "attempts": 22}])
+
+    spec = _season_spec(
+        "player_rushing_bell_cow",
+        "/api/nfl/bell-cow",
+        {"positions": "RB", "seasons": "{season}", "regWeeks": "{week}"},
+        "player/rushing_bell_cow",
+    )
+    _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert params_seen[0] == {"positions": "RB", "seasons": "2024", "regWeeks": "1"}
+    assert params_seen[21] == {
+        "positions": "RB",
+        "seasons": "2024",
+        "regWeeks": "",
+        "postWeeks": "4",
+    }
+    assert len(params_seen) == 22
+    result = _invoke_season(monkeypatch, tmp_path, spec, respond, "--season", "2024")
+    assert len(params_seen) == 22
+    assert "22 skip" in result.output
+
+
 def test_parse_curl_get_strips_auth_headers_and_splits_query():
     curl_text = (
         "curl 'https://fantasypointsdata.com/api/nfl/coverage-matrix"

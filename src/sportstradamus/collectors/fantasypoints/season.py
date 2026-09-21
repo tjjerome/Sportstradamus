@@ -1,20 +1,22 @@
 """``fp-fetch season`` — one request per tool for a whole season.
 
 The API's ``splits=week`` switch answers a multi-week window with one row
-per entity-week instead of one aggregated row, and the columns the stats
-layer reads match what the per-week requests return. It takes the regular
+per entity-week instead of one aggregated row. It takes the regular
 season and the postseason rounds together, so one request per tool
 replaces 22, which is what makes a multi-season re-pull fit inside the
 account's daily request budget (``docs/fantasypoints.md`` § Historical
 backfill).
 
-Two things keep the parquets usable in place of per-week pulls. A response
-is capped at a per-tool row count (1,500 on the receiving tools, up to
-3,700 on the snap tools) and, past the cap, the lowest-volume players drop
-out of every week asked for; the API flags such a response in a header,
-and the window is then halved until each half fits. And
+Three things keep the parquets usable in place of per-week pulls. A
+response is capped at a per-tool row count (1,500 on the receiving tools,
+up to 3,700 on the snap tools) and, past the cap, the lowest-volume players
+drop out of every week asked for; the API flags such a response in a
+header, and the window is then halved until each half fits.
 ``lineup-combos/ol`` ignores the switch and answers with its aggregated
-rows; a tool like that goes week by week.
+rows; a tool like that goes week by week. And ``bell-cow`` answers with
+split rows that are not its per-week rows, so it is never sent a split
+request. On every other tool the split rows gave the stats layer the same
+features as the per-week rows (2025, weeks 1-15).
 """
 
 from __future__ import annotations
@@ -66,6 +68,11 @@ _SPLIT_WEEK_COL = "split_week"
 # A week's share of its window's total: present only on split responses and
 # a function of the window asked for, so it never reaches the parquet.
 _WINDOW_SHARE_COLS = ["split_pct", "split_rte_pct"]
+# Endpoints fetched week by week because their split rows differ from their
+# per-week rows. ``bell-cow`` under ``splits=week`` counts a carry fewer for
+# some backs, in a one-week window too, and joins a traded player's teams
+# into one ``team`` string ("HST, KC"); its market shares feed recipes.
+_PER_WEEK_ENDPOINTS = ("/api/nfl/bell-cow",)
 
 
 @click.command("season")
@@ -144,8 +151,9 @@ def _fetch_season(
         for folder_week in _FOLDER_WEEKS
         if folder_week not in wanted
     ]
+    fetch = _fetch_week_by_week if spec.url.endswith(_PER_WEEK_ENDPOINTS) else _fetch_window
     if wanted:
-        results += _fetch_window(spec, client, season=season, weeks=wanted, paths=paths, log=log)
+        results += fetch(spec, client, season=season, weeks=wanted, paths=paths, log=log)
     wrote = sum(r.rows for r in results if r.status == RESULT_OK)
     click.echo(f"  {spec.name}: wrote {wrote} rows across {len(wanted)} weeks", err=True)
     return results
@@ -192,10 +200,7 @@ def _fetch_window(
         click.echo(
             f"  {spec.name}: no per-week split in the response; fetching week by week", err=True
         )
-        return [
-            _fetch_one_week(spec, client, season=season, folder_week=w, path=paths[w], log=log)
-            for w in weeks
-        ]
+        return _fetch_week_by_week(spec, client, season=season, weeks=weeks, paths=paths, log=log)
     results = []
     for folder_week in weeks:
         df = parse_table_response(
@@ -212,35 +217,46 @@ def _fetch_window(
     return results
 
 
-def _fetch_one_week(
+def _fetch_week_by_week(
     spec: EndpointSpec,
     client: CookieClient,
     *,
     season: int,
-    folder_week: int,
-    path: Path,
+    weeks: list[int],
+    paths: dict[int, Path],
     log: logging.Logger,
-) -> RunResult:
-    """The per-week command's request for one folder week, on the same client.
+) -> list[RunResult]:
+    """The per-week command's request for each of folder ``weeks``, on the same client.
 
-    Forces ``refetch=True``: every folder week reaching this fallback was
+    Forces ``refetch=True``: every folder week reaching this path was
     already chosen by ``_fetch_season``'s ``wanted`` filter, so this must not
     let ``fetch_and_write_one``'s own on-disk skip-check re-decide and drop a
     ``--refetch`` week that already has rows.
     """
-    mode, week = _mode_and_week(folder_week)
-    return runner.fetch_and_write_one(
-        spec,
-        path_for=lambda _spec: path,
-        fetch_one=lambda s: dispatch.dispatch_capturing_errors(
-            FP_SOURCE, client, s, season=season, week=week, mode=mode, log=log
-        ),
-        transform=parse_table_response,
-        log=log,
-        season=season,
-        week=week,
-        refetch=True,
-    )
+    results = []
+    for folder_week in weeks:
+        mode, week = _mode_and_week(folder_week)
+        results.append(
+            runner.fetch_and_write_one(
+                spec,
+                path_for=lambda _spec, path=paths[folder_week]: path,
+                fetch_one=partial(
+                    dispatch.dispatch_capturing_errors,
+                    FP_SOURCE,
+                    client,
+                    season=season,
+                    week=week,
+                    mode=mode,
+                    log=log,
+                ),
+                transform=parse_table_response,
+                log=log,
+                season=season,
+                week=week,
+                refetch=True,
+            )
+        )
+    return results
 
 
 def _rows_by_week(payload: object) -> dict[int, list[dict]] | None:

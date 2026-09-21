@@ -7,7 +7,7 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ### Added
 - `fetch fp season`: one split request per tool pulls a whole NFL season, postseason
-  included, halving on the API's row cap; ~180 calls a season instead of ~1,300.
+  included, halving on the API's row cap; ~200 calls a season instead of ~1,300.
 - NFL FantasyPoints Tier 1 batch: passing-situation splits (QB), pace ×2 (team + faced),
   OL lineup-combos units, and the raw-count wins (xTD, RYOE, red-zone carry shares,
   end-zone attempt rate, xYards) — 47 recipe outputs, 4 catalog entries, `ybc` revived.
