@@ -99,7 +99,7 @@ def split_period_params(*, season: int, folder_weeks: Sequence[int]) -> dict[str
 
     ``splits=week`` turns a multi-week window into one row per entity-week,
     so one request covers a whole season (:mod:`season` lists where those
-    rows fall short of a per-week request's). Folder weeks past the
+    rows fall short of a per-week request's values). Folder weeks past the
     regular season are the postseason rounds (``parquet_path_for_spec``);
     the API takes them in the same request and labels their rows ``WC`` /
     ``DV`` / ``CC`` / ``SB``, which :mod:`season` maps back to folder weeks.
