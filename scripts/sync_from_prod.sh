@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Pull production's odds archive + runtime outputs down to this dev machine and
-# fold them in losslessly. Run from the dev box whenever you want to sync up:
+# Pull production's odds archive, runtime outputs, and player/team collector
+# snapshots down to this dev machine and fold them in losslessly. Run from
+# the dev box whenever you want to sync up:
 #
 #   scripts/sync_from_prod.sh             # full sync
 #   scripts/sync_from_prod.sh --dry-run   # print the commands without running them
 #
 # The prod archive is snapshotted under prod's archive flock (so the copy is
 # never torn mid-write), pulled here, then merged into dev's archive via
-# `merge-archives` (which backs up dev's archive first and never drops the local
-# backfill). The runtime parquet/json outputs are rsync'd in update mode
-# (added / refreshed, never deleted); dashboard modifier corrections riding in
-# with them are folded into dev's committed configs (review + commit the dirty
-# files). Every ssh/rsync uses a connect timeout so a powered-off prod fails
-# fast instead of hanging.
+# `merge-archives` (which backs up dev's archive first and never drops the
+# local backfill). The runtime parquet/json outputs, plus the player_data/
+# and team_data/ collector snapshot dirs — most importantly FantasyPoints'
+# weekly NFL pulls, a prod-only cron dev has no way to regenerate
+# independently (see docs/data_collectors.md) — all rsync in update mode
+# (added / refreshed, never deleted). Dashboard modifier corrections riding
+# in with the runtime files are folded into dev's committed configs (review
+# + commit the dirty files). player_data/ and team_data/ pull whole-directory
+# rather than scoped like `sync_to_prod.sh`'s push side — safe here because
+# this pull direction never --deletes, so no prod-only sibling file is ever
+# at risk, and future CTG (NBA) / Savant (MLB) snapshots land automatically
+# with no script change needed. Every ssh/rsync uses a connect timeout so a
+# powered-off prod fails fast instead of hanging.
 #
 # Environment (optional overrides):
 #   PROD_SSH             ssh target for prod  (default: sportstradamus@192.168.1.84)
@@ -41,7 +49,12 @@ esac
 
 ARCHIVE_LOCK="/tmp/sportstradamus-archive.lock"
 SNAPSHOT="/tmp/sportstradamus_prod_snapshot.duckdb"
-RUNTIME_REL="src/sportstradamus/data/runtime"
+# Data dirs pulled additively (update mode, never delete; see header).
+PULL_RELS=(
+    "src/sportstradamus/data/runtime"
+    "src/sportstradamus/data/player_data"
+    "src/sportstradamus/data/team_data"
+)
 SSH_OPTS=(-o "ConnectTimeout=$SSH_CONNECT_TIMEOUT" -o BatchMode=yes)
 RSYNC_SSH="ssh -o ConnectTimeout=$SSH_CONNECT_TIMEOUT -o BatchMode=yes"
 
@@ -81,11 +94,17 @@ run ssh "${SSH_OPTS[@]}" "$PROD_SSH" \
 run rsync -a --partial --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
     "$PROD_SSH:$SNAPSHOT" "$SNAPSHOT"
 
-# 4. Pull data/runtime/ (update, never delete dev-only files). Runtime files are
-#    written atomically on prod, so a live read returns complete files.
-run mkdir -p "$LOCAL_DIR/$RUNTIME_REL"
-run rsync -au --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
-    "$PROD_SSH:$PROD_DIR/$RUNTIME_REL/" "$LOCAL_DIR/$RUNTIME_REL/"
+# 4. Pull data/runtime/, data/player_data/ and data/team_data/ (update mode,
+#    never delete dev-only files). Runtime files are written atomically on
+#    prod and periodically refreshed; player_data/team_data collector
+#    snapshots are written atomically once per season/week and never
+#    touched again — both guarantee a live read never catches a partial
+#    write.
+for rel in "${PULL_RELS[@]}"; do
+    run mkdir -p "$LOCAL_DIR/$rel"
+    run rsync -au --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
+        "$PROD_SSH:$PROD_DIR/$rel/" "$LOCAL_DIR/$rel/"
+done
 
 # 5. Fold prod's rows into dev's archive losslessly. Run from the repo root so
 #    merge-archives' default relative target resolves to dev's archive. Module
