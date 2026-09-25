@@ -79,9 +79,10 @@ def _fantasy_weights(
 
     The spec tables read no instance state except NFL's, which selects components off
     ``playerProfile["position"]`` (the numeric code ``get_depth`` writes) — seeded here
-    from the combo matrix's own numeric position column. A spec carrying sampled, Bernoulli or post-hook terms has no
-    model-fed equivalent (MLB pitcher win, the quality-start indicator, NHL goalie
-    win), so the cell is refused rather than priced from a partial spec.
+    from the combo matrix's own numeric position column. A spec carrying sampled,
+    Bernoulli or post-hook terms has no model-fed equivalent (MLB pitcher win, the
+    quality-start indicator, NHL goalie win), so the cell is refused rather than priced
+    from a partial spec.
     """
     stats = _LEAGUE_STATS[league]()
     position_of: dict[str, str] = {}
