@@ -1414,8 +1414,11 @@ class Stats:
                     self.log_strings["position"],
                 ],
             ]
+            # Left: the gamelog row proves the player took the field, so the roster only
+            # contributes attributes. An inner merge dropped every player absent from the
+            # roster on the day the matrix was built from every past gameday.
             player_df = old_player_df.merge(
-                player_df, on=self.log_strings["player"], suffixes=[None, "_obs"]
+                player_df, on=self.log_strings["player"], how="left", suffixes=[None, "_obs"]
             )
             player_df.drop(
                 columns=[col for col in player_df.columns if "_obs" in col], inplace=True

@@ -846,7 +846,7 @@ class StatsNFL(Stats):
             & (self.players["team"] != "FA*")
         ]
         self.players.name = self.players.name.apply(remove_accents)
-        self.players.team = self.players.team.map(
+        self.players.team = self.players.team.replace(
             {
                 "NOS": "NO",
                 "GBP": "GB",
@@ -1898,12 +1898,14 @@ class StatsNFL(Stats):
         """Per-position component sum for NFL's all-position fantasy markets.
 
         The scoring formula is position-independent; the quoted components are not,
-        so the spec is selected off the player's roster position (see
-        ``NFL_FANTASY_COMPONENTS`` for the coverage measurements behind each list).
-        A player whose position is unknown gets no quote.
+        so the spec is selected off the position ``get_depth`` wrote to
+        ``playerProfile`` -- the gamelog's on a past date, the roster's on an upcoming
+        one (see ``NFL_FANTASY_COMPONENTS`` for the coverage measurements behind each
+        list). A player whose position is unknown gets no quote.
         """
         reception_points = NFL_FANTASY_RECEPTION_POINTS.get(market)
-        components = NFL_FANTASY_COMPONENTS.get(self.players["position"].get(player))
+        code = int(self.playerProfile["position"].get(player, 0))
+        components = NFL_FANTASY_COMPONENTS.get(self.positions[code - 1]) if code else None
         if reception_points is None or components is None:
             return None
         weights = NFL_FANTASY_WEIGHTS | {"receptions": reception_points}

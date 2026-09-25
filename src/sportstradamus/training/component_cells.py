@@ -78,18 +78,20 @@ def _fantasy_weights(
     """Per-player component weights from the league's own ``_fantasy_combo_spec``.
 
     The spec tables read no instance state except NFL's, which selects components off
-    ``self.players["position"]`` — seeded here from the combo matrix's own numeric
-    position column. A spec carrying sampled, Bernoulli or post-hook terms has no
+    ``playerProfile["position"]`` (the numeric code ``get_depth`` writes) — seeded here
+    from the combo matrix's own numeric position column. A spec carrying sampled, Bernoulli or post-hook terms has no
     model-fed equivalent (MLB pitcher win, the quality-start indicator, NHL goalie
     win), so the cell is refused rather than priced from a partial spec.
     """
     stats = _LEAGUE_STATS[league]()
     position_of: dict[str, str] = {}
     if league == "NFL":
-        codes = pd.to_numeric(combo["Player position"], errors="coerce")
+        codes = pd.to_numeric(combo["Player position"], errors="coerce").fillna(0).astype(int)
         named = codes.map(dict(enumerate(stats.positions, start=1)))
         position_of = dict(zip(combo["Player"], named, strict=True))
-        stats.players = pd.DataFrame({"position": pd.Series(position_of)})
+        stats.playerProfile = pd.DataFrame(
+            {"position": pd.Series(dict(zip(combo["Player"], codes, strict=True)))}
+        )
     specs: dict[str, Weights] = {}
     labels = ["fantasy_combo_spec"]
     for player in players:

@@ -6,7 +6,8 @@ field never populates, so its fantasy settlement columns silently omit the HBP
 term (combo-sum pricing brief §8e) and would pin a biased truth.
 
 NFL runs one all-position fantasy market, so its spec is selected per player off
-the roster position; the weights are still the platform's single scoring table.
+the position ``get_depth`` wrote to ``playerProfile``; the weights are still the
+platform's single scoring table.
 
 Platform rule sources: underdogfantasy.com Rules -> Scoring and the
 prizepicks.com scoring chart (2026 season), cross-checked against the repo's
@@ -227,9 +228,9 @@ NFL_MARKET_TABLES = {
 
 
 def _nfl_stats():
-    stats = object.__new__(StatsNFL)
-    stats.players = pd.DataFrame(
-        {"position": ["QB", "RB", "WR", "TE"]},
+    stats = StatsNFL()
+    stats.playerProfile = pd.DataFrame(
+        {"position": [stats.positions.index(pos) + 1 for pos in ("QB", "RB", "WR", "TE")]},
         index=["A Quarterback", "A Back", "A Receiver", "An End"],
     )
     return stats
