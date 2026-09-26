@@ -2026,6 +2026,19 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-09-25 · **NFL FantasyPoints Tier 1 bump retrained on the gamelog-keyed population — ship
+  11/20 → 8/20, no cell supersedes; keep-or-rollback is the owner's call.** Every NFL matrix was
+  rebuilt cold (`--full-rebuild` + a bootstrapped `volume-v1` registry; c2 34 min, c3 2 h 35,
+  c5 6 h 34, retrain 1 h 58) on the re-pulled 2021–2025 snapshots, 47 new recipe outputs (0 inert
+  by |SHAP|) and the depth-chart fix (6eac660c) that admits every gamelog participant (+35% rows,
+  ~2.7× in 2021). BSS up on 9 of 14 scored cells (carries .033→.038, interceptions .250→.258,
+  rushing yards −.008→.002, yards −.080→−.053), down on qb yards (.036→−.018), targets
+  (.003→−.016) and fantasy underdog (.060→.044). Passing first downs (g2 g4 g6), passing yards
+  (g4) and sacks taken (g4 g5 g6) lost ship — three SkewNormal `centered_additive` cells whose
+  validation sets grew ~35%. Production scorecards HOLD everywhere (S2/S3 fail both ways).
+  Report, deterministic A/B tables and the whole-set rollback material live in
+  `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`; per-cell restores are not coherent
+  because every verdict re-rolled against a new `strategy_matrix_hash`. Nothing synced to prod.
 - 2026-09-01 · **NFL passing yards SHIPS 6/6 again — general lever, unaided sweep.** The
   post-leak retrain failed g1 by a hair (ci_hi 0.0050): served P leaned +0.0265 over the book
   (calibration-in-the-large) and the lean alone carried the point estimate; every outcome-fitted
@@ -2174,17 +2187,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   now conditioned on (family, 1/√n) in `sweep._ledger_gate_discounts`. Exp 4 read: R5
   λ-shrinkage NULL (§6.1 Rung B). Pending: Exp 2 default flip + retry deletion, Exp 3
   count-objective flip.
-- 2026-07-21 · Role×position two-part method generalized off NFL. New `training/role_specs.py`
-  registers a `RoleSpec` for every continuous cell in NFL/NBA/WNBA/NHL (43 total, MLB excluded):
-  league-wide positions (mirror `Stats.positions`, tier only codes a market fields) + small
-  per-market column pick; NFL receiving byte-identical (`_role_score` flat-reduce preserved,
-  max-diff 0.0 on 14,923 rows). Corner enrolls via `role_registry_gated` so the board sweep can
-  search it everywhere; nothing ships without the six gates. Coverage golden
-  `tests/golden/test_role_specs.py` fails loud on any uncovered continuous cell. Serving stays
-  NFL-validating + fail-loud (blob-driven generalization deferred, no live gap). Pipeline cleanup:
-  the two NFL heads already share one config-driven `group_conditional_cdf` engine; collapsed
-  `train_market`'s structural if/elif into `_structural_gate_inputs`, split the 226-line receiving
-  support audit into six cohesive helpers, and pulled the structural branches out of
-  `_step_predict_splits`/`_step_persist_artifacts` — four transient complexity tags removed, all
-  honestly under CC 10. Gates: golden 3771 pass (only the pre-existing shipped-cell ship-gate
-  invariant red), integration 30, Ruff + complexity clean.

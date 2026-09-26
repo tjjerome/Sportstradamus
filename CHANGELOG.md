@@ -24,6 +24,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
 
 ### Changed
+- NFL models retrained on the Tier 1 FantasyPoints feature set and the gamelog-keyed
+  training population (every NFL matrix rebuilt cold); the verdict sits in
+  `docs/handoffs/model_improvement_track.md` §10.
 - Games constellation stars sit on their template's drawing; a narrow shape's extra stars
   spread across the team's half.
 - Games star click ~0.9 s → ~10 ms: the star lights before the server answers (~0.25 s),
