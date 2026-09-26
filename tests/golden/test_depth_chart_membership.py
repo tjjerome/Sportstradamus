@@ -75,13 +75,27 @@ def test_upcoming_gameday_still_needs_the_roster():
 def test_nfl_roster_loader_keeps_unmapped_team_codes(monkeypatch):
     raw = pd.DataFrame(
         {
-            "name": ["Josh Allen", "Patrick Mahomes", "Tyreek Hill", "Some Kicker", "Drake Maye"],
-            "team": ["BUF", "KCC", "FA", "BUF", "NEP"],
-            "position": ["QB", "QB", "WR", "PK", "QB"],
-            "gsis_id": ["00-0034857", "00-0033873", "00-0033040", "00-0000001", "00-0039918"],
-            "age": [30.3, 31.0, 32.6, 25.0, 24.1],
-            "height": [77.0, 74.0, 70.0, 72.0, 76.0],
-            "weight": [237.0, 225.0, 185.0, 200.0, 225.0],
+            "name": [
+                "Josh Allen",
+                "Patrick Mahomes",
+                "Tyreek Hill",
+                "Some Kicker",
+                "Drake Maye",
+                "Josh Allen",
+            ],
+            "team": ["BUF", "KCC", "FA", "BUF", "NEP", "JAX"],
+            "position": ["QB", "QB", "WR", "PK", "QB", "LB"],
+            "gsis_id": [
+                "00-0034857",
+                "00-0033873",
+                "00-0033040",
+                "00-0000001",
+                "00-0039918",
+                "00-0035236",
+            ],
+            "age": [30.3, 31.0, 32.6, 25.0, 24.1, 28.5],
+            "height": [77.0, 74.0, 70.0, 72.0, 76.0, 77.0],
+            "weight": [237.0, 225.0, 185.0, 200.0, 225.0, 262.0],
         }
     )
     monkeypatch.setattr(nfl_module.nfl, "import_ids", lambda: raw)
@@ -95,6 +109,8 @@ def test_nfl_roster_loader_keeps_unmapped_team_codes(monkeypatch):
     assert "Tyreek Hill" not in stats.players.index
     assert "Some Kicker" not in stats.players.index
     assert stats.ids["Josh Allen"] == "00-0034857"
+    assert stats.ids["Tyreek Hill"] == "00-0033040"
+    assert "Some Kicker" not in stats.ids
 
 
 def test_nfl_fantasy_spec_reads_the_position_get_depth_wrote():

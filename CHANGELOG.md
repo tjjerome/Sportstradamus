@@ -17,6 +17,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- NFL play-by-play stats resolve every skill player's id, not only the roster's: players who
+  had left the league carried all-zero pbp columns (and zero `passing first downs` /
+  `sacks taken` targets) on every past game once the depth-chart fix admitted them.
 - Past-gameday depth charts are keyed on the gamelog, not the build-day roster: unrostered
   players no longer vanish from training history (an NFL cold rebuild's population depended
   on its run date). NFL serve-time `Player depth` is a within-team rank again (team codes

@@ -839,13 +839,10 @@ class StatsNFL(Stats):
         self._enrich_team_markets(nfl_data, mask=new_mask)
 
     def _load_player_ids(self):
-        self.players = nfl.import_ids()
-        self.players = self.players.loc[
-            self.players["position"].isin(["QB", "RB", "WR", "TE"])
-            & (self.players["team"] != "FA")
-            & (self.players["team"] != "FA*")
-        ]
-        self.players.name = self.players.name.apply(remove_accents)
+        skill = nfl.import_ids()
+        skill = skill.loc[skill["position"].isin(["QB", "RB", "WR", "TE"])]
+        skill.name = skill.name.apply(remove_accents)
+        self.players = skill.loc[(skill["team"] != "FA") & (skill["team"] != "FA*")]
         # import_ids() codes that differ from the gamelog's. Every current team must map:
         # an unmapped code reaches _rescale_team_volume as a team the profiles never saw.
         self.players.team = self.players.team.replace(
@@ -860,9 +857,15 @@ class StatsNFL(Stats):
                 "NEP": "NE",
             }
         )
-        ids = self.players[["name", "gsis_id"]].dropna()
+        # parse_pbp resolves gamelog names through this map, so it covers everyone who ever
+        # played, not just the roster: a player who left the league used to get
+        # _empty_player_pbp_stats on every past game. A rostered id wins a same-name collision.
+        ids = skill[["name", "gsis_id"]].dropna()
         ids.index = ids.name
         self.ids = ids.gsis_id.to_dict()
+        rostered = self.players[["name", "gsis_id"]].dropna()
+        rostered.index = rostered.name
+        self.ids.update(rostered.gsis_id.to_dict())
         self.players = self.players.drop_duplicates("name")
         self.players.index = self.players["name"]
         self.players = self.players[["age", "height", "weight", "team", "position"]]
