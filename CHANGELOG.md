@@ -20,7 +20,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Past-gameday depth charts are keyed on the gamelog, not the build-day roster: unrostered
   players no longer vanish from training history (an NFL cold rebuild's population depended
   on its run date). NFL serve-time `Player depth` is a within-team rank again (team codes
-  were mapped to NaN), and the NFL fantasy spec reads the profile position.
+  were mapped to NaN; the Patriots' `NEP` roster code is mapped to `NE` so the team rescale
+  no longer raises on it), and the NFL fantasy spec reads the profile position.
 - Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
 
 ### Changed

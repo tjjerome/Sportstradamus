@@ -846,6 +846,8 @@ class StatsNFL(Stats):
             & (self.players["team"] != "FA*")
         ]
         self.players.name = self.players.name.apply(remove_accents)
+        # import_ids() codes that differ from the gamelog's. Every current team must map:
+        # an unmapped code reaches _rescale_team_volume as a team the profiles never saw.
         self.players.team = self.players.team.replace(
             {
                 "NOS": "NO",
@@ -855,6 +857,7 @@ class StatsNFL(Stats):
                 "KCC": "KC",
                 "LVR": "LV",
                 "JAC": "JAX",
+                "NEP": "NE",
             }
         )
         ids = self.players[["name", "gsis_id"]].dropna()
