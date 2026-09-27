@@ -294,7 +294,7 @@ def _patch_login(monkeypatch, response, keys=None, firebase=None):
             }
         ),
     )
-    monkeypatch.setattr(session_mod, "update_keys", lambda updates: sent.update(updates))
+    monkeypatch.setattr(session_mod, "update_keys", sent.update)
     monkeypatch.delenv("FANTASYPOINTS_EMAIL", raising=False)
     monkeypatch.delenv("FANTASYPOINTS_PASSWORD", raising=False)
     firebase = firebase or _FakeLoginResponse(payload={"idToken": "firebase.id.token"})
