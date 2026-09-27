@@ -307,27 +307,31 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
 
 ## 6. Owner decisions this lane needs up front
 
-1. **Lane choice for failing served cells.** Recommended: flip every NFL cell with
-   `ship == False` on the honest board to `shipped: "withheld"` in one reviewed
-   `stat_meta.json` commit, so `ship sweep --league NFL --confirm` can auto-ship them on a clean
-   6/6. Alternative: keep them live and run `--include-shipped --confirm-auto-promote`, accepting
-   that S2/S3 against a failing incumbent will HOLD almost every candidate (`--min-model-weight`
-   helps only passing yards). Either way the agent presents the resulting `stat_meta` diff and
-   the owner commits it.
+1. **Lane choice for failing served cells — decided 2026-09-27.** The nine cells with
+   `ship == False` on the honest board are `shipped: "withheld"` (`7d986d3c`, on prod since
+   2026-09-27 06:09 CDT), so `ship sweep --league NFL --confirm` runs the fresh lane and
+   auto-ships them on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
+   still on disk the market yields no offers at all (not even the book fallback); the next dev
+   `meditate` prunes the nine pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`,
+   after which the book fallback takes over. Prod still holds the 09-17 pickles for all 20 cells.
 2. **Trim floor.** `trim_matrix(M, 15000)` binds on the WR/RB/TE cells after the population
    fix. Raising it grows every league's training set and training time; if authorized, run it
-   as a rebuild of the affected NFL cells with a frozen-matrix A/B before promotion.
+   as a rebuild of the affected NFL cells with a frozen-matrix A/B before promotion. The owner
+   asked on 2026-09-27 to "trim the floors"; the direction and value are not pinned yet, so the
+   constant is still 15,000 — confirm both before touching `pipeline.py`.
 3. **Combo quote history.** Whether to pull prod's archive (or Odds API history) for
    2024–2025 combo lines — the only lever that changes the combos' Gate 1 evidence base.
-4. **Push and sync.** `abb82025` (`NEP` fix — prod is likely dropping every NFL market on
-   Patriots slates until it lands) and `4c8b4a91` are unpushed; `scripts/sync_to_prod.sh`
-   carries the models, `model_stats`, the two calibration JSONs, the corr parquets and
-   `player_data/NFL` + `team_data/NFL` — **not** `leagues/nfl/gamelog.parquet`. Prod's gamelog
-   therefore keeps its zeroed pbp rows (30% of history, feeding the team/defense aggregates the
-   honest models were trained without) until the recompute runs there: deploy `4c8b4a91`, then
-   run `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/recompute_pbp_zeroed.py` on prod at a
-   quiet hour (about 4 minutes; it calls `update()`, so keep it clear of the cron jobs' archive
-   flock) before the honest models are synced.
+4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip
+   are on `origin/devel` (06:06 CDT) and on prod (`run_job.sh`'s self-deploy pull replicated by
+   hand at 06:09 CDT under its pull lock, dashboard restarted). Prod's gamelog was recomputed
+   06:09–06:14 CDT with `recompute_pbp_zeroed.py` under the archive flock (5 min, 2.2 GB peak;
+   10,209 rows revisited, 75 residual all-zero rows with snap > 0.3 — the same six nickname
+   mismatches as dev; log `~/recompute_20260927.log`, pre-run copy
+   `~/gamelog.parquet.bak_20260927`, both on prod). `scripts/sync_to_prod.sh` has **not** run:
+   prod still serves the 09-17 pickles, `model_stats` and calibration files. It carries the
+   models, `model_stats`, the two calibration JSONs, the corr parquets and `player_data/NFL` +
+   `team_data/NFL` — not `leagues/nfl/gamelog.parquet`, which is why the recompute ran on prod
+   directly.
 
 ## 7. Rules the lane runs under
 

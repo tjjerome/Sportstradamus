@@ -30,7 +30,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ### Changed
 - NFL models retrained on the Tier 1 FantasyPoints feature set and the gamelog-keyed
   training population (every NFL matrix rebuilt cold, play-by-play stats recomputed): 11/20
-  ship; verdict in `docs/handoffs/model_improvement_track.md` §10, recovery plan in
+  ship, the nine failing cells `shipped: "withheld"`; verdict in
+  `docs/handoffs/model_improvement_track.md` §10, recovery plan in
   `docs/handoffs/nfl-ship15-recovery.md`.
 - Games constellation stars sit on their template's drawing; a narrow shape's extra stars
   spread across the team's half.
