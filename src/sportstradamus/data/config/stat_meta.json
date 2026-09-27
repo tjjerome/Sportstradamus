@@ -191,7 +191,7 @@
         },
         "completions": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_projvol",
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "crps",
@@ -208,7 +208,7 @@
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_isotonic",
             "blending": "nll",
@@ -241,7 +241,7 @@
         },
         "passing yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "prob_recal_book_citl",
             "dist_training_loss": "nll",
@@ -250,7 +250,7 @@
         },
         "qb tds": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "cdf_recal_isotonic",
             "dist_training_loss": "nll",
@@ -259,7 +259,7 @@
         },
         "qb yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "isotonic_mean",
             "dist_training_loss": "crps",
@@ -278,7 +278,7 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_isotonic",
             "dist_training_loss": "crps",
@@ -312,14 +312,14 @@
         },
         "sacks taken": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
         },
         "targets": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "nll",
@@ -337,7 +337,7 @@
         },
         "yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "none",
             "dist_training_loss": "crps",
