@@ -34,19 +34,18 @@ whenever the queue changes; git holds the history.
 | NBA | 18/21 | 16 | **DONE** |
 | MLB | 15/19 | 15 | **DONE** |
 | NHL | 12/15 | 12 | **DONE** |
-| NFL | 20/20 | 15 | **DONE** — every cell on devel |
+| NFL | 11/20 | 15 | **REOPENED** — 2026-09-26 honest board after the FantasyPoints bump + population fix; lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
 
 ## In flight right now
 
-- Rushing + receiving yards + interceptions ship on devel (receiving via the ±8
-  dispersion skew cap — routing protocol at model_improvement_track.md §8.2 #0a;
-  rushing book-lean w=0.05). Mixture serve build killed, StudentT no-go — briefs in
-  `docs/archive/`, reopen trigger in §8.2 #0a.
-- Passing yards shipped (devel) via the SkewNormal precision-pool scale floor
-  (`_BLEND_MODEL_SCALE_FLOOR`, commit 29139a7a) — NFL end-game §4 has the numbers.
-  Remaining NFL work is supersession hygiene, not breadth.
+- NFL re-rolled: the 2026-09 FantasyPoints Tier 1 bump rebuilt every NFL matrix on the
+  gamelog-keyed population, so all 20 verdicts were re-earned; the honest 2026-09-26 board
+  reads 11/20 (passing yards and sacks taken out on Gate 4, receiving yards still Gate 4,
+  the two combos Gate 1 on a few dozen authentic rows). The queue, levers and owner
+  decisions live in [nfl-ship15-recovery.md](nfl-ship15-recovery.md); this file keeps the
+  standing rules and the history below.
 
-## NFL end-game (20/20 — complete)
+## NFL end-game (history — reached 20/20 on 2026-09-01; superseded by the 2026-09 rebuild)
 
 1. **Six candidates through confirm** (in flight + re-run): the five SN confirms above, plus
    the count re-runs. If a confirm reverts, its recovery levers in order: g4-only calibrated

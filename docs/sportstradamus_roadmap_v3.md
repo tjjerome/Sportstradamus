@@ -76,6 +76,7 @@ an exception. A session works one lane and reads that lane's brief.
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
 | `model-track` | Profit-first: beat the DFS apps/mispriced books live (WS-1) + standing breadth harvest → D3/D5 + MLB/NHL post-GO grind (WS-2); the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
+| `nfl-ship15-recovery` | NFL back to ≥15/20 honest ships after the FantasyPoints bump re-rolled every verdict; passing / rushing / receiving yards + the two yards combos mandatory | OPEN | owner decisions in the brief §6 | [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) |
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (D6 resolved; stage 1 commit path next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | ACTIVE — **CRITICAL PATH** (blocks D3 + dfs-products 2b/2c/5); stages 0-4 complete on `feature/sleeper-parity`, PR to devel pending merge; target merge ~Aug 2026 (pre NFL Wk 1) | devel merge → unblocks stage 5 live soak | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |

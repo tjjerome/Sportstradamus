@@ -2026,19 +2026,19 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
-- 2026-09-25 · **NFL FantasyPoints Tier 1 bump retrained on the gamelog-keyed population — ship
-  11/20 → 8/20, no cell supersedes; keep-or-rollback is the owner's call.** Every NFL matrix was
-  rebuilt cold (`--full-rebuild` + a bootstrapped `volume-v1` registry; c2 34 min, c3 2 h 35,
-  c5 6 h 34, retrain 1 h 58) on the re-pulled 2021–2025 snapshots, 47 new recipe outputs (0 inert
-  by |SHAP|) and the depth-chart fix (6eac660c) that admits every gamelog participant (+35% rows,
-  ~2.7× in 2021). BSS up on 9 of 14 scored cells (carries .033→.038, interceptions .250→.258,
-  rushing yards −.008→.002, yards −.080→−.053), down on qb yards (.036→−.018), targets
-  (.003→−.016) and fantasy underdog (.060→.044). Passing first downs (g2 g4 g6), passing yards
-  (g4) and sacks taken (g4 g5 g6) lost ship — three SkewNormal `centered_additive` cells whose
-  validation sets grew ~35%. Production scorecards HOLD everywhere (S2/S3 fail both ways).
-  Report, deterministic A/B tables and the whole-set rollback material live in
-  `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`; per-cell restores are not coherent
-  because every verdict re-rolled against a new `strategy_matrix_hash`. Nothing synced to prod.
+- 2026-09-26 · **NFL FantasyPoints Tier 1 bump, honest retrain — ship 11/20 → 11/20, mean BSS
+  .052 → .058, 0 of 47 new columns inert, no supersession; recovery lane opened.** All 20 NFL
+  matrices rebuilt cold on the gamelog-keyed population (6eac660c) with the 47 new recipe outputs
+  (c2 35 min, c3 2 h 29, c5 6 h 45, retrain 1 h 51). A first retrain on 2026-09-25 read 8/20 and
+  was NOT honest: `parse_pbp` resolved names through the roster-limited id map, so every departed
+  player carried all-zero pbp stats (30.6% of gamelog rows, the TARGETS of passing first downs and
+  sacks taken); fixed 4c8b4a91, gamelog recomputed, matrices rebuilt again. Honest board: in
+  fantasy prizepicks (g2) and receptions (g1 ci_hi .0027); out passing yards (g4 .0705/.0649) and
+  sacks taken (g4 .0654/.0652); passing first downs back; completions g1 by .0001. Yards family:
+  rushing SHIPS (BSS −.008→+.005), passing g4-only, receiving g4-only (whole KS in the over-tail),
+  yards/qb yards g1 on 73/29 authentic rows (combo lines absent 2024–25). Every scorecard HOLD.
+  Report `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`; ≥15/20 plan
+  `docs/handoffs/nfl-ship15-recovery.md`. Nothing synced to prod; owner decides keep vs rollback.
 - 2026-09-01 · **NFL passing yards SHIPS 6/6 again — general lever, unaided sweep.** The
   post-leak retrain failed g1 by a hair (ci_hi 0.0050): served P leaned +0.0265 over the book
   (calibration-in-the-large) and the lean alone carried the point estimate; every outcome-fitted
