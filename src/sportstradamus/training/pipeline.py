@@ -928,9 +928,9 @@ def _step_synthesize_odds(
 
 
 _PRETRIM_LINE_COLUMN = "__PreTrimLine"
-# trim_matrix never balances a matrix below this many rows. 20,000 clears the NFL WR/RB/TE
-# populations (17-19k after the 2026-09 gamelog-keyed depth fix), so the line and over/under
-# balancing only runs on genuinely large cells; 15,000 was cutting a fifth of their unquoted rows.
+# trim_matrix never balances a matrix below this many rows. Raised from 15,000 on 2026-09-27:
+# the NFL WR/RB/TE cells (20k+ rows before trimming since the gamelog-keyed depth fix) were
+# losing a fifth of their unquoted rows to the balancing; at 20,000 they keep 2.4-5.8k more.
 _MATRIX_TRIM_FLOOR = 20000
 
 
