@@ -928,6 +928,10 @@ def _step_synthesize_odds(
 
 
 _PRETRIM_LINE_COLUMN = "__PreTrimLine"
+# trim_matrix never balances a matrix below this many rows. 20,000 clears the NFL WR/RB/TE
+# populations (17-19k after the 2026-09 gamelog-keyed depth fix), so the line and over/under
+# balancing only runs on genuinely large cells; 15,000 was cutting a fifth of their unquoted rows.
+MATRIX_TRIM_FLOOR = 20000
 
 
 def _reconcile_clipped_neutral_quotes(
@@ -987,7 +991,7 @@ def _step_persist_matrix(
     if _PRETRIM_LINE_COLUMN in M:
         raise ValueError(f"reserved matrix column is present: {_PRETRIM_LINE_COLUMN}")
     M[_PRETRIM_LINE_COLUMN] = M["Line"]
-    M = trim_matrix(M, 15000, seed=MATRIX_TRIM_SEED)
+    M = trim_matrix(M, MATRIX_TRIM_FLOOR, seed=MATRIX_TRIM_SEED)
     if league is not None and market is not None:
         M = _reconcile_clipped_neutral_quotes(
             M,
