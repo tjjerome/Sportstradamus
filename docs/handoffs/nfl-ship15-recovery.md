@@ -380,7 +380,10 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    not carry `leagues/nfl/gamelog.parquet`, which is why the recompute ran on prod directly.
    Prod's own `team_data/NFL/2026/week_03` holds 20 empty 636-byte stubs from a 2026-09-16
    fetch (pre-port); harmless, the collector skips only non-empty files, so Wednesday's
-   `fp-fetch` refetches them. The 16:50 CDT prophecize run is the first on the new pickles.
+   `fp-fetch` refetches them. The 16:50 CDT prophecize run was the first on the new pickles:
+   OK in 896 s, log window identical to the 15:50 run's (no NFL error), receiving yards served
+   (130 offers in the 17:04 `current_offers` snapshot), the eight withheld cells absent, one
+   `withheld but pickle on disk` warning per withheld cell per platform.
 
 ## 7. Rules the lane runs under
 
