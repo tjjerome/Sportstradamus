@@ -278,7 +278,7 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_isotonic",
             "dist_training_loss": "crps",
