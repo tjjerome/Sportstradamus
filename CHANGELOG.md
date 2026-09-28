@@ -28,9 +28,13 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
 
 ### Changed
+- Training-matrix trim floor 15,000 → 20,000 rows (`pipeline._MATRIX_TRIM_FLOOR`): the six NFL
+  WR/RB/TE cells the balancing was cutting keep 2.4–5.8k more rows (+14–41%); every league's
+  matrices keep more unquoted rows from their next persist on.
 - NFL models retrained on the Tier 1 FantasyPoints feature set and the gamelog-keyed
   training population (every NFL matrix rebuilt cold, play-by-play stats recomputed): 11/20
-  ship, the nine failing cells `shipped: "withheld"`; verdict in
+  ship (12/20 after the 2026-09-27 trim-floor retrain), the nine failing cells
+  `shipped: "withheld"`; verdict in
   `docs/handoffs/model_improvement_track.md` §10, recovery plan in
   `docs/handoffs/nfl-ship15-recovery.md`.
 - Games constellation stars sit on their template's drawing; a narrow shape's extra stars

@@ -62,7 +62,7 @@ for the run) and the within-team `Player depth` rank at serve time. Verify the s
 fake-mode integration suite no-ops `Stats` I/O and cannot see these breaks (memory
 `nfl_serve_path_parity_probe`).
 
-## 3. Where the numbers stand (honest board, 2026-09-26)
+## 3. Where the numbers stand (honest board 2026-09-26; floor-20k update 2026-09-27 below)
 
 **11 of 20 ship** (baseline 11, the zeroed run 8). Mean BSS over the scored cells rose
 0.0515 → 0.0577; 0 of the 47 new columns are inert by |SHAP|; every production scorecard reads
@@ -95,6 +95,16 @@ the board itself is `data/training/model_stats.parquet` (NFL rows, 2026-09-26 20
 | targets | KILL g1 | KILL g1 | **KILL g1** | -0.012 | 0.51 | 2176 (131) | 0.020 / 0.050 | g1 ci_hi 0.032 on 131 authentic rows / 101 clusters |
 | tds | SHIP | SHIP | **SHIP** | +0.167 | 0.90 | 3298 (3207) | 0.021 / 0.050 |  |
 | yards | KILL g1 g4 | KILL g1 | **KILL g1** | -0.042 | 0.50 | 2162 (73) | 0.047 / 0.050 | g1 mean −0.009 but ci_hi 0.027 on 73 rows / 59 clusters; g4 passes |
+
+**Floor-20k retrain, 2026-09-27 — 12 of 20 ship.** With `_MATRIX_TRIM_FLOOR` at 20,000 (section 6,
+decision 2) the six cells the old floor was cutting were rebuilt and retrained; the table above
+keeps their 15k values. Receiving yards now passes 6/6 (g1 −0.0002 [−0.0024, +0.0020], g4 0.707,
+BSS +0.020, w 0.34; scorecard against the 15k test set HOLD — S2 −0.0007 n.s., S3 sharpe
+0.026 → 0.050, z +1.34) but is still `shipped: "withheld"` until the owner flips it. Receptions
+stays in (BSS .0032 → .0078, w .62 → .68), fantasy prizepicks stays in. Targets (g1 ci_hi 0.0251,
+BSS −.012 → −.024), yards (g1 ci_hi 0.0380; BSS −.042 → −.012) and fantasy underdog (g1 ci_hi
+0.0490) still fail Gate 1 on their 131 / 73 / 131 authentic rows. Compare script
+`$B/compare_floor20k.py`, log `$B/logs/floor20k_compare.log`.
 
 Two cohort facts to keep in view. Book-less cells (`n authentic = 0`: the fantasy cells, the
 first-down/sack/td cells) auto-pass Gate 1 and carry `w = 1.0`; their ship is Gates 2–6. Four
@@ -242,10 +252,14 @@ w 0.38, n 2,379 (2,304 authentic).
 3. `centered_additive_mean10` normalization — the transform that flipped `carries` from
    below-book to beats-the-book at real HPO (memory `nfl_volume_cells_feature_mature`: the
    volume-family deficit is target shape and capacity, not features).
-4. Training population: this cell hits the trim floor (`trim_matrix(M, 15000)` in
-   `pipeline._step_persist_matrix`); the rebuild ended near 15,900 rows with about half its
-   unquoted rows balanced away while all 9,792 quoted keys survived. Raising the floor is a
-   global owner knob (section 6, decision 2) and needs a rebuild of the affected matrices.
+4. Training population: this cell hit the old 15,000 trim floor (`pipeline._MATRIX_TRIM_FLOOR`,
+   applied in `_step_persist_matrix`); the honest rebuild ended near 15,900 rows with about half
+   its unquoted rows balanced away while all 9,792 quoted keys survived. The floor is 20,000 since
+   2026-09-27 and the rebuilt matrix has 19,941 rows (section 6, decision 2).
+
+Outcome 2026-09-27: at the 20,000 floor the cell passes 6/6 (g4 0.707; g1 −0.0002
+[−0.0024, +0.0020]; BSS +0.020, w 0.34) and needs the `withheld` → `devel` flip to serve. Levers
+1–3 stay listed because every retrain re-rolls the verdict.
 
 ### yards and qb yards (the combos)
 
@@ -314,11 +328,21 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    still on disk the market yields no offers at all (not even the book fallback); the next dev
    `meditate` prunes the nine pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`,
    after which the book fallback takes over. Prod still holds the 09-17 pickles for all 20 cells.
-2. **Trim floor.** `trim_matrix(M, 15000)` binds on the WR/RB/TE cells after the population
-   fix. Raising it grows every league's training set and training time; if authorized, run it
-   as a rebuild of the affected NFL cells with a frozen-matrix A/B before promotion. The owner
-   asked on 2026-09-27 to "trim the floors"; the direction and value are not pinned yet, so the
-   constant is still 15,000 — confirm both before touching `pipeline.py`.
+2. **Trim floor — decided 2026-09-27.** `pipeline._MATRIX_TRIM_FLOOR` is 20,000 (`0a22c0a9`;
+   was a literal 15,000). The floor is the row count below which `trim_matrix` never balances,
+   so at 20,000 the six WR/RB/TE cells the old floor was cutting gained 2.4–5.8k rows: targets
+   14,548 → 18,915 (now below the floor, unbalanced), yards 14,546 → 19,863, receiving yards
+   15,861 → 19,941, receptions 17,299 → 19,727, fantasy prizepicks 14,262 → 19,953, fantasy
+   underdog 14,142 → 19,929 — those five landed just under 20,000, so their pre-trim populations
+   exceed 20k and the floor still binds them, more loosely. tds and receiving tds (which the
+   balancing barely touched) are unchanged. Global: every league's
+   next persist keeps more unquoted rows too (NBA/WNBA caches all sat at the 15k floor). The six
+   matrices were rebuilt cold on 2026-09-27 (`$B/run_floor20k.sh`, quarantine
+   `$B/quarantine_floor20k`, pre-change artifacts `$B/pre_floor20k`) and the cells retrained;
+   the outcome is in section 3. Separate finding, not acted on: every `meditate` re-trims the
+   cache and the Result-band and push steps ignore the floor, so a cache loses 0.5–5% of its
+   unquoted rows on each persist even with no new games (targets 15,000 → 14,548 between the
+   09-26 promotion and the 09-26 retrain).
 3. **Combo quote history.** Whether to pull prod's archive (or Odds API history) for
    2024–2025 combo lines — the only lever that changes the combos' Gate 1 evidence base.
 4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip

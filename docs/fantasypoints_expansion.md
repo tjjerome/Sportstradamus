@@ -221,7 +221,8 @@ Order, with the state of each step:
 2. Tier 1 in one batch — code landed: `passing-situation`, `pace`,
    `lineup-combos/ol` plus the raw-count free wins below, 47 new recipe outputs.
    Every NFL matrix was rebuilt cold and retrained on 2026-09-26 (11/20 ship, 0 new
-   columns inert); `docs/handoffs/model_improvement_track.md` §10 carries the verdict and
+   columns inert; 12/20 after the 2026-09-27 trim-floor retrain);
+   `docs/handoffs/model_improvement_track.md` §10 carries the verdict and
    [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) the ≥15/20 plan.
 3. Tier 2 filter fan-out, as a fixed slice list — open.
 4. `injury-reports` last, once the pre-game snapshot discipline is designed — open.
