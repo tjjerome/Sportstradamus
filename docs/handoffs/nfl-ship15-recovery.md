@@ -100,7 +100,7 @@ the board itself is `data/training/model_stats.parquet` (NFL rows, 2026-09-26 20
 decision 2) the six cells the old floor was cutting were rebuilt and retrained; the table above
 keeps their 15k values. Receiving yards now passes 6/6 (g1 −0.0002 [−0.0024, +0.0020], g4 0.707,
 BSS +0.020, w 0.34; scorecard against the 15k test set HOLD — S2 −0.0007 n.s., S3 sharpe
-0.026 → 0.050, z +1.34) but is still `shipped: "withheld"` until the owner flips it. Receptions
+0.026 → 0.050, z +1.34) and is back to `shipped: "devel"` (`34fbdcb4`, 2026-09-27). Receptions
 stays in (BSS .0032 → .0078, w .62 → .68), fantasy prizepicks stays in. Targets (g1 ci_hi 0.0251,
 BSS −.012 → −.024), yards (g1 ci_hi 0.0380; BSS −.042 → −.012) and fantasy underdog (g1 ci_hi
 0.0490) still fail Gate 1 on their 131 / 73 / 131 authentic rows. Compare script
@@ -258,8 +258,9 @@ w 0.38, n 2,379 (2,304 authentic).
    2026-09-27 and the rebuilt matrix has 19,941 rows (section 6, decision 2).
 
 Outcome 2026-09-27: at the 20,000 floor the cell passes 6/6 (g4 0.707; g1 −0.0002
-[−0.0024, +0.0020]; BSS +0.020, w 0.34) and needs the `withheld` → `devel` flip to serve. Levers
-1–3 stay listed because every retrain re-rolls the verdict.
+[−0.0024, +0.0020]; BSS +0.020, w 0.34); flipped back to `devel` in `34fbdcb4`. Prod serves its
+09-17 pickle (which fails Gate 4) until `scripts/sync_to_prod.sh` carries the new one. Levers 1–3
+stay listed because every retrain re-rolls the verdict.
 
 ### yards and qb yards (the combos)
 
@@ -323,7 +324,8 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
 
 1. **Lane choice for failing served cells — decided 2026-09-27.** The nine cells with
    `ship == False` on the honest board are `shipped: "withheld"` (`7d986d3c`, on prod since
-   2026-09-27 06:09 CDT), so `ship sweep --league NFL --confirm` runs the fresh lane and
+   2026-09-27 06:09 CDT; receiving yards back to `devel` in `34fbdcb4` after the floor-20k
+   retrain), so `ship sweep --league NFL --confirm` runs the fresh lane on the remaining eight and
    auto-ships them on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
    still on disk the market yields no offers at all (not even the book fallback); the next dev
    `meditate` prunes the nine pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`,

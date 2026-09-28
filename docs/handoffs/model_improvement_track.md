@@ -2029,8 +2029,8 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 - 2026-09-27 · **NFL trim floor 15,000 → 20,000, six WR/RB/TE cells rebuilt + retrained — ship
   11/20 → 12/20.** `pipeline._MATRIX_TRIM_FLOOR`; the balancing had cut a fifth of those cells'
   unquoted rows (targets 14,548 → 18,915 rows, the other five to 19.7–19.9k, so the floor still
-  binds them). Receiving yards passes 6/6 (g1 −0.0002 [−0.0024, +0.0020], g4 0.707) but is
-  `withheld` pending the owner's flip; receptions BSS .0032 → .0078; targets / yards / fantasy
+  binds them). Receiving yards passes 6/6 (g1 −0.0002 [−0.0024, +0.0020], g4 0.707) and is back
+  to `devel` (34fbdcb4); receptions BSS .0032 → .0078; targets / yards / fantasy
   underdog still fail Gate 1 on 131 / 73 / 131 authentic rows. Side finding: every persist
   re-trims the cache and the Result-band / push steps ignore the floor (fantasy prizepicks
   19,953 → 18,699 on the retrain's re-persist with no new games). Details
