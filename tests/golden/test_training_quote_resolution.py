@@ -461,7 +461,9 @@ def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path
     matrix[_PRETRIM_LINE_COLUMN] = matrix["Line"]
     archived = matrix["Archived"]
 
-    clipped = _clip_lines(matrix, archived, int(archived.sum()))
+    clipped = _clip_lines(
+        matrix, archived, int(archived.sum()), pd.Series(True, index=matrix.index)
+    )
     assert clipped.loc[rows, "Line"] == 8.5
     assert clipped.loc[rows + 1, "Line"] == 6.5
     assert clipped.loc[rows + 2, "Line"] == 5.0

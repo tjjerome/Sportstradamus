@@ -781,7 +781,7 @@ def _step_load_matrix(
     dependency_root: Path | None = None,
     dependency_namespace: str = DEPENDENCY_NAMESPACE,
     matrix_input: Path | None = None,
-) -> tuple[pd.DataFrame, object] | None:
+) -> tuple[pd.DataFrame, object, pd.Series] | None:
     """Load cached training parquet, fetch new rows, concat. Returns None on early-exit.
 
     Args:
@@ -795,7 +795,8 @@ def _step_load_matrix(
         need_model: True if no existing model pickle was found.
 
     Returns:
-        ``(M, training_data_path)`` tuple where ``M`` is the combined matrix,
+        ``(M, training_data_path, new_rows)`` where ``M`` is the combined matrix and
+        ``new_rows`` masks the rows fetched this run (every row on a rebuild or cold start),
         or ``None`` when there is nothing to train on.
     """
     # style: allow-complexity — four mutually exclusive matrix sources (frozen input, full
@@ -852,6 +853,11 @@ def _step_load_matrix(
     if new_M.empty and not force and not need_model:
         return None
 
+    # Positional: built before the concat below, M (cached) first and new_M (fetched)
+    # second, matching the concat's row order. drop_duplicates(keep="last") then keeps
+    # the fetched copy of a (Player, Date) collision, so re-indexing this mask by
+    # M.index afterward still tags the survivor correctly.
+    new_rows = pd.Series([False] * len(M) + [True] * len(new_M))
     M = pd.concat([M, new_M], ignore_index=True)
     if M.empty:
         logger.warning("  No usable training data for %s %s, skipping", league, market)
@@ -859,6 +865,7 @@ def _step_load_matrix(
     M.Date = pd.to_datetime(M.Date, format="mixed")
     if "Player" in M.columns:
         M = M.drop_duplicates(subset=["Player", "Date"], keep="last")
+        new_rows = new_rows.loc[M.index]
     unpriced = incomplete_provenance_rows(M)
     if unpriced:
         # Raise before the caller persists: cached rows predating the provenance block concat
@@ -872,7 +879,7 @@ def _step_load_matrix(
             f'--league {league} --markets "{market}"`, which re-resolves the block from the '
             "archive through the training join's own resolver, then retrain."
         )
-    return M, filepath
+    return M, filepath, new_rows
 
 
 def _step_synthesize_odds(
@@ -984,6 +991,7 @@ def _step_persist_matrix(
     market: str | None = None,
     dist: str | None = None,
     cv: float = 1.0,
+    new_rows: pd.Series | None = None,
 ) -> pd.DataFrame:
     """Trim the matrix and write it to parquet; deterministic mode skips the write."""
     if immutable_input:
@@ -991,7 +999,7 @@ def _step_persist_matrix(
     if _PRETRIM_LINE_COLUMN in M:
         raise ValueError(f"reserved matrix column is present: {_PRETRIM_LINE_COLUMN}")
     M[_PRETRIM_LINE_COLUMN] = M["Line"]
-    M = trim_matrix(M, _MATRIX_TRIM_FLOOR, seed=MATRIX_TRIM_SEED)
+    M = trim_matrix(M, _MATRIX_TRIM_FLOOR, seed=MATRIX_TRIM_SEED, new_rows=new_rows)
     if league is not None and market is not None:
         M = _reconcile_clipped_neutral_quotes(
             M,
@@ -4702,7 +4710,7 @@ def train_market(
     )
     if loaded is None:
         return
-    M, training_data_path = loaded
+    M, training_data_path, new_rows = loaded
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
     M = _step_persist_matrix(
@@ -4715,6 +4723,7 @@ def train_market(
         market=market,
         dist=dist,
         cv=cv,
+        new_rows=new_rows,
     )
     if full_rebuild:
         repo_root = Path(__file__).resolve().parents[3]

@@ -70,9 +70,9 @@ def test_half_populated_provenance_block_is_refused(tmp_path):
 
 
 def test_fully_populated_and_legacy_matrices_both_load(tmp_path):
-    populated, _ = _load(_matrix(), tmp_path)
+    populated, _, _ = _load(_matrix(), tmp_path)
     assert len(populated) == 2
 
     legacy = _matrix().drop(columns=list(PROVENANCE_COLUMNS))
-    loaded, _ = _load(legacy, tmp_path)
+    loaded, _, _ = _load(legacy, tmp_path)
     assert len(loaded) == 2

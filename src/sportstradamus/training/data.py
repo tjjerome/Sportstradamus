@@ -45,6 +45,11 @@ _MIN_ARCHIVED_FOR_OVER_TARGET: int = 20
 # below this the reference is treated as empty and uniform weights are used.
 _MIN_HISTOGRAM_REFERENCE: int = 20
 
+# Rides through trim_matrix marking the rows appended since the matrix was last trimmed. Cached
+# rows already survived the Result band, the line clip and the push drop when they were new;
+# re-applying those steps to them cut a fresh slice of the unquoted tail on every append.
+_NEW_ROW_COLUMN: str = "__NewRow"
+
 
 def count_training_rows(stat_data, market, start_date, archive) -> int:
     """Estimate the number of training rows get_training_matrix would produce for
@@ -131,7 +136,7 @@ def _rebase_days_into_season(M: pd.DataFrame) -> pd.DataFrame:
     return M
 
 
-def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int) -> pd.DataFrame:
+def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int, new_mask) -> pd.DataFrame:
     if (
         n_archived >= _MIN_ARCHIVED_FOR_CLIP
         and n_archived / len(M) > _MIN_ARCHIVED_FRACTION_FOR_CLIP
@@ -145,7 +150,7 @@ def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int) -> pd.DataFrame
         M["QuoteAuthenticity"].eq(SYNTHETIC)
         if "QuoteAuthenticity" in M
         else pd.Series(True, index=M.index)
-    )
+    ) & new_mask
     M.loc[clip_mask, "Line"] = M.loc[clip_mask, "Line"].clip(line_floor, line_ceil)
     return M
 
@@ -216,7 +221,7 @@ def _balance_over_under(M: pd.DataFrame, min_rows: int, rng) -> pd.DataFrame:
         M.drop(cut, inplace=True)
 
     n = int(push_rate * len(M)) - pushes["Archived"].sum()
-    chopping_block = pushes.loc[pushes["Archived"] == 0].index
+    chopping_block = pushes.loc[(pushes["Archived"] == 0) & pushes[_NEW_ROW_COLUMN]].index
     n = np.clip(n, None, len(chopping_block))
     if n > 0:
         cut = rng.choice(chopping_block, n, replace=False)
@@ -225,15 +230,27 @@ def _balance_over_under(M: pd.DataFrame, min_rows: int, rng) -> pd.DataFrame:
     return pd.concat([M, pushes]).sort_values("Date")
 
 
-def trim_matrix(M: pd.DataFrame, min_rows: int = 7500, seed: int | None = None) -> pd.DataFrame:
+def trim_matrix(
+    M: pd.DataFrame,
+    min_rows: int = 7500,
+    seed: int | None = None,
+    *,
+    new_rows: pd.Series | None = None,
+) -> pd.DataFrame:
     """Remove data quality issues and prepare matrix for modeling.
 
     Trims outlier results, clips lines to a realistic range, balances
     the line distribution across positions, and balances over/under
     proportions.  All removal steps respect min_rows so that sparse-
     archive markets are not destroyed.
+
+    ``new_rows`` is a boolean mask over ``M.index`` marking the rows appended since the
+    matrix was last trimmed (``None``: every row). The outlier trim, the line clip and the
+    push drop apply only to those rows, so re-trimming a cached matrix with nothing new
+    returns it unchanged; the two balancing steps still see every row.
     """
     warnings.simplefilter("ignore", UserWarning)
+    M = M.assign(**{_NEW_ROW_COLUMN: True if new_rows is None else new_rows})
     if seed is None:
         rng = np.random
     else:
@@ -250,11 +267,12 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500, seed: int | None = None) 
             & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
         )
         | (M["Archived"] == 1)
+        | ~M[_NEW_ROW_COLUMN]
     ].copy()
 
     archived_mask = M["Archived"] == 1
     n_archived = archived_mask.sum()
-    M = _clip_lines(M, archived_mask, n_archived)
+    M = _clip_lines(M, archived_mask, n_archived, M[_NEW_ROW_COLUMN])
 
     overall_target = (
         M.loc[archived_mask, "Line"].median()
@@ -272,7 +290,8 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500, seed: int | None = None) 
             M, pd.Series(True, index=M.index), archived_mask, overall_target, min_rows, rng
         )
 
-    if n_archived < _MIN_ARCHIVED_FOR_BALANCE:
-        return M.sort_values("Date")
-
-    return _balance_over_under(M, min_rows, rng)
+    if n_archived >= _MIN_ARCHIVED_FOR_BALANCE:
+        M = _balance_over_under(M, min_rows, rng)
+    else:
+        M = M.sort_values("Date")
+    return M.drop(columns=_NEW_ROW_COLUMN)

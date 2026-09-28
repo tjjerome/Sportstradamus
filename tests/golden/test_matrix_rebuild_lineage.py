@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pickle
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -108,7 +110,7 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
     output = tmp_path / "quarantine"
     dependency_root = tmp_path / "dependencies"
 
-    rebuilt, path = _step_load_matrix(
+    rebuilt, path, _new_rows = _step_load_matrix(
         "NFL_passing-yards",
         pd.Timestamp("2024-01-01").date(),
         stats,
@@ -130,6 +132,34 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
     assert stats.cutoffs == [pd.Timestamp("2024-01-01").date()]
     assert stats.model_dependency_root == dependency_root
     assert stats.model_dependency_namespace == "stage5-recovery-20260725-v1"
+
+
+def test_incremental_load_marks_only_the_fetched_rows_new(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "training_data"
+    cache_dir.mkdir()
+    _matrix().to_parquet(cache_dir / "NFL_passing-yards.parquet")
+    monkeypatch.setattr(pipeline, "pkg_resources", SimpleNamespace(files=lambda _pkg: tmp_path))
+    fetched = _matrix().assign(
+        Player=["E", "F", "G", "H"],
+        Date=["2025-02-01", "2025-02-02", "2025-02-03", "2025-02-04"],
+    )
+    stats = _Stats(fetched)
+
+    loaded, _path, new_rows = _step_load_matrix(
+        "NFL_passing-yards",
+        date(2024, 1, 1),
+        stats,
+        "NFL",
+        "passing yards",
+        deterministic=False,
+        force=False,
+        need_model=False,
+    )
+
+    assert stats.cutoffs == [date(2025, 1, 4)]
+    assert list(loaded["Player"]) == ["B", "A", "C", "D", "E", "F", "G", "H"]
+    assert new_rows.tolist() == [False] * 4 + [True] * 4
+    assert new_rows.index.equals(loaded.index)
 
 
 def test_full_rebuild_rejects_canonical_matrix_root():
@@ -168,7 +198,7 @@ def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):
     )
     before = path.read_bytes()
 
-    loaded, loaded_path = _step_load_matrix(
+    loaded, loaded_path, _new_rows = _step_load_matrix(
         "NFL_attempts",
         pd.Timestamp("2024-01-01").date(),
         stats,
