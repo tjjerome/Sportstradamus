@@ -2026,6 +2026,18 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-09-28 · **Matrix re-trim erosion fixed (`ae52fe12`); floor-20k NFL models synced to
+  prod.** `trim_matrix` applies the Result band, the line clip and the push drop to appended rows
+  only (`new_rows` from `_step_load_matrix`); re-trimming the caches with no new games now
+  returns them unchanged (was −859 fantasy prizepicks, −273 receptions, −17 NBA PTS a pass; the
+  floor-bounded balancing is untouched). `sync_to_prod.sh` carried the 20 NFL pickles, the
+  serving artifacts and the re-pulled FP history. Open landmine: `targets` is withheld but a
+  volume dependency — the next plain `meditate` would prune the pickle the WR/TE serve path
+  loads. Same day, the integration gate's one red since 09-17 (WNBA PA centered SN, mean
+  8.46 < 10) traced to `set_model_start_values` seeding `STDYr = 0` rows at log(1e-6), which
+  blew the scale head up over the rounds (6.5 → 62); zero-history rows now borrow the batch
+  median (memory `integration_gate_red_wnba_centered_sn`), gate fully green. Details
+  `docs/handoffs/nfl-ship15-recovery.md` §6.
 - 2026-09-27 · **NFL trim floor 15,000 → 20,000, six WR/RB/TE cells rebuilt + retrained — ship
   11/20 → 12/20.** `pipeline._MATRIX_TRIM_FLOOR`; the balancing had cut a fifth of those cells'
   unquoted rows (targets 14,548 → 18,915 rows, the other five to 19.7–19.9k, so the floor still

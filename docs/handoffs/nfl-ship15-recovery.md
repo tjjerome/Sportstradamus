@@ -258,9 +258,9 @@ w 0.38, n 2,379 (2,304 authentic).
    2026-09-27 and the rebuilt matrix has 19,941 rows (section 6, decision 2).
 
 Outcome 2026-09-27: at the 20,000 floor the cell passes 6/6 (g4 0.707; g1 −0.0002
-[−0.0024, +0.0020]; BSS +0.020, w 0.34); flipped back to `devel` in `34fbdcb4`. Prod serves its
-09-17 pickle (which fails Gate 4) until `scripts/sync_to_prod.sh` carries the new one. Levers 1–3
-stay listed because every retrain re-rolls the verdict.
+[−0.0024, +0.0020]; BSS +0.020, w 0.34); flipped back to `devel` in `34fbdcb4`. Prod serves this pickle since the
+2026-09-28 sync (section 6, decision 4); before that it served the 09-17 one, which fails Gate 4.
+Levers 1–3 stay listed because every retrain re-rolls the verdict.
 
 ### yards and qb yards (the combos)
 
@@ -328,8 +328,18 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    retrain), so `ship sweep --league NFL --confirm` runs the fresh lane on the remaining eight and
    auto-ships them on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
    still on disk the market yields no offers at all (not even the book fallback); the next dev
-   `meditate` prunes the nine pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`,
-   after which the book fallback takes over. Prod still holds the 09-17 pickles for all 20 cells.
+   `meditate` prunes the eight pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`.
+   The 2026-09-28 sync carried all 20 dev pickles, the withheld eight included (they were left
+   in place by the `--bypass-withholding` retrain; serve-neutral, since the withheld check in
+   `model_prob` precedes the pickle check, but each logs a `withheld but pickle on disk`
+   warning per prophecize run). **Landmine before the next plain `meditate`:** `targets` is
+   withheld *and* one of the three NFL volume dependencies (`StatsNFL.volume_stats`). The
+   prune loop in `training/cli.py` does not exempt it, and at serve
+   `Stats.load_volume_model_params` reads `models/NFL_targets.mdl`; with the pickle gone it
+   returns False, `StatsNFL.get_volume_stats` returns early, and every WR/TE cell loses its
+   targets projection. Exempt `volume_stats` markets from the prune (or keep `targets` served)
+   before running `meditate --league NFL` without `--bypass-withholding`; a sync after such a
+   run would delete the pickle on prod too (the mirror pass asks first).
 2. **Trim floor — decided 2026-09-27.** `pipeline._MATRIX_TRIM_FLOOR` is 20,000 (`0a22c0a9`;
    was a literal 15,000). The floor is the row count below which `trim_matrix` never balances,
    so at 20,000 the six WR/RB/TE cells the old floor was cutting gained 2.4–5.8k rows: targets
@@ -341,10 +351,17 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    next persist keeps more unquoted rows too (NBA/WNBA caches all sat at the 15k floor). The six
    matrices were rebuilt cold on 2026-09-27 (`$B/run_floor20k.sh`, quarantine
    `$B/quarantine_floor20k`, pre-change artifacts `$B/pre_floor20k`) and the cells retrained;
-   the outcome is in section 3. Separate finding, not acted on: every `meditate` re-trims the
-   cache and the Result-band and push steps ignore the floor, so a cache loses 0.5–5% of its
-   unquoted rows on each persist even with no new games (targets 15,000 → 14,548 between the
-   09-26 promotion and the 09-26 retrain).
+   the outcome is in section 3. Separate finding, fixed 2026-09-28 (`ae52fe12`): every
+   `meditate` re-trimmed the whole cache, and the Result band, the line clip and the push drop
+   ignored the floor, so a cache lost 0.5–6% of its unquoted rows on each persist even with no
+   new games (targets 15,000 → 14,548 between the 09-26 promotion and the 09-26 retrain;
+   fantasy prizepicks 19,953 → 18,699 on the floor-20k re-persist). `trim_matrix` now takes
+   the `new_rows` mask `_step_load_matrix` returns and applies those three steps to appended
+   rows only; re-trimming the current caches with nothing new returns them unchanged (fantasy
+   prizepicks was −859 a pass, receptions −273, NBA PTS −17; tds still gives back 60 rows to the
+   floor-bounded balancing above 20,000, by design). Golden pin
+   `tests/golden/test_trim_matrix_retrim.py`. The rows already lost return only with a rebuild;
+   none was run.
 3. **Combo quote history.** Whether to pull prod's archive (or Odds API history) for
    2024–2025 combo lines — the only lever that changes the combos' Gate 1 evidence base.
 4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip
@@ -353,11 +370,17 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    06:09–06:14 CDT with `recompute_pbp_zeroed.py` under the archive flock (5 min, 2.2 GB peak;
    10,209 rows revisited, 75 residual all-zero rows with snap > 0.3 — the same six nickname
    mismatches as dev; log `~/recompute_20260927.log`, pre-run copy
-   `~/gamelog.parquet.bak_20260927`, both on prod). `scripts/sync_to_prod.sh` has **not** run:
-   prod still serves the 09-17 pickles, `model_stats` and calibration files. It carries the
-   models, `model_stats`, the two calibration JSONs, the corr parquets and `player_data/NFL` +
-   `team_data/NFL` — not `leagues/nfl/gamelog.parquet`, which is why the recompute ran on prod
-   directly.
+   `~/gamelog.parquet.bak_20260927`, both on prod). `scripts/sync_to_prod.sh` ran on
+   2026-09-28 16:14 CDT: the 20 NFL pickles (floor-20k retrain), `model_stats`, the two
+   calibration JSONs, the corr files, and the FantasyPoints snapshots — the re-pulled 2021–2025
+   seasons (1,320 files each; prod's history had been legacy-era until then) plus 2026 week 1
+   and one week-2 file, 6,661 files. Dev's week 3 was 61 empty stubs from a 09-25 pre-game
+   fetch; they were moved to `$B/nfl_2026_week_03_empty_stubs_20260925/` first so no partial
+   week reached prod (and so the dev-side fetch does not skip week 3 later). The script does
+   not carry `leagues/nfl/gamelog.parquet`, which is why the recompute ran on prod directly.
+   Prod's own `team_data/NFL/2026/week_03` holds 20 empty 636-byte stubs from a 2026-09-16
+   fetch (pre-port); harmless, the collector skips only non-empty files, so Wednesday's
+   `fp-fetch` refetches them. The 16:50 CDT prophecize run is the first on the new pickles.
 
 ## 7. Rules the lane runs under
 
@@ -401,6 +424,8 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
 | the integration suite restores runtime snapshots byte-for-byte but refreshes mtimes | `integration_clobbers_runtime_snapshots` |
 | history.parquet is keyed by game date; prophecize.log is cumulative and `\r`-joined | `prophecize_prod_artifact_read_traps` |
 | a walk and a second session racing on `stat_meta.json` | `git_add_races_running_walk` |
+| `targets` is withheld but a serve-time volume dependency; a plain `meditate` prunes its pickle and every WR/TE cell loses its projection | section 6, decision 1 |
+| every persist re-trimmed the whole cache (fixed 2026-09-28; rows already lost need a rebuild) | `matrix_persist_retrim_erosion` |
 
 ## 9. Prior art — dead, do not retry without new evidence
 

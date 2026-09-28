@@ -17,6 +17,15 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- LightGBMLSS start values: a row whose player has no dispersion history (`STDYr` 0, one game
+  in the window) seeds its scale head at the batch's median dispersion instead of the `1e-6`
+  clip floor, whose gradient blew the scale head up for every row sharing its leaves (the
+  deterministic WNBA PA fit drifted from scale 6.5 to 62 over 30 rounds on 25 such rows).
+- Training matrices no longer erode on every `meditate`: `trim_matrix` applies the Result
+  band, the line clip and the push drop only to the rows appended since the last trim
+  (`new_rows` from `_step_load_matrix`), so a cache with no new games re-trims to itself
+  (NFL fantasy prizepicks had lost 859 rows a pass, receptions 273). The floor-bounded
+  balancing is unchanged.
 - NFL play-by-play stats resolve every skill player's id, not only the roster's: players who
   had left the league carried all-zero pbp columns (and zero `passing first downs` /
   `sacks taken` targets) on every past game once the depth-chart fix admitted them.
