@@ -1275,7 +1275,14 @@ def set_model_start_values(
     n = len(sv)
 
     mu = np.clip(sv[:, 0], 1e-6, None)
-    std = np.clip(sv[:, 1], 1e-6, None)
+    std = sv[:, 1]
+    # A player with one game in the window has STDYr 0. Seeding its scale head at the clip
+    # floor hands the loss a near-zero sigma whose gradient blows the head up for every row in
+    # its leaves, so rows without dispersion history borrow the batch's typical dispersion.
+    with_history = std > 0
+    if with_history.any():
+        std = np.where(with_history, std, np.median(std[with_history]))
+    std = np.clip(std, 1e-6, None)
     hist_gate = np.clip(sv[:, 2], 0, 0.99)
 
     _r_upper = shape_ceiling if shape_ceiling is not None else 50
