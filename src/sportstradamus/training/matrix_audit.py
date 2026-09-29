@@ -39,7 +39,12 @@ def incomplete_provenance_rows(frame: pd.DataFrame) -> int:
 
 
 def audit_matrix(path: Path) -> dict[str, object]:
-    """Report identity, numeric, lattice, position, and quote provenance integrity."""
+    """Report identity, numeric, lattice, position, and quote provenance integrity.
+
+    "Bookless" is overloaded: ``quote_counts["bookless"]`` counts rows with zero
+    consulted books, while ``quote_classification == "bookless"`` means the whole
+    matrix has zero authentic rows.
+    """
     # style: allow-complexity — a flat sequence of independent integrity checks, each
     # appending its own violation; splitting it would only scatter one report's assembly.
     frame = pd.read_parquet(path)
@@ -135,7 +140,7 @@ def audit_matrix(path: Path) -> dict[str, object]:
         violations.append(_MISSING_PROVENANCE_VIOLATION)
     else:
         authenticity = frame["QuoteAuthenticity"]
-        authentic = authenticity.eq("authentic")
+        authentic = authenticity.eq(AUTHENTIC)
         # TrainingQuote.archived: a pick'em row is a directly priced line like an authentic
         # one and owes the same invariants; only the authentic rows are book evidence.
         direct = authenticity.isin((AUTHENTIC, PICKEM))
