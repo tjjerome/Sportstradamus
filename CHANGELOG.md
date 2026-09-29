@@ -6,6 +6,10 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Added
+- `backfill_historical_odds` `--key-name` / `--dates-from` / `--props-only`: fund the paid
+  calls from a named creds entry, seed game-dates from an archived market, skip the
+  sport-level game-line call; the NFL combo markets (`yards`, `qb yards`) are mapped for
+  the Odds API, so live `confer` polls 12 NFL markets.
 - `fetch fp season`: one split request per tool pulls a whole NFL season, postseason
   included, halving on the API's row cap; ~200 calls a season instead of ~1,300.
 - NFL FantasyPoints Tier 1 batch: passing-situation splits (QB), pace ×2 (team + faced),
@@ -17,6 +21,13 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- The withheld prune keeps volume-denominator pickles (`VOLUME_STATS`: NFL targets /
+  attempts / carries, NBA and WNBA MIN, MLB pitches thrown, NHL timeOnIce / shotsAgainst);
+  a withheld denominator still serves nothing but the league's other cells keep their
+  volume projections.
+- `inject_backfilled_odds` no longer dies on NFL (`KeyError: 'position'`): the fantasy combo
+  hook answers before reading the profile, and the repair runs `get_depth` per gameday
+  only for the two depth-quoted fantasy cells.
 - LightGBMLSS start values: a row whose player has no dispersion history (`STDYr` 0, one game
   in the window) seeds its scale head at the batch's median dispersion instead of the `1e-6`
   clip floor, whose gradient blew the scale head up for every row sharing its leaves (the
@@ -37,6 +48,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
 
 ### Changed
+- Gate 1 and the blend-weight fit count sportsbook quotes only: a cohort priced only by
+  DFS platforms is the new `pickem` provenance class (a real line, trim-protected, not
+  book evidence), so a DFS-only cell is book-less and ships on gates 2–6 at weight 1.0.
 - Training-matrix trim floor 15,000 → 20,000 rows (`pipeline._MATRIX_TRIM_FLOOR`): the six NFL
   WR/RB/TE cells the balancing was cutting keep 2.4–5.8k more rows (+14–41%); every league's
   matrices keep more unquoted rows from their next persist on.

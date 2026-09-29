@@ -160,8 +160,9 @@ Quick checks when collection or serving looks wrong:
 - **Poisoned odds rows**: `sportstradamus admin sweep-runaway-odds`
   (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
   `fit_book_weights` refits off the cleaned archive.
-- **Withheld cell still serving**: `meditate` prunes withheld pickles weekly; a
-  missed run leaves stale pickles that `model_prob` now refuses with a
+- **Withheld cell still serving**: `meditate` prunes withheld pickles weekly (a
+  volume denominator in `VOLUME_STATS` keeps its pickle and serves nothing, no
+  warning); a missed run leaves stale pickles that `model_prob` now refuses with a
   "withheld but pickle on disk" warning. To prune immediately:
   `poetry run python -c "from sportstradamus.helpers.io import prune_model_pickle; print(prune_model_pickle('WNBA','PRA'))"`
 - **Served cell failing fresh gates**: `meditate` only warns (SHIP-GATE

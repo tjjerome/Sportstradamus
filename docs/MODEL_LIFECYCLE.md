@@ -100,7 +100,8 @@ promotion; a loss (or a declined prompt) restores the incumbent byte-identical a
 `--min-model-weight T` makes the fitted blend weight a ship criterion in both lanes; the three
 clauses (nomination, ship-time revert, S1-only waiver) live in [ship_gate.md](ship_gate.md). The
 board's `model_weight` and `n_authentic_validation` columns show each corner's fitted weight and
-the authentic validation rows behind it.
+the sportsbook-priced (`authentic`) validation rows behind it; `pickem` rows (DFS-only cohorts)
+count for neither.
 
 ## 2. Confirm the winner with a real training run
 

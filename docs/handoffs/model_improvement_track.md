@@ -1541,11 +1541,12 @@ snapshot.
   a sharp book the model honestly loses to, not a coin flip. The Odds API has zero NFL prop
   history before 2023-05-03 and post-cutoff refetch resolves to different entity names, so
   further paid backfill is a dead end (probe-verified). Honest-g1 blockers, all code-side:
-  (a) **8 bookless cells** (qb-yards, qb-tds, yards, targets, sacks-taken, passing-first-downs,
-  rushing-tds, receiving-tds) grade against synthetic 0.5 rows — **owner ruling: that stands;
-  bookless markets must beat the coin flip** (no autopass; yards does, qb-yards honestly
-  doesn't); (b) 17–21% synthetic-row dilution on priced cells (`scorecard._priced_rows` counts
-  `Odds_synthetic`) — known measurement caveat, no gate change planned; (c) **tds ev-clamp bug — FIXED**:
+  (a) **bookless cells** (qb-yards, qb-tds, yards, targets, sacks-taken, passing-first-downs,
+  rushing-tds, receiving-tds): the 2026-09-29 owner decision superseded the coin-flip ruling —
+  Gate 1 scores sportsbook quotes only, a DFS-only cohort is the `pickem` class, and a cell
+  with no sportsbook rows is book-less (Gate 1 blank ⇒ pass, gates 2–6 decide);
+  (b) synthetic and `pickem` rows never enter Gate 1 (`scorecard._priced_rows` scores
+  `QuoteAuthenticity == authentic` only); (c) **tds ev-clamp bug — FIXED**:
   the population zi (0.777) refutes every quoted-star tds price (selection: books quote likely
   scorers), so `get_ev` clamped and confer persisted ev = 5×line on all 20,840 rows since
   2026-06. Fix: the moneylines parser stores a NULL ev + shape-free quote for gate-refuted
@@ -1562,9 +1563,9 @@ snapshot.
 Feature foundations are §6.7 and proceed now; training/shipping is gated on D1/D2
 ([`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md)). First targets when active: MLB hitter
 volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/points.
-Book-less MLB cells (pitches-thrown, both fantasy) grade against the synthetic coin-flip book —
-**owner ruling: they must beat it** (g1–g3 vs 0.5 baseline, no autopass); the
-continuous/centered-SN board is still their ship path, with g1 a real bar. MLB count matrices
+Book-less MLB cells (pitches-thrown, both fantasy) have no sportsbook rows, so Gate 1 is blank
+⇒ pass (owner decision 2026-09-29; DFS-only cohorts are `pickem`); the continuous/centered-SN
+board is still their ship path, on gates 2–6. MLB count matrices
 are the fattest in the system (55–65k rows); sample size is not MLB's blocker.
 
 ### §6.10 WS-1 — Live alignment (Priority 1)

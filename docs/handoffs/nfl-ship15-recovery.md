@@ -10,7 +10,7 @@ those documents are the contract it works under. Status: OPEN, written 2026-09-2
 
 Bring the NFL board back to **at least 15 of 20 cells with `ship == True`** on
 `data/training/model_stats.parquet`, scored honestly on the rebuilt training population with the
-Tier 1 FantasyPoints feature set kept. Five cells are **mandatory members** of the shipped set:
+Tier 1 FantasyPoints feature set kept. Six cells are **mandatory members** of the shipped set:
 
 | cell | what it is | why mandatory |
 |---|---|---|
@@ -19,6 +19,7 @@ Tier 1 FantasyPoints feature set kept. Five cells are **mandatory members** of t
 | `receiving yards` | WR/RB/TE single stat | owner's named market |
 | `yards` | rush + rec combo (`combo_props`) | owner's named combo |
 | `qb yards` | pass + rush combo (`combo_props`) | owner's named combo |
+| `targets` | WR/TE volume stat, the league's serve-time volume denominator (`VOLUME_STATS`) | owner's named market (added 2026-09-28) |
 
 Constraints that define "honestly":
 
@@ -288,10 +289,13 @@ BSS +0.085; w 0.90.
    wrap an archive CLI in your own flock), then `sportstradamus admin merge-archives --source
    <prod copy> --target archive/archive.duckdb --dry-run` on the dev box before a real merge.
    The Odds API is the other candidate source if it offers combined-yards player markets
-   (`player_rush_reception_yds`-style keys — check the market list; `stat_map.json` maps none
-   of them today). The designed path is `python -m sportstradamus.scripts.backfill_historical_odds
-   --league NFL --markets 'yards,qb yards' --start … --end … --max-dates 1 --dry-run` once the
-   keys are mapped: the dry run makes the paid calls and prints the cross-book `ev` spread
+   (`player_rush_reception_yds` → `yards`, `player_pass_rush_yds` → `qb yards`, mapped in
+   `stat_map.json` on 2026-09-29; live `confer` polls them too). The designed path is
+   `python -m sportstradamus.scripts.backfill_historical_odds --league NFL --markets 'yards,qb yards'
+   --start … --end … --key-name odds_api_plus --dates-from Moneyline --props-only --max-dates 1
+   --dry-run` (the default `odds_api_max` key is dead, HTTP 401; the combos have no archived
+   2024–25 rows so the game-dates seed from `Moneyline`; the game lines already exist, so the
+   ~30-credit-per-date sport call is skipped): the dry run makes the paid calls and prints the cross-book `ev` spread
    (zero spread = degenerate source, stop), then the real run writes game-day `01:00` rows the
    point-in-time reads prefer. Credits come out of the governor
    (memory `odds_api_budget_governor`); probe one date first (memory
@@ -301,9 +305,10 @@ BSS +0.085; w 0.90.
    `inject_backfilled_odds_not_rebuild_equivalent`) or rebuild just those two cells through
    `run_phase_c.sh`-style `--full-rebuild --matrix-only --market 'yards,qb yards'` (~25 min
    each), then confirm.
-3. Read DFS quotes with the known caveat: the line is a real quote, the price is pinned near
-   0.5 (memory `dfs_pickem_lines_are_real_quotes`), so a Gate 1 tie against them is cheaper
-   than against sportsbooks and says less.
+3. DFS-only quotes are the `pickem` provenance class since 2026-09-29 (owner decision): a real
+   line (memory `dfs_pickem_lines_are_real_quotes`) but not book evidence — Gate 1 and the
+   blend fit skip them, so a DFS-only cell is book-less and ships on gates 2–6
+   ([docs/ship_gate.md](../ship_gate.md)).
 4. If no history exists anywhere, say so and put the decision to the owner: wait for the 2026
    cohort to grow (each retrain re-rolls the verdict) or accept these two as the last to cross.
    The component sum is already unbiased for a `combo_props` spec (memory
@@ -332,14 +337,11 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    The 2026-09-28 sync carried all 20 dev pickles, the withheld eight included (they were left
    in place by the `--bypass-withholding` retrain; serve-neutral, since the withheld check in
    `model_prob` precedes the pickle check, but each logs a `withheld but pickle on disk`
-   warning per prophecize run). **Landmine before the next plain `meditate`:** `targets` is
-   withheld *and* one of the three NFL volume dependencies (`StatsNFL.volume_stats`). The
-   prune loop in `training/cli.py` does not exempt it, and at serve
-   `Stats.load_volume_model_params` reads `models/NFL_targets.mdl`; with the pickle gone it
-   returns False, `StatsNFL.get_volume_stats` returns early, and every WR/TE cell loses its
-   targets projection. Exempt `volume_stats` markets from the prune (or keep `targets` served)
-   before running `meditate --league NFL` without `--bypass-withholding`; a sync after such a
-   run would delete the pickle on prod too (the mirror pass asks first).
+   warning per prophecize run). **Landmine — fixed 2026-09-29 (`05e6e18c`):** `targets` is
+   withheld *and* one of the three NFL volume dependencies (`VOLUME_STATS` in `helpers/io.py`,
+   read by `StatsNFL.volume_stats`); `prune_model_pickle` now keeps every denominator, so a
+   plain `meditate` refreshes its matrix, prunes nothing, and the WR/TE cells keep their
+   targets projection while `model_prob` still serves nothing for the withheld cell.
 2. **Trim floor — decided 2026-09-27.** `pipeline._MATRIX_TRIM_FLOOR` is 20,000 (`0a22c0a9`;
    was a literal 15,000). The floor is the row count below which `trim_matrix` never balances,
    so at 20,000 the six WR/RB/TE cells the old floor was cutting gained 2.4–5.8k rows: targets

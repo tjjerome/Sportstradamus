@@ -15,8 +15,8 @@ whenever the queue changes; git holds the history.
 3. The three yards markets (passing / rushing / receiving yards) are the priority ships beyond
    the current candidate set — owner wants **all three**. Interceptions is the lowest-priority
    NFL cell (least popular market).
-4. No denominator pruning. Bookless cells must beat the coin flip (g1–g3 vs synthetic 0.5
-   stand as computed).
+4. No denominator pruning. Bookless cells (no sportsbook quote; a DFS-only cohort is `pickem`)
+   ship on gates 2–6 with Gate 1 blank (owner decision 2026-09-29 superseded the coin-flip rule).
 5. ≤5 distribution types in play (ZINB, NegBin, DPO, SkewNormal direct+centered). Adding a
    6th requires an owner ask with pilot evidence. Current standing: a 6th type is endorsed
    in principle, contingent on the compositional-architecture smoke test (NFL end-game

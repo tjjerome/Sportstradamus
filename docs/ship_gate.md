@@ -243,7 +243,8 @@ record. Every cell carries `{"dist": ..., "shipped": ..., "strategy": ...}`
 where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
 
 - `"withheld"` — `meditate` prunes the cell's pickle so `prophecize`
-  dark-outs the market.
+  dark-outs the market (a volume denominator in `VOLUME_STATS` keeps its
+  pickle for the league's projections; the `shipped` check alone darks it out).
 - `"devel"` — the production-tracking branch (`devel`) trains + ships
   the cell. In 14-day Gate-2 soak.
 - `"main"` — the cell also passed Gate-2 graduation; it's locked in on
