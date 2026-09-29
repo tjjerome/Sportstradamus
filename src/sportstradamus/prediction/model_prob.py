@@ -1081,6 +1081,8 @@ def model_prob(
     filepath = model_pickle_path(league, market)
     # Withhold is normally enforced by meditate pruning the pickle; a missed meditate leaves
     # a stale pickle serving a withheld cell (two weeks of WNBA PRA, 2026-08). Fail closed.
+    # A volume denominator keeps its pickle on purpose (VOLUME_STATS), so it is not a
+    # missed meditate and gets no warning.
     if stat_meta.get(league, {}).get(market, {}).get("shipped") == WITHHELD:
         if os.path.isfile(filepath) and market not in VOLUME_STATS[league]:
             logger.warning(
