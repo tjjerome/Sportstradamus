@@ -114,7 +114,7 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     """Write the re-resolved quotes into ``M`` and describe what moved."""
     quotes = resolve_cached_quotes(stat_data, market, M)
     legacy = "QuoteSource" not in M.columns
-    authentic_before = int(M["Archived"].to_numpy(dtype=bool).sum())
+    archived_before = int(M["Archived"].to_numpy(dtype=bool).sum())
     price_moved = int(
         (~np.isclose(quotes["Odds"].to_numpy(float), M["Odds"].to_numpy(float))).sum()
     )
@@ -131,7 +131,7 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     breakdown = ", ".join(f"{source} {count}" for source, count in sources.most_common())
     return (
         f"{len(M)} rows ({'legacy' if legacy else 'refresh'}); {breakdown}; "
-        f"authentic {authentic_before} -> {int(M['Archived'].sum())}; "
+        f"archived {archived_before} -> {int(M['Archived'].sum())}; "
         f"Odds moved on {price_moved}; EV moved on {ev_moved}"
     )
 

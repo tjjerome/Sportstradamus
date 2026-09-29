@@ -39,6 +39,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import VOLUME_STATS, market_file_slug, model_pickle_path
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
     book_evs_for_players,
     price_offers_at_quotes,
@@ -743,10 +744,7 @@ def _apply_affine_candidate_distribution(
     if not legacy:
         if "QuoteAuthenticity" in offer_df:
             provenance = offer_df["QuoteAuthenticity"]
-            if (
-                provenance.isna().any()
-                or not provenance.isin(("authentic", "derived", "synthetic")).all()
-            ):
+            if provenance.isna().any() or not provenance.isin(AUTHENTICITY_VALUES).all():
                 raise ValueError("affine candidate received invalid quote authenticity")
             authentic = provenance.eq("authentic").to_numpy(dtype=bool)
         else:
