@@ -476,7 +476,9 @@
             "player_reception_yds": "receiving yards",
             "player_receptions": "receptions",
             "player_rush_yds": "rushing yards",
-            "player_rush_attempts": "carries"
+            "player_rush_attempts": "carries",
+            "player_rush_reception_yds": "yards",
+            "player_pass_rush_yds": "qb yards"
         },
         "NBA": {
             "player_points": "PTS",

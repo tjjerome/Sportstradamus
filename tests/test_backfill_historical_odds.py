@@ -7,6 +7,9 @@ import datetime
 import importlib.resources as pkg_resources
 import json
 
+import pytest
+from click.testing import CliRunner
+
 from sportstradamus import data
 from sportstradamus.moneylines import (
     _archive_event_props,
@@ -168,3 +171,93 @@ def test_standard_market_still_prices_ev():
     assert [(m, p) for m, p, _ in archive.merged] == [("hits", "Aaron Judge")]
     (_market, _entity, _book, rungs) = archive.ladders[0]
     assert len(rungs) == 4
+
+
+def test_backfill_props_only_skips_the_game_line_call(monkeypatch, tmp_path):
+    class FakeArchive:
+        def write(self):
+            pass
+
+    prop_calls, moneyline_calls = [], []
+    monkeypatch.setattr(bho, "Archive", FakeArchive)
+    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
+    monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: prop_calls.append(k))
+    monkeypatch.setattr(
+        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append(k)
+    )
+    bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 6, props_only=True)
+    assert moneyline_calls == []
+    assert len(prop_calls) == 1
+    assert list(json.loads((tmp_path / "progress.json").read_text())) == [
+        "NFL|passing yards|propsonly"
+    ]
+
+
+def test_job_sig_props_only_is_its_own_resume_key():
+    assert bho._job_sig("NFL", PROPS, props_only=True) == "NFL|passing yards|propsonly"
+
+
+def _invoke_main(monkeypatch, tmp_path, args):
+    class FakeArchive:
+        def write(self):
+            pass
+
+    props_keys, moneyline_keys, seeds = [], [], []
+    keys = {**FAKE_KEYS, "odds_api_alt": "alt-key-string"}
+    monkeypatch.setattr(
+        bho, "_load_keys_and_props", lambda league, markets, alt_mode: (dict(keys), PROPS)
+    )
+    monkeypatch.setattr(
+        bho, "_game_dates", lambda league, markets, start, end: seeds.append(list(markets)) or DATES
+    )
+    monkeypatch.setattr(bho, "Archive", FakeArchive)
+    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
+    monkeypatch.setattr(
+        bho, "get_props", lambda archive, apikey, *a, **k: props_keys.append(apikey)
+    )
+    monkeypatch.setattr(
+        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_keys.append(apikey)
+    )
+    result = CliRunner().invoke(bho.main, ["--start", "2024-09-05", "--end", "2024-09-05", *args])
+    return result, props_keys, moneyline_keys, seeds
+
+
+def test_main_key_name_dates_from_and_props_only(monkeypatch, tmp_path):
+    result, props_keys, moneyline_keys, seeds = _invoke_main(
+        monkeypatch,
+        tmp_path,
+        ["--key-name", "odds_api_alt", "--dates-from", "Moneyline, Totals", "--props-only"],
+    )
+    assert result.exit_code == 0, result.output
+    assert seeds == [["Moneyline", "Totals"]]
+    assert props_keys == ["alt-key-string"]
+    assert moneyline_keys == []
+
+
+def test_main_key_name_funds_the_game_line_call_too(monkeypatch, tmp_path):
+    result, _, moneyline_keys, seeds = _invoke_main(
+        monkeypatch, tmp_path, ["--key-name", "odds_api_alt"]
+    )
+    assert result.exit_code == 0, result.output
+    assert seeds == [["passing yards"]]
+    assert [k[bho.HISTORICAL_KEY_NAME] for k in moneyline_keys] == ["alt-key-string"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--props-only", "--game-lines-only"],
+        ["--props-only", "--layer", "close", "--snapshot-hour", "23"],
+        ["--dates-from", "Moneyline", "--check-all"],
+    ],
+)
+def test_main_rejects_contradictory_fetch_flags(monkeypatch, tmp_path, args):
+    result, *_ = _invoke_main(monkeypatch, tmp_path, args)
+    assert result.exit_code != 0
+
+
+def test_combo_keys_are_mapped_for_nfl():
+    with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
+        nfl = json.load(f)["Odds API"]["NFL"]
+    assert nfl["player_rush_reception_yds"] == "yards"
+    assert nfl["player_pass_rush_yds"] == "qb yards"

@@ -18,7 +18,10 @@ Validate before spending: ``--dry-run`` makes the same paid API calls but
 routes the parsed result into a capturing stub (no archive write) and prints
 the per-book ``ev`` spread per market. A non-zero cross-book std means real
 de-vig came back; a zero std means the source is degenerate too and a backfill
-will not help.
+will not help. For a market with no archived rows yet (the NFL combo markets),
+``--dates-from Moneyline`` seeds the game-dates from an archived market,
+``--props-only`` skips the sport-level game-line call those windows already
+hold, and ``--key-name`` picks which ``creds/keys.json`` entry pays.
 
     poetry run python -m sportstradamus.scripts.backfill_historical_odds \
         --league NFL --markets "passing yards,attempts,completions" \
@@ -160,15 +163,14 @@ def _load_keys_and_props(league, markets=None, alt_mode=None):
     return apikey, {league: subset}
 
 
-def _game_dates(league, props, start, end):
-    """Distinct archived game-dates for the league in ``[start, end]``."""
-    want = [m.strip() for m in props[league].values()]
+def _game_dates(league, markets, start, end):
+    """Distinct archived game-dates for ``markets`` in ``[start, end]``."""
     con = duckdb.connect(str(ARCHIVE_DB), read_only=True)
     rows = con.execute(
         "SELECT DISTINCT game_date FROM odds "
         "WHERE league=? AND market = ANY(?) AND game_date BETWEEN ? AND ? "
         "ORDER BY game_date",
-        [league, want, start, end],
+        [league, list(markets), start, end],
     ).fetchall()
     con.close()
     return [r[0] for r in rows]
@@ -193,12 +195,14 @@ def _report_dry_run(capture):
         click.echo(f"  ladder rungs {market}: {n}")
 
 
-def _job_sig(league, props, alt_mode=None, layer="feature", game_lines_only=False):
+def _job_sig(
+    league, props, alt_mode=None, layer="feature", game_lines_only=False, props_only=False
+):
     """Stable key for the resume log: league + market set, tagged by mode.
 
-    Alt-mode, close-layer and game-lines-only runs fetch different data for the
-    same market names, so they must not share resume state with the plain
-    feature job (whose historical sig format stays untouched).
+    Alt-mode, close-layer, game-lines-only and props-only runs fetch different
+    data for the same market names, so they must not share resume state with
+    the plain feature job (whose historical sig format stays untouched).
     """
     sig = f"{league}|{','.join(sorted(props[league].values()))}"
     if alt_mode:
@@ -207,6 +211,8 @@ def _job_sig(league, props, alt_mode=None, layer="feature", game_lines_only=Fals
         sig += f"|{layer}"
     if game_lines_only:
         sig += "|gamelines"
+    if props_only:
+        sig += "|propsonly"
     return sig
 
 
@@ -259,10 +265,11 @@ def _backfill(
     alt_mode=None,
     layer="feature",
     game_lines_only=False,
+    props_only=False,
 ):
     """Fetch each date, flushing + checkpointing per date so a credit-out exit
     is safe and the same command resumes from where it stopped."""
-    job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
+    job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only, props_only)
     done = _load_done(job_sig)
     remaining = [d for d in dates if d.isoformat() not in done]
     click.echo(f"{league}: {len(done)} done, {len(remaining)} to fetch this run")
@@ -274,7 +281,7 @@ def _backfill(
             f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})"
         )
         try:
-            if layer == "feature":
+            if layer == "feature" and not props_only:
                 get_moneylines(
                     archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
                 )
@@ -341,6 +348,24 @@ def _backfill(
     help="Fetch only h2h/totals/spreads, skipping the per-event prop calls. "
     "For repairing a window where game lines went unfetched but props did not.",
 )
+@click.option(
+    "--key-name",
+    default=HISTORICAL_KEY_NAME,
+    show_default=True,
+    help="creds/keys.json entry that funds the paid historical calls.",
+)
+@click.option(
+    "--dates-from",
+    default=None,
+    help="Comma-separated archived markets whose game-dates seed the run, for markets "
+    "with no archived rows yet (e.g. Moneyline).",
+)
+@click.option(
+    "--props-only",
+    is_flag=True,
+    help="Skip the sport-level game-line call (h2h/totals/spreads) when the window's "
+    "Moneyline/Totals rows already exist.",
+)
 def main(
     league,
     markets,
@@ -353,6 +378,9 @@ def main(
     alt_mode,
     layer,
     game_lines_only,
+    key_name,
+    dates_from,
+    props_only,
 ):
     """Re-fetch real historical book EVs for degenerate-seed markets.
 
@@ -375,7 +403,17 @@ def main(
         # --dry-run reports per-book prop ev spread, which this mode never fetches;
         # letting it through would pay the full prop bill the flag exists to avoid.
         raise click.ClickException("--dry-run probes prop ev spread; nothing to probe here")
+    if props_only and game_lines_only:
+        raise click.ClickException("--props-only and --game-lines-only are opposites")
+    if props_only and layer != "feature":
+        raise click.ClickException("--layer close is already props-only")
+    if dates_from and check_all:
+        raise click.ClickException(
+            "--dates-from seeds dates from the archive; --check-all walks the calendar"
+        )
     apikey, props = _load_keys_and_props(league, markets, alt_mode)
+    # moneylines' historical game-line path reads the odds_api_max slot by name.
+    apikey[HISTORICAL_KEY_NAME] = apikey[key_name]
     sport_key = ODDS_API_SPORT_KEYS[league]
     if check_all:
         dates = [
@@ -389,7 +427,8 @@ def main(
             )
         ]
     else:
-        dates = _game_dates(league, props, start, end)
+        seed = [m.strip() for m in dates_from.split(",")] if dates_from else props[league].values()
+        dates = _game_dates(league, seed, start, end)
     click.echo(
         f"{league}: {len(dates)} archived game-date(s) {start}..{end}, markets={list(props[league].values())}"
     )
@@ -401,11 +440,20 @@ def main(
         return
 
     if max_dates:
-        job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
+        job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only, props_only)
         done = _load_done(job_sig)
         dates = [d for d in dates if d.isoformat() not in done][:max_dates]
     _backfill(
-        apikey, props, league, sport_key, dates, snapshot_hour, alt_mode, layer, game_lines_only
+        apikey,
+        props,
+        league,
+        sport_key,
+        dates,
+        snapshot_hour,
+        alt_mode,
+        layer,
+        game_lines_only,
+        props_only,
     )
 
 
