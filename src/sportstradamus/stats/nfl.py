@@ -20,7 +20,7 @@ from sportstradamus.helpers import (
     remove_accents,
     set_model_start_values,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import (
     nfl_fp_loader,
@@ -455,7 +455,7 @@ class StatsNFL(Stats):
                 "time_per_play",
             ],
         }
-        self.volume_stats = ["attempts", "carries", "targets"]
+        self.volume_stats = VOLUME_STATS["NFL"]
         self.need_pbp = True
         self.default_total = 22.668
         self.positions = ["QB", "WR", "RB", "TE"]

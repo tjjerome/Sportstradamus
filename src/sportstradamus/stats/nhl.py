@@ -29,7 +29,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import write_gamelog
+from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     ComboSpec,
@@ -135,7 +135,7 @@ class StatsNHL(Stats):
             "Rebound",
             "RG",
         ]
-        self.volume_stats = ["timeOnIce", "shotsAgainst"]
+        self.volume_stats = VOLUME_STATS["NHL"]
         self.default_total = 2.674
         self.positions = ["C", "W", "D", "G"]
         self.league = "NHL"

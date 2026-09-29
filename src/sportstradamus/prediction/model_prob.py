@@ -38,7 +38,7 @@ from sportstradamus.helpers import (
     stat_zi,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
-from sportstradamus.helpers.io import market_file_slug, model_pickle_path
+from sportstradamus.helpers.io import VOLUME_STATS, market_file_slug, model_pickle_path
 from sportstradamus.prediction.book_quotes import (
     book_evs_for_players,
     price_offers_at_quotes,
@@ -1082,7 +1082,7 @@ def model_prob(
     # Withhold is normally enforced by meditate pruning the pickle; a missed meditate leaves
     # a stale pickle serving a withheld cell (two weeks of WNBA PRA, 2026-08). Fail closed.
     if stat_meta.get(league, {}).get(market, {}).get("shipped") == WITHHELD:
-        if os.path.isfile(filepath):
+        if os.path.isfile(filepath) and market not in VOLUME_STATS[league]:
             logger.warning(
                 f"{filename} withheld but pickle on disk — skipping; run meditate to prune"
             )

@@ -27,7 +27,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
@@ -384,7 +384,7 @@ class StatsNBA(Stats):
             "OPP_PIE",
         ]
 
-        self.volume_stats = ["MIN"]
+        self.volume_stats = VOLUME_STATS["NBA"]
         self.default_total = 111.667
         self.log_strings = {
             "game": "GAME_ID",

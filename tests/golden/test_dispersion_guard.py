@@ -101,6 +101,17 @@ def test_withheld_cell_without_pickle_is_silent(monkeypatch, tmp_path, caplog):
     assert "withheld but pickle on disk" not in caplog.text
 
 
+def test_withheld_volume_dependency_keeps_quiet_and_serves_nothing(monkeypatch, tmp_path, caplog):
+    """A withheld volume denominator keeps its pickle on purpose; no 'run meditate to prune'."""
+    pickle_path = tmp_path / "WNBA_PRA.mdl"
+    pickle_path.write_bytes(b"not a pickle")
+    _withhold_wnba_pra(monkeypatch, pickle_path)
+    monkeypatch.setattr(model_prob_module, "VOLUME_STATS", {"WNBA": ("PRA",)})
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert _serve_wnba_pra() == []
+    assert "withheld but pickle on disk" not in caplog.text
+
+
 def test_stale_strategy_identity_skips_the_cell_not_the_slate(monkeypatch, tmp_path, caplog):
     spec = get_strategy("SkewNormal")
     identity = build_artifact_identity(

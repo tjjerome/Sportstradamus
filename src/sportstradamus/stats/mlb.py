@@ -36,7 +36,7 @@ from sportstradamus.helpers import (
     stat_dist,
 )
 from sportstradamus.helpers.combined_markets import POST_RNG_SEED
-from sportstradamus.helpers.io import write_gamelog
+from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     ComboSpec,
@@ -352,7 +352,7 @@ class StatsMLB(Stats):
             "fielding": ["DER"],
             "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"],
         }
-        self.volume_stats = ["pitches thrown"]
+        self.volume_stats = VOLUME_STATS["MLB"]
         self.default_total = 4.671
         self.log_strings = {
             "game": "gameId",

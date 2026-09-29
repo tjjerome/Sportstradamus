@@ -90,6 +90,16 @@ MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
 MODELS_DIR = pkg_resources.files(data) / "models"
 
+# Serve-time volume denominators Stats.load_volume_model_params reads for every other cell
+# of the league; a withheld one keeps its pickle (model_prob still serves nothing for it).
+VOLUME_STATS: dict[str, tuple[str, ...]] = {
+    "NBA": ("MIN",),
+    "WNBA": ("MIN",),
+    "MLB": ("pitches thrown",),
+    "NFL": ("attempts", "carries", "targets"),
+    "NHL": ("timeOnIce", "shotsAgainst"),
+}
+
 # Tuple-typed columns in parlay_hist that round-trip as homogeneous float lists.
 _PARLAY_LIST_COLS = ("Leg Probs", "Corr Pairs", "Boost Pairs", "Markets", "Players")
 
@@ -134,15 +144,19 @@ def prune_model_pickle(league: str, market: str) -> bool:
 
     Used by ``meditate`` to dark-out a cell marked ``shipped="withheld"`` in
     ``stat_meta.json``: with no pickle on disk, ``model_prob`` returns ``[]``
-    and the market is not scored.
+    and the market is not scored. A volume denominator (``VOLUME_STATS``) is
+    never deleted: the league's other cells project their volume from it.
 
     Args:
         league: League code.
         market: Market stem.
 
     Returns:
-        ``True`` if a pickle existed and was removed, ``False`` if none was present.
+        ``True`` if a pickle existed and was removed; ``False`` if none was
+        present or the cell is a volume denominator.
     """
+    if market in VOLUME_STATS[league]:
+        return False
     path = model_pickle_path(league, market)
     existed = path.exists()
     path.unlink(missing_ok=True)

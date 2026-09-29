@@ -90,7 +90,12 @@ def test_cli_target_normalization_matches_effective_family_contract(
     assert train_market.call_args.kwargs["target_normalization"] == expected_target
 
 
-def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("pruned", "phrase"), [(True, "pruned pickle"), (False, "no pickle pruned")]
+)
+def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(
+    monkeypatch, tmp_path, pruned, phrase
+):
     """A withheld cell (no bypass) still builds its matrix — only the fit is skipped."""
     train_market = _scaffold_meditate(
         monkeypatch,
@@ -98,7 +103,7 @@ def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(monkeyp
         configured_target=WITHHELD,
         cell_meta={"dist": "DPO", "shipped": "withheld"},
     )
-    prune = MagicMock()
+    prune = MagicMock(return_value=pruned)
     monkeypatch.setattr(training_cli, "prune_model_pickle", prune)
 
     result = CliRunner().invoke(
@@ -111,3 +116,4 @@ def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(monkeyp
     assert "target_normalization" not in train_market.call_args.kwargs
     prune.assert_called_once_with("NFL", "passing tds")
     assert "withheld — matrix refreshed" in result.output
+    assert phrase in result.output

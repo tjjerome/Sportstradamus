@@ -317,6 +317,7 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
     monkeypatch.setattr(io_mod, "MODELS_DIR", models)
     (models / "NBA_PTS.mdl").write_text("x")  # active -> kept
     (models / "NBA_REB.mdl").write_text("x")  # withheld -> pruned
+    (models / "NBA_MIN.mdl").write_text("x")  # withheld volume denominator -> kept
 
     meta_path = tmp_path / "stat_meta.json"
     _write(
@@ -325,6 +326,7 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
             "NBA": {
                 "PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
                 "REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
+                "MIN": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
             }
         },
     )
@@ -347,3 +349,4 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert (models / "NBA_PTS.mdl").exists()
     assert not (models / "NBA_REB.mdl").exists()
+    assert (models / "NBA_MIN.mdl").exists()

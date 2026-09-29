@@ -728,10 +728,10 @@ def meditate(
                         dependency_root=dependency_root,
                         dependency_namespace=dependency_namespace,
                     )
-                    prune_model_pickle(lg, market)
+                    pruned = prune_model_pickle(lg, market)
                     click.echo(
-                        f"[{lg}] {market}: withheld — matrix refreshed, pruned pickle, "
-                        "skipped training"
+                        f"[{lg}] {market}: withheld — matrix refreshed, "
+                        f"{'pruned pickle' if pruned else 'no pickle pruned'}, skipped training"
                     )
                     continue
             if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:
