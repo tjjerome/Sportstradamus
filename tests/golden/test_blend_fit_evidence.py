@@ -138,3 +138,13 @@ def test_clusters_align_by_label_when_metadata_order_differs(monkeypatch):
 
     assert pipe._blend_fit_cluster_count(splits, mask) == 2
     assert _fuse_skewnormal(splits)["model_weight"] == 1.0
+
+
+def test_pickem_validation_rows_are_not_blend_evidence():
+    """A pick'em-only line is real but priced at the platform's even payout, so the mask
+    accepts the label and keeps the row out of the blend fit."""
+    splits = _splits(3, authenticity=["authentic", "pickem", "authentic"])
+
+    mask = pipe._split_quote_authenticity_mask(splits, "validation")
+
+    assert mask.tolist() == [True, False, True]

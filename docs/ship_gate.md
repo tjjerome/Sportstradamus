@@ -57,7 +57,7 @@ hysteresis deadband); the CITL-under leg runs on every cell.
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
-| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
+| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded); scored on sportsbook-priced rows (`QuoteAuthenticity == authentic`) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
 | 2 | **Star σ-match** | `z = |mean(EV) − mean(Result)| / std(Result)` on the top-mean decile | `z < 0.5` — bias under half the segment's spread | `_GATE2_STAR_Z_MAX = 0.5` |
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
@@ -178,9 +178,13 @@ as the reported `g4_iqr_ratio`.
 **Auto-pass / fail conventions for blank metrics:**
 
 - **Gate 1 blank** (no book `Odds` in the dump): **auto-pass** — no book to beat,
-  model wins by default. Also blank when the authentic-quoted rows span fewer than
-  `calibration._ONE_SE_MIN_CLUSTERS` distinct players (dates for team markets) — a
-  one-row book is no book, the same floor the blend-weight fit applies to its rows.
+  model wins by default. Also blank when the sportsbook-priced rows (`QuoteAuthenticity ==
+  "authentic"`) span fewer than `calibration._ONE_SE_MIN_CLUSTERS` distinct players (dates for
+  team markets) — a one-row book is no book, the same floor the blend-weight fit applies to
+  its rows. A pick'em-only cohort (`"pickem"`: Underdog/PrizePicks/Sleeper/… with no
+  sportsbook on the line) is a real line priced at the platform's even payout, not book
+  evidence: such rows never enter Gate 1 or the blend fit, so a DFS-only cell is book-less
+  and ships on gates 2–6 at weight 1.0 (owner decision 2026-09-29).
 - **Gate 5 blank** (no `P` or no `Line`): **fail** — the cell couldn't compute
   calibration; that's a model artifact, not a free pass. Gate 5 only needs `P` +
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.
@@ -224,7 +228,7 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 
 Under `ship sweep --confirm --min-model-weight T` the blend weight is a ship criterion as well:
 a board corner whose fitted `model_weight` is below `T` ranks but never nominates (exactly `1.0`
-= no authentic quotes, exempt), a confirmed retrain landing below `T` is reverted, and a
+= no sportsbook-priced quotes, exempt), a confirmed retrain landing below `T` is reverted, and a
 challenger at or above `T` may replace an incumbent below `T` on **S1 alone** — two legs that
 both sit on the book at the line give S2/S3 a paired difference of zero, so they cannot separate
 them. Any other supersession keeps S1 + S2 + S3. See

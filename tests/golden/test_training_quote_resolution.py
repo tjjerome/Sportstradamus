@@ -23,6 +23,9 @@ from sportstradamus.helpers.training_quotes import (
 from sportstradamus.scripts.inject_backfilled_odds import resolve_cached_quotes
 from sportstradamus.stats import base as base_mod
 from sportstradamus.training.data import _clip_lines
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_affine import (
+    _affine_authenticity_mask,
+)
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _explicit_quote_authenticity_mask,
 )
@@ -482,7 +485,10 @@ def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path
 
 
 def test_structural_pool_mask_uses_only_explicit_authenticity():
-    index = pd.Index([10, 11, 12])
-    values = pd.Series(["authentic", "derived", "synthetic"], index=index)
+    index = pd.Index([10, 11, 12, 13])
+    values = pd.Series(["authentic", "pickem", "derived", "synthetic"], index=index)
+    expected = [True, False, False, False]
 
-    assert _explicit_quote_authenticity_mask(values, index).tolist() == [True, False, False]
+    assert _explicit_quote_authenticity_mask(values, index).tolist() == expected
+    splits = {"quote_authenticity_validation": values}
+    assert _affine_authenticity_mask(splits, "validation", index).tolist() == expected

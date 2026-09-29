@@ -7,6 +7,7 @@ import pandas as pd
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.training.group_conditional_cdf import fit_two_part_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import (
     apply_two_part_line,
@@ -55,7 +56,7 @@ def _explicit_quote_authenticity_mask(values, index: pd.Index) -> np.ndarray:
     series = pd.Series(values).reindex(index)
     if series.isna().any():
         raise ValueError("quote authenticity does not align to its split")
-    if not series.isin(("authentic", "derived", "synthetic")).all():
+    if not series.isin(AUTHENTICITY_VALUES).all():
         raise ValueError("quote authenticity contains an unsupported value")
     return series.eq("authentic").to_numpy(dtype=bool)
 

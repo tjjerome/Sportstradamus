@@ -174,7 +174,7 @@ def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(arch
     rows, quote = resolve("fantasy points underdog", "P")
     assert [row.book for row in rows] == ["Underdog"]
     assert (quote.line, quote.over_probability, quote.source) == (11.5, 0.5, "book_direct")
-    assert (quote.authenticity, quote.observed_at) == ("authentic", _TS)
+    assert (quote.authenticity, quote.observed_at) == ("pickem", _TS)
 
     # A real quote outranks the stand-in — a boost prices away from 50/50 and must survive.
     # Its mean is re-derived at the resolving cell's cv/dist, so it need not match the 10.2

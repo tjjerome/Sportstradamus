@@ -7,6 +7,7 @@ import json
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.training.group_conditional_cdf import fit_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import apply_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._contracts import (
@@ -36,7 +37,7 @@ def _affine_authenticity_mask(splits: dict, split: str, index: pd.Index) -> np.n
     quote_key = f"quote_authenticity_{split}"
     if splits.get(quote_key) is not None:
         values = pd.Series(splits[quote_key]).reindex(index)
-        if values.isna().any() or not values.isin(("authentic", "derived", "synthetic")).all():
+        if values.isna().any() or not values.isin(AUTHENTICITY_VALUES).all():
             raise ValueError("affine quote authenticity is missing, unaligned, or unsupported")
         return values.eq("authentic").to_numpy(dtype=bool)
     archived = pd.Series(splits.get(f"archived_{split}"), index=index).reindex(index)

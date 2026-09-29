@@ -21,20 +21,20 @@ The whole quote is written, prices included. Repairing the block alone would
 strand a row whose class changed — one relabelled ``combo_ev_inversion`` while
 its ``Odds`` stayed the neutral 0.5 reads as book evidence bought by a coin
 flip, which is what the load-time provenance guard exists to prevent. Writing
-the resolved ``Line`` is likewise what a rebuild produces: once the block is
-present ``_clip_lines`` clips synthetic rows only, so authentic and derived
-lines stay unclipped, and the next ``meditate`` re-trims from the repaired block.
+the resolved ``Line`` is likewise what a rebuild resolves: once the block is
+present ``_clip_lines`` clips synthetic rows only, so every other line stays
+unclipped. It clips only the rows a ``meditate`` appends, though, so a repaired
+synthetic row keeps the unclipped line a rebuild would clip.
 
     poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
         --league NFL --markets "passing yards,attempts,completions" --dry-run
 
 Or sweep every cached matrix at once (the ``*_corr`` feature matrices carry no
-book columns and are skipped). ``--legacy-only`` narrows the sweep to the
-matrices that predate the block, so repairing them cannot disturb the training
-data of a cell that is already serving:
+book columns and are skipped). Every cached matrix now carries the block, so
+``--legacy-only`` (skip those that do) matches nothing and a sweep refreshes
+serving cells too:
 
-    poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
-        --all-cached --legacy-only
+    poetry run python -m sportstradamus.scripts.inject_backfilled_odds --all-cached
 """
 
 import datetime

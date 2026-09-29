@@ -23,6 +23,12 @@ CONSENSUS_LINE_POLICY = "modal-nearest-median-v1"
 AUTHENTIC = "authentic"
 DERIVED = "derived"
 SYNTHETIC = "synthetic"
+# A cohort only pick'em platforms priced: the line is real, the price is anchored at the
+# platform's even payout. Trim-protected like an authentic row; Gate 1 and the blend fit
+# treat the cell as book-less (owner decision 2026-09-29, docs/ship_gate.md).
+PICKEM = "pickem"
+# Every value a ``QuoteAuthenticity`` column may hold; its readers reject anything else.
+AUTHENTICITY_VALUES = (AUTHENTIC, PICKEM, DERIVED, SYNTHETIC)
 # Component-sum kernel quotes carry this source with ``authenticity=DERIVED``:
 # the probability is derived from real component-book quotes, not fabricated.
 COMBO_SUM_SOURCE = "combo_sum"
@@ -49,7 +55,7 @@ _PICKEM_PLATFORMS = {
 }
 # Book names under which the DFS pick'em platforms write archive odds rows.
 # Their prices repost (and sometimes move) sportsbook consensus, so consensus
-# readers cap their weight whenever a real sportsbook also quotes the entry.
+# readers drop them whenever a real sportsbook also quotes the entry.
 DFS_PLATFORM_BOOKS: frozenset[str] = frozenset(_PICKEM_PLATFORMS.values())
 # Pick'em pays the same either way at the posted line — the operator's rake sits
 # in the payout multiplier, not the line — so an unboosted entry prices at 50/50.
@@ -89,12 +95,12 @@ class TrainingQuote:
 
     @property
     def archived(self) -> bool:
-        """Legacy compatibility projection: only direct book probability is authentic."""
-        return self.authenticity == AUTHENTIC
+        """Legacy compatibility projection: a directly priced line, sportsbook or pick'em."""
+        return self.authenticity in (AUTHENTIC, PICKEM)
 
     @property
     def odds_synthetic(self) -> bool:
-        """Every non-authentic probability is derived or synthetic."""
+        """Every probability not priced directly is derived or synthetic."""
         return not self.archived
 
     def as_record(self) -> dict[str, object]:
@@ -311,7 +317,9 @@ def _authentic_quote(
     choice.
 
     The cohort narrows to its sportsbooks first (:func:`sportsbook_cohort`), so the
-    quote's ``books``/``book_count`` name exactly the rows that set its price.
+    quote's ``books``/``book_count`` name exactly the rows that set its price. A cohort
+    with no sportsbook in it is a ``PICKEM`` quote: still a directly priced line, but not
+    book evidence.
     """
     cohort = sportsbook_cohort(cohort)
     under = _weighted_value(cohort, "under_probability", weights)
@@ -322,7 +330,7 @@ def _authentic_quote(
         over_probability=float(np.clip(1.0 - under, 0.0, 1.0)),
         ev=float(get_ev(line, under, cv=cv, dist=dist)),
         source="book_direct",
-        authenticity=AUTHENTIC,
+        authenticity=PICKEM if all(row.book in DFS_PLATFORM_BOOKS for row in cohort) else AUTHENTIC,
         synthetic_reason=None,
         observed_at=_latest_observation(cohort),
         book_count=len(cohort),

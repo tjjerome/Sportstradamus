@@ -54,6 +54,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR, _dp_mu_from_mean
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.skew_normal_centered import CenteredSkewNormal, _centered_to_direct
@@ -3400,15 +3401,16 @@ def _step_decode_predictions(
 def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
     """Return a row-aligned mask for quotes that may contribute book evidence.
 
-    Current matrices carry the explicit three-state provenance contract. Legacy
-    matrices fall back to their archived/synthetic compatibility columns, and
-    truly provenance-free inputs retain their historical all-priced behavior.
+    Current matrices carry the explicit provenance contract, where only a sportsbook
+    price is book evidence: a ``pickem`` quote is a real line priced at the platform's
+    even payout. Legacy matrices fall back to their archived/synthetic compatibility
+    columns, and truly provenance-free inputs retain their historical all-priced behavior.
     """
     index = splits[f"B_{split}"].index
     authenticity = splits.get(f"quote_authenticity_{split}")
     if authenticity is not None:
         values = pd.Series(authenticity).reindex(index)
-        if values.isna().any() or not values.isin(("authentic", "derived", "synthetic")).all():
+        if values.isna().any() or not values.isin(AUTHENTICITY_VALUES).all():
             raise ValueError(f"{split} quote authenticity is missing, unaligned, or unsupported")
         return values.eq("authentic").to_numpy(dtype=bool)
 

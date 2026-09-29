@@ -9,7 +9,11 @@ import click
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS, archive_ev_is_runaway
+from sportstradamus.helpers.training_quotes import (
+    AUTHENTICITY_VALUES,
+    PROVENANCE_COLUMNS,
+    archive_ev_is_runaway,
+)
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_position_codes
 
 _BOOK_COLUMNS = ("Line", "Odds", "EV", "Archived")
@@ -130,33 +134,33 @@ def audit_matrix(path: Path) -> dict[str, object]:
     else:
         authenticity = frame["QuoteAuthenticity"]
         authentic = authenticity.eq("authentic")
+        # TrainingQuote.archived: a pick'em row is a directly priced line like an authentic
+        # one and owes the same invariants; only the authentic rows are book evidence.
+        direct = authenticity.isin(("authentic", "pickem"))
         report["quote_counts"] = {
             "authentic": int(authentic.sum()),
+            "pickem": int((authenticity == "pickem").sum()),
             "synthetic": int((authenticity == "synthetic").sum()),
             "derived": int((authenticity == "derived").sum()),
             "bookless": int((frame["QuoteBookCount"] == 0).sum()),
-            "archive_coverage": float(authentic.mean()) if len(frame) else 0.0,
+            "archive_coverage": float(direct.mean()) if len(frame) else 0.0,
         }
         if incomplete_provenance_rows(frame):
             violations.append("null required quote provenance")
-        if not authenticity.isin(("authentic", "derived", "synthetic")).all():
+        if not authenticity.isin(AUTHENTICITY_VALUES).all():
             violations.append("invalid quote authenticity")
         reasons = frame["QuoteSyntheticReason"]
-        if reasons[authentic].notna().any() or reasons[~authentic].isna().any():
+        if reasons[direct].notna().any() or reasons[~direct].isna().any():
             violations.append("inconsistent synthetic reason")
         observed = frame["QuoteObservedAt"]
-        if observed[authentic].isna().any():
-            violations.append("authentic quote missing observation time")
+        if observed[direct].isna().any():
+            violations.append("direct quote missing observation time")
         book_count = pd.to_numeric(frame["QuoteBookCount"], errors="coerce")
-        if (
-            book_count.isna().any()
-            or (book_count < 0).any()
-            or (authentic & (book_count < 1)).any()
-        ):
+        if book_count.isna().any() or (book_count < 0).any() or (direct & (book_count < 1)).any():
             violations.append("invalid quote book count")
-        if not archived.equals(authentic.astype(bool)):
+        if not archived.equals(direct.astype(bool)):
             violations.append("Archived disagrees with explicit authenticity")
-        if not synthetic.equals((~authentic).astype(bool)):
+        if not synthetic.equals((~direct).astype(bool)):
             violations.append("Odds_synthetic disagrees with explicit authenticity")
     authentic_count = report["quote_counts"]["authentic"]
     if authentic_count == 0:

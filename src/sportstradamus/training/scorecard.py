@@ -60,6 +60,7 @@ from sportstradamus.helpers.integer_distribution import (
 )
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.calibration import _ONE_SE_MIN_CLUSTERS
 from sportstradamus.training.group_conditional_cdf import (
@@ -90,11 +91,12 @@ from sportstradamus.training.structural_strategies import (
 #     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
 #     The per-cell metrics (plus an "oracle" bound) land on the wide
 #     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
-#     wires the strict starter pass/fail. Cells with no book Odds, or with authentic
-#     quotes below the cluster floor, leave Gate 1 blank; the ship convention is that
-#     a blank Gate 1 auto-passes — no book to beat, model wins by default. Gate 5
-#     (model-only calibration) does NOT use Odds, so it still computes for those
-#     cells; Gate 5 blank means "couldn't compute" (no P or no Line), not auto-pass.
+#     wires the strict starter pass/fail. Cells with no book Odds, or with sportsbook
+#     (authentic) quotes below the cluster floor — a pick'em-only cell has none — leave
+#     Gate 1 blank; the ship convention is that a blank Gate 1 auto-passes — no book to
+#     beat, model wins by default. Gate 5 (model-only calibration) does NOT use Odds, so
+#     it still computes for those cells; Gate 5 blank means "couldn't compute" (no P or
+#     no Line), not auto-pass.
 #   * research -> devel, supersede: pass all six + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
@@ -539,13 +541,14 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
 
 
 def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
-    """Rows usable for the priced Brier gates: authentic, finite book evidence.
+    """Rows usable for the priced Brier gates: sportsbook-priced, finite book evidence.
 
     The single source of truth for which test rows enter Gate 1, so ancillary
     columns (e.g. Player for the clustered bootstrap) align to the same rows.
-    Provenance-bearing artifacts fail closed to explicit authentic quotes;
-    legacy artifacts without provenance retain their historical finite-price
-    behavior. A one-row book is no book: below
+    Provenance-bearing artifacts fail closed to explicit ``authentic`` quotes — a
+    ``pickem`` quote is a real line priced at the platform's even payout, so beating
+    it is beating a coin flip; legacy artifacts without provenance retain their
+    historical finite-price behavior. A one-row book is no book: below
     :data:`~sportstradamus.training.calibration._ONE_SE_MIN_CLUSTERS` distinct
     players (dates when the dump has no ``Player``, as team markets cluster), the
     authentic set is too thin to call Gate 1 book-beaten rather than book-less —
@@ -560,8 +563,7 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
         columns.append("QuoteAuthenticity")
     sub = df[columns].replace([np.inf, -np.inf], np.nan).dropna()
     if "QuoteAuthenticity" in sub.columns:
-        allowed = ("authentic", "derived", "synthetic")
-        if not sub["QuoteAuthenticity"].isin(allowed).all():
+        if not sub["QuoteAuthenticity"].isin(AUTHENTICITY_VALUES).all():
             raise ValueError("scorecard received invalid quote authenticity")
         sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
         key = "Player" if "Player" in df.columns else "Date"
