@@ -22,6 +22,27 @@ PROPS = {"NFL": {"player_pass_yds": "passing yards"}}
 DATES = [datetime.datetime(2023, 10, 29)]
 
 
+class _FakeArchive:
+    def write(self):
+        pass
+
+
+@pytest.fixture
+def fake_fetches(monkeypatch, tmp_path):
+    """Stub both paid fetch paths, recording ``(apikey, kwargs)`` per call, and
+    point the resume log at ``tmp_path / "progress.json"``."""
+    prop_calls, moneyline_calls = [], []
+    monkeypatch.setattr(bho, "Archive", _FakeArchive)
+    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
+    monkeypatch.setattr(
+        bho, "get_props", lambda archive, apikey, *a, **k: prop_calls.append((apikey, k))
+    )
+    monkeypatch.setattr(
+        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append((apikey, k))
+    )
+    return prop_calls, moneyline_calls
+
+
 def test_probe_passes_key_string(monkeypatch):
     seen = []
     monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: seen.append(apikey))
@@ -29,21 +50,11 @@ def test_probe_passes_key_string(monkeypatch):
     assert seen == ["key-string"]
 
 
-def test_backfill_passes_key_string_and_creds_dict(monkeypatch, tmp_path):
-    class FakeArchive:
-        def write(self):
-            pass
-
-    props_keys, moneyline_keys = [], []
-    monkeypatch.setattr(bho, "Archive", FakeArchive)
-    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
-    monkeypatch.setattr(
-        bho, "get_props", lambda archive, apikey, *a, **k: props_keys.append(apikey)
-    )
-    monkeypatch.setattr(
-        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_keys.append(apikey)
-    )
+def test_backfill_passes_key_string_and_creds_dict(fake_fetches):
+    prop_calls, moneyline_calls = fake_fetches
     bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 6)
+    props_keys = [apikey for apikey, _ in prop_calls]
+    moneyline_keys = [apikey for apikey, _ in moneyline_calls]
     assert props_keys == ["key-string"]
     assert moneyline_keys == [FAKE_KEYS]
 
@@ -55,21 +66,10 @@ def test_job_sig_modes_are_distinct_and_base_format_stable():
     assert bho._job_sig("NFL", PROPS, None, "close") == "NFL|passing yards|close"
 
 
-def test_backfill_game_lines_only_skips_the_paid_prop_calls(monkeypatch, tmp_path):
+def test_backfill_game_lines_only_skips_the_paid_prop_calls(fake_fetches, tmp_path):
     """Repairing a window where game lines went unfetched must not re-buy props:
     the per-event prop calls are the whole cost, the h2h/totals/spreads call is one."""
-
-    class FakeArchive:
-        def write(self):
-            pass
-
-    prop_calls, moneyline_calls = [], []
-    monkeypatch.setattr(bho, "Archive", FakeArchive)
-    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
-    monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: prop_calls.append(k))
-    monkeypatch.setattr(
-        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append(k)
-    )
+    prop_calls, moneyline_calls = fake_fetches
     bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 6, game_lines_only=True)
     assert prop_calls == []
     assert len(moneyline_calls) == 1
@@ -87,19 +87,10 @@ def test_alt_market_names_resolve_to_stat_map():
         assert all(key.endswith("_alternate") for key in alts), league
 
 
-def test_backfill_close_layer_skips_lines_and_stamps_close_hour(monkeypatch, tmp_path):
-    class FakeArchive:
-        def write(self):
-            pass
-
-    calls, moneyline_calls = [], []
-    monkeypatch.setattr(bho, "Archive", FakeArchive)
-    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
-    monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: calls.append(k))
-    monkeypatch.setattr(
-        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append(k)
-    )
+def test_backfill_close_layer_skips_lines_and_stamps_close_hour(fake_fetches, tmp_path):
+    prop_calls, moneyline_calls = fake_fetches
     bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 23, "alt", "close")
+    calls = [kwargs for _, kwargs in prop_calls]
     assert moneyline_calls == []
     assert [c["observed_at_hour"] for c in calls] == [bho.CLOSE_LAYER_HOUR]
     progress = json.loads((tmp_path / "progress.json").read_text())
@@ -173,18 +164,8 @@ def test_standard_market_still_prices_ev():
     assert len(rungs) == 4
 
 
-def test_backfill_props_only_skips_the_game_line_call(monkeypatch, tmp_path):
-    class FakeArchive:
-        def write(self):
-            pass
-
-    prop_calls, moneyline_calls = [], []
-    monkeypatch.setattr(bho, "Archive", FakeArchive)
-    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
-    monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: prop_calls.append(k))
-    monkeypatch.setattr(
-        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append(k)
-    )
+def test_backfill_props_only_skips_the_game_line_call(fake_fetches, tmp_path):
+    prop_calls, moneyline_calls = fake_fetches
     bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 6, props_only=True)
     assert moneyline_calls == []
     assert len(prop_calls) == 1
@@ -197,12 +178,9 @@ def test_job_sig_props_only_is_its_own_resume_key():
     assert bho._job_sig("NFL", PROPS, props_only=True) == "NFL|passing yards|propsonly"
 
 
-def _invoke_main(monkeypatch, tmp_path, args):
-    class FakeArchive:
-        def write(self):
-            pass
-
-    props_keys, moneyline_keys, seeds = [], [], []
+def _invoke_main(monkeypatch, fake_fetches, args):
+    prop_calls, moneyline_calls = fake_fetches
+    seeds = []
     keys = {**FAKE_KEYS, "odds_api_alt": "alt-key-string"}
     monkeypatch.setattr(
         bho, "_load_keys_and_props", lambda league, markets, alt_mode: (dict(keys), PROPS)
@@ -210,22 +188,16 @@ def _invoke_main(monkeypatch, tmp_path, args):
     monkeypatch.setattr(
         bho, "_game_dates", lambda league, markets, start, end: seeds.append(list(markets)) or DATES
     )
-    monkeypatch.setattr(bho, "Archive", FakeArchive)
-    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
-    monkeypatch.setattr(
-        bho, "get_props", lambda archive, apikey, *a, **k: props_keys.append(apikey)
-    )
-    monkeypatch.setattr(
-        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_keys.append(apikey)
-    )
     result = CliRunner().invoke(bho.main, ["--start", "2024-09-05", "--end", "2024-09-05", *args])
+    props_keys = [apikey for apikey, _ in prop_calls]
+    moneyline_keys = [apikey for apikey, _ in moneyline_calls]
     return result, props_keys, moneyline_keys, seeds
 
 
-def test_main_key_name_dates_from_and_props_only(monkeypatch, tmp_path):
+def test_main_key_name_dates_from_and_props_only(monkeypatch, fake_fetches):
     result, props_keys, moneyline_keys, seeds = _invoke_main(
         monkeypatch,
-        tmp_path,
+        fake_fetches,
         ["--key-name", "odds_api_alt", "--dates-from", "Moneyline, Totals", "--props-only"],
     )
     assert result.exit_code == 0, result.output
@@ -234,9 +206,9 @@ def test_main_key_name_dates_from_and_props_only(monkeypatch, tmp_path):
     assert moneyline_keys == []
 
 
-def test_main_key_name_funds_the_game_line_call_too(monkeypatch, tmp_path):
+def test_main_key_name_funds_the_game_line_call_too(monkeypatch, fake_fetches):
     result, _, moneyline_keys, seeds = _invoke_main(
-        monkeypatch, tmp_path, ["--key-name", "odds_api_alt"]
+        monkeypatch, fake_fetches, ["--key-name", "odds_api_alt"]
     )
     assert result.exit_code == 0, result.output
     assert seeds == [["passing yards"]]
@@ -244,16 +216,17 @@ def test_main_key_name_funds_the_game_line_call_too(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "message"),
     [
-        ["--props-only", "--game-lines-only"],
-        ["--props-only", "--layer", "close", "--snapshot-hour", "23"],
-        ["--dates-from", "Moneyline", "--check-all"],
+        (["--props-only", "--game-lines-only"], "opposites"),
+        (["--props-only", "--layer", "close", "--snapshot-hour", "23"], "already props-only"),
+        (["--dates-from", "Moneyline", "--check-all"], "walks the calendar"),
     ],
 )
-def test_main_rejects_contradictory_fetch_flags(monkeypatch, tmp_path, args):
-    result, *_ = _invoke_main(monkeypatch, tmp_path, args)
+def test_main_rejects_contradictory_fetch_flags(monkeypatch, fake_fetches, args, message):
+    result, *_ = _invoke_main(monkeypatch, fake_fetches, args)
     assert result.exit_code != 0
+    assert message in result.output
 
 
 def test_combo_keys_are_mapped_for_nfl():

@@ -364,7 +364,8 @@ def _backfill(
     "--props-only",
     is_flag=True,
     help="Skip the sport-level game-line call (h2h/totals/spreads) when the window's "
-    "Moneyline/Totals rows already exist.",
+    "Moneyline/Totals rows already exist; add missing game lines later with "
+    "--game-lines-only, never the plain command.",
 )
 def main(
     league,
