@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.training_quotes import (
+    AUTHENTIC,
     AUTHENTICITY_VALUES,
+    PICKEM,
     PROVENANCE_COLUMNS,
     archive_ev_is_runaway,
 )
@@ -136,7 +138,7 @@ def audit_matrix(path: Path) -> dict[str, object]:
         authentic = authenticity.eq("authentic")
         # TrainingQuote.archived: a pick'em row is a directly priced line like an authentic
         # one and owes the same invariants; only the authentic rows are book evidence.
-        direct = authenticity.isin(("authentic", "pickem"))
+        direct = authenticity.isin((AUTHENTIC, PICKEM))
         report["quote_counts"] = {
             "authentic": int(authentic.sum()),
             "pickem": int((authenticity == "pickem").sum()),
