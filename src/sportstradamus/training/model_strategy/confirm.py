@@ -1080,7 +1080,7 @@ def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> 
 def _confirm_one(
     meta: dict, cand: dict, *, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
-    """Persist one candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
+    """Persist a candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
 
     The pickle prune on failure keeps the artifact set honest: ``model_prob`` already serves
     nothing for a withheld cell, and a volume denominator (``VOLUME_STATS``) keeps its pickle.
