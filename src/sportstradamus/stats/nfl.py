@@ -456,6 +456,7 @@ class StatsNFL(Stats):
             ],
         }
         self.volume_stats = VOLUME_STATS["NFL"]
+        self.depth_quoted_markets = frozenset(NFL_FANTASY_RECEPTION_POINTS)
         self.need_pbp = True
         self.default_total = 22.668
         self.positions = ["QB", "WR", "RB", "TE"]
@@ -1910,9 +1911,11 @@ class StatsNFL(Stats):
         list). A player whose position is unknown gets no quote.
         """
         reception_points = NFL_FANTASY_RECEPTION_POINTS.get(market)
+        if reception_points is None:
+            return None
         code = int(self.playerProfile["position"].get(player, 0))
         components = NFL_FANTASY_COMPONENTS.get(self.positions[code - 1]) if code else None
-        if reception_points is None or components is None:
+        if components is None:
             return None
         weights = NFL_FANTASY_WEIGHTS | {"receptions": reception_points}
         return ComboSpec(marginals=tuple((sub, weights[sub]) for sub in components))

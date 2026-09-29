@@ -337,6 +337,8 @@ class _Stub:
     def check_combo_markets(self, *args, **kwargs):
         return np.nan
 
+    depth_quoted_markets = frozenset()
+
     def window_short_logs(self, date):
         """The repair windows the logs per gameday; the stub has none to window."""
 
@@ -366,6 +368,34 @@ def test_repair_and_scratch_append_emit_identical_book_fields(monkeypatch, rows,
     repair = resolve_cached_quotes(_Stub(), "AST", cached).iloc[0]
 
     assert append_fields.to_dict() == repair.to_dict()
+
+
+@pytest.mark.parametrize("depth_quoted", [frozenset({"AST"}), frozenset()])
+def test_repair_runs_get_depth_only_for_depth_quoted_markets(monkeypatch, depth_quoted):
+    """A market whose combo spec reads the position ``get_depth`` writes (NFL fantasy)
+    pays one ``get_depth`` per gameday in the repair; every other market skips it."""
+    monkeypatch.setattr(base_mod, "archive", _FakeArchive([], 0.0))
+    calls = []
+
+    class _DepthStub(_Stub):
+        depth_quoted_markets = depth_quoted
+
+        def get_depth(self, offers, date):
+            calls.append((sorted(offers), date))
+
+    cached = pd.DataFrame(
+        {
+            "Player": ["P", "Q", "P"],
+            "Date": ["2026-05-08", "2026-05-08", "2026-05-09"],
+            "Avg10": [2.0, 3.0, 2.5],
+            "Line": [2.0, 3.0, 2.5],
+            "EV": [2.0, 3.0, 2.5],
+        }
+    )
+    resolve_cached_quotes(_DepthStub(), "AST", cached)
+
+    expected = [(["P", "Q"], datetime.date(2026, 5, 8)), (["P"], datetime.date(2026, 5, 9))]
+    assert calls == (expected if depth_quoted else [])
 
 
 def test_pipeline_ev_inversion_remains_explicitly_synthetic():

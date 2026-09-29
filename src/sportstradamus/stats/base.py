@@ -491,6 +491,9 @@ class Stats:
         self.profile_latest_date = datetime(year=1900, month=1, day=1).date()
         self.profiled_market = ""
         self.volume_stats = []
+        # Markets whose combo quote reads the position get_depth writes to playerProfile
+        # (NFL's fantasy hook); inject_backfilled_odds runs get_depth only for these.
+        self.depth_quoted_markets: frozenset[str] = frozenset()
         self.playerProfile = pd.DataFrame()
         self.defenseProfile = pd.DataFrame()
         self.teamProfile = pd.DataFrame()

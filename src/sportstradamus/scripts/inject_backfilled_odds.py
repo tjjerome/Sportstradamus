@@ -15,7 +15,10 @@ rows. ``Stats.resolve_player_market_odds`` reads only ``stats.index`` and
 ``stats["Avg10"]`` from its frame — both cached — and its combo fallback needs
 only the 300-day log window, not the profile frames built from it. So one
 ``window_short_logs`` call per gameday reproduces what a rebuild resolves, at one
-batched archive query per gameday instead of a full feature rebuild.
+batched archive query per gameday instead of a full feature rebuild. The exception
+is a league's ``depth_quoted_markets`` (NFL's fantasy cells, whose per-position
+spec reads the position ``get_depth`` writes): those pay one ``get_depth`` per
+gameday, roughly 15 s each on NFL.
 
 The whole quote is written, prices included. Repairing the block alone would
 strand a row whose class changed — one relabelled ``combo_ev_inversion`` while
@@ -99,6 +102,8 @@ def resolve_cached_quotes(stat_data: Stats, market: str, M: pd.DataFrame) -> pd.
     ):
         stat_data.window_short_logs(game_date)
         players = rows["Player"]
+        if market in stat_data.depth_quoted_markets:
+            stat_data.get_depth(dict.fromkeys(players), game_date)
         stats = pd.DataFrame({"Avg10": rows["Avg10"].to_numpy()}, index=players)
         stats = stats.loc[~stats.index.duplicated()]
         quotes = stat_data.resolve_player_market_odds(

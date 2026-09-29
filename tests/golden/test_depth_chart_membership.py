@@ -19,7 +19,7 @@ import pandas as pd
 
 from sportstradamus.stats import StatsNFL
 from sportstradamus.stats import nfl as nfl_module
-from sportstradamus.stats.nfl import NFL_FANTASY_COMPONENTS
+from sportstradamus.stats.nfl import NFL_FANTASY_COMPONENTS, NFL_FANTASY_RECEPTION_POINTS
 from sportstradamus.training.component_cells import _fantasy_weights
 
 GAMEDAY = date(2023, 10, 29)
@@ -125,6 +125,15 @@ def test_nfl_fantasy_spec_reads_the_position_get_depth_wrote():
     assert tuple(sub for sub, _ in spec.marginals) == NFL_FANTASY_COMPONENTS["WR"]
     assert stats._fantasy_combo_spec("fantasy points underdog", "Unknown Position") is None
     assert stats._fantasy_combo_spec("fantasy points underdog", "Never Profiled") is None
+
+
+def test_nfl_non_fantasy_markets_need_no_position_for_the_combo_hook():
+    """inject_backfilled_odds resolves 18 NFL cells without get_depth: the hook must
+    answer None for a non-fantasy market before it looks at the (empty) profile."""
+    stats = StatsNFL()
+    assert stats.playerProfile.empty
+    assert stats._fantasy_combo_spec("targets", "Some Receiver") is None
+    assert stats.depth_quoted_markets == frozenset(NFL_FANTASY_RECEPTION_POINTS)
 
 
 def test_component_cells_seed_the_nfl_spec_from_the_combo_matrix_position():
