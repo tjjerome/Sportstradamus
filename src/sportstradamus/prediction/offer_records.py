@@ -39,6 +39,12 @@ _MAX_CONFIDENCE = 0.90
 # the per-player distance ranking, so it is filtered out.
 _MAX_UNDERDOG_BOOST = 3.65
 
+# Full decimal payout above which Kelly is zeroed instead of computed. The realized
+# ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%
+# against a ~60% model read, so the edge claim isn't trusted past here. The cap moves
+# only on the realized_by_side payout-band split, never ad hoc.
+MAX_FAVORED_PAYOUT: float = 2.5
+
 # Drop an unquoted single-player leg when the model disagrees with the payout-implied
 # probability by more than this. Underdog prices its own boosts near-fair, so a model
 # >15 pts from the only price available has no independent support — these were the
@@ -270,7 +276,13 @@ def finalize_records(
         )
         offer_df = offer_df.loc[~phantom]
     offer_df["Market EV"] = offer_df["Market Prob"] * offer_df["Boost"]
-    offer_df["Kelly"] = (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1)
+    # A payout at or below 1x can't carry edge; the old formula divided two negatives
+    # into a false-positive Kelly for exactly those legs.
+    offer_df["Kelly"] = np.where(
+        (offer_df["Boost"] > 1) & (offer_df["Boost"] <= MAX_FAVORED_PAYOUT),
+        (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1),
+        0.0,
+    )
     offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
     offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
         1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]

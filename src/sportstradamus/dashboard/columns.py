@@ -38,7 +38,8 @@ HELP = {
     "returns $1.06 on average against the app. This is what Kelly sizes.",
     "Cons Edge": "The consensus book's edge at the same DFS payout: Market EV − 1. Above 0% "
     "the book agrees the line is soft; below 0% the book disagrees (you're contrarian).",
-    "Kelly": "Kelly edge — the bankroll fraction full-Kelly would stake on this leg.",
+    "Kelly": "Kelly edge — the bankroll fraction full-Kelly would stake on this leg; 0 when "
+    "the payout is at or below 1× or above the 2.5× favored cap.",
     MOVE: "How far the fair line has moved since the offer opened, in the stat's own units, on "
     "this row's Platform — the DFS app you'd bet, not the consensus. The fair line is where "
     "the app's price would be even money, so a multiplier change counts even while the posted "
