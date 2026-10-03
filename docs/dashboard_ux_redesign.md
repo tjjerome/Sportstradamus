@@ -63,9 +63,9 @@ into **Games** and the Pick'em tab retired, both owner-approved during the build
 
 | Surface | Job | Key content |
 |---|---|---|
-| **Tonight** (home) | "What's on tonight?" | Nebula game cards: matchup, tip-off urgency, the story engine's `game_headline`, best edge vs the DFS payout, model-liked leg count. Click → Games. |
+| **Tonight** (home) | "What's on tonight?" | Nebula game cards: matchup, tip-off urgency, the story engine's `game_headline` behind the lead side's arrow, best edge vs the DFS payout, model-liked leg count. Cards sort urgent first, then by the game's star prominence (per-league normalized), then favored-leg count, then tip-off. Click → Games. |
 | **Board** | Cross-game shopping | Every offer in the Obsidian AG Grid (phone: card list): `Move` line-movement spark, Win %, Model Edge, Consensus Edge, Kelly; prophecy lenses (Sharp / Longshots / Contrarian / Consensus); "+ slip" per row; detail dialog. |
-| **Games** | One matchup, fully told — and the slip editor | Platform + game picker → Total / Spread / Shape hero, the story menu (≤ 5 stories × Bankroll Builder / Shoot the Moon), the constellation (click or tap stars to build; deeper / wider lenses; hover card with last five + movement), satellite and disliked-leg pickers, legs panel, Lock it in. |
+| **Games** | One matchup, fully told — and the slip editor | Platform + game picker → Total / Spread / Shape hero, the story menu (≤ 5 stories × Bankroll Builder / Shoot the Moon; opens on the slate's lead story, each labelled "Over-led · " / "Under-led · "), the constellation (click or tap stars to build; deeper / wider lenses; hover card with last five + movement), satellite and disliked-leg pickers, legs panel, Lock it in. |
 | **Receipts** | Prove it | Hero: "if you'd tailed every rec" (ROI / win % / record). Skeptic checks: EV>5% record, CLV beat rate, calibration vs book, worst month (losers shown, never hidden). Record grid by league/market/platform, reliability panel, precomputed strategy-sim grid + live Customize, **your slips** graded nightly. |
 | **Model Lab** (Diagnostics · Correlations · Training · Modifiers) | How the sausage is made | Per-cell health (model_stats + live metrics + lifecycle), calibration/diagnostics, correlation heatmap from `corr_market_summary`, gate matrix, the modifier reconciler; deep-link target from every "market trust" line. |
 

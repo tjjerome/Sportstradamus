@@ -111,6 +111,7 @@ def _render_hero(
     game_context: pd.DataFrame,
     parlays: pd.DataFrame,
     stories: pd.DataFrame,
+    platform: str,
     league: str,
     game: str,
     date: str,
@@ -122,14 +123,14 @@ def _render_hero(
     Blank if the game has no context row (unknown game — same graceful no-op as the
     banner this replaces). The matchup line speaks full team names
     (:func:`theme.team_name`, abbrev fallback); the prophecy subline is the story
-    engine's headline for the game (:func:`narrative.game_headline`).
+    engine's lead headline for the game on ``platform`` (:func:`narrative.game_headline`).
     """
     strip = context_strip(game_context, game=game, date=date)
     if not strip:
         return
     fav, spread = strip["fav_team"], strip["spread"]
     spread_text = f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even"
-    headline = game_headline(stories, parlays, game=game, date=date)
+    headline = game_headline(stories, parlays, game=game, date=date, platform=platform)
     shape = str(strip["shape"])
     glyph = game_shape_glyph(shape, size=_HERO_GLYPH_SIZE)
     shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
@@ -161,25 +162,48 @@ def _render_hero(
     )
 
 
+def _story_menu(sub: pd.DataFrame, story_ids: list) -> tuple[dict, int]:
+    """Selectbox labels per story and the index of the story the menu opens on.
+
+    headline, lead and lead_side are story-level (identical on both objective rows):
+    the slate's lead story opens the menu (the first story when none is flagged) and
+    its side-led prefix says which way it leans.
+    """
+    heads = sub.drop_duplicates("story_id").set_index("story_id")
+    labels = {}
+    for sid in story_ids:
+        headline = str(heads.loc[sid, "headline"]) or sid
+        side = heads.loc[sid, "lead_side"]
+        labels[sid] = f"{side}-led · {headline}" if side else headline
+    opening = next((i for i, sid in enumerate(story_ids) if heads.loc[sid, "lead"]), 0)
+    return labels, opening
+
+
 def _render_story_preloader(
-    stories: pd.DataFrame, platform: str, game: str, offers: pd.DataFrame
+    stories: pd.DataFrame, platform: str, game: str, date: str, offers: pd.DataFrame
 ) -> None:
     """Optional: pre-load a story's legs into the constellation for the chosen game."""
     # The stories snapshot lags offers (absent until the first prophecize writes it);
     # game_headline guards the hero the same way.
     if stories.empty:
         return
-    sub = stories.loc[(stories["platform"] == platform) & (stories["Game"] == game)]
+    sub = stories.loc[
+        (stories["platform"] == platform)
+        & (stories["Game"] == game)
+        & (stories["Date"].astype(str) == date)
+    ]
     if sub.empty:
         return
     story_ids = sorted(
         sub["story_id"].dropna().unique(), key=lambda s: int(str(s).rsplit("#", 1)[-1])
     )
+    labels, opening = _story_menu(sub, story_ids)
 
     story_id = st.selectbox(
         "Preload a story (optional)",
         story_ids,
-        format_func=lambda sid: str(sub.loc[sub["story_id"] == sid].iloc[0]["headline"]) or sid,
+        index=opening,
+        format_func=labels.get,
         key="cascade_story",
     )
     rows = sub.loc[sub["story_id"] == story_id]
@@ -322,8 +346,9 @@ else:
     st.session_state[_BUILDER] = "constellation"
     pcol, gcol = st.columns([1, 2])
     with pcol:
-        st.session_state[_PLATFORM] = _platform_selector(offers)
-    games = _candidate_games(offers, st.session_state[_PLATFORM])
+        platform = _platform_selector(offers)
+    st.session_state[_PLATFORM] = platform
+    games = _candidate_games(offers, platform)
     with gcol:
         focus_game, focus_date = _game_select(games, legs)
     if focus_game:
@@ -336,8 +361,10 @@ else:
         # can't change under the user when they switch Underdog <-> Sleeper or narrow
         # the sport filter, and two games showing at once can't wear the same shape.
         shapes = load_slate_shapes(focus_date)
-        _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
-        _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
+        _render_hero(
+            game_context, parlays, stories, platform, league, focus_game, focus_date, home, away
+        )
+        _render_story_preloader(stories, platform, focus_game, focus_date, offers)
 
 st.divider()
 if focus_game:

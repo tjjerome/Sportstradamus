@@ -68,6 +68,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
+from sportstradamus.dashboard.narrative import bet_arrow
 from sportstradamus.leg_schema import build_leg
 
 _APP = Path("src/sportstradamus/dashboard/app.py").resolve()
@@ -94,6 +95,7 @@ _OFFER_ROWS = [
         "Win Prob": 0.58,
         "Model EV": 1.07,
         "Market EV": 1.02,
+        "Star": 2.4,
     },
     {
         "League": "WNBA",
@@ -112,6 +114,7 @@ _OFFER_ROWS = [
         "Win Prob": 0.61,
         "Model EV": 1.11,
         "Market EV": 1.03,
+        "Star": 1.9,
     },
 ]
 
@@ -130,21 +133,35 @@ def _hero_title(at: AppTest) -> str:
     return match.group(1)
 
 
-def test_app_boots_and_tonight_renders():
-    """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page)."""
+def test_app_boots_and_tonight_renders(monkeypatch, tmp_path):
+    """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page).
+
+    ``current_offers`` points at the schema fixture so the boot exercises the card loop
+    against the current contract rather than whatever snapshot is on disk.
+    """
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     assert not at.exception
     assert _hero_title(at) == "Tonight"
 
 
-def test_app_sport_switch_rerenders_without_exception():
+def test_app_sport_switch_rerenders_without_exception(monkeypatch, tmp_path):
     """Interacting with the global sport segmented-control triggers a clean rerun.
 
     Exercises the ``st.session_state["sport"]`` handoff at the top of ``app.py``
     (the widget-key-to-plain-key copy every surface reads) through an actual
     widget interaction, not just the initial render.
     """
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     at.segmented_control(key="_sport_widget").set_value("NBA").run()
@@ -181,6 +198,61 @@ def test_tonight_card_names_favored_legs_when_no_story_binds_them(monkeypatch, t
     cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
     assert cards, "no Tonight game card rendered"
     assert "No prophecy yet — 2 favored legs, no story binds them" in cards[0]
+
+
+def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
+    """The brightest star leads the slate, ahead of a game with more favored legs.
+
+    Two NBA games on one date, neither urgent (no ``Commence``): A carries two
+    model-liked legs at Star 1.0, B one at Star 2.8, so B's card renders first. B's
+    lead story (``lead``, ``lead_side == "Over"``) prefixes its prophecy with the Over
+    arrow.
+    """
+    rows = [
+        {**_OFFER_ROWS[0], "Kelly": 0.03, "Star": 1.0},
+        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02, "Star": 1.0},
+        {
+            **_OFFER_ROWS[0],
+            "Team": "BOS",
+            "Opponent": "LAL",
+            "Home": True,
+            "Game": "BOS/LAL",
+            "Player": "J. Tatum",
+            "Kelly": 0.02,
+            "Star": 2.8,
+        },
+    ]
+    stories = [
+        {
+            "platform": "Underdog",
+            "League": "NBA",
+            "Game": "BOS/LAL",
+            "Date": "2026-07-04",
+            "story_id": "BOS/LAL#1",
+            "objective": "builder",
+            "headline": "Tatum takes over",
+            "model_ev": 1.2,
+            "lead": True,
+            "lead_side": "Over",
+        }
+    ]
+    offers_fixture = tmp_path / "current_offers.parquet"
+    stories_fixture = tmp_path / "current_game_stories.parquet"
+    pd.DataFrame(rows).to_parquet(offers_fixture)
+    pd.DataFrame(stories).to_parquet(stories_fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", stories_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", tmp_path / "no_parlays.parquet")
+    st.cache_data.clear()
+
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.run()
+    assert not at.exception
+    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    matchups = [re.search(r'class="tc-matchup">(\w+)', c).group(1) for c in cards]
+    assert matchups == ["BOS", "NYK"]
+    assert f"{bet_arrow('Over')} “Tatum takes over”" in cards[0]
 
 
 def test_board_renders_condensed_grid(monkeypatch, tmp_path):

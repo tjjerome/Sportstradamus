@@ -198,11 +198,19 @@ def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
 def _load_current_offers_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    df = read_parquet_safe(path)
+    if "Star" not in df.columns:
+        df = df.reindex(columns=[*df.columns, "Star"], fill_value=0.0)
+    return df
 
 
 def load_current_offers() -> pd.DataFrame:
-    """Today's scored offers from the latest ``prophecize`` snapshot."""
+    """Today's scored offers from the latest ``prophecize`` snapshot.
+
+    ``Star`` (player prominence) reads 0.0 on a snapshot written before the column
+    existed, so a dashboard restarted on the pull that brought it keeps rendering
+    until the next ``prophecize`` writes the real values.
+    """
     return _load_current_offers_cached(CURRENT_OFFERS_PATH, _mtime(CURRENT_OFFERS_PATH))
 
 

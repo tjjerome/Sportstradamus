@@ -21,8 +21,10 @@ from sportstradamus.dashboard.data import (
 from sportstradamus.dashboard.narrative import (
     SHAPE_CAPTION,
     SHAPE_DISPLAY,
+    bet_arrow,
     context_strip,
     game_headline,
+    game_lead_side,
     home_away,
     storyless_prophecy,
 )
@@ -114,24 +116,31 @@ if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
+# The model-liked picks (Kelly > 0) are the legs the constellation draws as stars. Their
+# Star prominence is read against the league's own slate max, so a league with no depth
+# term (MLB tops out at 2.0) competes on equal footing with one that has it.
+liked = (
+    pd.to_numeric(offers["Kelly"], errors="coerce") > 0
+    if "Kelly" in offers.columns
+    else pd.Series(False, index=offers.index)
+)
+league_star_max = offers.loc[liked].groupby("League")["Star"].max()
+
 now = pd.Timestamp.now(tz="UTC")
 cards = []
 for game_key, group in offers.groupby(game_key_cols, sort=False):
     if isinstance(game_key, str):
         game_key = (game_key,)
     key_dict = dict(zip(game_key_cols, game_key, strict=False))
+    league = key_dict.get("League", "")
     game = str(group["Game"].iloc[0])
     date_raw = key_dict.get("Date", "")
     home, away = home_away(group)
 
-    # Favored legs: the model-liked picks (Kelly > 0) the constellation draws as stars,
-    # deduped to distinct Player/Market/Bet across books and alt-lines.
-    kelly = pd.to_numeric(group["Kelly"], errors="coerce") if "Kelly" in group else None
-    favored = (
-        group.loc[kelly > 0].drop_duplicates(["Player", "Market", "Bet"]).shape[0]
-        if kelly is not None
-        else 0
-    )
+    # Favored legs dedupe to distinct Player/Market/Bet across books and alt-lines.
+    picks = group.loc[liked[group.index]]
+    favored = picks.drop_duplicates(["Player", "Market", "Bet"]).shape[0]
+    star = picks["Star"].max() / league_star_max[league] if not picks.empty else 0.0
     # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
     edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
     top_edge = edges.max() if edges is not None and edges.notna().any() else None
@@ -146,23 +155,25 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     minutes = (commence - now).total_seconds() / 60 if pd.notna(commence) else float("inf")
     cards.append(
         {
-            "league": key_dict.get("League", ""),
+            "league": league,
             "home": home,
             "away": away,
             "date": date_raw,
             "favored": favored,
+            "star": star,
             "offer_count": len(group),
             "top_edge": top_edge,
             "headline": game_headline(stories, parlays, game=game, date=date_raw),
+            "side": game_lead_side(stories, game=game, date=date_raw),
             "shape": strip["shape"] if strip else "",
             "minutes": minutes,
             "urgent": 0 < minutes < _URGENT_MINUTES,
         }
     )
 
-# Games tipping off within the hour rise to the top; then most favored legs first,
-# soonest tip-off as the tiebreak.
-cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["favored"], c["minutes"]))
+# Games tipping off within the hour rise to the top; within a tier the brightest star
+# leads, then the most favored legs, soonest tip-off as the tiebreak.
+cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["star"], -c["favored"], c["minutes"]))
 
 for c in cards:
     league, home, away = c["league"], c["home"], c["away"]
@@ -180,8 +191,11 @@ for c in cards:
         if has_edge
         else '<span class="tc-badge tc-gray">no edge</span>'
     )
+    # The lead side's arrow is narrative's own SVG markup, so it rides in unescaped ahead
+    # of the escaped headline.
+    arrow = f"{bet_arrow(c['side'])} " if c["side"] else ""
     prophecy = (
-        f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
+        f'<div class="tc-prophecy">{arrow}“{html.escape(c["headline"])}”</div>'
         if c["headline"]
         else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(favored)}</div>'
     )
