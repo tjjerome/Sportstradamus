@@ -265,9 +265,10 @@ and prints a summary — devel promotions are direct edits.
 
 **Known gap:** the graduated classifier (`training/graduation.py`) uses a
 proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window
-+ non-negative live book-BSS — not the full live metric set above. `main` is
-dormant until the live aggregator produces data, so the proxy is acceptable
-for now.
++ non-negative live book-BSS + neither recommended side's live precision
+below `MIN_PRECISION_SIDE` (0.50) — not the full live metric set above.
+`main` is dormant until the live aggregator produces data, so the proxy is
+acceptable for now.
 
 ---
 

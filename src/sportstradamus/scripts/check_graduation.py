@@ -31,8 +31,8 @@ _STATE_COLORS = {
     "not-shipped": "cyan",
 }
 # Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
-# precision_over_live is the new Gate-2 demote driver (see
-# graduation.MIN_PRECISION_OVER); precision_under_live is informational.
+# precision_over_live and precision_under_live are both Gate-2 demote drivers
+# (see graduation.MIN_PRECISION_SIDE).
 _DISPLAY_COLUMNS = (
     "league",
     "market",

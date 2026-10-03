@@ -27,18 +27,20 @@ import pandas as pd
 MIN_SETTLED_FOR_GRADUATION = 200
 # The 30d window is the canonical graduation gate (7d is too noisy for state).
 GRADUATION_WINDOW_DAYS = 30
-# Demote a cell when the Bet=Over hit rate (precision_over) falls below this.
-# Precision_over = P(Result=Over | Bet=Over) is the like-for-like metric that
-# matches the training pipeline's `precision_over` column — comparing the
-# aggregate `predicted_over_rate` vs `empirical_over_rate` instead conflates
+# Demote a cell when EITHER recommended side's live hit rate (precision_over
+# or precision_under) falls below this. Precision_side = P(Result=side |
+# Bet=side) is the like-for-like metric that matches the training pipeline's
+# `precision_over`/`precision_under` columns — comparing the aggregate
+# `predicted_over_rate` vs `empirical_over_rate` instead conflates
 # publication-selection bias (Sleeper/UD push Over-skewed offers) with real
 # model bias and produces false-positive demotes (see
 # `/tmp/researcher_fg3m_calibration_divergence.md`, 2026-05-24). Below 0.50
-# the model's Over recommendations lose more often than they win, which is a
-# losing strategy at any boost ≤ 2.0×. Live precision_over is NaN when fewer
-# than `_MIN_BETS_FOR_PRECISION` Over bets exist in the window (see
-# `nightly.py`); the check is skipped in that case.
-MIN_PRECISION_OVER = 0.50
+# that side's recommendations lose more often than they win, a losing
+# strategy at any boost ≤ 2.0×. A side's live precision is NaN when it has
+# fewer than `_MIN_BETS_FOR_PRECISION` bets in the window (see `nightly.py`);
+# NaN means no evidence for that side, so the check is skipped only for that
+# side, not the whole cell.
+MIN_PRECISION_SIDE = 0.50
 
 
 def _is_nan_like(x: object) -> bool:
@@ -47,17 +49,24 @@ def _is_nan_like(x: object) -> bool:
     return x is None or (isinstance(x, float) and math.isnan(x))
 
 
+def _precision_below_min(precision_live: float) -> bool:
+    # NaN means no evidence for this side (too few bets); only a measured
+    # precision can fail the gate.
+    return not _is_nan_like(precision_live) and precision_live < MIN_PRECISION_SIDE
+
+
 def classify_lifecycle(
     gate1_bss: float,
     n_settled: float,
     book_bss_30d: float,
     precision_over_live: float = float("nan"),
+    precision_under_live: float = float("nan"),
 ) -> str:
-    """Map (Gate-1 BSS, n_settled, Gate-2 BSS, precision_over) to a lifecycle state.
+    """Map (Gate-1 BSS, n_settled, Gate-2 BSS, side precisions) to a lifecycle state.
 
     NaN/negative Gate-1 BSS -> ``not-shipped``; positive Gate-1 BSS but
-    insufficient live data -> ``in-test``; negative live BSS or live
-    precision_over below :data:`MIN_PRECISION_OVER` -> ``demoted``;
+    insufficient live data -> ``in-test``; negative live BSS or either side's
+    live precision below :data:`MIN_PRECISION_SIDE` -> ``demoted``;
     otherwise -> ``graduated``.
 
     Args:
@@ -65,9 +74,10 @@ def classify_lifecycle(
         n_settled: Settled offer count in the graduation window.
         book_bss_30d: Live 30-day book-relative brier-skill-score.
         precision_over_live: Live 30d hit rate among ``Bet="Over"`` rows
-            (i.e. P(Result=Over | Bet=Over)). NaN -> precision check skipped
-            (typically because the cell has fewer Over bets than
-            ``nightly._MIN_BETS_FOR_PRECISION``).
+            (i.e. P(Result=Over | Bet=Over)). NaN -> no evidence for this
+            side, so its precision check is skipped (typically because the
+            cell has fewer Over bets than ``nightly._MIN_BETS_FOR_PRECISION``).
+        precision_under_live: Same metric for ``Bet="Under"`` rows.
 
     Returns:
         One of ``"not-shipped"``, ``"in-test"``, ``"graduated"``, ``"demoted"``.
@@ -83,7 +93,7 @@ def classify_lifecycle(
         return "in-test"
     if book_bss_30d < 0:
         return "demoted"
-    if not _is_nan_like(precision_over_live) and precision_over_live < MIN_PRECISION_OVER:
+    if _precision_below_min(precision_over_live) or _precision_below_min(precision_under_live):
         return "demoted"
     return "graduated"
 
@@ -195,6 +205,7 @@ def lifecycle_table(
             r.get("n_settled", float("nan")),
             r.get("gate2_book_bss", float("nan")),
             r.get("precision_over_live", float("nan")),
+            r.get("precision_under_live", float("nan")),
         ),
         axis=1,
     )

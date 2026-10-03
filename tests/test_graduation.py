@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.training.graduation import (
-    MIN_PRECISION_OVER,
+    MIN_PRECISION_SIDE,
     classify_lifecycle,
     free_passer_cells,
     graduated_cells,
@@ -36,29 +36,30 @@ def test_classify_lifecycle(gate1_bss, n_settled, book_bss_30d, expected):
 
 
 @pytest.mark.parametrize(
-    ("precision_over", "expected"),
+    ("precision_over", "precision_under", "expected"),
     [
-        # Above threshold -> graduated.
-        (0.60, "graduated"),
-        (0.51, "graduated"),
-        # Exactly at threshold is still graduated (strict "<" demote).
-        (MIN_PRECISION_OVER, "graduated"),
-        # Below threshold -> demoted.
-        (MIN_PRECISION_OVER - 1e-6, "demoted"),
-        (0.40, "demoted"),
-        # NaN (too few Over bets to estimate) skips the check -> graduated
-        # since the other gates pass.
-        (math.nan, "graduated"),
+        # Both sides above threshold -> graduated.
+        (0.60, 0.60, "graduated"),
+        # Exactly at threshold on both sides is still graduated (strict "<" demote).
+        (MIN_PRECISION_SIDE, MIN_PRECISION_SIDE, "graduated"),
+        # Over below threshold, Under healthy -> demoted.
+        (0.45, 0.60, "demoted"),
+        # Under below threshold, Over healthy -> demoted.
+        (0.60, 0.45, "demoted"),
+        # Neither side has enough bets to estimate (NaN) -> precision check
+        # skipped entirely -> not demoted on precision.
+        (math.nan, math.nan, "graduated"),
     ],
 )
-def test_classify_lifecycle_precision_over_gate(precision_over, expected):
-    """precision_over-based gate: demote when Bet=Over recommendations lose more than they win."""
+def test_classify_lifecycle_precision_side_gate(precision_over, precision_under, expected):
+    """Precision gate is symmetric: demote when either recommended side loses more than it wins."""
     assert (
         classify_lifecycle(
             gate1_bss=0.10,
             n_settled=500,
             book_bss_30d=0.05,
             precision_over_live=precision_over,
+            precision_under_live=precision_under,
         )
         == expected
     )
