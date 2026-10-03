@@ -38,6 +38,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label),
+#   Star (player prominence in [0, 3], stories/lead.py),
 #   Bats / Opp Hand / Lineup (MLB hitters only — batting side, probable starter's
 #   throwing hand, and whether the batting slot is posted or the usual one)
 # - Correlations: Corr Same, Corr Opp
@@ -75,6 +76,7 @@ _OFFER_KEEP_COLS = [
     "O/U",
     "DVPOA",
     "Position",
+    "Star",
     "Bats",
     "Opp Hand",
     "Lineup",
@@ -212,7 +214,10 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
     ``list<struct>`` parquet column) that the dashboard's ``seed_from_story``
     re-resolves against current offers; ``kelly_stake`` is a standalone
     full-Kelly bankroll *fraction* — the dashboard rail re-sizes it into
-    Decimal dollars against the live bankroll.
+    Decimal dollars against the live bankroll. ``lead_side`` / ``lead_player``
+    name the side and player a led story is seeded on (``""`` when unled),
+    ``star`` is the story's max player prominence, and ``lead`` flags the one
+    story per platform/game/date the Games and Tonight tabs headline.
     ``build_game_stories`` returns a column-stable frame even with no stories, so
     an empty slate still writes a header-only snapshot the dashboard can read.
     """
