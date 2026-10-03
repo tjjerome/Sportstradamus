@@ -77,6 +77,9 @@ LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
 # Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
 # running the Monte-Carlo backtest at page load). Written nightly by reflect.
 PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
+# Realized hit rate / ROI by bet side at the platform payouts (Receipts reads it to
+# answer whether each side makes money). Written nightly by reflect.
+REALIZED_BY_SIDE_PATH = _RUNTIME_DIR / "realized_by_side.parquet"
 # Precomputed reliability (prob bin x alt-line split) grid (Receipts reads it instead
 # of re-binning history at page load). Written nightly by reflect.
 CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"

@@ -185,6 +185,7 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | `books/` | (called from `prediction/cli.py`) | Underdog (`underdog.py:get_ud` — player props, team/game markets, alternate lines) and Sleeper (`sleeper.py:get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
 | `analysis.py` / `clv.py` | — | Shared metric functions; closing-line-value computation |
+| `realized.py` | — | Realized-by-side ledger: hit rate and ROI per bet side at the platform payouts |
 | `skew_normal.py`, `skew_normal_centered.py`, `double_poisson.py`, `hurdle.py` | — | Custom PyTorch distributions for LightGBMLSS (SkewNormal, centered parametrization, Double Poisson, HurdleZINB) |
 | `history_schema.py`, `leg_schema.py` | — | Canonical schemas for the prediction-history frame and structured parlay legs |
 
