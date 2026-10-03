@@ -33,26 +33,6 @@ class _StubArchive:
         return self._under_table.get((league, market, date, player), float("nan"))
 
 
-def test_signed_clv_over_uses_positive_sign():
-    assert clv._signed_clv(0.50, 0.55, "Over") == pytest.approx(0.05)
-
-
-def test_signed_clv_under_flips_sign():
-    assert clv._signed_clv(0.50, 0.55, "Under") == pytest.approx(-0.05)
-
-
-def test_signed_clv_higher_is_over_synonym():
-    assert clv._signed_clv(0.40, 0.45, "Higher") == pytest.approx(0.05)
-
-
-def test_signed_clv_returns_nan_when_open_is_nan():
-    assert math.isnan(clv._signed_clv(float("nan"), 0.55, "Over"))
-
-
-def test_signed_clv_returns_nan_when_close_is_nan():
-    assert math.isnan(clv._signed_clv(0.55, float("nan"), "Under"))
-
-
 # Player A: NBA points, a Gamma cell. Archive close-EV is a realistic points stat mean
 # (~11), not a probability — the whole point of this fixture is to prove the conversion
 # actually inverts the mean through the distribution rather than passing it through raw.
@@ -143,8 +123,45 @@ def test_fill_from_archive_skips_rows_already_closed():
     assert df.loc[0, "Close Market Prob"] == pytest.approx(0.99)
 
 
+def test_fill_from_archive_repairs_inverted_clv_on_existing_close():
+    """A row already carrying Close Market Prob, stamped under the pre-fix,
+    sign-flipped convention, gets its Market/Model CLV corrected on the next
+    run — it isn't "pending" so the archive is never consulted for it."""
+    history = pd.DataFrame(
+        [
+            {
+                "Player": "Player C",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "blocks",
+                "Line": 3.5,
+                "Boost": 1.0,
+                "Platform": "Underdog",
+                "Bet": "Under",
+                "Win Prob": 0.55,
+                "Market Prob": 0.50,
+                "Dist": "ZINB",
+                "CV": 0.9,
+                "Gate": 0.12,
+                "Step": 1.0,
+                "Close Market Prob": 0.65,
+                "Market CLV": -(0.65 - 0.50),
+                "Model CLV": -(0.65 - 0.55),
+            }
+        ]
+    )
+    df = clv.fill_from_archive(history, _StubArchive({}))
+
+    row = df.loc[0]
+    assert row["Close Market Prob"] == pytest.approx(0.65)
+    assert row["Market CLV"] == pytest.approx(0.65 - 0.50)
+    assert row["Model CLV"] == pytest.approx(0.65 - 0.55)
+
+
 def test_fill_from_archive_under_bet_hand_computed():
-    """An Under bet's close_p is the raw P(under line), not 1 minus it."""
+    """An Under bet's close_p is the raw P(under line), not 1 minus it, and its
+    CLV is close_p minus the bet-side probability with no extra sign flip —
+    Market Prob/Win Prob are already expressed on the bet side."""
     history = pd.DataFrame(
         [
             {
@@ -176,8 +193,8 @@ def test_fill_from_archive_under_bet_hand_computed():
     row = df.loc[0]
     assert 0.0 <= expected_close_p <= 1.0
     assert row["Close Market Prob"] == pytest.approx(expected_close_p)
-    assert row["Market CLV"] == pytest.approx(-(expected_close_p - 0.50))
-    assert row["Model CLV"] == pytest.approx(-(expected_close_p - 0.55))
+    assert row["Market CLV"] == pytest.approx(expected_close_p - 0.50)
+    assert row["Model CLV"] == pytest.approx(expected_close_p - 0.55)
 
 
 def test_fill_from_archive_zinb_gate_changes_close_p():

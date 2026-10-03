@@ -8,11 +8,13 @@ derived from the row date; until per-row kickoff timestamps are wired in
 the default sits at game-day evening UTC, which guarantees the cutoff is
 after every league's kickoff window.
 
-Definitions, in no-vig probability units:
+``Market Prob``, ``Win Prob``, and ``Close Market Prob`` are all already
+expressed on the bet side (``prediction/offer_records.py`` flips an Under
+row's book price before either column is derived), so CLV is a plain
+difference for either side, in no-vig probability units:
 
-    sign       = +1 if Bet in {"Over",  "Higher"} else -1
-    Market CLV = sign * (Close Market Prob - Market Prob)
-    Model CLV  = sign * (Close Market Prob - Win Prob)
+    Market CLV = Close Market Prob - Market Prob
+    Model CLV  = Close Market Prob - Win Prob
 """
 
 from __future__ import annotations
@@ -52,47 +54,20 @@ def _segments_parquet_path() -> Path:
     return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
 
 
-def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
-    """Return signed CLV in probability points, or NaN when undefined.
-
-    Args:
-        open_p: Probability the bettor implicitly bought at placement time.
-        close_p: Closing book probability at game-lock.
-        bet: Direction of the bet — Over/Higher get +1, Under/Lower get -1.
-
-    Returns:
-        Signed CLV (close − open, flipped for Under). NaN if either
-        probability is NaN.
-    """
-    if pd.isna(open_p) or pd.isna(close_p):
-        return np.nan
-    sign = 1 if bet in _OVER_BETS else -1
-    return sign * (float(close_p) - float(open_p))
-
-
 def _fill_offer_rows(history: pd.DataFrame, idx, close_under: float) -> None:
-    """Assign the closing trio onto ``history.loc[idx]`` in place.
+    """Assign ``Close Market Prob`` onto ``history.loc[idx]`` in place.
 
     ``close_under`` is ``P(under offer_line)``, shared by every offer row in the
-    ``PREDICTION_KEY`` group; each row flips it to its own side via ``Bet`` before
-    computing CLV, since a single prediction can carry both Over and Under offers
-    across platforms.
+    ``PREDICTION_KEY`` group; each row flips it to its own side via ``Bet``, since
+    a single prediction can carry both Over and Under offers across platforms.
+    ``Market CLV``/``Model CLV`` are derived afterward, vectorized across the
+    whole frame, by :func:`fill_from_archive`.
     """
     rows = history.loc[idx]
     close_p = rows["Bet"].apply(
         lambda bet: close_under if bet not in _OVER_BETS else 1.0 - close_under
     )
-    market_clv = [
-        _signed_clv(mp, cp, bet)
-        for mp, cp, bet in zip(rows["Market Prob"], close_p, rows["Bet"], strict=True)
-    ]
-    model_clv = [
-        _signed_clv(wp, cp, bet)
-        for wp, cp, bet in zip(rows["Win Prob"], close_p, rows["Bet"], strict=True)
-    ]
     history.loc[idx, "Close Market Prob"] = close_p
-    history.loc[idx, "Market CLV"] = market_clv
-    history.loc[idx, "Model CLV"] = model_clv
 
 
 def _fetch_close_ev_or_composite(
@@ -227,8 +202,13 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     runs. Groups whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left
     with NaN closing fields and excluded from CLV aggregates downstream.
 
-    Skips rows that already carry a non-NaN ``Close Market Prob`` so a
-    re-run doesn't redundantly hit archive.
+    Skips rows that already carry a non-NaN ``Close Market Prob`` so a re-run
+    doesn't redundantly hit archive. ``Market CLV``/``Model CLV`` are then
+    (re)computed — ``Close Market Prob - Market Prob`` / ``- Win Prob`` — for
+    every row with a non-NaN ``Close Market Prob``, not only the ones just
+    filled. That makes the recompute idempotent and lets it repair a row
+    stamped under a stale or differently-signed convention on its next run,
+    with no migration script needed.
 
     Args:
         history: Flat one-row-per-offer DataFrame.
@@ -241,12 +221,17 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
         return history
 
     pending = history.loc[history["Close Market Prob"].isna()]
-    if pending.empty:
-        return history
+    if not pending.empty:
+        for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
+            _fill_one_group(history, archive, key, idx)
 
-    for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
-        _fill_one_group(history, archive, key, idx)
-
+    has_close = history["Close Market Prob"].notna()
+    history.loc[has_close, "Market CLV"] = (
+        history.loc[has_close, "Close Market Prob"] - history.loc[has_close, "Market Prob"]
+    )
+    history.loc[has_close, "Model CLV"] = (
+        history.loc[has_close, "Close Market Prob"] - history.loc[has_close, "Win Prob"]
+    )
     return history
 
 
