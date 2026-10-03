@@ -129,6 +129,13 @@ def _stack_ctxs(legs: list[Leg], rho: float = 0.3) -> dict[str, GameCtx]:
     return {game: GameCtx(league="NBA", game=game, shape="even", rho=pairs)}
 
 
+_STAR_VS_FIELD = _legs(
+    ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+    ("Field A", "Under", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
+    ("Field B", "Under", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
+)
+
+
 def test_city_from_name_strips_one_or_two_word_nicknames():
     assert _city_from_name("Chicago Bulls") == "Chicago"
     assert _city_from_name("Oklahoma City Thunder") == "Oklahoma City"
@@ -294,12 +301,7 @@ def test_player_direction_mixed_when_own_legs_split():
 
 def test_route_stack_contrast_over_names_the_lone_thriver():
     """One player leans Over against an Under field — that player fronts the prose."""
-    legs = _legs(
-        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
-        ("Field A", "Under", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
-        ("Field B", "Under", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
-    )
-    archetype, subject = route(legs, _stack_ctxs(legs))
+    archetype, subject = route(_STAR_VS_FIELD, _stack_ctxs(_STAR_VS_FIELD))
     assert archetype == "stack"
     assert subject["dir"] == "ContrastOver"
     assert subject["p"] == "Star"
@@ -335,6 +337,7 @@ def test_stack_focus_two_v_two_is_mixed():
     direction, anchor = _stack_focus(legs)
     assert direction == "Mixed"
     assert anchor == "C"  # counts tie, so conviction picks the anchor
+    assert _stack_focus(legs, lead="A") is None
 
 
 def test_stack_focus_straddler_is_mixed():
@@ -346,6 +349,7 @@ def test_stack_focus_straddler_is_mixed():
     )
     direction, _anchor_name = _stack_focus(legs)
     assert direction == "Mixed"
+    assert _stack_focus(legs, lead="Star") is None
 
 
 def test_anchor_conviction_breaks_leg_count_ties():
@@ -411,11 +415,95 @@ def test_thesis_variants_uses_stack_focus_direction(monkeypatch):
         return ["{p} against the grain in {g}"]
 
     monkeypatch.setattr(engine, "bank_cell", fake_bank_cell)
-    legs = _legs(
-        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
-        ("Field A", "Under", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
-        ("Field B", "Under", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
-    )
-    variants, vi, _subject = engine.thesis_variants(legs, _stack_ctxs(legs))
+    variants, vi, _subject = engine.thesis_variants(_STAR_VS_FIELD, _stack_ctxs(_STAR_VS_FIELD))
     assert calls == {"archetype": "stack", "direction": "ContrastOver"}
     assert variants[vi] == "Star against the grain in X/Y"
+
+
+def test_route_lead_hint_routes_player_on_the_lead(monkeypatch):
+    """Short of a stack the lead anchors, a led cluster is the lead's own story —
+    their narrative side and stat family — over a unit edge or a teammate's majority."""
+    calls = []
+
+    def fake_bank_cell(voice, archetype, shape, direction, category):
+        calls.append((archetype, direction, category))
+        return ["{p} carries {g}"]
+
+    monkeypatch.setattr(engine, "bank_cell", fake_bank_cell)
+    unit_pair = _legs(
+        ("A", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("B", "Over", 6.5, "AST", "X/Y", "X", "G2", "playmaking"),
+    )
+    edge = {
+        "X/Y": GameCtx(league="NBA", game="X/Y", pos_edges={"X": {"G": {"dvpoa": 0.12, "n": 2}}})
+    }
+    assert route(unit_pair, edge)[0] == "unit"
+    variants, vi, _ = thesis_variants(unit_pair, edge, lead="B")
+    assert (calls[-1], variants[vi]) == (("player", "Over", "playmaking"), "B carries X/Y")
+
+    majority = _legs(
+        ("Volume", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("Volume", "Over", 2.5, "FG3M", "X/Y", "X", "G1", "scoring"),
+        ("Lead", "Under", 9.5, "REB", "X/Y", "Y", "C1", "boards"),
+    )
+    plain = {"X/Y": GameCtx(league="NBA", game="X/Y")}
+    assert route(majority, plain)[1]["p"] == "Volume"
+    variants, vi, _ = thesis_variants(majority, plain, lead="Lead")
+    assert (calls[-1], variants[vi]) == (("player", "Under", "boards"), "Lead carries X/Y")
+
+
+def test_route_lead_hint_keeps_unanimous_stack_anchored_on_lead():
+    """A one-sided stack stays a stack but fronts the lead, even past the
+    higher-conviction player the un-led anchor would pick."""
+    legs = _legs(
+        ("Lead", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("Sure Thing", "Over", 8.5, "REB", "X/Y", "X", "C1", "boards", False, 0.80),
+        ("Opp", "Over", 22.5, "PTS", "X/Y", "Y", "G1", "scoring", False, 0.60),
+    )
+    ctxs = _stack_ctxs(legs)
+    assert route(legs, ctxs)[1]["p"] == "Sure Thing"
+    assert route(legs, ctxs, lead="Lead") == (
+        "stack",
+        {"n": 3, "p": "Lead", "g": "X/Y", "dir": "Over"},
+    )
+
+
+def test_route_lead_hint_contrast_only_when_lead_is_the_lone_side():
+    """A contrast fronts its lone-side player, so it survives a lead only when that
+    player is the lead — never anchored on an opponent the story isn't about."""
+    assert route(_STAR_VS_FIELD, _stack_ctxs(_STAR_VS_FIELD), lead="Star") == (
+        "stack",
+        {"n": 3, "p": "Star", "g": "X/Y", "dir": "ContrastOver"},
+    )
+    teammates = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("Mate", "Over", 8.5, "REB", "X/Y", "X", "F1", "boards"),
+        ("Opp", "Under", 22.5, "PTS", "X/Y", "Y", "G1", "scoring"),
+    )
+    ctxs = _stack_ctxs(teammates)
+    assert route(teammates, ctxs)[1] == {"n": 3, "p": "Opp", "g": "X/Y", "dir": "ContrastUnder"}
+    archetype, subject = route(teammates, ctxs, lead="Star")
+    assert (archetype, subject) == ("player", {"p": "Star", "g": "X/Y"})
+    assert _direction(_subject_legs(teammates, "X/Y", archetype, subject)) == "Over"
+
+
+def test_route_lead_hint_ignores_a_player_outside_the_game():
+    """A lead with no leg in the primary game can't front its story, so the slip
+    routes exactly as it would un-led."""
+    legs = _legs(
+        ("A", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("B", "Under", 18.5, "PTS", "X/Y", "Y", "G1", "scoring"),
+        ("Satellite", "Over", 6.5, "AST", "Z/W", "Z", "G1", "playmaking"),
+    )
+    ctxs = {"X/Y": GameCtx(league="NBA", game="X/Y")}
+    baseline = route(legs, ctxs)
+    assert baseline == ("game-script", {"g": "X/Y"})
+    for lead in ("Satellite", "Nobody"):
+        assert route(legs, ctxs, lead=lead) == baseline
+
+
+def test_route_without_lead_is_unchanged():
+    """Parlay theses never pass a lead, so the default call stays today's router."""
+    ctxs = _stack_ctxs(_STAR_VS_FIELD)
+    pinned = ("stack", {"n": 3, "p": "Star", "g": "X/Y", "dir": "ContrastOver"})
+    assert route(_STAR_VS_FIELD, ctxs) == route(_STAR_VS_FIELD, ctxs, lead=None) == pinned
