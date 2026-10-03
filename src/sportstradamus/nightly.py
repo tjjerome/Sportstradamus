@@ -7,6 +7,7 @@ Runs after games finish to:
 4. Fill in Legs Resolved/Misses columns in parlay_hist
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
+7. Compute and persist the realized-by-side ledger at platform payouts
 
 Schedule with cron after games finish, e.g.:
     0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
@@ -40,6 +41,7 @@ from sportstradamus.helpers.io import (
     LIVE_METRICS_PATH,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
+    REALIZED_BY_SIDE_PATH,
     _atomic_write_parquet,
     read_history,
     read_parlay_hist,
@@ -49,6 +51,7 @@ from sportstradamus.helpers.io import (
     write_user_slips,
 )
 from sportstradamus.helpers.parlay_modifiers import fold_overlay
+from sportstradamus.realized import compute_realized_by_side
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
 
@@ -124,19 +127,30 @@ def _empty_live_metrics_frame() -> pd.DataFrame:
     )
 
 
-def _side_precision(group: pd.DataFrame, side: str) -> float:
-    """Hit rate among ``Bet == side`` rows (i.e. precision of side recommendations).
+def _bettable(group: pd.DataFrame) -> pd.DataFrame:
+    """Rows whose side the platform posted, with a legacy NaN ``Boost`` read as the flat 1.0.
 
-    ``side`` is ``"Over"`` or ``"Under"``. Returns NaN when fewer than
-    :data:`_MIN_BETS_FOR_PRECISION` rows recommended that side — the conditional
-    hit rate is too noisy at small n to gate a graduation decision.
+    ``Boost == 0`` is the persisted marker for a side the platform never offered, so the
+    row was never a bet and belongs in neither precision nor the profit sims.
     """
-    side_mask = (group["Bet"] == side).to_numpy()
-    n_side = int(side_mask.sum())
-    if n_side < _MIN_BETS_FOR_PRECISION:
+    bets = group.assign(Boost=group["Boost"].fillna(1.0))
+    return bets[bets["Boost"] > 0]
+
+
+def _side_precision(group: pd.DataFrame, side: str) -> float:
+    """Hit rate among posted ``Bet == side`` rows (i.e. precision of side recommendations).
+
+    Unposted rows (``Boost == 0``) are excluded because they hit ~83% and would mask every
+    Under failure now that Gate 2 demotes on either side's precision. ``side`` is
+    ``"Over"`` or ``"Under"``. Returns NaN when fewer than :data:`_MIN_BETS_FOR_PRECISION`
+    posted rows recommended that side — the conditional hit rate is too noisy at small n
+    to gate a graduation decision.
+    """
+    bets = _bettable(group)
+    bets = bets[bets["Bet"] == side]
+    if len(bets) < _MIN_BETS_FOR_PRECISION:
         return float("nan")
-    side_hits = ((group["Bet"] == side) & (group["Result"] == side)).sum()
-    return float(side_hits / n_side)
+    return float((bets["Result"] == side).mean())
 
 
 def _top_decile_mae(group: pd.DataFrame) -> float:
@@ -159,43 +173,38 @@ def _top_decile_mae(group: pd.DataFrame) -> float:
 def _profit_sim_yield(group: pd.DataFrame) -> float:
     """Flat $1-stake realized ROI at fair-odds payouts (locked decision #7).
 
-    Payout multiplier on win = boost / books_p for Over bets (since the bet
-    cashes when Result == Over and the book's implied prob of Over is books_p);
-    boost / (1 - books_p) for Under bets. ``yield`` = (sum(payout * Hit) - n) / n.
-    Returns NaN when the window has no settled offers — distinguishable from
-    "broke even" by the n_settled column.
+    ``Market Prob`` on the history frame is already the bet side's book probability,
+    Over or Under alike, so the payout multiplier on a win is ``boost / books_p`` for
+    every row — no Under inversion. Rows with ``Boost == 0`` are excluded: the platform
+    never posted that side, so there was no bet. ``yield`` = (sum(payout * Hit) - n) / n
+    over the bettable rows; NaN when the window has none.
     """
-    n = len(group)
+    bets = _bettable(group)
+    n = len(bets)
     if n == 0:
         return float("nan")
-    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
-    boost = group["Boost"].fillna(1.0).to_numpy()
-    hit = group["Hit"].fillna(0).to_numpy()
-    is_over = (group["Bet"] == "Over").to_numpy()
-    payout = np.where(is_over, boost / books_p, boost / (1 - books_p))
+    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    payout = bets["Boost"].to_numpy() / books_p
+    hit = bets["Hit"].fillna(0).to_numpy()
     return float((np.sum(payout * hit) - n) / n)
 
 
 def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
     """Kelly-sized realized ROI — Phase 4 set-baseline -> main live gate.
 
-    Per offer: ``decimal_odds = boost / books_p_for_bet_side`` (same convention as
-    :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0,
-    0.05)`` where ``p`` is the model's probability on the bet side. ROI is the
-    dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
-    sum(stake)`` — so cells with different bet counts are comparable. Returns
-    NaN when no offer attracted a positive Kelly stake (no +EV bets in the
-    window).
+    Per bettable offer (``Boost > 0``, see :func:`_bettable`): ``decimal_odds = boost /
+    books_p``, where ``Market Prob`` and ``Win Prob`` are the book's and the model's
+    probabilities of the bet side whichever side it is (same convention as
+    :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0, 0.05)``.
+    ROI is the dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
+    sum(stake)`` — so cells with different bet counts are comparable. Returns NaN when no
+    offer attracted a positive Kelly stake (no +EV bets in the window).
     """
-    n = len(group)
-    if n == 0:
-        return float("nan")
-    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
-    boost = group["Boost"].fillna(1.0).to_numpy()
-    hit = group["Hit"].fillna(0).to_numpy()
-    is_over = (group["Bet"] == "Over").to_numpy()
-    model_p = group["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
-    decimal_odds = np.where(is_over, boost / books_p, boost / (1 - books_p))
+    bets = _bettable(group)
+    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    hit = bets["Hit"].fillna(0).to_numpy()
+    model_p = bets["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
+    decimal_odds = bets["Boost"].to_numpy() / books_p
     b = decimal_odds - 1.0
     # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.
     raw_kelly = np.where(b > 0, (model_p * decimal_odds - 1.0) / b, 0.0)
@@ -370,6 +379,22 @@ def _precompute_calibration(history):
     )
 
 
+def _precompute_realized_by_side(history):
+    ledger = compute_realized_by_side(history)
+    _atomic_write_parquet(ledger, REALIZED_BY_SIDE_PATH)
+    window = max(LIVE_METRICS_WINDOWS)
+    by_side = ledger[
+        (ledger["window_days"] == window)
+        & (ledger["cohort"] == "recommended")
+        & (ledger["split"] == "side")
+    ].set_index("side")["roi"]
+    roi = {s: f"{by_side[s]:+.1%}" if s in by_side.index else "n/a" for s in ("Over", "Under")}
+    logger.info(
+        f"Realized by side: wrote {len(ledger)} rows to {REALIZED_BY_SIDE_PATH.name}; "
+        f"{window}d recommended ROI Over {roi['Over']} Under {roi['Under']}"
+    )
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -402,6 +427,7 @@ def run(league, skip_update, history_only, log_level):
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
     _warn_calibration_divergence(metrics)
+    _precompute_realized_by_side(history)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)

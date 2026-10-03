@@ -67,6 +67,7 @@ _DATA_FILES_TO_PROTECT = (
     "runtime/current_line_movement.parquet",
     "runtime/current_offer_details.parquet",
     "runtime/current_pickem.parquet",
+    "runtime/realized_by_side.parquet",
 )
 
 

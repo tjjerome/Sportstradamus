@@ -9,14 +9,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus import nightly
 from sportstradamus.nightly import (
     _MIN_BETS_FOR_PRECISION,
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
+    _precompute_realized_by_side,
+    _profit_sim_kelly_yield,
+    _profit_sim_yield,
     _settled_offers,
     _side_precision,
 )
+from sportstradamus.realized import REALIZED_BY_SIDE_COLS
 
 NOW = datetime(2026, 5, 20, 12, 0, 0)
 
@@ -33,6 +38,7 @@ def _build_offer(line: float, bet: str, model_p: float, books_p: float) -> dict:
         "Close Market Prob": float("nan"),
         "Market CLV": float("nan"),
         "Model CLV": float("nan"),
+        "Alt Line": False,
     }
 
 
@@ -73,6 +79,7 @@ def _build_history_fixture(now: datetime = NOW, n_per_cell: int = 18) -> pd.Data
                     "Temperature": 1.0,
                     "Disp Cal": 1.0,
                     "Step": "test",
+                    "Model Version": "test",
                     **_build_offer(line, bet, model_p, books_p),
                     "Actual": actual,
                 }
@@ -253,6 +260,31 @@ def test_compute_live_metrics_profit_sim_yield_signs():
     assert wnba_30d["profit_sim_yield"] == pytest.approx(-1.0, abs=1e-6)
 
 
+def test_profit_sim_yield_prices_the_chosen_side():
+    # Market Prob is already the bet side's book probability, so an 0.88 Under favourite
+    # pays 1 / 0.88 exactly like an 0.88 Over one.
+    for bet in ("Under", "Over"):
+        row = {"Bet": bet, "Result": bet, "Hit": 1, "Boost": 1.0, "Market Prob": 0.88}
+        assert math.isclose(_profit_sim_yield(pd.DataFrame([row])), 1 / 0.88 - 1)
+
+
+def test_profit_sim_yields_skip_unoffered_rows():
+    # Boost 0 means the platform never posted that side: not a bet, so in neither sim.
+    posted = {
+        "Bet": "Under",
+        "Result": "Under",
+        "Hit": 1,
+        "Boost": 1.0,
+        "Market Prob": 0.55,
+        "Win Prob": 0.62,
+    }
+    both = pd.DataFrame([posted, {**posted, "Boost": 0.0}])
+    alone = pd.DataFrame([posted])
+    assert _profit_sim_yield(alone) == pytest.approx(1 / 0.55 - 1)
+    assert _profit_sim_yield(both) == _profit_sim_yield(alone)
+    assert _profit_sim_kelly_yield(both) == _profit_sim_kelly_yield(alone)
+
+
 def test_side_precision_reports_hit_rate_per_side():
     """`_side_precision` returns the side-conditional hit rate, NaN when too few bets."""
     # 40 Over bets, 24 hit -> precision_over = 0.60.
@@ -261,12 +293,14 @@ def test_side_precision_reports_hit_rate_per_side():
         {
             "Bet": ["Over"] * 40,
             "Result": (["Over"] * 24) + (["Under"] * 16),
+            "Boost": 1.0,
         }
     )
     under_bets = pd.DataFrame(
         {
             "Bet": ["Under"] * 40,
             "Result": (["Under"] * 16) + (["Over"] * 24),
+            "Boost": 1.0,
         }
     )
     group = pd.concat([over_bets, under_bets], ignore_index=True)
@@ -281,10 +315,29 @@ def test_side_precision_returns_nan_when_n_below_threshold():
         {
             "Bet": ["Over"] * n_small + ["Under"] * 50,
             "Result": ["Over"] * n_small + ["Under"] * 25 + ["Over"] * 25,
+            "Boost": 1.0,
         }
     )
     assert math.isnan(_side_precision(group, "Over"))
     assert _side_precision(group, "Under") == pytest.approx(0.50)
+
+
+def test_side_precision_excludes_unposted_rows():
+    # Unposted Unders (Boost 0) hit ~83% in history; counting them would mask Under failures.
+    def _unders(n_posted: int, n_unposted_hits: int = 10) -> pd.DataFrame:
+        hits = n_posted // 2
+        return pd.DataFrame(
+            {
+                "Bet": "Under",
+                "Result": ["Under"] * hits
+                + ["Over"] * (n_posted - hits)
+                + ["Under"] * n_unposted_hits,
+                "Boost": [1.0] * n_posted + [0.0] * n_unposted_hits,
+            }
+        )
+
+    assert _side_precision(_unders(_MIN_BETS_FOR_PRECISION), "Under") == pytest.approx(0.5)
+    assert math.isnan(_side_precision(_unders(_MIN_BETS_FOR_PRECISION - 1), "Under"))
 
 
 def test_compute_live_metrics_populates_precision_columns():
@@ -300,3 +353,13 @@ def test_compute_live_metrics_populates_precision_columns():
     # Both sides should report a finite precision in [0, 1].
     assert 0.0 <= nba_pts_30d["precision_over_live"] <= 1.0
     assert 0.0 <= nba_pts_30d["precision_under_live"] <= 1.0
+
+
+def test_precompute_realized_by_side_writes_parquet(tmp_path, monkeypatch):
+    path = tmp_path / "realized_by_side.parquet"
+    monkeypatch.setattr(nightly, "REALIZED_BY_SIDE_PATH", path)
+    # Dated off the wall clock: compute_realized_by_side anchors its windows on today.
+    _precompute_realized_by_side(_build_history_fixture(now=datetime.now()))
+    ledger = pd.read_parquet(path)
+    assert list(ledger.columns) == REALIZED_BY_SIDE_COLS
+    assert not ledger.empty

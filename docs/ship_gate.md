@@ -279,6 +279,10 @@ acceptable for now.
 | **No incumbent in main** | Positive Kelly-sized ROI on the cell's settled offers within the 30-day graduation window (`profit_sim_kelly_yield ≥ 0` AND live `book_bss ≥ 0`) | `nightly._profit_sim_kelly_yield` writes `data/live_metrics_per_market.parquet`; `check_graduation._classify_lifecycle` reads it |
 | **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `stat_meta.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
 
+Live precision and both profit sims count only sides the platform posted
+(`Boost > 0`); an unposted side was never a bet, and `Market Prob` is the bet side's
+book probability on either side, so no Under inversion is applied.
+
 A cell that drifts outside its set-baseline bounds is **withheld and re-enters the
 set-baseline track** (drift monitor; the prior pickle stays archived under
 `data/old_models/` for one-pull revert). Live data is dormant in dev, so the live
