@@ -65,6 +65,10 @@ def match_label(team: str, opp: str, home: bool) -> str:
     return f"{team} {'v' if home else '@'} {opp}"
 
 
+def _game_date_mask(df: pd.DataFrame, game: str, date) -> pd.Series:
+    return (df["Game"] == game) & (df["Date"].astype(str) == str(date))
+
+
 def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     """The headline of the highest-EV parlay for one game (``""`` when none).
 
@@ -73,9 +77,7 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     """
     if parlays.empty or "Thesis" not in parlays.columns or "Model EV" not in parlays.columns:
         return ""
-    sub = parlays.loc[
-        (parlays["Game"] == game) & (parlays["Date"].astype(str) == str(date))
-    ].dropna(subset=["Model EV"])
+    sub = parlays.loc[_game_date_mask(parlays, game, date)].dropna(subset=["Model EV"])
     if sub.empty:
         return ""
     thesis = sub.loc[sub["Model EV"].idxmax(), "Thesis"]
@@ -85,7 +87,7 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
 def _story_rows(stories: pd.DataFrame, game: str, date, platform: str | None) -> pd.DataFrame:
     if stories.empty:
         return stories
-    mask = (stories["Game"] == game) & (stories["Date"].astype(str) == str(date))
+    mask = _game_date_mask(stories, game, date)
     if platform is not None:
         mask &= stories["platform"] == platform
     return stories.loc[mask]
@@ -174,7 +176,7 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
     """
     if ctx_df.empty:
         return None
-    sub = ctx_df.loc[(ctx_df["Game"] == game) & (ctx_df["Date"].astype(str) == str(date))]
+    sub = ctx_df.loc[_game_date_mask(ctx_df, game, date)]
     if sub.empty:
         return None
     row = sub.iloc[0]
