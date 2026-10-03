@@ -82,21 +82,57 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     return str(thesis) if pd.notna(thesis) else ""
 
 
-def game_headline(stories: pd.DataFrame, parlays: pd.DataFrame, *, game: str, date) -> str:
-    """Story-engine headline for one game: the highest-``model_ev`` story's ``headline``.
+def _story_rows(stories: pd.DataFrame, game: str, date, platform: str | None) -> pd.DataFrame:
+    if stories.empty:
+        return stories
+    mask = (stories["Game"] == game) & (stories["Date"].astype(str) == str(date))
+    if platform is not None:
+        mask &= stories["platform"] == platform
+    return stories.loc[mask]
 
-    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row for the game,
-    and ``""`` when both are empty. ``stories`` is ``current_game_stories`` (keyed
-    ``platform, League, Game, …`` with no ``Date``, so it matches on ``Game`` alone); the
-    ``date`` only scopes the Date-aware parlay fallback.
+
+def game_headline(
+    stories: pd.DataFrame,
+    parlays: pd.DataFrame,
+    *,
+    game: str,
+    date,
+    platform: str | None = None,
+) -> str:
+    """Story-engine headline for one ``(Game, Date)``, optionally scoped to ``platform``.
+
+    Prefers the slate's ``lead`` story for that key, falling back to every matching row
+    when none is marked lead, and returns that subset's highest-``model_ev`` ``headline``.
+    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row, and ``""``
+    when both are empty.
     """
-    if not stories.empty and {"Game", "headline", "model_ev"} <= set(stories.columns):
-        sub = stories.loc[stories["Game"] == game].dropna(subset=["model_ev"])
+    rows = _story_rows(stories, game, date, platform)
+    if not rows.empty and {"headline", "model_ev"} <= set(rows.columns):
+        sub = rows.dropna(subset=["model_ev"])
+        lead_sub = sub.loc[sub["lead"]]
+        if not lead_sub.empty:
+            sub = lead_sub
         if not sub.empty:
             headline = sub.loc[sub["model_ev"].idxmax(), "headline"]
             if pd.notna(headline) and str(headline):
                 return str(headline)
     return top_thesis(parlays, game=game, date=date)
+
+
+def game_lead_side(stories: pd.DataFrame, *, game: str, date, platform: str | None = None) -> str:
+    """The lead story's ``lead_side`` for one ``(Game, Date)``, optionally scoped to ``platform``.
+
+    The max-``model_ev`` lead row's side when both platforms lead the game on different
+    sides; ``""`` when no story is marked lead for the key, or there are no stories.
+    """
+    rows = _story_rows(stories, game, date, platform)
+    if rows.empty:
+        return ""
+    lead_rows = rows.loc[rows["lead"]]
+    if lead_rows.empty:
+        return ""
+    side = lead_rows.loc[lead_rows["model_ev"].idxmax(), "lead_side"]
+    return str(side) if pd.notna(side) else ""
 
 
 def storyless_prophecy(favored: int) -> str:

@@ -252,7 +252,11 @@ def load_pair_modifiers() -> dict:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")
 def _load_current_game_stories_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    df = read_parquet_safe(path)
+    for col, default in (("lead", False), ("lead_side", "")):
+        if col not in df.columns:
+            df = df.reindex(columns=[*df.columns, col], fill_value=default)
+    return df
 
 
 def load_current_game_stories() -> pd.DataFrame:
@@ -260,8 +264,9 @@ def load_current_game_stories() -> pd.DataFrame:
 
     Keys ``platform, League, Game, story_id, objective`` with ``legs`` a JSON
     leg-desc list; ``headline``/``joint_p``/``model_ev``/``kelly_stake``/
-    ``bet_size`` per row. Seeds the Slips constellation builder (Bankroll
-    Builder / Shoot the Moon).
+    ``bet_size``/``lead``/``lead_side`` per row (``lead``/``lead_side`` default to
+    ``False``/``""`` for a snapshot written before those columns existed). Seeds
+    the Slips constellation builder (Bankroll Builder / Shoot the Moon).
     """
     return _load_current_game_stories_cached(
         CURRENT_GAME_STORIES_PATH, _mtime(CURRENT_GAME_STORIES_PATH)
