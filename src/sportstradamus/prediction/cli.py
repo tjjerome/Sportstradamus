@@ -411,6 +411,8 @@ def main(progress, contest_variant, log_level):
         # Freshly scored offers always start unresolved; reflect fills these in.
         for col in ("Actual", "Close Market Prob", "Market CLV", "Model CLV"):
             all_df[col] = np.nan
+        all_df["Payout Over"] = all_df["Boost_Over"]
+        all_df["Payout Under"] = all_df["Boost_Under"]
         new_df = all_df[HISTORY_COLS].copy() if not all_df.empty else pd.DataFrame()
     else:
         new_df = pd.DataFrame()

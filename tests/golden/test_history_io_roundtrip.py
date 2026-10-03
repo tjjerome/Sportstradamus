@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers import io
+from sportstradamus.history_schema import HISTORY_COLS
 
 
 def _patch_path(tmp_path, monkeypatch):
@@ -40,6 +41,8 @@ def _flat_history():
                 "Market CLV": np.nan,
                 "Model CLV": np.nan,
                 "Alt Line": False,
+                "Payout Over": 1.78,
+                "Payout Under": 1.78,
                 "Actual": np.nan,
             },
             {
@@ -60,6 +63,8 @@ def _flat_history():
                 "Market CLV": 0.10,
                 "Model CLV": 0.05,
                 "Alt Line": True,
+                "Payout Over": 1.85,
+                "Payout Under": 1.9,
                 "Actual": 22.0,
             },
         ]
@@ -86,6 +91,8 @@ def test_write_then_read_preserves_flat_shape_and_values(tmp_path, monkeypatch):
     assert back.loc[1, "Line"] == 26.5
     assert back.loc[1, "Close Market Prob"] == 0.60
     assert bool(back.loc[1, "Alt Line"]) is True
+    assert back.loc[0, "Payout Over"] == 1.78
+    assert back.loc[1, "Payout Under"] == 1.9
 
 
 def test_two_offer_rows_for_same_prediction_key_both_persist(tmp_path, monkeypatch):
@@ -97,3 +104,7 @@ def test_two_offer_rows_for_same_prediction_key_both_persist(tmp_path, monkeypat
     key_cols = ["Player", "League", "Date", "Market"]
     assert back.drop_duplicates(subset=key_cols).shape[0] == 1
     assert back.shape[0] == 2
+
+
+def test_payout_columns_are_in_history_schema():
+    assert {"Payout Over", "Payout Under"}.issubset(HISTORY_COLS)

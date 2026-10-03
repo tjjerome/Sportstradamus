@@ -45,6 +45,10 @@ OFFER_LEVEL_COLS = [
     "Model CLV",
     # |Line - Consensus Line| > tolerance, stamped at write time (cli.py).
     "Alt Line",
+    # Full decimal payout of each side on the platform (0 = side not posted); named
+    # "Payout" because `Boost` on this frame is Underdog's raw multiplier.
+    "Payout Over",
+    "Payout Under",
 ]
 
 HISTORY_COLS = PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + ["Actual"]
