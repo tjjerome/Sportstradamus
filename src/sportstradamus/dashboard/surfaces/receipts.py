@@ -24,6 +24,7 @@ from sportstradamus.analysis import (
     worst_month,
 )
 from sportstradamus.dashboard.assets import ambient_css
+from sportstradamus.dashboard.components.by_side import render_by_side
 from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.profit_sim import (
@@ -37,6 +38,7 @@ from sportstradamus.dashboard.data import (
     load_calibration_summary,
     load_history,
     load_profit_sim_summary,
+    load_realized_by_side,
     load_resolve_meta,
     load_user_slips,
     sidebar_filters,
@@ -217,6 +219,9 @@ if wm:
     )
 else:
     s4.metric("Worst month", "—")
+
+st.subheader("Realized by side — platform payouts")
+render_by_side(load_realized_by_side())
 
 st.subheader("By league / market / platform")
 dim = (

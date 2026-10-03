@@ -36,6 +36,7 @@ from sportstradamus.helpers.io import (
     PAIR_MODIFIER_COLS,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
+    REALIZED_BY_SIDE_PATH,
     USER_SLIPS_PATH,
     parlay_hist_mtime,
     read_history,
@@ -303,6 +304,21 @@ def load_calibration_summary() -> pd.DataFrame:
     return _load_calibration_summary_cached(
         CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH)
     )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_realized_by_side_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
+
+
+def load_realized_by_side() -> pd.DataFrame:
+    """Realized hit rate and ROI per bet side at platform payouts, from the latest ``reflect``.
+
+    Long over ``window_days, cohort, split, key, side`` with ``n, hit_rate, pred_rate,
+    book_rate, units, roi`` (``realized.REALIZED_BY_SIDE_COLS``); empty until ``reflect``
+    writes it.
+    """
+    return _load_realized_by_side_cached(REALIZED_BY_SIDE_PATH, _mtime(REALIZED_BY_SIDE_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")
