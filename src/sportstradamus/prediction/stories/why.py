@@ -19,7 +19,7 @@ import pandas as pd
 
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.bank import why_bank
-from sportstradamus.prediction.stories.legs import lower_leg, offer_index
+from sportstradamus.prediction.stories.legs import lower_leg
 from sportstradamus.prediction.stories.lineup import batting_slot
 
 # Implied-probability gap (model vs book hit prob) below which the two sides
@@ -210,20 +210,21 @@ def _ev_clause(row: pd.Series) -> str:
     return _why_variant(row, "ev", "vs_book").format(ev=f"{model_ev:.2f}", book_ev=f"{book_ev:.2f}")
 
 
-def story_dek(core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame) -> str:
+def story_dek(core_bet_ids: Sequence[int], sctx, index: Mapping[tuple, Mapping]) -> str:
     """A story card's one-line dek: cluster strength, anchor form, matchup.
 
     Built from the legs shared by both of the story's presets, so it stays
-    valid whichever mode chip is active. Clause-guarded and empty-safe — a
-    sub-2-leg core carries no cluster clause and missing offer facts drop
-    their clauses; everything deterministic via the md5 rotation.
+    valid whichever mode chip is active. ``index`` is ``legs.offer_index`` of
+    the offers frame, built once per game by the menu. Clause-guarded and
+    empty-safe — a sub-2-leg core carries no cluster clause and missing offer
+    facts drop their clauses; everything deterministic via the md5 rotation.
     """
     # The label reads the display Market, so the seed needs no platform map to
     # resolve the slug lower_leg carries for enrich_legs.
     descs = [leg_label(lower_leg(sctx.bet_df[i], {})) for i in core_bet_ids]
     seed_tail = "|".join(sorted(descs)) + f"|{sctx.date}"
     clauses = _cluster_clause(core_bet_ids, sctx, seed_tail)
-    anchor = _dek_anchor(core_bet_ids, sctx, offers)
+    anchor = _dek_anchor(core_bet_ids, sctx, index)
     if anchor is not None:
         clauses += _anchor_clauses(*anchor, seed_tail)
     return " · ".join(clauses)
@@ -274,14 +275,14 @@ def _dek_lineup_clause(player: str, match: Mapping, seed_tail: str) -> str:
 
 
 def _dek_anchor(
-    core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame
+    core_bet_ids: Sequence[int], sctx, index: Mapping[tuple, Mapping]
 ) -> tuple[str, Mapping] | None:
-    """The core's highest-conviction leg and its offer row — the dek's subject."""
-    if not core_bet_ids or offers.empty:
+    """The core's highest-conviction leg and its offer record — the dek's subject."""
+    if not core_bet_ids:
         return None
     anchor_id = max(core_bet_ids, key=lambda i: float(sctx.g.p_model[i]))
     row = sctx.bet_df[anchor_id]
-    match = offer_index(offers).get((row["Player"], row["Bet"], row["Line"]))
+    match = index.get((row["Player"], row["Bet"], row["Line"]))
     if match is None:
         return None
     return row["Player"], match

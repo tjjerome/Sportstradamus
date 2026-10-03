@@ -24,6 +24,7 @@ from sportstradamus.prediction.stories import (
 from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.context import Leg
 from sportstradamus.prediction.stories.effects import split_effects
+from sportstradamus.prediction.stories.legs import offer_index
 from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
 from sportstradamus.prediction.stories.why import (
     _anchor_clauses,
@@ -843,7 +844,7 @@ def test_dek_names_the_posted_batting_slot():
         bet_df={0: {"Player": "Aaron Judge", "Bet": "Over", "Line": 1.5, "Market": "total bases"}},
         g=SimpleNamespace(p_model=[0.61]),
     )
-    dek = story_dek([0], sctx, _mlb_offer())
+    dek = story_dek([0], sctx, offer_index(_mlb_offer()))
     assert "Aaron Judge" in dek
     assert "3rd" in dek and "left" in dek
 
