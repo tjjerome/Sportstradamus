@@ -102,10 +102,13 @@ def _why_variant(row: Mapping, clause: str, branch: str) -> str:
     return _pick(why_bank()["why"][clause][branch], f"{clause}|{key}")
 
 
-def _form_branch(deviation: float) -> str:
+def _form_branch(deviation: float, bet: str) -> str:
+    """``for`` when the deviation points the bet's way (above on an Over, below on an Under)."""
     if abs(deviation) < _FORM_AT_LINE:
         return "at_line"
-    return "above" if deviation > 0 else "below"
+    above = deviation > 0
+    side = "for" if above == (bet == "Over") else "against"
+    return ("above_" if above else "below_") + side
 
 
 def _pronoun(row: pd.Series) -> str:
@@ -118,6 +121,8 @@ def _pronoun(row: pd.Series) -> str:
 def _form_clause(row: pd.Series) -> str:
     """Form vs the line. ``Avg 5`` / ``Avg H2H`` are stored as average-minus-line.
 
+    The last-5 read says whether form backs the bet or cuts against it; the
+    head-to-head tail only says which side of the line its average sits on.
     ``Avg H2H == 0`` is the no-head-to-head-history sentinel (set in
     ``model_prob`` when ``H2HPlayed == 0``), so an exact 0.0 H2H is dropped
     rather than read as "even with the line".
@@ -125,22 +130,23 @@ def _form_clause(row: pd.Series) -> str:
     avg5, line = _val(row, "Avg 5"), _val(row, "Line")
     if avg5 is None or line is None:
         return ""
-    clause = _why_variant(row, "form", _form_branch(avg5)).format(
+    clause = _why_variant(row, "form", _form_branch(avg5, row.get("Bet"))).format(
         dev=f"{abs(avg5):g}", line=f"{line:g}", pronoun=_pronoun(row)
     )
     h2h = _val(row, "Avg H2H")
     if h2h is not None and abs(h2h) >= _FORM_AT_LINE:
-        tail = _why_variant(row, "form_h2h", _form_branch(h2h)).format(dev=f"{abs(h2h):g}")
+        h2h_branch = "above" if h2h > 0 else "below"
+        tail = _why_variant(row, "form_h2h", h2h_branch).format(dev=f"{abs(h2h):g}")
         clause += f", {tail}"
     return clause
 
 
 def _matchup_clause(row: pd.Series) -> str:
+    """What the defense does with the stat, true on either side: the edge clause names the bet."""
     dvpoa = _val(row, "DVPOA")
     if dvpoa is None or abs(dvpoa) < _DVPOA_NOTE_FLOOR:
         return ""
-    favorable = (dvpoa > 0) == (row.get("Bet") == "Over")
-    return _why_variant(row, "matchup", "favorable" if favorable else "tough")
+    return _why_variant(row, "matchup", "gives" if dvpoa > 0 else "takes")
 
 
 def _lineup_clause(row: pd.Series) -> str:
@@ -240,20 +246,16 @@ def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
     clauses = []
     avg5, line = match.get("Avg 5"), match.get("Line")
     if avg5 is not None and line is not None and not pd.isna(avg5) and not pd.isna(line):
+        branch = _form_branch(float(avg5), match.get("Bet"))
         clauses.append(
-            _pick(bank["form"][_form_branch(float(avg5))], f"dek.form|{seed_tail}").format(
+            _pick(bank["form"][branch], f"dek.form|{seed_tail}").format(
                 p=player, dev=f"{abs(float(avg5)):g}", line=f"{float(line):g}"
             )
         )
     dvpoa = match.get("DVPOA")
     if dvpoa is not None and not pd.isna(dvpoa) and abs(float(dvpoa)) >= _DVPOA_NOTE_FLOOR:
-        favorable = (float(dvpoa) > 0) == (match.get("Bet") == "Over")
-        clauses.append(
-            _pick(
-                bank["matchup"]["favorable" if favorable else "tough"],
-                f"dek.matchup|{seed_tail}",
-            ).format(p=player)
-        )
+        branch = "gives" if float(dvpoa) > 0 else "takes"
+        clauses.append(_pick(bank["matchup"][branch], f"dek.matchup|{seed_tail}").format(p=player))
     lineup_clause = _dek_lineup_clause(player, match, seed_tail)
     if lineup_clause:
         clauses.append(lineup_clause)

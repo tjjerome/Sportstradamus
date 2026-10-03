@@ -25,7 +25,12 @@ from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.context import Leg
 from sportstradamus.prediction.stories.effects import split_effects
 from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
-from sportstradamus.prediction.stories.why import story_dek
+from sportstradamus.prediction.stories.why import (
+    _anchor_clauses,
+    _form_clause,
+    _matchup_clause,
+    story_dek,
+)
 
 _DATE = "2026-06-13"
 
@@ -235,17 +240,18 @@ def test_why_exact_strings():
     out = attach_offer_why(_OFFERS.copy())
     whys = {(r["Player"], r["Market"], r["Bet"]): r["Why"] for _, r in out.iterrows()}
     assert whys[("Jayson Tatum", "PTS", "Over")] == (
-        "Running 3.5 past a 28.5 line over his last 5, with 2 of daylight above it "
-        "head-to-head, the matchup grades out friendly, a 7-pt gap on the over: "
-        "model 59%, book 52%."
+        "The over has his last 5 averaging 3.5 above the 28.5 line, with 2 of daylight above "
+        "it head-to-head, facing an opponent that lets this stat climb, a 7-pt gap on the "
+        "over: model 59%, book 52%."
     )
     assert whys[("Joel Embiid", "PTS", "Under")] == (
-        "2 below a 30.5 line over his last 5, and 1.5 short of it when these two meet, "
-        "a matchup that leans the right way, model 57%, book 51% — the under carries "
-        "a 6-pt edge."
+        "The under goes with his last 5 running 2 short of the 30.5 line, and 1.5 short of it "
+        "when these two meet, into a matchup that has been suppressing this stat, model 57%, "
+        "book 51% — the under carries a 6-pt edge."
     )
     assert whys[("Jayson Tatum", "REB", "Over")] == (
-        "1 above a 8.5 line over his last 5, a 6-pt gap on the over: model 56%, book 50%."
+        "The over goes with his last 5 running 1 past the 8.5 line, a 6-pt gap on the over: "
+        "model 56%, book 50%."
     )
 
 
@@ -677,6 +683,30 @@ def test_why_rotation_deterministic():
     a = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     b = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     assert a == b
+
+
+def test_matchup_clause_reads_the_defense_on_an_under():
+    """The matchup says what the defense does with the stat, true on either side of the
+    bet; naming the side is the edge clause's job."""
+    bank = why_bank()
+    for dvpoa, branch in ((-0.10, "takes"), (0.10, "gives")):
+        facts = {"DVPOA": dvpoa, "Bet": "Under"}
+        assert _matchup_clause(pd.Series(facts)) in bank["why"]["matchup"][branch]
+        (dek_clause,) = _anchor_clauses("Joel Embiid", facts, _DATE)
+        assert dek_clause in {v.format(p="Joel Embiid") for v in bank["dek"]["matchup"][branch]}
+
+
+def test_form_clause_is_bet_factual():
+    """An Under on a player running above the line reads as form cutting against it,
+    and one on a player running below it as form backing it."""
+    bank = why_bank()
+    for avg5, branch in ((2.0, "above_against"), (-2.0, "below_for")):
+        facts = {"Avg 5": avg5, "Line": 30.5, "Bet": "Under"}
+        why = {v.format(dev="2", line="30.5", pronoun="his") for v in bank["why"]["form"][branch]}
+        assert _form_clause(pd.Series(facts)) in why
+        dek = {v.format(p="Joel Embiid", dev="2", line="30.5") for v in bank["dek"]["form"][branch]}
+        (dek_clause,) = _anchor_clauses("Joel Embiid", facts, _DATE)
+        assert dek_clause in dek
 
 
 # Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a

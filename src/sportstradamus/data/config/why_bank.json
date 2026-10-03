@@ -10,21 +10,37 @@
   },
   "why": {
     "form": {
-      "above": [
-        "{dev} above a {line} line over {pronoun} last 5",
-        "clearing a {line} line by {dev} across {pronoun} last 5",
-        "{dev} clear of a {line} line over {pronoun} last 5",
-        "running {dev} past a {line} line over {pronoun} last 5",
-        "a {line} line, beaten by {dev} on average over {pronoun} last 5",
-        "{dev} of daylight above a {line} line across {pronoun} last 5"
+      "above_for": [
+        "the over goes with {pronoun} last 5 running {dev} past the {line} line",
+        "{pronoun} last 5 back the over by running {dev} above the {line} line",
+        "form sides with the over as {pronoun} last 5 run {dev} clear of the {line} line",
+        "the over has {pronoun} last 5 averaging {dev} above the {line} line",
+        "the over starts from {pronoun} last 5 already {dev} past the {line} line",
+        "the over leans on {pronoun} last 5 clearing the {line} line by {dev}"
       ],
-      "below": [
-        "{dev} below a {line} line over {pronoun} last 5",
-        "trailing a {line} line by {dev} across {pronoun} last 5",
-        "{dev} shy of a {line} line over {pronoun} last 5",
-        "running {dev} short of a {line} line over {pronoun} last 5",
-        "a {line} line, missed by {dev} on average over {pronoun} last 5",
-        "{dev} of slack below a {line} line across {pronoun} last 5"
+      "above_against": [
+        "the under bets against {pronoun} last 5 running {dev} past the {line} line",
+        "{pronoun} last 5 cut against the under by running {dev} above the {line} line",
+        "form sides against the under as {pronoun} last 5 run {dev} clear of the {line} line",
+        "the under faces {pronoun} last 5 averaging {dev} above the {line} line",
+        "the under asks for a miss on the {line} line {pronoun} last 5 cleared by {dev}",
+        "the under runs against {pronoun} last 5 clearing the {line} line by {dev}"
+      ],
+      "below_for": [
+        "the under goes with {pronoun} last 5 running {dev} short of the {line} line",
+        "{pronoun} last 5 back the under by running {dev} below the {line} line",
+        "form sides with the under as {pronoun} last 5 run {dev} shy of the {line} line",
+        "the under has {pronoun} last 5 averaging {dev} below the {line} line",
+        "the under starts from {pronoun} last 5 already {dev} short of the {line} line",
+        "the under leans on {pronoun} last 5 missing the {line} line by {dev}"
+      ],
+      "below_against": [
+        "the over bets against {pronoun} last 5 running {dev} short of the {line} line",
+        "{pronoun} last 5 cut against the over by running {dev} below the {line} line",
+        "form sides against the over as {pronoun} last 5 run {dev} shy of the {line} line",
+        "the over faces {pronoun} last 5 averaging {dev} below the {line} line",
+        "the over asks for a jump past the {line} line {pronoun} last 5 missed by {dev}",
+        "the over runs against {pronoun} last 5 missing the {line} line by {dev}"
       ],
       "at_line": [
         "sitting right on a {line} line over {pronoun} last 5",
@@ -62,21 +78,21 @@
       ]
     },
     "matchup": {
-      "favorable": [
-        "a favorable matchup on paper",
-        "a soft matchup on paper",
-        "a matchup that leans the right way",
-        "a matchup the numbers like",
-        "the matchup grades out friendly",
-        "a defense that gives this stat away"
+      "gives": [
+        "facing a matchup where this stat runs above average",
+        "against an opponent that pushes this stat above the norm",
+        "into a matchup that has been inflating this stat",
+        "against an opponent that allows this stat at an above-average rate",
+        "facing an opponent that lets this stat climb",
+        "into an opponent that gives this stat up more than most"
       ],
-      "tough": [
-        "into a tough matchup",
-        "into a stingy matchup",
-        "against a matchup that leans wrong",
-        "into a matchup the numbers dislike",
-        "the matchup grades out hostile",
-        "against a defense that takes this stat away"
+      "takes": [
+        "facing a matchup where this stat runs below average",
+        "against an opponent that holds this stat below the norm",
+        "into a matchup that has been suppressing this stat",
+        "against an opponent that allows this stat at a below-average rate",
+        "facing an opponent that keeps this stat down",
+        "into an opponent that takes this stat away more than most"
       ]
     },
     "edge": {
@@ -194,21 +210,37 @@
       "{n} legs that tend to land together, {rho} average correlation"
     ],
     "form": {
-      "above": [
-        "{p} runs {dev} past a {line} line across the last 5",
-        "{p} clears the {line} number by {dev} across the last 5",
-        "{p}'s last 5 sit {dev} above a {line} line",
-        "the last 5 put {p} {dev} above a {line} line",
-        "a {line} line sits {dev} below {p}'s recent pace",
-        "{p} carries {dev} of cushion on a {line} line across the last 5"
+      "above_for": [
+        "{p} runs {dev} past the {line} line across the last 5, a trend the over rides",
+        "the over has {p}'s last 5 averaging {dev} above the {line} line",
+        "{p}'s last 5 back the over, {dev} clear of the {line} line",
+        "form sides with the over as {p} runs {dev} past the {line} line",
+        "the over starts from a last 5 that put {p} {dev} above the {line} line",
+        "{p} carries {dev} of cushion on the {line} line into the over"
       ],
-      "below": [
-        "{p} runs {dev} short of a {line} line across the last 5",
-        "{p} misses the {line} number by {dev} across the last 5",
-        "{p}'s last 5 sit {dev} below a {line} line",
-        "the last 5 leave {p} {dev} below a {line} line",
-        "a {line} line sits {dev} above {p}'s recent pace",
-        "{p} carries a {dev} deficit to a {line} line across the last 5"
+      "above_against": [
+        "{p} runs {dev} past the {line} line across the last 5, a trend the under bets against",
+        "the under faces {p}'s last 5 averaging {dev} above the {line} line",
+        "{p}'s last 5 cut against the under, {dev} clear of the {line} line",
+        "form sides against the under as {p} runs {dev} past the {line} line",
+        "the under asks {p} to miss the {line} line the last 5 cleared by {dev}",
+        "{p} carries {dev} of cushion on the {line} line that the under has to erase"
+      ],
+      "below_for": [
+        "{p} runs {dev} short of the {line} line across the last 5, a trend the under rides",
+        "the under has {p}'s last 5 averaging {dev} below the {line} line",
+        "{p}'s last 5 back the under, {dev} shy of the {line} line",
+        "form sides with the under as {p} runs {dev} short of the {line} line",
+        "the under starts from a last 5 that left {p} {dev} below the {line} line",
+        "{p} carries a {dev} deficit to the {line} line into the under"
+      ],
+      "below_against": [
+        "{p} runs {dev} short of the {line} line across the last 5, a trend the over bets against",
+        "the over faces {p}'s last 5 averaging {dev} below the {line} line",
+        "{p}'s last 5 cut against the over, {dev} shy of the {line} line",
+        "form sides against the over as {p} runs {dev} short of the {line} line",
+        "the over asks {p} to clear the {line} line the last 5 missed by {dev}",
+        "{p} carries a {dev} deficit to the {line} line that the over has to erase"
       ],
       "at_line": [
         "{p} lands right at a {line} line across the last 5",
@@ -220,21 +252,21 @@
       ]
     },
     "matchup": {
-      "favorable": [
-        "{p} draws a defense that concedes this stat",
-        "the matchup tilts {p}'s way",
-        "{p} faces a defense that ranks soft against this stat",
-        "the defense-versus-position read leans {p}'s way",
-        "{p} lines up against a giving matchup",
-        "the matchup grades favorable for {p}"
+      "gives": [
+        "{p} faces a matchup where this stat runs above average",
+        "{p} draws an opponent that pushes this stat above the norm",
+        "the matchup has been inflating this stat for {p}'s position",
+        "{p}'s opponent allows this stat at an above-average rate",
+        "{p} meets an opponent that lets this stat climb",
+        "the defense-versus-position read has this stat running above average for {p}"
       ],
-      "tough": [
-        "{p} draws a defense that guards this stat well",
-        "the matchup tilts against {p}",
-        "{p} faces a defense that ranks stingy against this stat",
-        "the defense-versus-position read leans against {p}",
-        "{p} lines up against a hostile matchup",
-        "the matchup grades tough for {p}"
+      "takes": [
+        "{p} faces a matchup where this stat runs below average",
+        "{p} draws an opponent that holds this stat below the norm",
+        "the matchup has been suppressing this stat for {p}'s position",
+        "{p}'s opponent allows this stat at a below-average rate",
+        "{p} meets an opponent that keeps this stat down",
+        "the defense-versus-position read has this stat running below average for {p}"
       ]
     },
     "lineup": {

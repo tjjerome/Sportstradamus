@@ -344,7 +344,8 @@ def test_shape_never_falls_through_to_even(voice, archetype, direction, shape):
     Every (voice, archetype, non-even shape, direction) node must be authored
     somewhere, and every category under it must resolve to that node's copy —
     a shape-blind fall-through is how a shootout ended up telling readers the
-    game had a low ceiling.
+    game had a low ceiling. Excludes ``mistakes``: a mistakes read prefers
+    valence over shape by design.
     """
     shaped = [
         cell
@@ -357,8 +358,54 @@ def test_shape_never_falls_through_to_even(voice, archetype, direction, shape):
     ]
     assert shaped, "no cell authored for this shape and direction"
     for category in _CATEGORIES:
+        if category == "mistakes":
+            continue
         returned = bank_cell(voice, archetype, shape, direction, category)
         assert any(returned is cell for cell in shaped), category
+
+
+def _chain_candidates(bank, voice, shape, archetype, direction, category):
+    """Cells bank_cell's (voice/shared × shape/even) probe can return for one category."""
+    shared = bank["shared"]
+    voiced = bank.get(voice, shared)
+    return [
+        cell
+        for phrases, shape_key in (
+            (voiced, shape),
+            (shared, shape),
+            (voiced, "even"),
+            (shared, "even"),
+        )
+        for cell in [phrases.get(archetype, {}).get(shape_key, {}).get(direction, {}).get(category)]
+        if cell
+    ]
+
+
+@pytest.mark.parametrize("direction", ("Over", "Under"))
+@pytest.mark.parametrize("archetype", ("player", "stack", "game-script"))
+@pytest.mark.parametrize("shape", _SHAPES)
+@pytest.mark.parametrize("voice", _SPORT_VOICES)
+def test_mistakes_never_degrades_to_production(voice, shape, archetype, direction):
+    """A mistakes lookup resolves to a mistakes cell, never a production cell.
+
+    Mistakes cells are authored only under ``even`` (docs/story_voice.md), so this
+    pins the valence-before-shape probe for a negative-market leg in a shaped game.
+    """
+    if not any(
+        arch == archetype and dirn == direction and category == "mistakes"
+        for _voice, arch, _shape, dirn, category, _variants in _walk_variants()
+    ):
+        pytest.skip(f"no mistakes cell authored anywhere for ({archetype}, {direction})")
+
+    bank = _bank()
+    mistakes = _chain_candidates(bank, voice, shape, archetype, direction, "mistakes")
+    assert mistakes, (voice, archetype, shape, direction)
+
+    returned = bank_cell(voice, archetype, shape, direction, "mistakes")
+    assert returned in mistakes
+
+    production = _chain_candidates(bank, voice, shape, archetype, direction, "production")
+    assert returned not in production
 
 
 # Where the board's shape and the model's direction disagree, every voice owes
@@ -510,14 +557,16 @@ def test_baseball_voice_speaks_baseball():
 # a list-valued clause (dek.cluster) carries branch None. Every variant must
 # use exactly these slots — the facts are the clause.
 _WHY_SLOTS = {
-    ("why", "form", "above"): {"dev", "line", "pronoun"},
-    ("why", "form", "below"): {"dev", "line", "pronoun"},
+    ("why", "form", "above_for"): {"dev", "line", "pronoun"},
+    ("why", "form", "above_against"): {"dev", "line", "pronoun"},
+    ("why", "form", "below_for"): {"dev", "line", "pronoun"},
+    ("why", "form", "below_against"): {"dev", "line", "pronoun"},
     ("why", "form", "at_line"): {"line", "pronoun"},
     ("why", "form_h2h", "above"): {"dev"},
     ("why", "form_h2h", "below"): {"dev"},
     ("why", "form_h2h", "at_line"): set(),
-    ("why", "matchup", "favorable"): set(),
-    ("why", "matchup", "tough"): set(),
+    ("why", "matchup", "gives"): set(),
+    ("why", "matchup", "takes"): set(),
     ("why", "edge", "model_ahead"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "edge", "book_back"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "ev", "solo"): {"ev"},
@@ -531,11 +580,13 @@ _WHY_SLOTS = {
     ("why", "lineup_usual", "switch"): {"slot", "throws"},
     ("why", "lineup_usual", "slot_only"): {"slot"},
     ("dek", "cluster", None): {"n", "rho"},
-    ("dek", "form", "above"): {"p", "dev", "line"},
-    ("dek", "form", "below"): {"p", "dev", "line"},
+    ("dek", "form", "above_for"): {"p", "dev", "line"},
+    ("dek", "form", "above_against"): {"p", "dev", "line"},
+    ("dek", "form", "below_for"): {"p", "dev", "line"},
+    ("dek", "form", "below_against"): {"p", "dev", "line"},
     ("dek", "form", "at_line"): {"p", "line"},
-    ("dek", "matchup", "favorable"): {"p"},
-    ("dek", "matchup", "tough"): {"p"},
+    ("dek", "matchup", "gives"): {"p"},
+    ("dek", "matchup", "takes"): {"p"},
     ("dek", "lineup", "posted"): {"p", "slot"},
     ("dek", "lineup", "posted_hand"): {"p", "slot", "throws"},
     ("dek", "lineup", "usual"): {"p", "slot"},
@@ -549,6 +600,22 @@ def test_why_bank_branch_inventory_and_slots():
     for key, variants in seen.items():
         for variant in variants:
             assert set(_SLOT_RE.findall(variant)) == _WHY_SLOTS[key], (key, variant)
+
+
+def test_why_bank_side_words_follow_the_branch():
+    """A bet-relative form branch implies one side (above_for and below_against are
+    Overs), so its prose may name that side, never the other. Matchup branches read
+    the defense, true on either side, so they name neither."""
+    bank = why_bank()
+    over_branches = {"above_for", "below_against"}
+    for section in ("why", "dek"):
+        for branch in ("above_for", "above_against", "below_for", "below_against"):
+            wrong_side = _UNDER_WORD_RE if branch in over_branches else _OVER_WORD_RE
+            for variant in bank[section]["form"][branch]:
+                assert not wrong_side.search(variant), (section, branch, variant)
+        for branch, variants in bank[section]["matchup"].items():
+            for variant in variants:
+                assert not _BET_WORD_RE.search(variant), (section, branch, variant)
 
 
 def test_why_bank_depth_and_mid_sentence_style():

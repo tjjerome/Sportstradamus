@@ -56,8 +56,11 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
     Shape outranks both voice and category: a shootout keeps shootout copy even
     when the voice authors no such cell and the category has to degrade to
     ``production``, because shape-blind prose contradicts the game it describes
-    ("low ceiling — fade the scoring" on a Coors slate). Under a shape node the
-    chain probes ``category`` then ``production`` and nothing else, so the
+    ("low ceiling — fade the scoring" on a Coors slate). The one exception is
+    ``mistakes``, which outranks shape instead: every voice authors ``mistakes``
+    cells only under ``even``, so that lookup probes voice/shared × shape/even
+    for ``mistakes`` before taking any ``production`` step. Under a shape node
+    the chain probes ``category`` then ``production`` and nothing else, so the
     authoring invariant the design rests on is that every authored shaped node
     carries a ``production`` cell. Only when neither the voice nor ``shared``
     authors *any* cell for that shape and direction does the chain fall to
@@ -68,7 +71,18 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
     bank = _bank()
     shared = bank["shared"]
     voiced = bank.get(voice, shared)
+    mistakes_probe = (
+        (
+            (voiced, shape, "mistakes"),
+            (shared, shape, "mistakes"),
+            (voiced, "even", "mistakes"),
+            (shared, "even", "mistakes"),
+        )
+        if category == "mistakes"
+        else ()
+    )
     for phrases, shape_key, category_key in (
+        *mistakes_probe,
         (voiced, shape, category),
         (voiced, shape, "production"),
         (shared, shape, category),
