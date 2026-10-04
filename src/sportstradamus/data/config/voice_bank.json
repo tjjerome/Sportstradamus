@@ -1708,265 +1708,320 @@
       "shootout": {
         "Over": {
           "scoring": [
-            "The {g} total sits high, and {p} carries the yardage with it",
-            "A loud {g} number keeps {p} on the field every drive",
-            "The pace in {g} stretches the drives that feed {p}",
-            "Neither {g} defense gets a stop, and the yards find {p}",
-            "{p} settles into the {g} tempo and the chains keep moving",
-            "Scoring drives in {g} need yards, and {p} supplies them"
+            "{p} pours yards onto a {g} scoreboard that keeps turning",
+            "{p} rides the {g} pace and racks up yards every drive",
+            "{p} runs the {g} tempo, and the chains keep moving",
+            "{p} carries the yardage a loud {g} total promises",
+            "{p} attacks a {g} defense that cannot get off the field",
+            "The {g} total runs loud, and {p} feeds on every drive",
+            "Neither {g} defense gets a stop, and the yards flood toward {p}",
+            "Scoring drives answer scoring drives in {g}, and {p} piles up the yards",
+            "A loud {g} number keeps {p} busy, and the yards keep coming",
+            "The {g} pace stacks snaps, and {p} turns snaps into yards"
           ],
           "playmaking": [
-            "The {g} pace turns every drive into throws, and {p} catches them",
-            "A high {g} total means volume passing, and {p} draws the targets",
-            "No-huddle football in {g} keeps {p} on the field",
-            "The {g} script leans pass, and the targets settle on {p}",
-            "{p} works the middle while {g} trades scoring drives",
-            "Two-minute pace in {g} funnels the completions toward {p}"
+            "{p} hauls in targets while {g} trades touchdowns",
+            "{p} owns the target share in a {g} game built on throws",
+            "{p} feeds on a {g} pace that turns every drive into throws",
+            "{p} racks up catches as the {g} shootout stretches every drive",
+            "The {g} total runs loud, and the completions pour toward {p}",
+            "No-huddle tempo in {g} fires target after target at {p}",
+            "The {g} script leans pass, and the targets pile up on {p}"
           ],
           "production": [
-            "The {g} total is loud, and {p} sits at the center of it",
-            "A shootout script in {g} keeps {p} on the field",
-            "The {g} pace lifts the workload, and {p} carries most of it",
-            "Every {g} drive matters early, and {p} touches most of them",
-            "{p} works a {g} script with no reason to slow down",
-            "Points come in bunches in {g}, and {p} sits upstream of them"
+            "{p} runs a {g} game that never slows down",
+            "{p} touches everything while the {g} scoreboard keeps turning",
+            "{p} runs the {g} shootout from the first snap",
+            "{p} piles up touches on a {g} pace with no brakes",
+            "{p} stacks touches while both {g} offenses run hot",
+            "The {g} total runs loud, and {p} drives the workload",
+            "A shootout script in {g} keeps {p} on the field and fed",
+            "Every {g} drive matters early, and {p} carries most of them",
+            "The {g} pace lifts every workload, and {p} hauls the biggest one"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} total is loud, but the script skips {p}",
-            "Scoring comes easy in {g}, just not through {p}",
-            "The {g} pace lifts everyone, and {p} is the exception",
-            "A loud {g} number still leaves {p} on the quiet side",
-            "{p} blocks while the {g} scoring happens elsewhere",
-            "The {g} shootout runs on the far hash from {p}"
+            "The {g} total runs loud, and {p}'s yards go cold anyway",
+            "Scoring comes easy in {g}, and it comes from everyone but {p}",
+            "The {g} pace lifts everyone, and {p}'s yardage falls flat",
+            "A loud {g} number, and {p} comes up short inside it",
+            "{p}'s yards dry up on the far hash of a {g} shootout",
+            "The {g} shootout runs through other hands, and {p}'s yards starve",
+            "Both {g} offenses erupt, and {p}'s share shrinks to nothing"
           ],
           "production": [
-            "The {g} total is loud, and {p}'s role stays small",
-            "A shootout in {g} lifts the board, not {p}'s snaps",
-            "The {g} pace rewards everyone ahead of {p} on the chart",
+            "The {g} total runs loud, and {p}'s workload stalls",
+            "A shootout in {g} lifts the board and starves {p}'s snaps",
+            "The {g} pace feeds everyone ahead of {p} on the depth chart",
             "Fireworks in {g} come from snaps {p} never takes",
-            "{p} watches the {g} scoring race from a light workload",
-            "The {g} script spreads it thin, and {p} gets the thinnest slice"
+            "{p} fades into a {g} script that spreads the touches thin",
+            "Both {g} offenses run hot, and {p}'s touches dry up anyway",
+            "A loud {g} number, and {p}'s role comes up short of it"
           ]
         }
       },
       "grind": {
         "Over": {
           "scoring": [
-            "The {g} number is low, and every yard runs through {p}",
-            "A slugfest in {g} shortens the game and lengthens {p}'s carries",
-            "The {g} trenches set the terms, and {p} works inside them",
-            "Field position drives {g}, and {p} moves it a yard at a time",
-            "{p} grinds the {g} chains forward while nothing else moves",
-            "Heavy personnel in {g} means the ball keeps finding {p}"
+            "{p} grinds the chains forward while {g} bogs down",
+            "{p} pounds the ball while the {g} trenches set the terms",
+            "{p} carries the {g} slugfest a yard at a time",
+            "{p} wears down a {g} front that gets no rest",
+            "The {g} number runs low, and every yard runs through {p}",
+            "A slugfest in {g} shortens the game and feeds {p} the carries",
+            "Heavy personnel in {g} means the ball keeps finding {p}",
+            "Field position rules {g}, and {p} drags it forward yard by yard",
+            "The {g} trenches set the terms, and {p} piles up yards inside them"
           ],
           "playmaking": [
-            "The {g} pocket collapses early, and the checkdowns settle on {p}",
-            "A low {g} number turns third down into a throw toward {p}",
-            "The {g} trenches lose, so the ball comes out to {p}",
-            "Short fields and short throws in {g} keep {p} busy",
-            "{p} is the safe read every time {g} bogs down",
-            "The {g} grind takes the deep shots away and leaves {p}"
+            "{p} racks up the checkdowns every time {g} bogs down",
+            "{p} owns third down when the {g} trenches take the deep ball away",
+            "{p} feeds on short throws while the {g} pocket collapses",
+            "The {g} pocket caves early, and the throws pour out to {p}",
+            "A low {g} number pushes every third down toward {p}",
+            "Short fields and short throws in {g} pile up catches for {p}",
+            "Deep shots die in {g}, and the short throws pile up on {p}"
           ],
           "production": [
-            "The {g} number is low, and {p} is the one engine running",
-            "A slugfest in {g} concentrates the touches, and {p} takes them",
-            "The {g} trenches shorten the game, and {p}'s role grows",
-            "Four-minute offense in {g} runs straight through {p}",
-            "{p} carries the {g} workload that ugly football creates",
-            "Field position rules {g}, and {p} is how it moves"
+            "{p} carries the whole {g} workload ugly football creates",
+            "{p} grinds out a workload while the {g} scoreboard barely moves",
+            "{p} owns the four-minute offense that closes {g}",
+            "{p} pounds through a {g} rockfight one carry at a time",
+            "A slugfest in {g} concentrates the touches, and {p} takes them all",
+            "The {g} number runs low, and {p} hauls the load anyway",
+            "Field position rules {g}, and {p} pushes it forward every series",
+            "The {g} trenches shorten the game, and the touches pile up on {p}",
+            "Twelve-play drives in {g} feed {p} on every down"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} number is low, and the trenches swallow {p}",
+            "The {g} number runs low, and the trenches swallow {p}",
             "A slugfest in {g} leaves {p} nothing to run into",
-            "Eight in the box in {g} closes {p}'s lanes",
+            "Eight in the box in {g} chokes {p}'s lanes shut",
             "The {g} trenches hold, and {p}'s yardage stalls with them",
-            "{p} works for scraps while {g} stays in the mud",
-            "Second-and-long all afternoon in {g} strands {p} short"
+            "{p} fights for scraps while {g} bogs down in the mud",
+            "Second-and-long all afternoon in {g}, and {p} comes up short",
+            "The {g} front clamps down, and {p}'s yards dry up",
+            "A low {g} number starves {p} of the yards"
           ],
           "production": [
-            "The {g} number is low, and {p}'s role shrinks with it",
+            "The {g} number runs low, and {p}'s role shrinks with it",
             "Punts pile up in {g}, and {p}'s snaps come to nothing",
             "The {g} grind keeps the ball away from {p}",
-            "A slugfest in {g} gives {p} volume without production",
-            "{p} disappears into a {g} script built on field position",
-            "Three-and-outs in {g} end the drives before {p} matters"
+            "A {g} slugfest drains the production out of {p}'s snaps",
+            "{p} fades into a {g} script built on field position",
+            "Three-and-outs in {g} choke the drives before {p} matters",
+            "The {g} trenches win, and {p}'s workload falls flat",
+            "Both fronts hold in {g}, and {p}'s touches dry up"
           ]
         }
       },
       "blowout": {
         "Over": {
           "scoring": [
-            "The {g} spread is wide, and {p} runs downhill on a beaten front",
+            "{p} runs downhill on a beaten {g} front, and the yards pile up",
+            "{p} piles up clock-killing yards once the {g} margin opens",
+            "{p} punishes a {g} defense that stops fighting by halftime",
+            "{p} racks up yards on soft {g} coverage all second half",
+            "The {g} spread runs wide, and {p} feeds on garbage time",
             "A lopsided {g} script means clock-killing carries, and {p} takes them",
+            "Garbage time in {g} hands {p} open grass, and the yards keep coming",
             "The {g} margin grows, and the yards come easy for {p}",
-            "Garbage time in {g} hands {p} soft coverage and open grass",
-            "{p} keeps moving the chains while the {g} margin settles it",
-            "A beaten {g} defense stops fighting, and {p}'s yardage climbs"
+            "A beaten {g} front sags, and {p}'s yardage climbs"
           ],
           "playmaking": [
-            "The {g} spread is wide, and prevent coverage feeds {p} completions",
-            "Garbage time in {g} turns every checkdown into a target for {p}",
-            "The {g} margin softens the coverage, and {p} works underneath",
-            "A trailing {g} offense throws all afternoon, and {p} catches it",
-            "{p} collects the easy targets a settled {g} script hands out",
-            "The {g} deficit forces throws, and most of them go to {p}"
+            "{p} feeds on prevent coverage once the {g} margin opens",
+            "{p} racks up catches while a trailing {g} offense throws it all afternoon",
+            "{p} piles up targets on a {g} script with the clock running out",
+            "The {g} spread runs wide, and the completions pour toward {p}",
+            "Garbage time in {g} feeds {p} a checkdown on every snap",
+            "The {g} margin softens the coverage, and {p} racks up the easy ones",
+            "A trailing {g} offense throws all afternoon, and {p} keeps catching it"
           ],
           "production": [
-            "The {g} spread is wide, and {p} works while it holds",
+            "{p} owns a {g} game decided by halftime",
+            "{p} piles it up unanswered while the {g} margin holds",
+            "{p} runs the clock and the {g} workload at the same time",
+            "{p} keeps the touches coming after the {g} margin opens",
+            "The {g} spread runs wide, and {p} drives the one-way traffic",
             "A one-way {g} script keeps handing {p} the ball",
-            "The {g} margin turns the second half into {p}'s workload",
+            "The {g} margin grows, and the second half pours through {p}",
             "Garbage time in {g} keeps {p} on the field and busy",
-            "{p} banks the numbers before the {g} margin closes the playbook",
             "A beaten {g} front lets {p} pile it up unanswered"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} spread is wide, and kneel-downs end {p}'s afternoon",
-            "A settled {g} script sends {p} to the sideline early",
+            "The {g} spread runs wide, and kneel-downs shut {p} down early",
+            "A decided {g} script pulls {p} by the fourth quarter",
             "The {g} margin closes the playbook on {p} by the fourth",
             "Backups take {p}'s snaps once {g} stops being a game",
-            "{p} watches the last quarter of {g} in a ball cap",
-            "Clock-killing football in {g} strands {p} short of the number"
+            "{p}'s yards dry up once the {g} margin makes it a formality",
+            "Clock-killing football in {g}, and {p} comes up short on yards",
+            "The {g} rout drains the yards out of {p}'s second half"
           ],
           "production": [
-            "The {g} spread is wide, and {p}'s workload ends with the suspense",
-            "Garbage time in {g} belongs to the second string, not {p}",
-            "The {g} margin caps {p}'s touches by the third quarter",
+            "The {g} spread runs wide, and {p}'s workload ends with the suspense",
+            "The {g} backups take garbage time, and {p}'s touches dry up",
+            "The {g} margin shuts {p} down by the third quarter",
             "Kneel-downs close {g}, and {p}'s counting stats never finish",
-            "{p} sits once the {g} margin makes the rest a formality",
-            "A decided {g} script has nothing left to ask of {p}"
+            "{p} fades to the bench once the {g} margin decides it",
+            "A decided {g} script starves {p} of fourth-quarter snaps",
+            "The {g} rout drains {p}'s workload before the fourth quarter starts"
           ]
         }
       },
       "coinflip": {
         "Over": {
           "scoring": [
+            "{p} keeps the chains moving while the {g} clock stays tight",
+            "{p} takes the yardage a one-score {g} game demands",
+            "{p} carries the drives that decide {g}",
+            "{p} piles up yards on a {g} afternoon with no safe lead",
             "The {g} clock matters to the last snap, and {p} keeps working",
-            "A one-score {g} keeps the offense in {p}'s hands",
-            "The {g} margin stays inside a score, and {p} moves the chains",
+            "A one-score {g} keeps {p} busy, and the yards keep coming",
             "Every {g} drive carries weight, and {p} carries the drives",
-            "{p} takes the yardage a tight {g} game demands",
-            "Two-minute football closes {g}, and {p} is in all of it"
+            "Two-minute football closes {g}, and {p} runs all of it",
+            "The {g} margin never gets safe, and the yards pour through {p}"
           ],
           "playmaking": [
+            "{p} owns third down on the drives that decide {g}",
+            "{p} racks up catches on every {g} possession that matters",
+            "{p} keeps the sticks moving while the {g} clock stays tight",
             "The {g} clock stays tight, and third down keeps finding {p}",
-            "A one-score {g} keeps the throws honest, and {p} catches them",
+            "A one-score {g} keeps the throws honest, and {p} hauls them in",
             "The {g} two-minute drill runs through {p}'s hands",
-            "Every {g} possession counts, and the ball goes to {p}",
-            "{p} is the answer on the downs that decide {g}",
-            "Late leverage in {g} narrows the reads to {p}"
+            "Late leverage in {g} pushes every read toward {p}"
           ],
           "production": [
-            "The {g} clock never gets safe, and {p} never leaves the field",
+            "{p} takes every snap while the {g} clock stays tight",
+            "{p} carries a {g} game that stays inside one score",
+            "{p} keeps working every meaningful snap of a tight {g} game",
+            "{p} owns the fourth quarter when {g} comes down to one possession",
+            "The {g} clock never gets safe, and {p}'s workload keeps climbing",
             "A one-score {g} means full snaps, and {p} takes all of them",
-            "The {g} margin holds and nobody rests, {p} least of all",
             "Four quarters of leverage in {g} keep {p} on the field",
-            "{p} works every meaningful snap while {g} stays tight",
-            "A tight {g} script keeps calling {p}'s number"
+            "A tight {g} script keeps calling {p}'s number",
+            "Nobody shortens the game in a one-score {g}, and {p} hauls the load"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} clock tightens, and the play calls get careful with {p}",
-            "A one-score {g} turns conservative, and {p}'s yardage stalls",
-            "Field-position chess in {g} keeps {p} bottled up",
-            "The {g} margin stays thin, and nobody risks a shot to {p}",
-            "{p} gets bracketed through the tense stretch of {g}",
-            "Ball control closes {g}, and {p}'s looks come to nothing"
+            "The {g} clock tightens, and {p}'s yardage stalls with it",
+            "A one-score {g} turns conservative, and {p}'s yards dry up",
+            "Field-position chess in {g} clamps {p}'s lanes shut",
+            "The {g} margin stays thin, and nobody takes a shot to {p}",
+            "{p} comes up short while {g} plays it close to the vest",
+            "Ball control closes {g}, and {p}'s looks fall flat",
+            "Bracket coverage smothers {p} through the tense stretch of {g}"
           ],
           "production": [
             "The {g} clock stays tight, and the playbook shrinks around {p}",
-            "A one-score {g} makes both coaches careful, and {p} pays for it",
-            "Punts trade hands in {g}, and {p}'s workload thins out",
-            "The {g} margin holds, and the ball stays away from {p}",
-            "{p} waits out a {g} game decided on field position",
-            "Careful football in {g} rations {p}'s touches"
+            "A one-score {g} makes both coaches careful, and {p}'s touches dry up",
+            "Punts trade hands in {g}, and {p}'s workload bogs down",
+            "The {g} margin holds, and careful calls starve {p} of touches",
+            "{p} fades into a {g} game decided on field position",
+            "Careful football in {g} rations {p}'s touches, and the volume falls flat",
+            "Both {g} sidelines play it close, and {p}'s role sags"
           ]
         }
       },
       "even": {
         "Over": {
           "scoring": [
-            "{p} moves the chains all afternoon in {g}",
-            "The {g} card sets no ceiling on {p}'s yardage",
-            "Nothing in the {g} coverage accounts for {p} on a drive",
+            "{p} keeps the chains moving all afternoon in {g}",
+            "{p} pours yards onto the {g} scoreboard from the first drive",
+            "{p} owns the {g} snap count, and the yards follow",
+            "{p} racks up yards on every {g} drive worth watching",
             "{p} takes the short yards the {g} board keeps offering",
-            "The {g} snap count points at {p}, and the yards follow",
-            "First read and first down belong to {p} in {g}"
+            "{p} hunts the end zone on every {g} drive",
+            "The {g} snap count points at {p}, and the yards pile up",
+            "The {g} coverage breaks first, and {p} runs into the open grass",
+            "First read and first down run through {p} in {g}",
+            "The {g} card sets no ceiling, and {p} climbs past the number"
           ],
           "playmaking": [
-            "{p} is the first read in {g} snap after snap",
-            "The {g} board points the targets at {p}",
-            "The middle of the field belongs to {p} in {g}",
-            "Third down in {g} has one answer, and it is {p}",
+            "{p} owns the first read in {g} snap after snap",
+            "{p} hauls in targets from every spot on the {g} route tree",
+            "{p} racks up catches across the middle in {g}",
+            "{p} feeds on the middle of the field while {g} spreads it out",
+            "The {g} board fires the targets at {p}",
+            "Third down in {g} has one answer, and the ball keeps finding {p}",
             "The {g} passing game runs on {p} alone",
             "Quick game and screens keep the ball on {p} in {g}"
           ],
           "production": [
-            "{p} touches everything the {g} game plan calls",
-            "The {g} board reads like a {p} workload",
-            "{p} shows up on every page of the {g} film",
-            "Volume is the whole story for {p} in {g}",
-            "The {g} card gives {p} the ball and keeps giving",
-            "{p} stacks touches from the opening drive in {g}"
+            "{p} takes every touch the {g} game plan calls",
+            "{p} drives the {g} workload from the opening snap",
+            "{p} stacks touches from the first drive in {g}",
+            "{p} owns every page of the {g} film",
+            "{p} piles up touches on a {g} game plan built around one name",
+            "The {g} board reads like a {p} workload, and the volume keeps coming",
+            "Volume carries the whole story for {p} in {g}",
+            "The {g} card feeds {p} the ball and keeps feeding",
+            "Every {g} series runs through {p}'s hands"
           ],
           "mistakes": [
-            "{p} keeps the pocket clean in {g}",
-            "The {g} card gives {p} time, and the sacks stay down",
-            "{p} gets the ball out early in {g} and protects it",
+            "{p} keeps the pocket clean in {g}, and the sacks stay down",
+            "{p} fires it out early in {g} and keeps the picks down",
+            "{p} takes the checkdown rather than the sack in {g}",
+            "{p} climbs the pocket and throws it away rather than force it",
+            "The {g} rush never breaks through, and {p}'s picks stay under the number",
             "Clean protection in {g} keeps {p}'s giveaways under the number",
-            "{p} slides and throws it away rather than force it in {g}",
-            "The {g} rush never reaches {p}, and the picks stay down"
+            "The {g} line owns the rush, and {p}'s sack count stays down"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} card puts the coverage on {p} all afternoon",
-            "{p} meets a loaded box on every {g} carry",
-            "The {g} sticks sit a yard past {p} all afternoon",
-            "Stacked fronts in {g} close {p}'s lanes before they open",
-            "{p} works hard for yards that never quite come in {g}",
-            "The {g} board sets a number {p}'s role does not reach"
+            "The {g} card puts the coverage on {p}, and the yards dry up",
+            "{p} runs into a loaded box on every {g} carry",
+            "{p} comes up short of the sticks all afternoon in {g}",
+            "Stacked fronts in {g} choke {p}'s lanes before they open",
+            "{p} grinds for yards that never come in {g}",
+            "The {g} coverage rolls to {p}, and the yards go cold",
+            "A loaded box smothers {p}'s yards in {g}",
+            "{p}'s yardage stalls while the {g} coverage clamps down"
           ],
           "playmaking": [
-            "The {g} coverage rolls toward {p} from the first snap",
-            "{p} gets bracketed all afternoon in {g}",
-            "The {g} route tree gives {p} the shortest branch",
-            "The {g} targets go somewhere other than {p}",
+            "The {g} coverage rolls to {p} early, and the targets dry up",
+            "{p} gets bracketed all afternoon in {g}, and the catches go cold",
+            "The {g} route tree hands {p} the shortest branch, and the targets starve",
+            "The {g} targets flood toward everyone except {p}",
             "{p} runs routes into traffic all day in {g}",
-            "The {g} board leaves {p} third in the target share"
+            "Third in the {g} target share, and {p}'s catches come up short",
+            "Bracket coverage muzzles {p}'s target share in {g}"
           ],
           "production": [
             "The {g} scheme keeps {p} on the field and off the ball",
-            "The {g} play sheet never gets to {p}'s number",
-            "The {g} card writes {p} out of the script",
-            "A decoy's workload waits for {p} in {g}",
-            "{p} plays the snaps, and the {g} box score misses it",
-            "Cold reads and colder volume follow {p} across the {g} film"
+            "The {g} play sheet skips {p}'s number, and the touches dry up",
+            "The {g} game plan shrinks {p}'s role to a decoy",
+            "{p} runs decoy routes in {g}, and the touches starve",
+            "{p} plays the snaps, and the {g} box score comes up short",
+            "{p}'s volume sags from the first {g} series on",
+            "The {g} scheme starves {p} of touches"
           ],
           "mistakes": [
-            "The {g} pass rush lives in {p}'s pocket all afternoon",
-            "{p} holds it too long in {g} and the sacks come",
-            "Pressure finds {p} on every {g} dropback, and the picks follow",
-            "The {g} pocket folds early, and {p} pays for it",
-            "{p} feeds the {g} rush, and the sack count climbs over",
-            "Tipped balls and late reads put {p}'s giveaways over the number",
-            "A fumble waits somewhere in {p}'s {g} afternoon"
+            "The {g} rush lives in {p}'s pocket, and the sacks pile up",
+            "{p} holds it too long in {g}, and the sacks come",
+            "Pressure swarms {p} on every {g} dropback, and the picks follow",
+            "The {g} pocket cracks early, and {p} pays for it with a pick",
+            "{p} feeds the {g} rush, and the sack count climbs over the number",
+            "Tipped balls and late reads push {p}'s giveaways over the number",
+            "The {g} rush rips at the ball, and {p} coughs up a fumble",
+            "{p}'s picks pile up while the {g} pocket caves"
           ]
         },
         "Mixed": {
           "production": [
             "The {g} drive chart splits: {up} while {down}",
-            "{p}'s snap count splits: {up} while {down}",
-            "The {g} huddle wants both: {up} and {down}",
-            "{p} plays two roles: {up} while {down}",
-            "The {g} chains split: {up} and {down}",
-            "The {g} snap counts diverge: {up} while {down}"
+            "{p}'s snap count runs two ways: {up} while {down}",
+            "The {g} huddle feeds both reads: {up} and {down}",
+            "{p} carries two roles in {g}: {up} while {down}",
+            "The {g} chains pull two ways: {up} and {down}",
+            "Snap counts in {g} run two directions: {up} while {down}",
+            "One {g} game plan carries two reads: {up} and {down}"
           ]
         }
       }
@@ -1975,166 +2030,182 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} total sits high, and the volume spreads across the board",
-            "Both {g} offenses play fast, and the numbers ride the pace",
+            "The {g} total runs loud, and the volume floods the whole board",
+            "Both {g} offenses run fast, and the numbers climb with the pace",
             "A loud {g} number keeps every starter on the field",
-            "The punt team stays seated for most of {g}",
-            "The {g} pace stacks snaps, and snaps feed everybody",
-            "Scoring drives answer scoring drives in {g}"
+            "Snaps pile up in {g}, and snaps feed everybody",
+            "Touchdown drives trade punches in {g}, and every stat line climbs",
+            "The {g} pace stacks snaps, and the whole box score runs hot",
+            "The {g} crowd noise climbs all afternoon, and the volume climbs with it"
           ],
           "scoring": [
-            "The {g} total sits high, and the end zone stays busy",
-            "Two no-huddle offenses turn {g} into a red-zone relay",
-            "The {g} pace produces touchdowns on both sides",
-            "Red-zone trips stack up early in {g}",
-            "A loud {g} number promises points, and both sides deliver",
-            "The {g} scoreboard keeps moving all afternoon"
+            "The {g} total runs loud, and both offenses hunt the end zone",
+            "Two no-huddle offenses light up {g} from the first series",
+            "The {g} pace pours touchdowns onto both sides of the scoreboard",
+            "Red-zone trips pile up early in {g}",
+            "A loud {g} number promises points, and both sides keep delivering",
+            "The {g} scoreboard keeps turning all afternoon",
+            "Both {g} offenses erupt, and the touchdowns come in bunches"
           ]
         },
         "Under": {
           "production": [
-            "The {g} total says shootout, and the model reads these numbers quieter",
-            "{g} projects loud, but the model does not follow it here",
-            "The board calls {g} a track meet, and the model disagrees",
-            "A loud {g} number sits on top of quiet workloads",
-            "The model reads {g} slower than the total does",
-            "Fireworks sit in the {g} price, and the model finds none"
+            "The {g} total says shootout, and the model says these numbers go cold",
+            "{g} projects loud, and the model watches the volume fall flat",
+            "The board calls {g} a track meet, and the numbers dry up anyway",
+            "A loud {g} number, and the model sees the stat lines come up short",
+            "The model reads {g} slower than the total, and the volume stalls",
+            "Fireworks live in the {g} price, and the model says they fall flat",
+            "The {g} scoreboard runs hot while these stat lines run dry"
           ]
         },
         "Mixed": {
           "production": [
             "The {g} pace splits it: {up} while {down}",
-            "A loud {g} number splits: {up} and {down}",
-            "No-huddle {g} rewards the pass: {up} while {down}",
+            "A loud {g} number pays unevenly: {up} and {down}",
+            "No-huddle tempo in {g} sorts the sheet: {up} while {down}",
             "The {g} shootout feeds unevenly: {up} while {down}",
             "Chunk plays shorten {g}: {up} and {down}",
-            "Both {g} offenses hum: {up} while {down}"
+            "Both {g} offenses run hot: {up} while {down}",
+            "The {g} scoreboard runs hot and picks sides: {up} and {down}"
           ]
         }
       },
       "grind": {
         "Over": {
           "production": [
-            "The {g} number is low, and the model still finds volume",
-            "{g} reads like a slugfest, and the workloads hold up anyway",
-            "A low {g} total hides twelve-play drives, and the model counts them",
-            "The trenches decide {g}, and the model likes what they produce",
-            "The board sees a rockfight in {g}, and the model sees snaps",
-            "{g} stays ugly, and ugly still fills a stat sheet"
+            "The {g} number runs low, and the model finds volume anyway",
+            "{g} reads like a slugfest, and the touches pile up anyway",
+            "A low {g} total hides twelve-play drives, and the snaps pile up inside them",
+            "The trenches decide {g}, and the model likes what they grind out",
+            "The board sees a {g} rockfight, and the model sees the snaps stack up",
+            "{g} stays ugly, and ugly football piles up volume anyway",
+            "Clock-heavy drives in {g} keep the counting stats climbing"
           ]
         },
         "Under": {
           "production": [
-            "The {g} number is low, and the punts pile up",
+            "The {g} number runs low, and the punts pile up",
             "A slugfest in {g} starves every stat line",
-            "Three-and-outs set the rhythm of {g}",
+            "Three-and-outs grind {g} down to nothing",
             "Both fronts win in {g}, and the trenches keep the ball",
-            "Field position is the only thing moving in {g}",
-            "The {g} chains barely move all afternoon"
+            "Field position rules {g}, and the volume bogs down",
+            "The {g} chains barely move, and the stat sheet goes cold",
+            "Punt after punt in {g}, and every workload dries up"
           ],
           "scoring": [
-            "The {g} number is low, and the end zone stays quiet",
-            "Two walls meet in {g}, and nothing gets through",
-            "A slugfest in {g} pays in field goals",
-            "Drives die at the thirty all afternoon in {g}",
-            "The {g} trenches keep the scoreboard still",
-            "Six points goes a long way in {g}"
+            "The {g} number runs low, and the end zone goes cold",
+            "Two walls meet in {g}, and nothing breaks through",
+            "A slugfest in {g} pays in field goals, and the touchdowns dry up",
+            "Drives stall at the thirty all afternoon in {g}",
+            "The {g} trenches smother the scoreboard",
+            "Six points carries a long way in {g}",
+            "Both {g} offenses choke inside the twenty"
           ]
         },
         "Mixed": {
           "production": [
             "The {g} trenches pay unevenly: {up} while {down}",
-            "A low {g} number splits: {up} and {down}",
-            "Three-and-outs feed the defenses: {up} while {down}",
+            "A low {g} number sorts the sheet: {up} and {down}",
+            "Three-and-outs feed the defenses in {g}: {up} while {down}",
             "Field position rules {g}: {up} while {down}",
-            "The {g} slugfest splits: {up} and {down}",
-            "Clock-heavy {g} favors contact: {up} while {down}"
+            "The {g} slugfest picks sides: {up} and {down}",
+            "Clock-heavy football in {g} feeds the contact: {up} while {down}",
+            "The {g} grind pays two ways: {up} and {down}"
           ]
         }
       },
       "blowout": {
         "Over": {
           "production": [
-            "The {g} spread is wide, and one playbook empties downhill",
+            "The {g} spread runs wide, and one playbook empties downhill",
             "A one-way {g} script piles up yardage unanswered",
             "The {g} margin grows early, and the counting stats keep running",
-            "Backups get whole quarters of {g}, and the volume holds",
-            "A beaten {g} front stops fighting by halftime",
-            "The {g} lead runs the ball, and the deficit throws it"
+            "Backups take whole quarters of {g}, and the volume holds",
+            "A beaten {g} front sags by halftime, and the yards pour through it",
+            "The {g} lead runs the ball, and the deficit throws it",
+            "Garbage time in {g} keeps the stat sheet filling up"
           ]
         },
         "Under": {
           "production": [
-            "The {g} spread is wide, and kneel-downs close the afternoon",
-            "A settled {g} script sends the starters to the bench",
-            "The {g} margin makes the fourth quarter a walkthrough",
-            "Garbage time in {g} belongs to names nobody rostered",
+            "The {g} spread runs wide, and kneel-downs close the afternoon",
+            "A decided {g} script pulls the starters by the fourth",
+            "The {g} margin shrinks the fourth quarter into a walkthrough",
+            "Garbage time in {g} belongs to names nobody rostered, and the volume dries up",
             "Clock-milking closes {g}, and the stat lines close with it",
-            "The {g} rout ends the workloads before the game ends"
+            "The {g} rout shuts down the workloads before the clock runs out",
+            "The starters fade to the bench once the {g} margin decides it"
           ]
         },
         "Mixed": {
           "production": [
             "The {g} margin picks sides: {up} while {down}",
-            "A wide {g} spread splits: {up} and {down}",
-            "Kneel-downs end one playbook: {up} while {down}",
-            "The {g} lead runs it: {up} while {down}",
+            "A wide {g} spread sorts it: {up} and {down}",
+            "Kneel-downs close one {g} playbook: {up} while {down}",
+            "The {g} lead runs it and the deficit throws it: {up} while {down}",
             "Garbage time reshuffles {g}: {up} and {down}",
-            "The {g} deficit throws: {up} while {down}"
+            "The {g} rout feeds one side: {up} while {down}",
+            "One-way traffic in {g} splits the sheet: {up} and {down}"
           ]
         }
       },
       "coinflip": {
         "Over": {
           "production": [
-            "The {g} clock never gets safe, and the starters never rest",
-            "A one-score {g} leaves both playbooks open to the end",
-            "Every {g} possession carries weight, and the volume follows",
+            "The {g} clock never gets safe, and the starters keep working",
+            "A one-score {g} keeps both playbooks open to the end",
+            "Every {g} possession carries weight, and the volume climbs with it",
             "Two-minute football closes {g}, and the snap counts hold",
-            "Nobody shortens the field with {g} this tight",
-            "Four quarters of leverage keep the {g} stat sheet busy"
+            "Nobody shortens the game with {g} this tight, and the touches pile up",
+            "Four quarters of leverage keep the {g} stat sheet busy",
+            "The {g} margin never opens, and both sidelines keep pressing"
           ]
         },
         "Under": {
           "production": [
-            "The {g} clock stays tight, and both sides get careful",
-            "A one-score {g} turns into field-position chess",
-            "Punts and field goals set the {g} rhythm",
+            "The {g} clock stays tight, and the play calls shrink",
+            "A one-score {g} bogs down into field-position chess",
+            "Punts and field goals set the {g} rhythm, and the volume dries up",
             "Both coaches play {g} not to lose, and the numbers shrink",
-            "The {g} margin makes the play calls conservative",
-            "Ball control closes {g}, and the volume never arrives"
+            "The {g} margin keeps the play calls careful, and the stat sheet goes cold",
+            "Ball control closes {g}, and the workloads fall flat",
+            "A tight {g} game starves every stat line"
           ]
         },
         "Mixed": {
           "production": [
-            "The {g} clock stays tight: {up} while {down}",
-            "A one-score {g} splits it: {up} and {down}",
+            "The {g} clock stays tight and picks sides: {up} while {down}",
+            "A one-score {g} sorts it: {up} and {down}",
             "Late leverage sorts {g}: {up} while {down}",
             "The {g} two-minute drill decides: {up} and {down}",
             "Careful calls close {g}: {up} while {down}",
-            "Full snaps and careful hands: {up} while {down}"
+            "Full snaps and careful hands in {g}: {up} while {down}",
+            "A one-possession {g} pays two ways: {up} and {down}"
           ]
         }
       },
       "even": {
         "Over": {
           "production": [
-            "The {g} card names no headliner, and the volume spreads wide",
-            "Nothing about {g} needs a star to produce",
-            "The {g} board favors the middle of both depth charts",
+            "The {g} card names no headliner, and the volume floods the board",
+            "Nothing about {g} needs a star, and the touches pile up everywhere",
+            "The {g} board feeds the middle of both depth charts",
             "A balanced {g} plan keeps the box score busy",
-            "The {g} edges sit in the corners of the box score",
-            "Everybody in the {g} rotation gets real work"
+            "The {g} edges run through the corners of the box score",
+            "Everybody in the {g} rotation racks up real work",
+            "Both {g} offenses keep the chains moving, and the volume follows"
           ]
         },
         "Under": {
           "production": [
-            "The {g} card reads flat from top to bottom",
-            "Nothing in {g} points at fireworks, so take the quiet side",
+            "The {g} card reads flat, and the numbers sag with it",
+            "Nothing in {g} points at fireworks, and the stat lines go cold",
             "The {g} board runs short on reasons to expect volume",
-            "Vanilla schemes and modest numbers describe {g} well",
-            "Neither {g} sideline has a reason to press",
-            "The {g} tape stays buttoned up"
+            "Vanilla schemes and modest numbers in {g}, and the volume dries up",
+            "Neither {g} sideline presses, and the workloads fall flat",
+            "The {g} tape stays buttoned up, and the touches shrink",
+            "Both {g} offenses bog down without anyone forcing it"
           ]
         },
         "Mixed": {
@@ -2142,9 +2213,10 @@
             "The {g} card splits: {up} while {down}",
             "Both readings hold in {g}: {up} and {down}",
             "The {g} matchup map splits: {up} while {down}",
-            "One {g} board holds both: {up} and {down}",
+            "One {g} board carries both: {up} and {down}",
             "Nothing tilts {g} either way: {up} while {down}",
-            "Two truths share {g}: {up} and {down}"
+            "Two truths share {g}: {up} and {down}",
+            "The {g} film runs two ways: {up} while {down}"
           ]
         }
       }
@@ -2153,20 +2225,22 @@
       "even": {
         "Over": {
           "production": [
-            "The {team} {grp} room wins its matchup with {opp} snap after snap",
-            "The {team} {grp} room gives {opp} nothing to work with",
-            "The {team} {grp}s out-execute {opp} series after series",
-            "Personnel decides it, and the {team} {grp}s hold the edge on {opp}",
-            "{opp} burns timeouts trying to solve the {team} {grp}s",
-            "The {team} {grp} room sets the terms {opp} has to meet"
+            "The {team} {grp} room owns its matchup with {opp} snap after snap",
+            "The {team} {grp}s punish {opp} series after series",
+            "The {team} {grp} room feeds on a {opp} unit that cannot keep up",
+            "Personnel decides it, and the {team} {grp}s run through {opp}",
+            "{opp} burns timeouts, and the {team} {grp}s keep coming",
+            "The {team} {grp} room pushes {opp} around all afternoon",
+            "The {team} {grp}s wear {opp} down one series at a time"
           ],
           "scoring": [
-            "The {team} {grp}s find the soft spots in the {opp} coverage",
+            "The {team} {grp}s rip through the soft spots in the {opp} coverage",
             "{opp} cannot keep the {team} {grp}s out of the end zone",
-            "The yards flow through the {team} {grp} room",
+            "The yards pour through the {team} {grp} room",
             "The {team} {grp}s stack first downs on {opp}",
             "The {opp} secondary keeps losing the {team} {grp}s",
-            "Chunk plays come out of the {team} {grp} room"
+            "Chunk plays come out of the {team} {grp} room all afternoon",
+            "The {team} {grp}s hunt the end zone every time they cross midfield"
           ]
         }
       }
@@ -2175,76 +2249,83 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} total is loud, and all {n} legs work with {p}",
-            "A shootout in {g} lifts {n} legs, and {p} leads them",
+            "The {g} total runs loud, and all {n} legs run with {p}",
+            "A shootout in {g} lifts {n} legs, and {p} drives them",
             "The {g} pace keeps {p} on the field and {n} legs alive",
-            "Every {g} scoring drive pays all {n} legs behind {p}",
-            "{n} legs sit downstream of a {g} pace {p} sets",
-            "No-huddle {g} football feeds {p} first and {n} legs after"
+            "Every {g} scoring drive feeds all {n} legs behind {p}",
+            "{n} legs ride a {g} pace {p} sets, and the volume keeps coming",
+            "No-huddle tempo in {g} feeds {p} first and {n} legs after",
+            "{p} runs the {g} shootout, and {n} legs pile up behind the pace"
           ]
         },
         "Under": {
           "production": [
-            "The {g} total is loud, and the model reads {n} legs quiet",
-            "{g} projects a shootout, and {p} leads {n} names against it",
-            "The board expects points in {g}, and the model expects less",
-            "A loud {g} number sits on top of {n} quiet workloads",
-            "{p} fronts {n} legs the {g} shootout has no use for",
-            "The model reads {g} loud and these {n} legs quiet"
+            "The {g} total runs loud, and the model reads {n} legs cold",
+            "{g} projects a shootout, and {p}'s {n} legs go cold inside it",
+            "The board expects points in {g}, and these {n} legs come up short",
+            "A loud {g} number, and {n} workloads behind {p} dry up anyway",
+            "{p} fronts {n} legs the {g} shootout starves",
+            "The model reads {g} loud and these {n} legs cold",
+            "The {g} scoreboard runs hot, and {p}'s {n} legs run dry"
           ]
         }
       },
       "grind": {
         "Over": {
           "production": [
-            "The {g} number is low, and the model still likes {n} legs",
-            "{g} reads like a slugfest, and {p} leads {n} legs through it",
+            "The {g} number runs low, and the model likes {n} legs anyway",
+            "{g} reads like a slugfest, and {p} drags {n} legs through it",
             "Twelve-play drives in {g} feed {n} legs, and {p} finishes them",
-            "The trenches decide {g}, and {n} legs work down there with {p}",
-            "The board sees a rockfight in {g}, and the model sees volume",
-            "{p} anchors {n} legs built for an ugly {g} afternoon"
+            "The trenches decide {g}, and {n} legs grind it out with {p}",
+            "The board sees a {g} rockfight, and the model sees {n} legs pile up",
+            "{p} carries {n} legs built for an ugly {g} afternoon",
+            "Ugly {g} football, and {p} grinds out all {n} legs anyway"
           ]
         }
       },
       "even": {
         "Over": {
           "production": [
-            "A {n}-leg {g} stack that lives on {p}'s snap count",
-            "{n} legs of {g} all sit downstream of {p}",
-            "One {g} offense and {n} angles run through {p}",
-            "When {p} works in {g}, all {n} legs work",
-            "The {g} card gives {p} the ball and {n} legs follow",
-            "{n} legs follow the {g} script {p} is writing"
+            "{p}'s snap count drives a {n}-leg {g} stack",
+            "{n} legs of {g} run downstream of {p}",
+            "One {g} offense carries {n} angles, and {p} carries the offense",
+            "{p} runs the {g} huddle, and all {n} legs take off with it",
+            "The {g} card feeds {p} the ball, and {n} legs follow",
+            "{n} legs ride the {g} script {p} drives",
+            "{p} keeps the chains moving, and {n} legs keep moving with them"
           ]
         },
         "Under": {
           "production": [
-            "{n} quiet legs out of {g}, and {p} is the quietest",
-            "The {g} card says slow, and {n} legs settle with it",
-            "{n} legs lean on a {g} offense that stalls, {p} first",
-            "Punts and slow drives sink {n} legs out of {g}",
-            "The {g} slowdown reaches all {n} legs, {p} included",
-            "{p} headlines a {g} slip that stays quiet, {n} legs deep"
+            "{n} legs out of {g} go cold, and {p} goes coldest",
+            "The {g} card says slow, and {n} legs stall with it",
+            "{n} legs lean on a {g} offense that bogs down, {p} first",
+            "Punts and slow drives drain {n} legs out of {g}",
+            "The {g} slowdown drags all {n} legs down, {p} included",
+            "{p} headlines a {g} slip that dries up, {n} legs deep",
+            "{n} workloads shrink in {g}, and {p}'s shrinks first"
           ]
         },
         "ContrastOver": {
           "production": [
-            "{p} keeps the chains moving while the {g} card stalls",
+            "{p} keeps the chains moving while the rest of the {g} card stalls",
             "One engine keeps running in {g}, and it is {p}",
-            "The {g} script slows everything except {p}'s workload",
-            "{p} keeps working while the other legs sit still",
-            "Everything in {g} cools except the snaps aimed at {p}",
-            "The {g} board goes quiet everywhere except on {p}"
+            "The {g} script bogs down everywhere except {p}'s workload",
+            "{p} keeps working while the other legs go cold",
+            "Everything in {g} dries up except the snaps aimed at {p}",
+            "The {g} board goes cold everywhere except on {p}",
+            "{p} piles it up while the rest of the {g} slip falls flat"
           ]
         },
         "ContrastUnder": {
           "production": [
             "The {g} chains keep moving everywhere except behind {p}",
-            "Every {g} drive hums except the ones aimed at {p}",
+            "Every {g} drive runs hot except the ones aimed at {p}",
             "The {g} clock runs hot for everyone but {p}",
-            "Yards for the field and a wall for {p} in {g}",
-            "{p} is the one number the {g} card leaves behind",
-            "Coverage rolls to the boundary and stays on {p} in {g}"
+            "The yards flood the field while {p} comes up short in {g}",
+            "{p}'s number goes cold while the rest of the {g} card runs",
+            "Coverage rolls to the boundary and clamps down on {p} in {g}",
+            "The rest of the {g} slip keeps coming, and {p} falls flat"
           ]
         },
         "Mixed": {
@@ -2253,8 +2334,9 @@
             "{p} anchors both sides: {up} and {down}",
             "The {g} stack splits: {up} while {down}",
             "{n} legs split the script: {up} and {down}",
-            "{p} holds the middle: {up} while {down}",
-            "One {g} offense pays twice: {up} and {down}"
+            "{p} carries the middle: {up} while {down}",
+            "One {g} offense pays twice: {up} and {down}",
+            "{p} drives {n} legs two ways: {up} while {down}"
           ]
         }
       }
