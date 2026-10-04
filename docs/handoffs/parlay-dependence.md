@@ -125,9 +125,10 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   stratified same-team/opposing/cross-game matrices) — **REUSE it, don't
   duplicate it**. PIT extraction extends this module or a sibling under
   `training/`, not a new parallel pipeline.
-- `src/sportstradamus/scripts/audit_parlay_calibration.py` — harness; note it
-  mirrors the payout table by hand (audit_parlay_calibration.py:42) and must
-  stay in sync with any pricing change.
+- `src/sportstradamus/scripts/audit_parlay_calibration.py` — harness; it
+  recovers each stored parlay's payout from its persisted `Boost` (already
+  `payout_base × boost`, clipped to 1–100), so there is no payout table to
+  keep in sync.
 - `tests/golden/` — copula-vs-hand-computed joints, flag-path equivalence.
 
 Serving path is touched ⇒ the inference-path compatibility checklist applies
@@ -222,9 +223,9 @@ valuable verdict.
   extends them, never re-implements them beside themselves.
 - Marginals are read-only here. This lane never edits distribution families,
   `stat_meta.json`, or gate code — joint structure only.
-- Keep the audit harness's hand-mirrored payout table
-  (audit_parlay_calibration.py:42) in sync with any pricing change, or the
-  inverse `Model EV → joint_p` recovery silently drifts.
+- The audit harness recovers `joint_p = Model EV / Boost` from the stored
+  `Boost` (the full payout); a pricing change that stops persisting the full
+  payout in `Boost` silently breaks that recovery.
 
 ## 8. Escalation & stop conditions
 

@@ -152,9 +152,9 @@ as optimistic.
 
 ## 3. Empirical calibration
 
-Open: `scripts/audit_parlay_calibration.py` runs end-to-end but dev checkouts have no
-resolved parlay history (`data/parlay_hist.parquet` is production-only), so local
-artifacts are placeholders. **This remains the only empirical check of the whole
+Open: `scripts/audit_parlay_calibration.py` runs end-to-end on the day-partitioned
+`data/runtime/parlay_hist/` (production writes it; the dev box carries a copy); it recovers
+each parlay's payout from its stored `Boost` (no hand-kept payout table since 2026-10-04). **This remains the only empirical check of the whole
 engine** — and it has two customers: the standing re-run vehicle is
 **hygiene-closeout stage 2** (owner-assisted, production host), and its populated
 artifacts double as the **incumbent baseline** parlay-dependence stage 4 must beat.

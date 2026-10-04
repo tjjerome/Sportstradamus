@@ -90,6 +90,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | DONE (all four stages closed 2026-09-13; the cache is per-box, so each box runs `fetch headshots` once) | — (owner installs the monthly cron row) | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
 | `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
 | `story-balance` | Honest ledger by bet side at platform payouts (Kelly / profit-sim / CLV / Gate-2 fixes), Over-led and Under-led star stories per game, live-analyst voice; selection-shrink lever researched and KILLED | OPEN (code landed 2026-10-03, unpushed; first live read after the next prophecize + reflect) | — | [handoffs/story-balance.md](handoffs/story-balance.md) |
+| `honest-receipts` | One pricing truth for realized performance (posted sides, platform payouts, the recommended cohort as the hero), decision-time columns in history, and the three research briefs (selection-aware trust layer, parlay-pricer repairs, train/serve skew) that decide the gated model-side fixes; no model is pulled on money, no model-free engine | OPEN (waves 1–3 landed on `devel` 2026-10-04, unpushed; R1 trust layer KILLED 2026-10-04, R2/R3 in flight) | I4/I5/I6 each wait on their brief's verdict + the owner's read | [handoffs/honest-receipts.md](handoffs/honest-receipts.md) |
 
 ### 4.1 Build path (visual index)
 
@@ -315,6 +316,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- honest-receipts lane opened: Receipts/Lab/reflect graded at platform payouts via `realized.py` (flat −110 retired), history gains decision-time columns, three research briefs dispatched; ship_gate devel→main row trued to the implemented rule (no realized-money threshold); §4 row added.
 - player-headshots lane DONE: `fetch headshots` cache, monthly job, and the face on the ticket card; owner cleared all five league CDNs for the private box; §4 row trued.
 - three follow-on lanes briefed off the dashboard close-out — `cleanup-pass`, `player-headshots`, `constellation-art` (§4 rows, §4.1 nodes); owner locked product names + game-total star fill (dfs-products §4); §8 trimmed.
 - dashboard-ux lane closed: Phase E scaffolding (art catalog, manifest loader, favicon, logo slot), constellation modules split, ledger debts fixed or routed; §3/§4/§8 trued; brief archived.
@@ -323,4 +325,3 @@ sketches live in the archived v2.
 - dfs-products lane added (game-line combos verify-first, Ladders graduated from §8, alt-line hardening, Rivals pricer); §5 gains its serialization rule; PARLAY_AUDIT refreshed w/ dispositions; stage-0 briefs in docs/archive.
 - model-track reframed profit-first: WS-1 live-alignment = P1, MLB/NHL activation folded in (ACTIVE), family research done (WS-3), copula stage-0 done (WS-4); g1–g5→g1–g6; seasonality Jun–Aug += live-alignment.
 - P8 planned (spec + 6 phase plans in `docs/archive/superpowers/`, incl. D constellation shapes + E art catalog); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains the ρ-overlay follow-up.
-- model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.

@@ -96,9 +96,9 @@ rendering on the old snapshots. A `KeyError` on `Star` in Tonight means the load
 | `6fc2dbd4` … `c1354dfe`, `0450274f` | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
 
 Untouched on purpose: `strategies/profit_sim.py`, `strategies/_ledger_*.py` (sim-bettor lane),
-`analysis._add_kelly_columns` (same sign flip on history, latent because `profit_sim` filters
-`Model EV > 1`), the flat −110 grading in Receipts' `record_grid` (the new panel is the honest view
-beside it).
+`analysis._add_kelly_columns` and the flat −110 grading in Receipts — both since fixed by the
+honest-receipts lane ([honest-receipts.md](honest-receipts.md): Kelly at the platform payout, the
+`record_grid` and flat hero retired).
 
 ## 5. How the balance works
 

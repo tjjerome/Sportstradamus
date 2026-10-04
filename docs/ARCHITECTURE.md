@@ -39,7 +39,7 @@ Sportstradamus/
 │   │   │   └── sleeper.py       # Sleeper props
 │   │   ├── moneylines.py        # Odds API ingest (confer command)
 │   │   ├── nightly.py           # reflect command (prediction resolution)
-│   │   ├── analysis.py          # shared metric functions
+│   │   ├── analysis.py          # outcome resolution for reflect, profit-sim precompute, scoring rules
 │   │   ├── clv.py               # closing-line-value computation
 │   │   ├── skew_normal.py       # custom LightGBMLSS distributions, with
 │   │   │                        #   skew_normal_centered.py, double_poisson.py, hurdle.py
@@ -184,8 +184,8 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | `moneylines.py` | `confer` | Odds API ingest for game-level and player-prop markets: `get_moneylines`, `get_props` |
 | `books/` | (called from `prediction/cli.py`) | Underdog (`underdog.py:get_ud` — player props, team/game markets, alternate lines) and Sleeper (`sleeper.py:get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
-| `analysis.py` / `clv.py` | — | Shared metric functions; closing-line-value computation |
-| `realized.py` | — | Realized-by-side ledger: hit rate and ROI per bet side at the platform payouts |
+| `analysis.py` / `clv.py` | — | Outcome resolution for `reflect` (`resolve_history`, `annotate_offer_outcomes`, Kelly at the platform payout), the nightly profit-sim precompute, proper scoring rules (Brier skill, Murphy decomposition, coverage); the flat −110 reporting helpers live in `src/deprecated/analysis_flat_odds.py`; closing-line-value computation |
+| `realized.py` | — | The one pricing truth for realized performance: settled offers the platform posted, priced at the platform payout (`settled_offers`), windows, the posted / recommended cohorts, the by-side ledger and the calibration summary. Receipts, Lab › Diagnostics and `reflect` all read it |
 | `skew_normal.py`, `skew_normal_centered.py`, `double_poisson.py`, `hurdle.py` | — | Custom PyTorch distributions for LightGBMLSS (SkewNormal, centered parametrization, Double Poisson, HurdleZINB) |
 | `history_schema.py`, `leg_schema.py` | — | Canonical schemas for the prediction-history frame and structured parlay legs |
 

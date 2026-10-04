@@ -276,7 +276,7 @@ acceptable for now.
 
 | Case | Threshold | Where |
 |---|---|---|
-| **No incumbent in main** | Positive Kelly-sized ROI on the cell's settled offers within the 30-day graduation window (`profit_sim_kelly_yield ≥ 0` AND live `book_bss ≥ 0`) | `nightly._profit_sim_kelly_yield` writes `data/live_metrics_per_market.parquet`; `check_graduation._classify_lifecycle` reads it |
+| **No incumbent in main** | ≥ 200 settled offers in the 30-day graduation window, live `book_bss ≥ 0`, and neither side's live precision below `MIN_PRECISION_SIDE` (0.50). No realized-money threshold: models are never promoted, demoted or withheld on realized ROI (owner rule, 2026-10-04); `profit_sim_yield` / `profit_sim_kelly_yield` in `data/live_metrics_per_market.parquet` are display-only | `nightly.py` writes the parquet; `check_graduation._classify_lifecycle` reads `n_settled`, `gate2_book_bss` and the side precisions |
 | **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `stat_meta.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
 
 Live precision and both profit sims count only sides the platform posted

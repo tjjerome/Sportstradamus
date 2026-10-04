@@ -312,6 +312,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Whole-CDF isotonic-PIT recal on count cells (Rung-C-on-count) | **Dead** — the monotone CDF map degrades low-mean count cells; Rung C ships on continuous cells only (PA), count residual routes to §6.6 | `[[rung_c_whole_cdf_recal]]` |
 | Context-conditioned book `cv` scale law | **Refuted** — 0% OOS book-PIT-KS gain (45/45; slope fits to 0). Book CDF is mis-shaped but decoupled from the served gate at `w≈0.90` ⇒ standalone book rebuild NO-GO | `[[book_distribution_audit_nogo]]`; refs |
 | Pooling-half blend rebuild (BLP + decoupled location/shape) | **Refuted (this cohort)** — decoupled (A) ill-posed, BLP (B) a wash (OOS ΔKS≈0); at `w≈0.90` nothing for the wrapper to repair; over-wide cells are family/shape-bound → §6.6. Re-probe per cohort; design in §6.5 | `[[pooling_half_blp_nogo]]`; refs |
+| Selection-aware trust layer (R1, `prediction/trust.py`, post-argmax `Trust Prob`) | **Dead — KILL 2026-10-04** — the pre-registered ablation fires: dropping served p costs no out-of-sample log-loss (logistic +0.00038 nats, p = .07; GBM p = .75), so the layer's honest probability is market-anchored, i.e. the model-free engine the owner ruled out; Tier B 0 of 12 after Holm. The selection fix routes to R3/I6 (honest-receipts lane); the standing monitor is Receipts' "edge captured" column (λ_sel) | [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md) |
 
 ## 4. Locked decisions
 
@@ -1866,6 +1867,20 @@ the gate for WS-3's two families, the copula, and the sweep/versioning build. To
 brief on a hook-gated edit, write a one-line justification to `.claude/.state/research_waiver`.
 
 **Open holes:**
+
+- **#0d — Selection-aware trust layer (R1): KILLED 2026-10-04; confirmatory re-run pre-registered for
+  mid-November.** [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md): market
+  observables available at decision time carry all of served p's out-of-sample information on posted legs,
+  so no probability consumer may anchor on a learned layer (it would be model-free in disguise). Rules that
+  survive the kill for any probability consumer: abstain is the no-fit default (below 2,000 legs and 5 dates
+  per league: no recommendation, Kelly 0 — never full trust; `strategies/kelly.py::resolve_shrinkage` still
+  grants `clip(live_bss)` on 1–19 legs and owes this fix); treat a retrain as a regime change (the model's
+  information share decays from 0.47–0.61 in a version's first days to 0.05–0.14 a week or two later,
+  exploratory); keep the phantom gate and never persist phantom rows. Reopen trigger: the re-run (frozen
+  `r1/prereg.py`, same 12-test Holm family, on the I2 decision-time columns, with an lp × version-age term
+  and fallback reported separately) passes the K2 ablation AND live λ_sel's trailing-30-day CI lower bound
+  clears 0. Cross-league caveat: the R1 window is 93% MLB and NFL had 5 fitted days; pooled cross-league
+  transfer failed (NFL W1/W2, WNBA W2); NBA abstains until ≥ 2,000 legs over ≥ 5 dates.
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   `/tmp/researcher_mixture_serve.md` (archived copy: `docs/archive/researcher_mixture_serve.md`):
