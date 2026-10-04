@@ -414,6 +414,8 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Market": "PTS",
                 "Line": line,
                 "Boost": 1.0,
+                "Boost_Over": 1.0,
+                "Boost_Under": 1.0,
                 "Bet": "Over",
                 "Projection": model_ev,
                 "Model Param": line,
