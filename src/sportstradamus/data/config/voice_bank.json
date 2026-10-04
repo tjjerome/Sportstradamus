@@ -3095,311 +3095,340 @@
       "shootout": {
         "Over": {
           "scoring": [
-            "The {g} total is loud, and {p} bats in the middle of it",
-            "A loud number in {g} keeps {p} coming to the plate",
-            "Runs come easy in {g}, and {p} squares the ball up",
-            "The ball carries in {g} and {p} finds the gaps",
-            "Both bullpens open early in {g} and {p} keeps hitting",
-            "A hitter's night in {g} runs through {p}'s bat",
-            "The {g} number sits high, and {p} adds to it",
-            "Traffic on the bases in {g} keeps reaching {p}"
+            "{p} pours total bases into the {g} scoreboard all night",
+            "The {g} total runs loud, and {p} drives the traffic",
+            "{p} racks up bases each time the order comes back around",
+            "Both bullpens crack early in {g}, and {p} feeds on the soft innings",
+            "{p} rips line drives into a {g} slugfest",
+            "A loud {g} number keeps bringing {p} to the plate with runners on",
+            "{p} owns the barrel in a {g} slugfest and the hits pile up",
+            "Runs rain in {g}, and {p} drives in his share",
+            "{p} climbs the scoreboard in {g} one line drive at a time"
           ],
           "k's": [
-            "The {g} total says runs, and {p} still misses bats",
-            "A loud number in {g} does not reach {p}'s fastball",
-            "The bats stay busy in {g} while {p} keeps punching hitters out",
-            "Runs come easy in {g} and the whiffs still come for {p}",
-            "{p} carves a lineup that hits everyone else in {g}",
-            "The {g} board reads loud, and {p}'s swing-and-miss holds",
-            "Both lineups square balls up in {g}, and {p} still gets swings"
+            "{p} hunts strikeouts while the rest of {g} swings for the fences",
+            "The {g} total runs loud, and {p} buries hitters with two strikes anyway",
+            "{p} carves a lineup that pounds everyone else in {g}",
+            "Runs rain in {g} and the whiffs keep coming for {p}",
+            "{p} fires through a hot {g} order and the punchouts stack up",
+            "A loud {g} number never reaches {p}, who racks up strikeouts anyway",
+            "{p} owns the zone in a {g} slugfest and the strikeouts climb"
           ],
           "production": [
-            "The {g} total is loud and {p} sits in the middle",
-            "Runs come from everywhere in {g}, and {p}'s line grows with them",
-            "A big number in {g} keeps {p}'s spot in the order coming up",
-            "Both bullpens work early in {g} and {p} keeps getting pitches",
-            "The {g} number invites volume, and {p} takes his share",
-            "A hitter's night in {g} settles on {p}'s line",
-            "The innings run long in {g} and {p} bats in most of them"
+            "{p} feeds on a loud {g} total and the box score fills",
+            "The {g} total runs loud, and {p} piles up chances inside it",
+            "{p} keeps coming to the plate in {g} and the numbers climb",
+            "Both bullpens crack early in {g}, and {p} racks up at-bats",
+            "{p} drives a loud {g} night from the heart of the order",
+            "Long innings in {g} keep {p}'s spot rolling back around",
+            "{p} stacks hits and runs while the {g} scoreboard lights up",
+            "A loud {g} number pushes {p} through the order one extra time",
+            "{p} owns the loudest {g} inning and the line grows with it"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} total is loud, and {p}'s bat stays quiet inside it",
-            "Runs come easy in {g} and none of them come from {p}",
-            "A loud number in {g} leaves {p}'s column alone",
-            "The ball carries in {g}, and {p} keeps hitting it flat",
-            "Everyone else squares it up in {g} while {p} waits",
-            "The {g} rally keeps starting one spot past {p}",
-            "A big number in {g} and a quiet night for {p}"
+            "The {g} total runs loud, and {p}'s bat goes cold inside it",
+            "Runs rain in {g} and none of them come off {p}'s bat",
+            "A loud {g} number flows around {p}, whose bases dry up",
+            "{p} comes up short on hits while the rest of {g} erupts",
+            "The ball carries in {g}, and {p}'s contact falls flat",
+            "Every other bat in {g} erupts and {p}'s bat stalls",
+            "A loud {g} total starves {p}'s hit column",
+            "The {g} rally keeps starting one spot past {p}"
           ],
           "k's": [
-            "The {g} total says contact, and {p} gets little swing-and-miss",
-            "A loud number in {g} means the bats find {p}",
-            "Runs come easy in {g} and the whiffs do not",
-            "The {g} lineups put the ball in play on {p}",
-            "Two-strike pitches keep finding wood in a loud {g}",
-            "A hitter's night in {g} ends {p}'s outing early",
-            "The barrels keep coming in {g} and {p}'s put-away pitch goes missing"
+            "The {g} total says contact, and {p}'s swing-and-miss dries up",
+            "A loud {g} number means barrels, and {p}'s strikeouts fall flat",
+            "Runs rain in {g} and the whiffs run dry for {p}",
+            "The {g} lineups pound the ball in play and {p}'s put-away pitch sags",
+            "Hard contact chases {p} from a loud {g} game early",
+            "Barrels keep coming in {g}, and {p}'s strikeouts come up short",
+            "Two-strike pitches keep finding wood in {g} and {p}'s punchouts stall"
           ],
           "production": [
-            "The {g} total is loud and {p}'s line stays small",
-            "Runs come from everywhere in {g} except {p}'s spot",
-            "A big number in {g} and a short night for {p}",
-            "The {g} board fills up around {p}",
-            "Both lineups get loud in {g} and {p} stays quiet",
-            "The {g} rally never reaches {p}'s half of the order",
-            "A loud night in {g} leaves {p} with nothing to show"
+            "The {g} total runs loud and {p}'s line shrinks inside it",
+            "Runs rain in {g}, and {p}'s box score starves",
+            "A loud {g} number flows around {p}, whose night falls flat",
+            "The {g} scoreboard lights up and {p} comes up short",
+            "Both lineups erupt in {g} while {p} drags through an empty night",
+            "The {g} rally rolls right past {p}'s spot in the order",
+            "A loud {g} night piles up runs everywhere except {p}'s line"
           ]
         }
       },
       "grind": {
         "Over": {
           "scoring": [
-            "Two aces hold {g} down, and {p} finds the one gap",
-            "A low number in {g} still leaves {p} his at-bats",
-            "The pitching runs {g}, and {p} takes the one good pitch",
-            "A duel in {g} turns on one swing, and it is {p}'s",
-            "Quiet innings in {g} still give {p} a barrel",
-            "The {g} number sits low, and {p} scratches a run across",
-            "Two good arms in {g} and one loud bat in {p}"
+            "Two aces choke {g}, and {p} cracks the one hit that matters",
+            "{p} owns the one loud swing in a {g} duel",
+            "A low {g} number hangs on {p}, and he drives the one run",
+            "{p} drives in the only run two aces give up in {g}",
+            "The pitching runs {g}, and {p} takes the one mistake pitch deep",
+            "{p} scratches across a run while the {g} aces grind",
+            "Zeros pile up in {g} until {p} breaks the duel open",
+            "{p} punishes the one pitch an ace leaves up in {g}",
+            "{p} climbs a low {g} scoreboard one base at a time"
           ],
           "k's": [
-            "A low number in {g} points straight at {p}'s strikeouts",
-            "Two aces shorten {g}, and {p} is one of them",
-            "The {g} duel is built on {p}'s swing-and-miss",
-            "Quiet innings in {g} come from {p} missing bats",
-            "The zeros in {g} belong to {p}, and so do the punchouts",
-            "A pitchers' night in {g} keeps {p} ahead in every count",
-            "The pitching decides {g}, and {p} decides it with strikeouts"
+            "Two aces choke {g}, and {p}'s strikeouts drive the duel",
+            "{p} carves the {g} order and the zeros pile up behind him",
+            "A low {g} number runs straight through {p}'s punchouts",
+            "{p} buries hitters with two strikes and the {g} duel shortens",
+            "{p} owns every count in {g}, and the strikeouts climb with the zeros",
+            "The pitching runs {g}, and {p} racks up the whiffs that prove it",
+            "{p} fires strike three past a {g} lineup that cannot touch him"
           ],
           "production": [
-            "Two aces hold {g} down, and {p} still fills a line",
-            "A low number in {g} leaves the margins to {p}",
-            "The pitching runs {g} and {p} takes what it gives",
-            "Every base is earned in {g}, and {p} earns most of them",
-            "A quiet {g} still comes back to {p}'s at-bats",
-            "The {g} duel narrows the night to {p}",
-            "The {g} margins are thin, and {p} lives in them"
+            "Two aces choke {g}, and {p} racks up the few chances that exist",
+            "{p} grinds out a full line while the {g} duel stays tight",
+            "A low {g} number pushes every edge onto {p}'s at-bats",
+            "{p} owns the thin margins of a {g} duel",
+            "The pitching runs {g} and {p} takes what the aces give",
+            "{p} piles up the small stuff in a {g} grind",
+            "Every base in {g} comes hard, and {p} hauls in most of them",
+            "{p} carries a thin {g} box score on his own",
+            "Zeros pile up in {g} everywhere except {p}'s line"
           ]
         },
         "Under": {
           "scoring": [
-            "Two aces hold {g} down, and {p}'s bat pays for it",
-            "A low number in {g} leaves {p} nothing to drive",
-            "The pitching in {g} keeps {p} off the barrel",
-            "The zone shrinks in {g} and {p} sees nothing good",
-            "A duel in {g} takes the bases away from {p}",
-            "Quiet innings in {g} run right past {p}'s spot",
-            "The {g} number sits low, and {p} sits with it"
+            "Two aces choke {g}, and {p}'s bat pays the bill",
+            "A low {g} number starves {p} of anything to drive",
+            "The pitching clamps down on {g}, and {p}'s hits dry up",
+            "The zone shrinks in {g} and {p} gets nothing to drive",
+            "A {g} duel takes the bases away from {p}",
+            "Quick innings in {g} roll right past {p}'s spot",
+            "{p}'s bat goes cold in a {g} grind",
+            "Two good arms smother {g} and {p} comes up short at the plate"
           ],
           "production": [
-            "Two aces shorten {g}, and {p}'s line shortens with it",
-            "A low number in {g} leaves {p} very little",
-            "The pitching runs {g} and {p}'s night stays small",
-            "Quick innings in {g} give {p} three at-bats and no more",
-            "A duel in {g} plays right around {p}",
-            "Two good arms in {g} squeeze {p} out",
-            "One run decides {g}, and {p} is not part of it"
+            "Two aces shorten {g}, and {p}'s line shrinks with it",
+            "A low {g} number starves {p}'s box score",
+            "The pitching runs {g} and {p}'s night bogs down",
+            "Quick innings in {g} drain {p} of chances",
+            "A {g} duel runs right around {p}",
+            "Two good arms choke {p}'s line in {g}",
+            "One run decides {g}, and {p} falls out of the story"
           ]
         }
       },
       "blowout": {
         "Over": {
           "scoring": [
-            "The {g} spread is wide, and {p} sees mop-up arms late",
-            "A lopsided {g} keeps sending {p} back to the plate",
-            "The margin in {g} empties a bullpen, and {p} eats the innings",
-            "A bullpen game in {g} hands {p} pitches to hit",
-            "The {g} margin adds an at-bat, and {p} uses it",
-            "Once {g} breaks open, the arms {p} faces get soft",
-            "The spread in {g} says the lineup bats around twice"
+            "The {g} spread runs wide, and {p} feeds on mop-up arms late",
+            "{p} piles up bases once the {g} bullpen cracks",
+            "A lopsided {g} score keeps sending {p} back to the plate",
+            "{p} drives in runs against soft arms as {g} breaks open",
+            "The {g} margin empties a bullpen, and {p} punishes every arm it sends",
+            "{p} racks up hits on a fourth trip through the {g} order",
+            "Garbage time in {g} hands {p} fastballs, and he rips them",
+            "{p} keeps coming to the plate as the {g} scoreboard runs away",
+            "{p} cracks the {g} game open and keeps hitting after it tips"
           ],
           "k's": [
-            "A wide {g} margin lets {p} work the zone freely",
-            "The {g} spread takes the pressure off {p}'s arm",
-            "A comfortable lead in {g} lets {p} hunt strikeouts",
-            "A settled scoreboard in {g} sharpens {p}'s put-away pitch",
-            "The margin in {g} lets {p} pitch ahead all night",
-            "A one-sided {g} keeps {p} attacking every count",
-            "With {g} settled early, {p} pitches to the punchout"
+            "The {g} spread runs wide, and {p} hunts strikeouts with the lead",
+            "{p} attacks every count once {g} breaks open",
+            "A comfortable {g} margin lets {p} fire his put-away pitch all night",
+            "{p} pounds the zone with a lead and the punchouts pile up",
+            "With {g} decided early, {p} chases strike three in every count",
+            "{p} buries a {g} lineup that sags once the margin grows",
+            "The {g} margin takes the pressure off, and {p}'s strikeouts climb",
+            "{p} owns the zone with a {g} lead and the whiffs stack up",
+            "{p} runs his pitch count deep with a lead and the strikeouts climb"
           ],
           "production": [
-            "The {g} spread is wide and {p} keeps batting",
-            "A lopsided {g} lengthens the order, and {p}'s line follows",
-            "The margin in {g} turns the late innings into batting practice for {p}",
-            "A bullpen game in {g} pads {p}'s whole line",
-            "Once {g} tips, {p} keeps getting extra chances",
-            "The {g} margin buys {p} an extra trip through the order",
-            "A wide number in {g} means volume, and {p} has the most"
+            "The {g} spread runs wide and {p} keeps batting",
+            "{p} piles up at-bats as the {g} order turns one extra time",
+            "A lopsided {g} score stretches the night, and {p} racks up chances",
+            "{p} feeds on garbage time in {g} and the box score fills",
+            "The {g} bullpen cracks, and {p} punishes everything that follows",
+            "{p} drives the {g} rout from the heart of the order",
+            "Mop-up innings in {g} hand {p} extra at-bats, and he takes them",
+            "{p} racks up a long line as {g} runs away early",
+            "The {g} margin pushes {p} through the order a fourth time"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} spread is wide, and {p} sits by the seventh",
-            "A lopsided {g} ends {p}'s day at the plate early",
-            "The margin in {g} sends a pinch hitter for {p}",
-            "Once {g} breaks open, {p} loses his last at-bat",
-            "A settled {g} costs {p} a trip through the order",
-            "The bench finishes {g}, and {p} watches from it",
-            "A wide {g} number shortens {p}'s night at the plate"
+            "The {g} spread runs wide, and {p}'s hits dry up by the seventh",
+            "A lopsided {g} score pulls {p} before his last at-bat",
+            "The {g} margin sends a pinch hitter for {p} and his bases stall",
+            "Once {g} breaks open, {p} falls out of the lineup",
+            "The bench finishes {g}, and {p}'s bat goes cold on it",
+            "A wide {g} number shuts down {p}'s night at the plate",
+            "{p} comes up short on hits once the {g} margin pulls him"
           ],
           "production": [
-            "The {g} spread is wide and {p}'s day ends early",
-            "A lopsided {g} hands the late innings to the bench, not {p}",
-            "The margin in {g} makes {p} a spectator by the eighth",
-            "Once {g} tips, {p} gets a getaway-day afternoon",
-            "A settled {g} caps {p}'s counting stats early",
-            "The {g} margin writes {p} a short line",
-            "Both benches empty in {g}, and {p}'s night ends with them"
+            "The {g} spread runs wide and {p}'s line shrinks with the regulars gone",
+            "A lopsided {g} score pulls {p} early, and his night stalls",
+            "The {g} margin drags {p} to the bench by the eighth",
+            "Once {g} tips, {p} falls off the lineup card early",
+            "A wide {g} number chokes {p}'s counting stats early",
+            "The {g} spread shuts {p} down after three at-bats",
+            "Both benches empty in {g}, and {p}'s night fades with them"
           ]
         }
       },
       "coinflip": {
         "Over": {
           "scoring": [
-            "A tight {g} comes down to one swing, and {p} takes it",
+            "A tight {g} game comes down to one swing, and {p} takes it",
+            "{p} drives in the run that decides a one-run {g} game",
             "The late innings in {g} keep finding {p}'s bat",
-            "One run decides {g}, and {p} is the one who drives it",
-            "A close {g} puts every big at-bat on {p}",
-            "Extra innings threaten in {g}, and {p} keeps coming up",
-            "The {g} margin is thin, and {p} owns the leverage",
-            "A one-run {g} hands the biggest at-bat to {p}"
+            "{p} owns the biggest at-bat in a tight {g} game",
+            "One run decides {g}, and {p} racks up the bases that matter",
+            "{p} piles up hits while a close {g} game runs deep",
+            "Extra innings threaten in {g}, and {p} keeps coming up with runners on",
+            "{p} cracks a close {g} game open with one line drive",
+            "The {g} margin runs thin, and {p} drives the late leverage",
+            "{p} cracks a tight {g} game open and the crowd noise climbs"
           ],
           "k's": [
-            "A tight {g} needs every out, and {p} takes them by strikeout",
-            "The late innings in {g} sharpen {p}'s stuff",
-            "One run decides {g}, and {p} pitches to the whiff",
-            "A close {g} keeps {p} working ahead in the count",
-            "Every out matters in {g}, and {p}'s put-away pitch answers",
-            "The {g} leverage settles on {p} and the punchouts follow",
-            "A tight {g} keeps {p} in the zone with two strikes"
+            "A tight {g} game needs every out, and {p} takes them by strikeout",
+            "{p} hunts strike three in every count of a one-run {g} game",
+            "One run decides {g}, and {p} buries hitters with two strikes",
+            "{p} owns the zone when the {g} leverage climbs",
+            "The late innings in {g} sharpen {p}'s stuff and the punchouts stack up",
+            "{p} fires his put-away pitch through every tight {g} inning",
+            "Every pitch counts in {g}, and {p} racks up strikeouts when it does",
+            "{p} attacks a tight {g} game one strikeout at a time"
           ],
           "production": [
-            "A tight {g} puts {p} in every important inning",
-            "The late innings in {g} give {p} one more turn",
-            "Extra innings threaten in {g}, and {p}'s line grows with them",
-            "One run decides {g} and {p} touches most of the chances",
-            "A close {g} funnels every late chance to {p}",
-            "The {g} margin stays thin, and {p} keeps getting looks",
-            "Nine full innings in {g} keep {p}'s spot coming around"
+            "A tight {g} game pushes {p} into every important inning",
+            "{p} racks up chances as the late innings in {g} stretch on",
+            "One run decides {g}, and {p} takes most of the chances",
+            "{p} owns the late leverage in a tight {g} game",
+            "Extra innings threaten in {g}, and {p}'s line climbs with them",
+            "{p} keeps coming up as a close {g} game runs long",
+            "The {g} margin runs thin and {p} drives the box score",
+            "{p} piles up the small edges a one-run {g} game hands out",
+            "Nine full innings in {g} keep {p}'s spot rolling back around"
           ]
         },
         "Under": {
           "scoring": [
-            "A tight {g} means matchup relievers, and {p} sees the tough ones",
-            "The late innings in {g} pitch around {p}",
-            "One run decides {g}, so nobody gives {p} anything",
-            "A close {g} turns {p}'s at-bats into free passes",
-            "The {g} bullpen game buries {p}'s best matchups",
-            "Careful pitching in a tight {g} leaves {p} nothing to hit",
-            "Every pitch is precious in {g}, and {p}'s bases dry up"
+            "A tight {g} game means matchup relievers, and {p}'s hits dry up",
+            "The late innings in {g} pitch around {p} and his bases stall",
+            "One run decides {g}, so nobody feeds {p} a strike",
+            "Careful pitching in a tight {g} game starves {p}'s bat",
+            "Bullpen chess in {g} buries {p}'s best matchups",
+            "Every pitch counts in {g}, and {p}'s contact falls flat",
+            "{p} comes up short on hits while a close {g} game grinds on"
           ],
           "production": [
-            "A tight {g} is too careful to feed {p}",
+            "A tight {g} game plays too careful to feed {p}",
             "The late innings in {g} take {p} out of it",
-            "One run decides {g}, and {p}'s line stays thin",
+            "One run decides {g}, and {p}'s line shrinks around it",
             "Matchup relievers own the late {g} innings, and {p} pays",
-            "A close {g} shrinks every chance {p} gets",
-            "The {g} margin is thin and so is {p}'s night",
-            "Bullpen chess in {g} keeps {p} from settling in"
+            "A close {g} game chokes every chance {p} gets",
+            "The {g} margin runs thin and so does {p}'s night",
+            "Bullpen chess in {g} bogs {p} down before he gets going"
           ]
         }
       },
       "even": {
         "Over": {
           "scoring": [
-            "The {g} card points at {p}, and the bases follow",
-            "{p} squares the ball up all night in {g}",
-            "The board likes {p}'s bat in {g}",
-            "Line drives keep leaving {p}'s bat in {g}",
-            "{p} reaches base again and again in {g}",
-            "The total bases come easy for {p} in {g}",
-            "Good swings and a friendly plate for {p} in {g}",
-            "The {g} matchup sets {p} up for hard contact"
+            "{p} pours line drives into the gaps in {g}",
+            "{p} racks up total bases on the {g} card",
+            "The {g} card runs through {p}'s bat",
+            "{p} owns the barrel in {g} and the hits pile up",
+            "{p} drives the ball all night in {g}",
+            "Hard contact keeps coming off {p}'s bat in {g}",
+            "{p} cracks line drives from the first at-bat in {g}",
+            "The board feeds {p} fastballs in {g}, and he squares them up",
+            "{p} floods the bases in {g} one hit at a time",
+            "{p} lights up the {g} card with the bat"
           ],
           "k's": [
-            "The {g} card sets up {p}'s swing-and-miss",
-            "{p} carves this lineup in {g}",
-            "The punchouts come in bunches for {p} in {g}",
-            "{p} works ahead all night and the strikeouts follow in {g}",
-            "The {g} order chases {p}'s pitch out of the zone",
-            "Strike three keeps showing up for {p} in {g}",
-            "Swings come up empty against {p}'s stuff in {g}",
-            "The {g} board reads whiffs whenever {p} pitches"
+            "{p} carves the {g} order and the strikeouts pile up",
+            "{p} hunts punchouts in {g} from the first pitch",
+            "The {g} card runs through {p}'s swing-and-miss",
+            "{p} buries the {g} lineup with two strikes all night",
+            "Whiffs keep coming for {p} in {g}",
+            "{p} owns the zone in {g} and strike three follows",
+            "{p} fires through the {g} order and the punchouts climb",
+            "Empty swings pile up on {p}'s stuff in {g}",
+            "{p} runs his pitch count deep in {g} and the strikeouts climb"
           ],
           "production": [
+            "{p} racks up good at-bats all night in {g}",
             "The {g} card runs through {p}",
-            "{p} keeps stacking good at-bats in {g}",
-            "The board is quiet, and {p} is the loud part of {g}",
-            "{p}'s spot in the order carries the {g} card",
-            "Everything in {g} sets up well for {p}",
+            "{p} drives the {g} card from the middle of the order",
+            "{p} owns the loudest line on a flat {g} board",
             "The numbers keep coming for {p} in {g}",
-            "A quiet board, and {p} still fills a line in {g}"
+            "{p} piles up chances in {g} and takes most of them",
+            "{p}'s spot in the order carries the {g} card",
+            "Everything in {g} feeds {p}'s line",
+            "{p} stacks up a full box score in {g}"
           ],
           "mistakes": [
             "{p} pounds the zone in {g} and the free passes stay down",
-            "First-pitch strikes all night from {p} in {g}",
-            "The zone belongs to {p} in {g}, and the walks stay under",
-            "{p} keeps the damage column quiet in {g}",
-            "No wildness and no free passes from {p} in {g}",
-            "{p} works around the barrel in {g} and stays clean",
-            "The {g} card asks for control, and {p} has it",
-            "{p} throws strikes in {g} and the walk column stays under"
+            "{p} fires first-pitch strikes all night in {g}",
+            "{p} owns the zone in {g}, and the walk column stays under",
+            "{p} keeps the damage down in {g}",
+            "Nothing wild from {p} in {g}: the walks fall flat",
+            "{p} attacks the {g} lineup in the zone and the walks dry up",
+            "The {g} card asks for strikes, and {p} pours them in",
+            "{p} clamps down on the walks in {g}",
+            "{p} shuts the damage column down in {g}"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} card leaves {p} very little to hit",
-            "{p} chases pitches out of the zone in {g}",
-            "Weak contact follows {p} all night in {g}",
-            "The board points away from {p}'s bat in {g}",
-            "{p} finds no barrel in {g}",
-            "The gaps stay closed for {p} in {g}",
-            "The {g} matchup takes the bases away from {p}",
-            "Quiet at-bats stack up for {p} in {g}"
+            "The {g} card starves {p} of anything to hit",
+            "{p} chases out of the zone all night in {g}",
+            "Weak contact drags {p} through a cold night in {g}",
+            "{p}'s bat goes cold in {g}",
+            "The board pulls away from {p}'s bat in {g}",
+            "The gaps shut on {p} in {g}",
+            "{p} comes up short on hits in {g}",
+            "The {g} matchup takes the bases away from {p}"
           ],
           "k's": [
-            "The {g} lineup puts everything in play on {p}",
-            "{p}'s swing-and-miss goes missing in {g}",
-            "The board reads contact whenever {p} pitches in {g}",
-            "Early contact and quick outs for {p} in {g}",
-            "Two-strike counts keep ending in contact for {p} in {g}",
-            "The {g} order spoils everything {p} throws",
-            "{p}'s put-away pitch stays flat in {g}",
-            "The {g} card asks {p} for outs, not strikeouts"
+            "The {g} lineup puts everything in play and {p}'s strikeouts dry up",
+            "{p}'s swing-and-miss goes cold in {g}",
+            "Early contact shuts down {p}'s punchouts in {g}",
+            "The {g} order spoils every two-strike pitch and {p}'s whiffs stall",
+            "{p}'s put-away pitch falls flat in {g}",
+            "Quick outs pile up for {p} in {g}, and the strikeouts stall",
+            "The {g} card feeds {p} outs, not strikeouts",
+            "{p}'s strikeouts run dry on a contact-heavy {g} card"
           ],
           "production": [
-            "The {g} card gives {p} a quiet night",
-            "{p}'s line stays small in {g}",
-            "The board forgets {p} in {g}",
-            "Nothing drops in for {p} in {g}",
-            "{p} finishes {g} with an empty line",
-            "The {g} matchup settles {p}'s bat down",
-            "A short line for {p} on a quiet {g} card",
-            "{p} sits on the quiet side of {g}"
+            "The {g} card drains {p}'s line",
+            "{p}'s night bogs down in {g}",
+            "The board shuts {p} out in {g}",
+            "Nothing falls in for {p} in {g}",
+            "{p} comes up short across the board in {g}",
+            "The {g} matchup smothers {p}'s bat",
+            "{p}'s line shrinks on a flat {g} card",
+            "{p} fades into the back of the {g} box score"
           ],
           "mistakes": [
             "The zone abandons {p} in {g} and the walks pile up",
             "{p} nibbles all night in {g} and the free passes climb",
-            "Full counts and wild misses follow {p} in {g}",
-            "{p} cannot find the plate in {g}, and the walk column goes over",
-            "The {g} card catches {p} between the zone and the corners",
-            "Traffic follows {p} all night in {g}, walks and loud contact",
-            "{p} misses the zone in {g} and the free passes go over",
-            "Wild pitches and long counts for {p} in {g}"
+            "Full counts and wild misses drag {p} down in {g}",
+            "{p} loses the plate in {g}, and the walks climb over the number",
+            "Traffic floods the bases behind {p} in {g}: walks and loud contact",
+            "{p} misses the zone in {g} and the damage piles up",
+            "Wild pitches and long counts bog {p} down in {g}",
+            "{p} sprays pitches out of the zone, and the free passes rain",
+            "The {g} lineup turns over on {p} and the free passes pile up",
+            "The {g} card buries {p} in empty swings and long counts"
           ]
         },
         "Mixed": {
           "production": [
-            "{p} splits the night: {up} while {down}",
-            "The {g} zone splits: {up} and {down}",
-            "{p} swings both ways: {up} and {down}",
-            "Innings split in {g}: {up} and {down}",
-            "{p}'s bat splits: {up} and {down}",
-            "{p} gives one back: {up} and {down}",
-            "{p} cuts both ways: {up} and {down}",
-            "{g} splits inning by inning: {up} and {down}"
+            "{p}'s bat pulls two ways: {up} and {down}",
+            "{p} comes out split: {up} and {down}",
+            "{p} runs hot and cold: {up} and {down}",
+            "{p}'s innings pull apart: {up} and {down}",
+            "{p}'s at-bats break two ways: {up} and {down}",
+            "The card pulls {p} apart: {up} and {down}",
+            "{p} carries one column: {up} while {down}",
+            "{p} breaks in two: {up} and {down}"
           ]
         }
       }
@@ -3408,187 +3437,189 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} total is loud, and both lineups take advantage",
-            "Both bullpens open early in {g}",
+            "The {g} total runs loud, and both lineups pile on",
+            "Both bullpens crack early in {g}",
             "The ball carries in {g} and the innings run long",
-            "A loud number in {g} keeps both orders batting around",
-            "The {g} number says runs, and the bats agree",
-            "Neither rotation lasts long in {g}",
+            "A loud {g} number keeps both orders turning",
+            "The {g} number says runs, and the bats pour them in",
+            "Neither starter lasts, and the {g} scoreboard lights up",
             "Crooked numbers stack up all night in {g}",
-            "The wind is out in {g} and the long ball follows"
+            "Runs rain in {g} and the long ball keeps coming"
           ],
           "scoring": [
-            "The {g} total is loud and the runs come in bunches",
-            "One rally leads into the next in {g}",
-            "A loud number in {g} means traffic on the bases",
-            "The ball carries in {g}, and the long ball follows",
-            "Both orders find the gaps in {g}",
-            "The {g} number invites crooked innings",
-            "Hard contact travels in {g} tonight",
-            "The bases stay busy in {g} from the first inning"
+            "The {g} total runs loud and the runs come in bunches",
+            "One rally feeds the next in {g}",
+            "A loud {g} number floods the bases all night",
+            "The ball carries in {g}, and the long ball piles on",
+            "Both orders rip line drives into the gaps in {g}",
+            "The {g} number invites crooked innings, and the bats take the invitation",
+            "Hard contact rains all night in {g}",
+            "Traffic floods the bases in {g} from the first inning"
           ]
         },
         "Under": {
           "production": [
-            "The {g} total says slugfest. The model reads these bats quieter than the number.",
-            "The {g} number says runs. These bats stay in the rack.",
-            "The board prices a slugfest in {g}. The model disagrees.",
-            "Runs will score in {g}. They will not come from these names.",
-            "A loud number sits on {g}. These lines still read quiet.",
-            "The {g} total expects fireworks. The model reads these bats down.",
-            "The ball carries in {g}. These swings still come up short."
+            "The {g} total says slugfest. These bats go cold anyway.",
+            "The {g} number runs loud, and these bats go cold inside it",
+            "The board prices a {g} slugfest. These lines fall flat anyway.",
+            "Runs rain in {g}. Not off these bats.",
+            "A loud {g} number flows around these names, and their lines dry up",
+            "The {g} total expects fireworks, and these swings come up short",
+            "The ball carries in {g}. These bats chase it and come up empty.",
+            "Crooked innings pile up in {g} everywhere except on these lines"
           ]
         },
         "Mixed": {
           "production": [
-            "The {g} total splits: {up} and {down}",
-            "A loud number in {g}: {up} and {down}",
-            "Runs come easy in {g}: {up} and {down}",
-            "A hitter's night in {g}: {up} while {down}",
-            "Both bullpens open in {g}: {up} and {down}",
-            "Crooked innings in {g}: {up} and {down}",
-            "One loud {g} inning: {up} and {down}"
+            "The {g} total runs loud: {up} and {down}",
+            "A loud {g} number pulls apart: {up} and {down}",
+            "Runs rain in {g}: {up} while {down}",
+            "Both bullpens crack in {g}: {up} and {down}",
+            "The {g} slugfest comes apart: {up} and {down}",
+            "Crooked innings pile up in {g}: {up} and {down}",
+            "One loud night cracks in two: {up} and {down}"
           ]
         }
       },
       "grind": {
         "Over": {
           "production": [
-            "The {g} number is low. The model still likes these lines.",
-            "Two aces headline {g}. The model reads these numbers higher.",
-            "The board calls {g} a duel. These stat lines still clear.",
+            "The {g} number runs low. These lines climb anyway.",
+            "Two aces headline {g}, and these numbers climb in spite of them",
+            "The board calls {g} a duel. These stat lines break through it.",
             "A pitchers' duel in {g} feeds the arms, not the bats",
-            "The {g} total sits low. The pitching columns fill anyway.",
-            "A duel keeps the runs down in {g}, not the numbers",
-            "The board reads {g} quiet. The model reads these names up."
+            "The {g} total hangs low, and the pitching columns pile up anyway",
+            "A duel chokes the runs in {g}, not these numbers",
+            "The board reads {g} as a grind. These names drive through it.",
+            "Zeros pile up in {g}, and these lines pile up with them"
           ]
         },
         "Under": {
           "production": [
-            "Two aces shorten {g}, and every bat pays for it",
-            "The {g} number sits low and the bats stay quiet",
-            "A pitchers' duel in {g} keeps the board clean",
-            "Quick innings in {g} leave nobody anything",
-            "The pitching runs {g} from the first inning",
-            "Nothing gets barreled in {g} tonight",
-            "A 1-0 kind of night in {g}",
-            "The {g} card reads zeros, and the bats agree"
+            "Two aces choke {g} and every bat pays for it",
+            "The {g} number runs low and the bats go cold",
+            "A pitchers' duel in {g} shuts down the scoreboard",
+            "Quick innings in {g} starve every line",
+            "The pitching smothers {g} from the first inning",
+            "Nothing gets barreled in {g} and the hits dry up",
+            "A 1-0 kind of night in {g}, and the bats bog down",
+            "The {g} card reads zeros, and the bats fall flat"
           ]
         },
         "Mixed": {
           "production": [
-            "Two aces shorten {g}: {up} and {down}",
+            "Two aces choke {g}: {up} and {down}",
             "The pitching runs {g}: {up} while {down}",
-            "A low number in {g}: {up} and {down}",
-            "Quick innings in {g}: {up} and {down}",
-            "The {g} duel splits: {up} and {down}",
+            "A low {g} number pulls apart: {up} and {down}",
+            "Quick innings grind through {g}: {up} and {down}",
+            "The {g} duel comes apart: {up} and {down}",
             "Zeros pile up in {g}: {up} and {down}",
-            "A pitchers' night in {g}: {up} and {down}"
+            "A pitchers' night breaks two ways: {up} and {down}"
           ]
         }
       },
       "blowout": {
         "Over": {
           "production": [
-            "The {g} spread is wide and both orders keep batting",
-            "A lopsided {g} empties both bullpens early",
-            "Mop-up innings in {g} hand out extra at-bats",
-            "The margin in {g} lengthens every lineup",
+            "The {g} spread runs wide and both orders keep batting",
+            "A lopsided {g} score cracks both bullpens open early",
+            "Mop-up innings in {g} rain extra at-bats on everyone",
+            "The {g} margin pushes every lineup through a fourth turn",
             "Once {g} breaks open, the volume comes easy",
-            "A wide number in {g} means a fourth trip through the order",
-            "The {g} spread promises long innings for both sides"
+            "A wide {g} number piles on at-bats for both sides",
+            "The {g} spread drags the innings out, and the lines climb with them"
           ]
         },
         "Under": {
           "production": [
-            "The {g} spread is wide, and the regulars come out early",
-            "A lopsided {g} hands the last three innings to the bench",
-            "The margin in {g} empties both dugouts by the seventh",
-            "Once {g} tips, the starters ice down",
-            "A wide number in {g} shortens every regular's day",
-            "The {g} spread turns the late innings into a call-up game",
-            "Pinch runners and bench bats finish {g}"
+            "The {g} spread runs wide, and the regulars come out by the seventh",
+            "A lopsided {g} score pulls the regulars for the last three innings",
+            "The {g} margin empties both dugouts early and every line shrinks",
+            "Once {g} tips, the starters fade to the bench",
+            "A wide {g} number shuts down every regular's day early",
+            "Pinch runners and bench bats close out {g}",
+            "The {g} spread drains the late innings of every name that matters"
           ]
         },
         "Mixed": {
           "production": [
-            "The {g} margin splits: {up} and {down}",
-            "The margin in {g} decides: {up} while {down}",
-            "The bench finishes {g}: {up} and {down}",
-            "Mop-up innings in {g}: {up} and {down}",
-            "One order keeps batting: {up} and {down}",
-            "The regulars come out early: {up} and {down}",
-            "Extra at-bats in {g}: {up} and {down}"
+            "The {g} margin breaks two ways: {up} and {down}",
+            "Garbage time in {g} pulls apart: {up} while {down}",
+            "The bench closes out {g}: {up} and {down}",
+            "Mop-up innings in {g} come apart: {up} and {down}",
+            "One order keeps batting in {g}: {up} and {down}",
+            "The regulars fade early in {g}: {up} and {down}",
+            "Extra at-bats pile up in {g}: {up} and {down}"
           ]
         }
       },
       "coinflip": {
         "Over": {
           "production": [
-            "A tight {g} runs deep into the night",
+            "A tight {g} game runs deep into the night",
             "The late innings in {g} keep both orders coming up",
-            "Extra innings threaten in {g}, and the volume follows",
-            "One run decides {g}, so both bullpens empty",
-            "A close {g} gets a full nine from everyone",
-            "The {g} margin stays thin and the innings keep coming",
-            "Free baseball is on the table in {g}"
+            "Extra innings threaten in {g}, and the volume climbs with them",
+            "One run decides {g}, so both bullpens empty into it",
+            "A close {g} game drags everyone through a full nine",
+            "The {g} margin runs thin and the innings keep coming",
+            "Free baseball threatens in {g}, and every line keeps climbing"
           ]
         },
         "Under": {
           "production": [
-            "A tight {g} turns into bullpen chess, and the numbers stay small",
+            "A tight {g} game turns into bullpen chess, and the numbers shrink",
             "Matchup relievers own the late innings in {g}",
-            "One run decides {g}, so every at-bat gets careful",
-            "The late innings in {g} belong to the managers",
-            "A close {g} plays small ball all night",
-            "The {g} margin is thin and the bats stay quiet",
-            "Careful pitching in {g} keeps every line short"
+            "One run decides {g}, so every at-bat bogs down in caution",
+            "The late innings in {g} belong to the managers, and the bats go cold",
+            "A close {g} game grinds through small ball all night",
+            "The {g} margin runs thin and every line falls flat",
+            "Careful pitching in {g} chokes every line short"
           ]
         },
         "Mixed": {
           "production": [
-            "A tight {g} splits: {up} and {down}",
-            "The late innings in {g}: {up} and {down}",
+            "A tight {g} game pulls apart: {up} and {down}",
+            "Late innings in {g} come apart: {up} and {down}",
             "One run decides {g}: {up} while {down}",
-            "Bullpen chess in {g}: {up} and {down}",
-            "Late leverage in {g}: {up} and {down}",
-            "Matchup baseball in {g}: {up} and {down}",
-            "The {g} margin stays thin: {up} and {down}"
+            "Bullpen chess breaks {g} two ways: {up} and {down}",
+            "Late leverage pulls {g} apart: {up} and {down}",
+            "Every pitch carries weight in {g}: {up} and {down}",
+            "The {g} margin runs thin: {up} and {down}"
           ]
         }
       },
       "even": {
         "Over": {
           "production": [
-            "The {g} card leans the same way all night",
-            "No ace and no headline bat in {g}",
-            "The board finds an edge in every {g} lineup spot",
-            "Small edges add up through the {g} order",
-            "The {g} card gives a little to everyone",
-            "Nine quiet mismatches sit on the {g} board",
-            "The value in {g} comes in singles, not headlines"
+            "The {g} card runs one direction all night",
+            "No ace and no headline bat in {g}, and the lines climb anyway",
+            "The board feeds an edge into every {g} lineup spot",
+            "Small edges pile up through the {g} order",
+            "The {g} card pours out small edges and they stack up",
+            "Nine mismatches stack up on the {g} board",
+            "The {g} value comes in singles, not headlines"
           ]
         },
         "Under": {
           "production": [
-            "The {g} card reads quiet from top to bottom",
-            "A tidy nine innings in {g}",
-            "The board wants nothing from {g} tonight",
-            "Routine flies and ground balls in {g}",
-            "The {g} lineups both stay in the rack",
+            "The {g} card goes cold from top to bottom",
+            "A tidy nine innings in {g}, and the bats go cold",
+            "The board shuts {g} down tonight",
+            "Routine flies and ground balls pile up in {g}",
+            "Both {g} lineups go cold at the same time",
             "Quick innings stack up on the {g} card",
-            "Nothing on the {g} board asks for a swing"
+            "Nothing on the {g} board breaks loose"
           ]
         },
         "Mixed": {
           "production": [
-            "The {g} card splits: {up} and {down}",
-            "The board reads both ways: {up} and {down}",
-            "The {g} matchups point apart: {up} and {down}",
-            "Half the {g} order shows: {up} and {down}",
-            "Arms and bats disagree: {up} and {down}",
-            "No single current in {g}: {up} and {down}",
-            "The {g} card leans both: {up} and {down}"
+            "The {g} card breaks two ways: {up} and {down}",
+            "The board runs both ways: {up} and {down}",
+            "The {g} matchups come apart: {up} and {down}",
+            "Half the {g} order comes through: {up} and {down}",
+            "Arms and bats pull apart: {up} and {down}",
+            "No single current runs through {g}: {up} and {down}",
+            "The {g} card runs two ways: {up} and {down}"
           ]
         }
       }
@@ -3597,22 +3628,23 @@
       "even": {
         "Over": {
           "production": [
-            "The {team} {grp}s hold the edge on {opp} tonight",
-            "{opp} has no answer for the {team} {grp}s",
-            "The {team} {grp}s win the matchup with {opp} top to bottom",
-            "Every {team} {grp} gets a favorable look at {opp}",
-            "The {team} {grp}s control the count against {opp} all night",
-            "{opp} spends the night behind in the count to the {team} {grp}s",
-            "The matchup card favors the {team} {grp}s against {opp}"
+            "The {team} {grp}s own the matchup with {opp} tonight",
+            "{opp} runs out of answers for the {team} {grp}s",
+            "The {team} {grp}s take the {opp} matchup top to bottom",
+            "Every {team} {grp} feeds on a favorable look at {opp}",
+            "The {team} {grp}s own the count against {opp} all night",
+            "{opp} falls behind in the count to the {team} {grp}s all night",
+            "The matchup card pushes the {team} {grp}s past {opp}"
           ],
           "scoring": [
             "The {team} {grp}s keep the line moving on {opp}",
-            "Base hits chain together for the {team} {grp}s against {opp}",
-            "The {opp} staff cannot miss the {team} {grp}s' barrels",
-            "The {team} {grp}s find the gaps on {opp} all night",
-            "Total bases come easy for the {team} {grp}s against {opp}",
-            "The {team} {grp}s square up everything {opp} throws",
-            "Hard contact follows the {team} {grp}s through the {opp} staff"
+            "Base hits pile up for the {team} {grp}s against {opp}",
+            "The {team} {grp}s pound the {opp} staff from the first inning",
+            "The {team} {grp}s rip the gaps open on {opp} all night",
+            "Total bases pour in for the {team} {grp}s against {opp}",
+            "The {team} {grp}s light up everything {opp} throws",
+            "Hard contact keeps coming from the {team} {grp}s through the {opp} staff",
+            "The {team} {grp}s run up the score on {opp}"
           ]
         }
       }
@@ -3621,94 +3653,94 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} total is loud, and these {n} legs ride it together",
-            "A loud number in {g} lifts {n} legs behind {p}",
+            "The {g} total runs loud, and these {n} legs climb it together",
+            "A loud {g} number carries {n} legs behind {p}",
             "One {g} rally carries all {n} legs, and {p} starts it",
-            "Both bullpens open early in {g} and {n} legs move together",
-            "The ball carries in {g}, and {p} fronts {n} legs",
-            "A hitter's night in {g} feeds {n} legs behind {p}",
-            "The {g} number invites a big inning, and {n} legs sit in it"
+            "Both bullpens crack early in {g} and {n} legs pile on together",
+            "The ball carries in {g}, and {n} legs feed on it behind {p}",
+            "{p} drives a loud {g} night and {n} legs come with him",
+            "The {g} number invites a big inning, and {n} legs pour into it"
           ]
         },
         "Under": {
           "production": [
-            "The {g} total says slugfest. The model reads these {n} bats quieter.",
-            "A loud number sits on {g}. These {n} legs stay quiet anyway.",
-            "Runs will score in {g}. Not through these {n} names.",
-            "The board prices a slugfest in {g}. {p} fronts {n} fades.",
-            "The ball carries in {g}. These {n} swings still come up short.",
-            "The {g} number expects fireworks. This slip reads quieter.",
-            "Crooked innings are coming in {g}. These {n} bats miss them."
+            "The {g} total says slugfest. These {n} bats go cold anyway.",
+            "A loud {g} number runs around these {n} legs, and their lines dry up",
+            "Runs rain in {g}. Not through these {n} names.",
+            "The board prices a {g} slugfest, and these {n} legs come up short",
+            "The ball carries in {g}, and these {n} swings fall flat anyway",
+            "The {g} number expects fireworks. This {n}-leg slip goes cold.",
+            "Crooked innings pile up in {g} everywhere except these {n} bats"
           ]
         }
       },
       "grind": {
         "Over": {
           "production": [
-            "The {g} number is low. These {n} legs still clear.",
-            "Two aces headline {g}. The model likes these {n} names anyway.",
-            "A duel in {g} suits {n} legs, and {p} most of all",
-            "The board calls {g} quiet. {p} fronts {n} legs that disagree.",
-            "A duel is coming in {g}. These {n} arms feed on it.",
-            "The pitching runs {g}. These {n} lines fill anyway.",
-            "A low number hangs on {g}. These {n} legs clear it."
+            "The {g} number runs low. These {n} legs climb it anyway.",
+            "Two aces headline {g}, and these {n} names break through anyway",
+            "A {g} duel feeds {n} legs, and {p} most of all",
+            "The board calls {g} a grind. {p} drives {n} legs through it.",
+            "A duel in {g} feeds these {n} arms",
+            "The pitching runs {g}, and these {n} lines pile up with it",
+            "A low number hangs on {g}, and {n} legs push through behind {p}"
           ]
         }
       },
       "even": {
         "Over": {
           "production": [
-            "{n} legs from one {g} rally, and {p} bats first",
+            "{n} legs ride one {g} rally, and {p} drives it",
             "The {g} card stacks {n} legs behind {p}",
-            "When {p} reaches base, all {n} legs move",
-            "{n} legs share one {g} lineup, and {p} anchors it",
-            "The {g} order links {n} legs together behind {p}",
-            "One inning in {g} can carry all {n} legs",
-            "{p} and {n} legs ride the same {g} lineup"
+            "When {p} reaches base, all {n} legs climb",
+            "{n} legs share one {g} lineup, and {p} carries it",
+            "The {g} order feeds {n} legs through {p}",
+            "One {g} inning carries all {n} legs",
+            "{p} and {n} legs pour out of the same {g} lineup"
           ]
         },
         "Under": {
           "production": [
-            "{n} quiet bats out of one {g} lineup, {p} included",
+            "{n} bats go cold in one {g} lineup, {p}'s included",
             "The {g} card fades {n} ways behind {p}",
-            "{p} fronts {n} legs the {g} rally never reaches",
-            "Zeros chain through the {g} order, {n} legs deep",
-            "{n} cold bats share one {g} dugout",
-            "The {g} lineup goes quiet, and {n} legs go with it",
-            "One quiet {g} inning after another, {n} legs behind {p}"
+            "{p} fronts {n} legs that the {g} rally rolls right past",
+            "Zeros pile up through the {g} order, {n} legs deep",
+            "{n} bats dry up in one {g} dugout",
+            "The {g} lineup goes cold, and {n} legs go with it",
+            "One {g} inning after another falls flat, {n} legs behind {p}"
           ]
         },
         "ContrastOver": {
           "production": [
-            "{p} barrels up while the rest of the {g} lineup sits",
-            "The {g} order goes quiet around {p}'s bat",
-            "One live bat in {g}, and it belongs to {p}",
-            "{p} keeps squaring balls up while the {g} order rests",
-            "The {g} lineup cools off everywhere except {p}'s plate appearances",
-            "{p} finds the barrel that the rest of {g} cannot",
-            "The quiet side of the {g} order, with {p} the exception"
+            "{p} owns the barrel while the rest of the {g} lineup goes cold",
+            "The {g} order dries up around {p}'s bat",
+            "One hot bat in {g}, and {p} carries it",
+            "{p} keeps squaring balls up while the {g} order fades",
+            "The {g} lineup goes cold everywhere except {p}'s plate appearances",
+            "{p} drives the ball while the rest of {g} comes up empty",
+            "The {g} order falls flat, and {p} breaks out alone"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "Hits come up and down the {g} order, none for {p}",
-            "The {g} lineup wakes up around {p}'s quiet bat",
-            "The {g} rally flows around {p}'s spot in the order",
-            "Everyone in the {g} order squares one up except {p}",
-            "{p} takes the quiet side of a busy {g} lineup",
-            "The bats around {p} stay hot in {g}, his stays cold",
-            "One cold plate in a warm {g} order, and it is {p}'s"
+            "Hits pile up and down the {g} order, none off {p}'s bat",
+            "The {g} lineup erupts around {p}'s cold bat",
+            "The {g} rally rolls around {p}'s spot in the order",
+            "Everyone in the {g} order drives one while {p} comes up short",
+            "{p} goes cold in the middle of a hot {g} lineup",
+            "The bats around {p} keep coming in {g}, and his dries up",
+            "One bat stalls in a loud {g} order, and it belongs to {p}"
           ]
         },
         "Mixed": {
           "production": [
             "{n} legs pull apart: {up} and {down}",
-            "The {g} slip splits: {up} and {down}",
-            "{p} fronts a split: {up} and {down}",
-            "{n} legs from one dugout: {up} and {down}",
-            "{n} legs off one lineup: {up} and {down}",
-            "{n} legs read two ways: {up} and {down}",
-            "The {g} order pulls apart: {up} and {down}"
+            "The {g} slip breaks two ways: {up} and {down}",
+            "{p} pulls {n} legs apart: {up} and {down}",
+            "{n} legs come apart in {g}: {up} and {down}",
+            "One lineup pulls {n} legs apart: {up} and {down}",
+            "{n} legs run two ways: {up} and {down}",
+            "The {g} order cracks in two: {up} and {down}"
           ]
         }
       }
