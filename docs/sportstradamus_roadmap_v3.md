@@ -89,6 +89,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | DONE | — | [handoffs/cleanup-pass.md](handoffs/cleanup-pass.md) |
 | `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | DONE (all four stages closed 2026-09-13; the cache is per-box, so each box runs `fetch headshots` once) | — (owner installs the monthly cron row) | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
 | `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
+| `story-balance` | Honest ledger by bet side at platform payouts (Kelly / profit-sim / CLV / Gate-2 fixes), Over-led and Under-led star stories per game, live-analyst voice; selection-shrink lever researched and KILLED | OPEN (code landed 2026-10-03, unpushed; first live read after the next prophecize + reflect) | — | [handoffs/story-balance.md](handoffs/story-balance.md) |
 
 ### 4.1 Build path (visual index)
 
