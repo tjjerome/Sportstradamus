@@ -266,6 +266,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Refresh the per-cell SHAP diagnostic CSVs | `training/shap.py:see_features` — diagnostics only; training uses the full unfiltered candidate feature set |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |
 | Find why a comp feature has a certain weight | `data/config/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
+| See how a cell's recommended legs would have done on held-out rows | `sportstradamus admin tail-scorecard` (`scripts/tail_scorecard.py`; re-serve in `tail_pricing.py`, information test in `tail_information.py`) — the live rule replayed at the archived DFS rungs; a diagnostic, never a gate |
 | Read archived / removed code | `src/deprecated/` (reintroduction protocol in its README) |
 
 ---

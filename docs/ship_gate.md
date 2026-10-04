@@ -212,6 +212,15 @@ deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0
 The σ / IQR_true denominators equal the model row, so the oracle row sizes each
 gate's natural threshold.
 
+**The gates score the bulk, not the recommended tail.** Gate 1 runs where the model and the book
+mostly agree (mean |model − market| .050 on its rows, against .120 on the legs the live rule
+recommends), so a cell can pass all six and still overstate its recommended legs.
+`sportstradamus admin tail-scorecard` replays the live recommendation rule on the held-out test rows
+at the DFS rungs the archive held and reports that selected-tail gap. It is a training-time
+diagnostic and an acceptance input for model-information work
+([handoffs/honest-receipts.md](handoffs/honest-receipts.md) §6). It is never a gate, and nothing in
+it demotes or withholds a cell.
+
 ---
 
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)

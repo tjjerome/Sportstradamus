@@ -4,8 +4,8 @@
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
 `docs/archive/` (§5). Status: OPEN — waves 1–3 landed on `devel` 2026-10-04, unpushed; all three briefs
-returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the gated model-side work (§6) waits on the
-owner's read.
+returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the gated
+model-side work (§6) waits on the owner's read.
 
 ## 1. Mission & money logic
 
@@ -78,6 +78,7 @@ print("recommended", cohort_summary(o[o["Recommended"]]))
 PY
 ls docs/archive/researcher_trust_layer.md docs/archive/researcher_parlay_engine.md docs/archive/researcher_train_serve_skew.md
 ls ~/backups/sportstradamus/2026-10-04-honest-receipts/   # dev box only: the briefs' harness scripts (§5)
+sportstradamus admin tail-scorecard                      # E (§6): ~90 s, read-only, writes /tmp/tail_scorecard.csv
 ```
 
 The Receipts hero must reconcile to the ledger to the leg: `cohort_summary` of the recommended cohort
@@ -111,12 +112,14 @@ nowhere on the page.
 | 2 | `efe5106e` | `realized.py`: `settled_offers`, `window`, `by_split`, `cohort_summary`, `compute_realized_by_side`, `worst_month`, `calibration_summary` (cohorts posted / recommended); `breakeven_rate` and the `quote` split join the ledger |
 | 2 | `73e7821b` | `reflect`: calibration summary from realized pricing; the fair-odds profit sims stop scaling Sleeper's posted payout as a promo (I3a) |
 | 3 | `1c9fc738`, `ccedaa3f`, `0f35e617`, `b3084815`, `2142ec91` | `dashboard.data.posted_offers_or_stop`; Receipts hero = the recommended cohort at the platform payout with the all-posted context row, by-side panel live from `by_split` with "edge captured", calibration panel by cohort, rolling-accuracy line at breakeven; Lab › Diagnostics on the same universe; the −110 helpers retired to `src/deprecated/`; `analysis._add_kelly_columns` sized at the platform payout (I3b) |
+| 3 | `2fb154c8` | E: `sportstradamus admin tail-scorecard` replays the live recommendation rule on held-out test rows at the archived DFS rungs and reports the selected-tail gap, the live gap for the same cells, the Model Version age split and the information test (§6, §7); a diagnostic, never a gate |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); `_ledger_settlement.realized_multiplier` omits per-pick multipliers and the
 Underdog modifier (I5d); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
-the I4 bullet). `docs/ship_gate.md`'s devel → main row no longer describes a `profit_sim_kelly_yield ≥ 0`
-money rule: no code implemented it and the owner's rule forbids it.
+the I4 bullet); the `SPORTSTRADAMUS_ARCHIVE_DB` default-path expression now repeats in four scripts
+beside `helpers/archive.py`. `docs/ship_gate.md`'s devel → main row no longer describes a
+`profit_sim_kelly_yield ≥ 0` money rule: no code implemented it and the owner's rule forbids it.
 
 ## 5. Research program (three briefs, `research-analyst`, model opus, read-only)
 
@@ -210,10 +213,21 @@ I6g from `r3/`.
   distance-conditional recalibration as a gap fix; rung admission as a gap lever (it is a volume
   lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change; any trust
   layer or fixed scalar shrink toward the book.
-- **E tail scorecard** (`scripts/tail_scorecard.py`, `-m diagnostics`; spec = R3 brief §6): reprices
-  every test-set row at the DFS rungs the archive `ladder` held, replays the live recommendation rule,
-  and reports the selected-tail gap per cell with day-clustered CIs. Routes to training, never to
-  demotion.
+- **E tail scorecard — built** (`sportstradamus admin tail-scorecard`; `scripts/tail_scorecard.py`
+  with `tail_pricing.py` and `tail_information.py`, tests under `-m diagnostics`; spec = R3 brief
+  §6). It re-serves every held-out test row at each Underdog and Sleeper rung the archive `ladder`
+  held (the rebuilt probability matches the persisted one to 1e-13 on every scored cell), hands each
+  slate to the live `finalize_records`, grades the survivors with `realized.settled_offers`, and
+  prints the selected-tail gap per cell, league and overall with day-clustered CIs. Beside it: the
+  live gap for the same cells and windows, split by Model Version age, and the information test (the
+  model-only forecast against the market at the decision-time and training-time references, cell
+  fixed effects). It never bets a side history shows was not posted; a side history never priced
+  pays 1 / (price × overround) and is flagged `assumed`, so the `posted` row of the payout split is
+  the clean read. It scores 32 of 91 test sets today (MLB 14, NFL 13, WNBA 5): 30 predate the
+  columns the re-serve needs (`Book_EV` and the family's model-only parameters; 18 NBA, 11 NHL and
+  WNBA FGA, until a retrain re-dumps them), 13 have no pickle and 16 have no ladder rung in the
+  window. Readers: I6c, I6d and I6g, as an acceptance input. It routes to training, never to
+  demotion, and becomes a sweep objective only after four weekly runs agree with live per cell.
 
 Rollout per [model_improvement_track.md](model_improvement_track.md) §6.10: replay-validate in the
 fixed profit sim, then A/B live through the D6 sim-bettor ledger. I5a-1, I6c and an I6g cadence change
@@ -282,6 +296,19 @@ eras.
   cell fixed effects, an intercept, model-only probabilities and the decision-time reference (a
   through-origin slope is level-contaminated; pooled encompassing without fixed effects read .78 where
   the within-cell value is .32).
+- Scorecard first run (rungs from 2026-08-30 to each cell's last test row; 40,568 rung rows, 1,149
+  selected): read .653, hit .524, gap +12.9 pp [6.7, 16.1], against live +12.8 [9.7, 15.2] on the
+  same cells and windows. NFL reads +15.8 [11.5, 21.2] on 904 legs against live +15.3. MLB reads
+  +3.1 [−3.3, 8.0] on 240 legs against live +9.7 [6.6, 13.0]; its CI overlaps the live gap of fresh
+  versions on the same cells (+7.9 [4.8, 11.6]; aged +10.5 [6.4, 14.8]), and 240 legs cannot tell
+  version age from R3's known optimism (training-matrix features; in-game quotes sit in every MLB
+  row of the window), so MLB needs more weekly runs before the scorecard is trusted there. By payout
+  source: posted +15.5 (594 legs), assumed +10.1 (555). The brief's prototype (+10.1 on 1,615 legs)
+  paid an assumed price on every side, so it bet sides the platforms never posted; the scorecard
+  does not. Information test, within cell, logistic b_model at decision time: MLB −.13 [−.66, .45]
+  (3,276 rows, 15 days, 9 cells), NFL −.16 [−.59, .30] (933 rows, 4 cells); neither can be told
+  from zero. The brief's MLB .77 → .66 reference-timing pair reproduces exactly, but only on its
+  530-row, 5-day subset holding both references, so the size of the timing effect is unmeasured.
 
 ## 8. Owner asks (one each)
 

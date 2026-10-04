@@ -254,7 +254,7 @@ poetry run ruff check src/sportstradamus/
 poetry run pytest tests/golden/             # parallel via pytest-xdist (-n auto lives in addopts)
 poetry run pytest -m integration -n0        # fake-mode end-to-end, no network; -n0: integration is not xdist-safe
 
-# Dev-only diagnostic-script tests (zinb-routing, icc), excluded from the default loop
+# Dev-only diagnostic-script tests (zinb-routing, icc, tail-scorecard), excluded from the default loop
 poetry run pytest -m diagnostics
 
 # Regenerate CLI help snapshots after an intentional flag change
