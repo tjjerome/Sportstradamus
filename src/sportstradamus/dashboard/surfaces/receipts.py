@@ -75,7 +75,6 @@ if history.empty:
 
 filters = sidebar_filters(history, key_prefix="receipts_")
 df = posted_offers_or_stop(history, filters)
-prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
 # The window scopes the hero, its cumulative units and worst month, and the by-side
@@ -108,7 +107,7 @@ st.download_button(
 
 st.subheader("Skeptic checks")
 clv_summary = clv.summarize(df)
-brier = brier_score_loss(df["Hit"], df[prob_col].clip(0, 1))
+brier = brier_score_loss(df["Hit"], df["Win Prob"].clip(0, 1))
 book_skill = compute_book_brier_skill_score(df)
 
 s1, s2, s3 = st.columns(3)
