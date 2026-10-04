@@ -15,6 +15,7 @@ from sportstradamus.nightly import (
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
+    _precompute_calibration,
     _precompute_realized_by_side,
     _profit_sim_kelly_yield,
     _profit_sim_yield,
@@ -264,13 +265,21 @@ def test_profit_sim_yield_prices_the_chosen_side():
     # Market Prob is already the bet side's book probability, so an 0.88 Under favourite
     # pays 1 / 0.88 exactly like an 0.88 Over one.
     for bet in ("Under", "Over"):
-        row = {"Bet": bet, "Result": bet, "Hit": 1, "Boost": 1.0, "Market Prob": 0.88}
+        row = {
+            "Platform": "Underdog",
+            "Bet": bet,
+            "Result": bet,
+            "Hit": 1,
+            "Boost": 1.0,
+            "Market Prob": 0.88,
+        }
         assert math.isclose(_profit_sim_yield(pd.DataFrame([row])), 1 / 0.88 - 1)
 
 
 def test_profit_sim_yields_skip_unoffered_rows():
     # Boost 0 means the platform never posted that side: not a bet, so in neither sim.
     posted = {
+        "Platform": "Underdog",
         "Bet": "Under",
         "Result": "Under",
         "Hit": 1,
@@ -283,6 +292,30 @@ def test_profit_sim_yields_skip_unoffered_rows():
     assert _profit_sim_yield(alone) == pytest.approx(1 / 0.55 - 1)
     assert _profit_sim_yield(both) == _profit_sim_yield(alone)
     assert _profit_sim_kelly_yield(both) == _profit_sim_kelly_yield(alone)
+
+
+@pytest.mark.parametrize(
+    ("platform", "boost", "fair_payout"),
+    [("Sleeper", 1.5, 1 / 0.6), ("Underdog", 1.2, 1.2 / 0.6)],
+)
+def test_profit_sim_yield_prices_sleeper_at_fair_odds_not_its_payout(platform, boost, fair_payout):
+    # Sleeper's Boost is its posted payout: scaling the 1 / 0.6 fair price by it pays 2.5.
+    bet = pd.DataFrame(
+        [
+            {
+                "Platform": platform,
+                "Bet": "Over",
+                "Result": "Over",
+                "Hit": 1,
+                "Boost": boost,
+                "Market Prob": 0.6,
+                "Win Prob": 0.7,
+            }
+        ]
+    )
+    assert _profit_sim_yield(bet) == pytest.approx(fair_payout - 1)
+    # A lone winning Kelly bet returns its decimal odds less the stake.
+    assert _profit_sim_kelly_yield(bet) == pytest.approx(fair_payout - 1)
 
 
 def test_side_precision_reports_hit_rate_per_side():
@@ -363,3 +396,11 @@ def test_precompute_realized_by_side_writes_parquet(tmp_path, monkeypatch):
     ledger = pd.read_parquet(path)
     assert list(ledger.columns) == REALIZED_BY_SIDE_COLS
     assert not ledger.empty
+
+
+def test_precompute_calibration_writes_the_realized_summary(tmp_path, monkeypatch):
+    path = tmp_path / "calibration_summary.parquet"
+    monkeypatch.setattr(nightly, "CALIBRATION_SUMMARY_PATH", path)
+    _precompute_calibration(_build_history_fixture())
+    summary = pd.read_parquet(path)
+    assert set(summary["Cohort"]) == {"posted", "recommended"}

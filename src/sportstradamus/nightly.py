@@ -28,7 +28,6 @@ from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
     annotate_offer_outcomes,
-    calibration_summary,
     check_bet,
     compute_book_brier_skill_score,
     precompute_profit_sim_summary,
@@ -51,7 +50,7 @@ from sportstradamus.helpers.io import (
     write_user_slips,
 )
 from sportstradamus.helpers.parlay_modifiers import fold_overlay
-from sportstradamus.realized import compute_realized_by_side
+from sportstradamus.realized import calibration_summary, compute_realized_by_side, settled_offers
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
 
@@ -170,21 +169,27 @@ def _top_decile_mae(group: pd.DataFrame) -> float:
     return float((top["Projection"] - top["Actual"]).abs().mean())
 
 
+def _fair_payout(bets: pd.DataFrame) -> np.ndarray:
+    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    # Sleeper's Boost is the posted payout, not a promo multiplier: the fair-odds sim prices
+    # every leg at 1 / book probability, promo-scaled only where a promo multiplier exists.
+    return np.where(bets["Platform"] == "Underdog", bets["Boost"], 1.0) / books_p
+
+
 def _profit_sim_yield(group: pd.DataFrame) -> float:
     """Flat $1-stake realized ROI at fair-odds payouts (locked decision #7).
 
     ``Market Prob`` on the history frame is already the bet side's book probability,
-    Over or Under alike, so the payout multiplier on a win is ``boost / books_p`` for
-    every row — no Under inversion. Rows with ``Boost == 0`` are excluded: the platform
-    never posted that side, so there was no bet. ``yield`` = (sum(payout * Hit) - n) / n
-    over the bettable rows; NaN when the window has none.
+    Over or Under alike, so every winning row pays :func:`_fair_payout` — no Under
+    inversion. Rows with ``Boost == 0`` are excluded: the platform never posted that side,
+    so there was no bet. ``yield`` = (sum(payout * Hit) - n) / n over the bettable rows;
+    NaN when the window has none.
     """
     bets = _bettable(group)
     n = len(bets)
     if n == 0:
         return float("nan")
-    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
-    payout = bets["Boost"].to_numpy() / books_p
+    payout = _fair_payout(bets)
     hit = bets["Hit"].fillna(0).to_numpy()
     return float((np.sum(payout * hit) - n) / n)
 
@@ -192,19 +197,17 @@ def _profit_sim_yield(group: pd.DataFrame) -> float:
 def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
     """Kelly-sized realized ROI — Phase 4 set-baseline -> main live gate.
 
-    Per bettable offer (``Boost > 0``, see :func:`_bettable`): ``decimal_odds = boost /
-    books_p``, where ``Market Prob`` and ``Win Prob`` are the book's and the model's
-    probabilities of the bet side whichever side it is (same convention as
-    :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0, 0.05)``.
+    Per bettable offer (``Boost > 0``, see :func:`_bettable`): ``d`` is :func:`_fair_payout`
+    and ``p`` is ``Win Prob``, both for the bet side whichever side it is (same convention
+    as :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0, 0.05)``.
     ROI is the dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
     sum(stake)`` — so cells with different bet counts are comparable. Returns NaN when no
     offer attracted a positive Kelly stake (no +EV bets in the window).
     """
     bets = _bettable(group)
-    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
     hit = bets["Hit"].fillna(0).to_numpy()
     model_p = bets["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
-    decimal_odds = bets["Boost"].to_numpy() / books_p
+    decimal_odds = _fair_payout(bets)
     b = decimal_odds - 1.0
     # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.
     raw_kelly = np.where(b > 0, (model_p * decimal_odds - 1.0) / b, 0.0)
@@ -372,7 +375,7 @@ def _precompute_profit_sim(history):
 
 
 def _precompute_calibration(history):
-    summary = calibration_summary(annotate_offer_outcomes(history))
+    summary = calibration_summary(settled_offers(history))
     _atomic_write_parquet(summary, CALIBRATION_SUMMARY_PATH)
     logger.info(
         f"Calibration: wrote {len(summary)} bin-split rows to {CALIBRATION_SUMMARY_PATH.name}"
