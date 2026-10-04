@@ -22,7 +22,7 @@ from sportstradamus.prediction.stories.why import attach_offer_why
 
 # Bumping this reshuffles every persisted headline once, because the md5 variant
 # index moves with the bank; ``user_slips.parquet`` headlines stay frozen.
-STORIES_VERSION: str = "p4"
+STORIES_VERSION: str = "p5"
 
 __all__ = [
     "STORIES_VERSION",

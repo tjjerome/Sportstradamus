@@ -8,7 +8,10 @@ are narrative (thrive/fade/split), so literal bet-side words are banned
 outside ``mistakes`` cells — where the literal word must be the *flipped*
 side, because a negative market's thriving bet is the Under. Every cell in
 both banks carries at least ``_MIN_VARIANTS_PER_CELL`` variants so the md5
-rotation has room to keep a slate's headlines distinct.
+rotation has room to keep a slate's headlines distinct. The register pins
+(live-verb floor, still-word ceiling, star-led and daily-cell depth) score
+each voice on its own, so one voice cannot keep the calm cadence while the
+rest move.
 """
 
 from __future__ import annotations
@@ -63,10 +66,119 @@ _OVER_WORD_RE = re.compile(r"\b(over|overs)\b", re.I)
 _UNDER_WORD_RE = re.compile(r"\b(under|unders)\b", re.I)
 # One thought per headline: an em-dash or a semicolon splices a second one in.
 _BANNED_PUNCT_RE = re.compile("[—;]")
-# The calm register states a read; it never sells one.
+# The live register states a read; it never sells one.
 _HYPE_WORD_RE = re.compile(r"\b(smash|smashes|hammer|hammers|cash|cashes|lock|locks)\b", re.I)
 # A sentence break inside a template: a period, space, then a capital or a slot.
 _INNER_BREAK_RE = re.compile(r"\.\s+(?=[A-Z{])")
+
+# Register "live analyst": a headline moves on a concrete action verb. Only the
+# present-tense form a star-as-agent sentence conjugates to counts (drives, carries,
+# goes cold), so a stem never credits its -ing or -ed forms.
+_LIVE_VERB_STEMS = (
+    "drive",
+    "pour",
+    "pile",
+    "carry",
+    "run",
+    "climb",
+    "stack",
+    "flood",
+    "feed",
+    "fire",
+    "bury",
+    "drag",
+    "hunt",
+    "swarm",
+    "rip",
+    "press",
+    "push",
+    "pull",
+    "spin",
+    "roll",
+    "surge",
+    "crack",
+    "pound",
+    "rack",
+    "haul",
+    "chase",
+    "close",
+    "own",
+    "attack",
+    "punish",
+    "smother",
+    "choke",
+    "clamp",
+    "stall",
+    "starve",
+    "drain",
+    "strangle",
+    "muzzle",
+    "flatten",
+    "shrink",
+    "sag",
+    "fade",
+    "erupt",
+    "rain",
+    "grind",
+    "wear",
+    "shut",
+    "break",
+    "light",
+    "take",
+    "keep",
+    "fall",
+    "come",
+    "bog",
+)
+# Phrasal verbs the contract names, base form with the verb first; the head takes the
+# same -s tolerance, so "goes cold" counts while a bare "goes" (as in "goes quiet") never does.
+_LIVE_VERB_PHRASES = (
+    "take over",
+    "keep coming",
+    "go cold",
+    "dry up",
+    "fall flat",
+    "come up short",
+    "bog down",
+    "grind down",
+    "wear down",
+    "shut down",
+    "run dry",
+    "break loose",
+    "light up",
+    "pile up",
+    "pile on",
+    "rack up",
+)
+
+
+def _live_verb_pattern(entry):
+    """``carry`` → ``carr(?:y|ies)``; ``take over`` → ``take(?:s|es)? over``."""
+    verb, _, tail = entry.partition(" ")
+    stem = verb[:-1] + "(?:y|ies)" if verb.endswith("y") else verb + "(?:s|es)?"
+    return (stem + " " + tail).rstrip()
+
+
+_LIVE_VERB_RE = re.compile(
+    r"\b(?:" + "|".join(map(_live_verb_pattern, (*_LIVE_VERB_STEMS, *_LIVE_VERB_PHRASES))) + r")\b",
+    re.I,
+)
+# Per-voice floor on variants carrying a live verb; shared is scored like the sport voices
+# because it terminates every fallback chain.
+_MIN_LIVE_VERB_SHARE = 0.60
+# The calm register's still words, rationed rather than banned: one variant in ten.
+_STILL_WORD_RE = re.compile(
+    r"\b(sits|settles|rests|still|quiet|calm|gentle)\b|nothing to force|no need to chase", re.I
+)
+_MAX_STILL_SHARE = 0.10
+# Star-led: {p} within the first three tokens ("{p}'s" counts) makes the star the agent, and
+# the Over-led story a game headlines is seeded on that star.
+_STAR_LEAD_TOKENS = 3
+_MIN_STAR_LED_VARIANTS = 3
+# player/<shape>/Over/{scoring,production} fire daily as every game's Over-led headline, so
+# slate-wide dedup needs more room there than the generic floor gives.
+_DAILY_CATEGORIES = ("scoring", "production")
+_MIN_VARIANTS_DAILY_CELL = 8
 
 
 def _walk_variants():
@@ -262,6 +374,61 @@ def test_no_hype_words():
             assert not _HYPE_WORD_RE.search(variant), (key, variant)
 
 
+def _share(voice, pattern):
+    """Share of one voice's variants, every archetype and cell, that ``pattern`` matches."""
+    variants = [
+        v for bank_voice, *_node, cell in _walk_variants() if bank_voice == voice for v in cell
+    ]
+    return sum(bool(pattern.search(v)) for v in variants) / len(variants)
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_live_verb_share_per_voice(voice):
+    """Pre-rewrite (calm register) shares: shared 0.354, basketball 0.302, football 0.383,
+    hockey 0.288, baseball 0.342."""
+    share = _share(voice, _LIVE_VERB_RE)
+    assert share >= _MIN_LIVE_VERB_SHARE, (voice, round(share, 3))
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_still_word_share_per_voice(voice):
+    """Pre-rewrite (calm register) shares: shared 0.177, basketball 0.134, football 0.071,
+    hockey 0.115, baseball 0.124."""
+    share = _share(voice, _STILL_WORD_RE)
+    assert share <= _MAX_STILL_SHARE, (voice, round(share, 3))
+
+
+def _player_over_cells(voice):
+    """``{(shape, category): variants}`` over one voice's ``player/<shape>/Over/<category>`` cells."""
+    return {
+        (shape, category): variants
+        for bank_voice, archetype, shape, direction, category, variants in _walk_variants()
+        if bank_voice == voice and archetype == "player" and direction == "Over"
+    }
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_player_over_cells_are_star_led(voice):
+    """The star is the sentence's agent, not the object the board happens to favor."""
+    led = {
+        key: sum("{p}" in " ".join(v.split()[:_STAR_LEAD_TOKENS]) for v in variants)
+        for key, variants in _player_over_cells(voice).items()
+    }
+    short = {key: n for key, n in led.items() if n < _MIN_STAR_LED_VARIANTS}
+    assert not short, short
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_daily_over_cells_carry_extra_depth(voice):
+    depth = {
+        key: len(variants)
+        for key, variants in _player_over_cells(voice).items()
+        if key[1] in _DAILY_CATEGORIES
+    }
+    short = {key: n for key, n in depth.items() if n < _MIN_VARIANTS_DAILY_CELL}
+    assert not short, short
+
+
 def test_terminal_period_only_after_a_second_sentence():
     """A headline is a card title: one sentence carries no closing period, and a
     two-sentence headline keeps both — one voice closing every line while the
@@ -383,20 +550,25 @@ def _chain_candidates(bank, voice, shape, archetype, direction, category):
 
 @pytest.mark.parametrize("direction", ("Over", "Under"))
 @pytest.mark.parametrize("archetype", ("player", "stack", "game-script"))
+def test_shared_authors_even_mistakes_for_every_headline_archetype(archetype, direction):
+    """The mistakes probe ends on shared's ``even`` cell, so a TOV stack or a mistakes-led
+    game script in a voice that authors neither still reads mistakes copy instead of
+    inheriting production copy."""
+    cell = _bank()["shared"][archetype]["even"][direction]["mistakes"]
+    assert len(cell) >= _MIN_VARIANTS_PER_CELL
+
+
+@pytest.mark.parametrize("direction", ("Over", "Under"))
+@pytest.mark.parametrize("archetype", ("player", "stack", "game-script"))
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("voice", _SPORT_VOICES)
 def test_mistakes_never_degrades_to_production(voice, shape, archetype, direction):
     """A mistakes lookup resolves to a mistakes cell, never a production cell.
 
     Mistakes cells are authored only under ``even`` (docs/story_voice.md), so this
-    pins the valence-before-shape probe for a negative-market leg in a shaped game.
+    pins the valence-before-shape probe for a negative-market leg in a shaped game;
+    shared's ``even`` mistakes cells make every archetype reachable, so nothing skips.
     """
-    if not any(
-        arch == archetype and dirn == direction and category == "mistakes"
-        for _voice, arch, _shape, dirn, category, _variants in _walk_variants()
-    ):
-        pytest.skip(f"no mistakes cell authored anywhere for ({archetype}, {direction})")
-
     bank = _bank()
     mistakes = _chain_candidates(bank, voice, shape, archetype, direction, "mistakes")
     assert mistakes, (voice, archetype, shape, direction)
