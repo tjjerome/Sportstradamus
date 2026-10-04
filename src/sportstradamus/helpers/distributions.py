@@ -159,6 +159,16 @@ def no_vig_odds(over, under=None, method="proportional"):
 # ``correlation.py``) divide it back out.
 UNDERDOG_BOOST_BASELINE: float = 1.78
 
+
+def platform_payout(boost, platform):
+    """Full decimal payout of a persisted DFS leg (``history.parquet`` conventions).
+
+    Underdog persists its raw multiplier over the per-pick baseline; Sleeper's ``Boost``
+    is already the posted decimal payout. Scalars or aligned array-likes.
+    """
+    return boost * np.where(np.asarray(platform) == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
+
+
 # An unboosted symmetric DFS pick pays the same either way, so it prices even.
 DFS_FAIR_PICK_PROB = 0.5
 
