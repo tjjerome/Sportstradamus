@@ -32,7 +32,7 @@ from sportstradamus.prediction.stories.menu import (
     _story_prose,
     build_game_stories,
 )
-from sportstradamus.prediction.stories.pricing import _log_growth, _score_subset
+from sportstradamus.prediction.stories.pricing import _log_growth, score_subset
 
 
 def _leg_keys(legs: list[dict]) -> frozenset:
@@ -412,7 +412,7 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     assert (builder["lead_side"], builder["lead_player"]) == ("Over", "Player0")
     new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
     all_scores = [
-        _score_subset(c, sctx, new_map)
+        score_subset(c, sctx, new_map)
         for size in range(2, min(len(sctx.leg_indices), sctx.max_size) + 1)
         for c in combinations(sctx.leg_indices, size)
         if validate_parlay_legs([sctx.bet_df[i] for i in c])[0]
@@ -469,7 +469,7 @@ def test_model_ev_is_the_real_copula_scorer():
     sctx, _ = _ctx([0.66, 0.64], corr)
     bet_id = (0, 1)
     new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
-    scored = _score_subset(bet_id, sctx, new_map)
+    scored = score_subset(bet_id, sctx, new_map)
     g = sctx.g
     arr = np.asarray(bet_id)
     boost = float(g.M[0, 1] * g.boosts[0] * g.boosts[1])

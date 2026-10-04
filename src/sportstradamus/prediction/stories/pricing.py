@@ -1,7 +1,7 @@
 """Subset pricing for the story menu: the exact copula score and its cheap proxy.
 
-``_score_subset`` prices one leg-subset through ``joint.parlay_payout_prob`` (the
-parlay search's gate-free scorer) while ``_independent`` and ``_shortlist`` rank
+``score_subset`` prices one leg-subset through ``joint.parlay_payout_prob`` (the
+parlay search's gate-free scorer) while ``independent`` and ``shortlist`` rank
 every subset by an independent-joint proxy so only a few finalists pay for the
 exact score.
 """
@@ -27,7 +27,7 @@ from sportstradamus.prediction.payouts import (
 _SHORTLIST_K: int = 8
 
 
-def _shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
+def shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
     """Distinct subsets worth an exact score: top-K by EV ∪ top-K by G ∪ all Power."""
     by_ev = sorted(proxies, key=lambda x: -x[1])[:_SHORTLIST_K]
     by_g = sorted(proxies, key=lambda x: -x[2])[:_SHORTLIST_K]
@@ -36,14 +36,14 @@ def _shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
     return list(picked)
 
 
-def _independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
+def independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
     """Cheap proxy: (independent EV, independent log-growth) — no copula, no MC."""
     p_ind = float(np.prod(sctx.g.p_model[np.asarray(bet_id)]))
     _boost, payout = _boost_payout(bet_id, sctx)
     return p_ind * payout, _log_growth(p_ind, payout)
 
 
-def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict) -> dict:
+def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict) -> dict:
     """Exact copula score for one subset (reuses parlay's gate-free scorer)."""
     size = len(bet_id)
     g = sctx.g

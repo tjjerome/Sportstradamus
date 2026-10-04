@@ -46,7 +46,7 @@ from sportstradamus.prediction.stories.legs import (
     offer_index,
     validate_parlay_legs,
 )
-from sportstradamus.prediction.stories.pricing import _independent, _score_subset, _shortlist
+from sportstradamus.prediction.stories.pricing import independent, score_subset, shortlist
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
@@ -139,21 +139,11 @@ def _stories_for_game(
     order = sorted(edge, key=lambda i: -edge[i])
     scored = []
     for cluster, side, lead in _cluster_strong_legs(order, sctx, seeds):
-        seed = seeds.get(side)
-        builder, moon = _best_subsets(
-            cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
+        priced = _price_cluster(
+            cluster, side, lead, seeds.get(side), order, sctx, new_map, require_both=require_both
         )
-        if builder is None and seed is not None:
-            # A lead whose cluster prices nothing around it (alone, or one-team in
-            # a two-team game) borrows a leg and is priced once more.
-            partner = _lead_partner(seed, cluster, order, sctx, require_both)
-            if partner is not None:
-                cluster = [*cluster, partner]
-                builder, moon = _best_subsets(
-                    cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
-                )
-        if builder is not None:
-            scored.append((cluster, builder, moon, side, lead))
+        if priced is not None:
+            scored.append(priced)
     # Led stories first, between themselves by Moon EV; then the rest by EV.
     scored.sort(
         key=lambda s: (s[3] == "", -s[2]["model_ev"], -max(edge[i] for i in s[0]), s[2]["bet_id"])
@@ -293,7 +283,7 @@ def _best_subsets(
     subsets) through the copula scorer.
     """
     proxies = [
-        (combo, *_independent(combo, sctx))
+        (combo, *independent(combo, sctx))
         for size in range(2, min(len(cluster), sctx.max_size) + 1)
         for combo in combinations(cluster, size)
         if (must_include is None or must_include in combo)
@@ -303,12 +293,43 @@ def _best_subsets(
     ]
     if not proxies:
         return None, None
-    scored = [_score_subset(bet_id, sctx, new_map) for bet_id in _shortlist(proxies)]
+    scored = [score_subset(bet_id, sctx, new_map) for bet_id in shortlist(proxies)]
     builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], s["bet_id"]))
     moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], s["bet_id"]))
     if moon["model_ev"] <= _MENU_MIN_MOON_EV:
         return None, None
     return builder, moon
+
+
+def _price_cluster(
+    cluster: list[int],
+    side: str,
+    lead: str,
+    seed: int | None,
+    order: Sequence[int],
+    sctx: GameScoringContext,
+    new_map: dict,
+    *,
+    require_both: bool,
+) -> tuple[list[int], dict, dict, str, str] | None:
+    """One cluster's (Builder, Moon) pair tagged with its lead, or ``None`` if neither prices.
+
+    A lead whose cluster prices nothing around it (alone, or one-team in a
+    two-team game) borrows a leg from ``order`` and is priced once more.
+    """
+    builder, moon = _best_subsets(
+        cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
+    )
+    if builder is None and seed is not None:
+        partner = _lead_partner(seed, cluster, order, sctx, require_both)
+        if partner is not None:
+            cluster = [*cluster, partner]
+            builder, moon = _best_subsets(
+                cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
+            )
+    if builder is None:
+        return None
+    return cluster, builder, moon, side, lead
 
 
 def _row(sctx: GameScoringContext, objective: str, sub: Mapping, story: Mapping) -> dict:
