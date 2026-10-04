@@ -312,7 +312,8 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Whole-CDF isotonic-PIT recal on count cells (Rung-C-on-count) | **Dead** — the monotone CDF map degrades low-mean count cells; Rung C ships on continuous cells only (PA), count residual routes to §6.6 | `[[rung_c_whole_cdf_recal]]` |
 | Context-conditioned book `cv` scale law | **Refuted** — 0% OOS book-PIT-KS gain (45/45; slope fits to 0). Book CDF is mis-shaped but decoupled from the served gate at `w≈0.90` ⇒ standalone book rebuild NO-GO | `[[book_distribution_audit_nogo]]`; refs |
 | Pooling-half blend rebuild (BLP + decoupled location/shape) | **Refuted (this cohort)** — decoupled (A) ill-posed, BLP (B) a wash (OOS ΔKS≈0); at `w≈0.90` nothing for the wrapper to repair; over-wide cells are family/shape-bound → §6.6. Re-probe per cohort; design in §6.5 | `[[pooling_half_blp_nogo]]`; refs |
-| Selection-aware trust layer (R1, `prediction/trust.py`, post-argmax `Trust Prob`) | **Dead — KILL 2026-10-04** — the pre-registered ablation fires: dropping served p costs no out-of-sample log-loss (logistic +0.00038 nats, p = .07; GBM p = .75), so the layer's honest probability is market-anchored, i.e. the model-free engine the owner ruled out; Tier B 0 of 12 after Holm. The selection fix routes to R3/I6 (honest-receipts lane); the standing monitor is Receipts' "edge captured" column (λ_sel) | [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md) |
+| Selection-aware trust layer (R1, `prediction/trust.py`, post-argmax `Trust Prob`) | **Dead — KILL 2026-10-04** — the pre-registered ablation fires: dropping served p costs no out-of-sample log-loss (logistic +0.00038 nats, p = .07; GBM p = .75), so the layer's honest probability is market-anchored, i.e. the model-free engine the owner ruled out; Tier B 0 of 12 after Holm. The selection fix routes to model information (I6, honest-receipts lane §6); the standing monitor is Receipts' "edge captured" column (λ_sel) | [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md) |
+| Train/serve skew and tail-calibration repairs as the selected-tail fix (R3) | **Dead as a gap lever (2026-10-04); alive as correctness** — post-fix recommended legs read 12.5 pp above their hit rate; calibration-chain and quote skews together are worth ≤ 0.7 pp, price-blind or distance-conditional recalibration ≤ 1.2 pp; 89 % is selection on model–market disagreement where the served mean carries little at-market information. The lever is model information: serve-time feature log + parity monitor, the version-age test, as-of training inputs, NFL information research ([honest-receipts.md](honest-receipts.md) §6, I6a–I6g). The instrument is the tail scorecard, a diagnostic and never a gate | [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md) |
 
 ## 4. Locked decisions
 
@@ -1556,6 +1557,14 @@ snapshot.
   the tds matrix purged pending regen; (d) count-cell book decode round-trips ev→odds through
   drifting cv/zi — the matrix build should read the WS-1 `under_prob` column directly. Seed-row
   cleanup applied + matrices swapped from `staging_nfl_book_repair/` (`[[breadth75_campaign]]`).
+- **At-market information (R3, honest-receipts lane).** Within cell, the NFL models carry no
+  information beyond the market: logistic encompassing b_model is .03 (.04) offline, ≈ 0 at every
+  distance from the booster's training cutoff, and −.03 (.16) live. g1 passes every NFL volume cell
+  and cannot see it. Part of the live deficit is serve-path feature parity (worst: completions,
+  receptions, interceptions, qb yards); the rest is absent information. The matchup leak and
+  booster staleness are ruled out. NFL information work is accepted on fixed-effect encompassing at
+  the decision-time reference plus the tail scorecard, after the parity repair and after the count
+  quote is levelled ([honest-receipts.md](honest-receipts.md) §6, I6e then I6d).
 - For any cell the model can't improve: lean harder on the book in the blend — rides the sharp
   line, ships if calibration holds. No cell is shelved (§8); never loosen a gate.
 
@@ -1599,6 +1608,12 @@ decision packet, never a session edit.
    threshold by decile, selection-aware shrinkage in `strategies/kelly.py`, a CLV / time-decay
    discount. Ship the config change through refactoring-specialist + the devel-ship-curator PR.
 
+**Where this stands (honest-receipts lane).** Step 1's era-aware read is `realized.py`: posted
+sides at the platform payout, split by Model Version. Of step 3's candidates, shrink-to-book and the
+selection-aware trust layer are both killed (§3.4). What remains of the selected-tail gap is
+selection on disagreement, not sizing (§8.2 #0e), so judge any further change on the tail scorecard
+and the Receipts recommended cohort, at like version ages.
+
 **Kill:** replay too confounded to adjudicate → a pre-registered **live A/B via the sim-bettor
 ledger** (roadmap D6). A serving-side *mechanism* implicated (not just sizing) → `research-analyst`
 brief first (§8.2 — live serving-distribution changes are research-gated).
@@ -1621,6 +1636,12 @@ Copula research is **done** (R3 brief `/tmp/researcher_copula_stage0.md`).
   standing tail read on `g4_tail_pit_ks` + central50/80 is runnable at scale, and the
   §6.5-deferred ladder-lift re-test (book-CDF fit on real rungs, previously blocked on an empty
   ladder table) is unblocked.
+- **Selected-tail read (honest-receipts R3).** The recommended-leg overstatement is not a
+  tail-shape or rung-decode defect: 75 % of the gap sits at |z| < 0.5, and `Market Prob` decoded
+  from the consensus agrees with real sportsbook rungs (MAD 2.4 pp; log-loss difference +0.003
+  [−0.003, +0.009]). The one calibration item with a measurable effect is the temperature ridge
+  (`0.01·(T−1)²` in `_brier_temperature_loss`): −1.0 to −1.2 pp at a small bulk log-loss cost
+  ([honest-receipts.md](honest-receipts.md) §6, I6c).
 - **Parlay dependence (copula) — R3 verdict.** Gaussian copula default; **t-copula only as a
   tested branch** (adopt iff pooled exceedance-Spearman clears a simulated Gaussian null in both
   tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10, ν̂≤15 — never per-pair ν). EB
@@ -1808,6 +1829,11 @@ the code before relying on the list.
    ≲ 0.11 (they diverge badly there); bootstrap the RQR variance.
 9. Post-hoc bias correctors at NFL count means must be affine ROE, not isotonic/per-decile
    (low-base-rate overfit, ref [48]); reserve isotonic for higher-mean NBA/WNBA count cells.
+10. Information reads do not transfer across leagues or calendar windows. The honest-receipts
+    live window is MLB September plus 11 NFL game-days, with no NBA cell, and MLB's offline
+    information itself falls in September. Estimate with cell fixed effects, an intercept,
+    model-only probabilities and the decision-time market reference; a pooled or through-origin
+    estimate credits cross-cell levels ([honest-receipts.md](honest-receipts.md) §7).
 
 ### §7.5 Ship & session mechanics
 
@@ -1881,6 +1907,23 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   and fallback reported separately) passes the K2 ablation AND live λ_sel's trailing-30-day CI lower bound
   clears 0. Cross-league caveat: the R1 window is 93% MLB and NFL had 5 fitted days; pooled cross-league
   transfer failed (NFL W1/W2, WNBA W2); NBA abstains until ≥ 2,000 legs over ≥ 5 dates.
+
+- **#0e — At-market information is the selected-tail lever (R3); the version-age test is
+  pre-registered.** [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md):
+  89 % of the recommended-leg overstatement is selection on model–market disagreement where the
+  served mean knows little beyond the market, and no serving layer can take it (#0d). Open:
+  (i) why MLB legs are far more honest in a version's first four days (+5.6 pp against +13.5 pp;
+  not level drift, booster or gamelog staleness, or the comp snapshot) — the paired same-leg test
+  on NBA and NHL from late October (I6g) decides between a 3–4-day retrain cadence and KILL, and no
+  cadence change lands before it; (ii) NFL at-market information (I6d), accepted only on
+  fixed-effect encompassing at the decision-time reference plus the tail scorecard; (iii) the
+  September drop in MLB information, first cross-league read October–November. Guards: promote
+  the tail scorecard into a sweep objective only after at least four weekly runs agree with live
+  per cell (rank correlation of the selected gap, at like version ages); it is never a gate.
+  Reopen rules from R3's hand-back: re-test price-blind tail recalibration once the scorecard
+  holds twice today's 1,615 selected rows; the booster-window KILL reopens if NBA or NHL shows
+  information decaying with distance from the training cutoff. Build order and the not-to-build
+  list: [honest-receipts.md](honest-receipts.md) §6.
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   `/tmp/researcher_mixture_serve.md` (archived copy: `docs/archive/researcher_mixture_serve.md`):
