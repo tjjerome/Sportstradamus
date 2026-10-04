@@ -1,94 +1,99 @@
 """Receipts realized-by-side panel (``dashboard/components/by_side.py``).
 
-``by_side_grid`` shapes the nightly ledger for the themed grid: the recommended cohort at
-one window and one split, keys ascending with Over before Under, rates in percentage
-points. ``render_by_side`` is smoke-run in Streamlit bare mode, where widgets return their
-defaults and the grid renders nothing, so the whole function body executes.
+``by_side_grid`` shapes a ``realized.by_split`` result for the themed grid: one split, keys
+ascending with Over before Under, rates in percentage points. ``render_by_side`` is
+smoke-run in Streamlit bare mode, where widgets return their defaults and the grid renders
+nothing, so the whole function body executes; with the grid call captured it shows the
+panel draws the sport-filtered legs the page hands it, never a source of its own.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
+import streamlit as st
 
+from sportstradamus.dashboard.components import by_side
 from sportstradamus.dashboard.components.by_side import by_side_grid, render_by_side
-from sportstradamus.realized import REALIZED_BY_SIDE_COLS
+from sportstradamus.dashboard.data import sport_filtered
+from sportstradamus.realized import by_split, settled_offers
+from tests.golden.test_receipts_reconciles_ledger import HISTORY
 
-_GRID_COLS = ["Side", "Bets", "Hit%", "Model%", "Book%", "Units", "ROI"]
-_ROW = {
-    "computed_at": pd.Timestamp("2026-10-03 12:00"),
-    "window_days": 30,
-    "cohort": "recommended",
-    "split": "side",
-    "key": "all",
-    "side": "Over",
-    "n": 40,
-    "hit_rate": 0.6,
-    "pred_rate": 0.58,
-    "book_rate": 0.5,
-    "breakeven_rate": 0.55,
-    "units": 3.14159,
-    "roi": 0.0785,
-}
+_GRID_COLS = [
+    "Side",
+    "Bets",
+    "Hit%",
+    "Breakeven%",
+    "Model%",
+    "Book%",
+    "Edge captured",
+    "Units",
+    "ROI",
+]
 
 
-def _ledger(*rows: dict) -> pd.DataFrame:
-    # Pinned to the ledger's own column list so a schema change there fails here, loudly.
-    assert set(_ROW) == set(REALIZED_BY_SIDE_COLS)
-    return pd.DataFrame([_ROW | row for row in rows], columns=REALIZED_BY_SIDE_COLS)
+def _recommended_stats(history: pd.DataFrame = HISTORY) -> pd.DataFrame:
+    offers = settled_offers(history)
+    return by_split(offers[offers["Recommended"]])
 
 
-def test_grid_keeps_only_the_window_cohort_and_split():
-    out = by_side_grid(
-        _ledger(
-            {},
-            {"window_days": 90, "n": 99},
-            {"cohort": "bettable", "n": 98},
-            {"split": "league", "key": "NBA", "n": 97},
-        ),
-        30,
-        "side",
-    )
+def test_grid_keeps_only_the_chosen_split():
+    out = by_side_grid(_recommended_stats(), "side")
     assert list(out.columns) == ["All", *_GRID_COLS]
-    assert out["All"].tolist() == ["all"]
-    assert out["Bets"].tolist() == [40]
+    assert out["All"].tolist() == ["all", "all"]
+    # Over: both A offers, D, I, K. Under: B, C, J.
+    assert list(zip(out["Side"], out["Bets"], strict=True)) == [("Over", 5), ("Under", 3)]
 
 
 def test_grid_sorts_keys_ascending_then_over_before_under():
-    out = by_side_grid(
-        _ledger(
-            {"split": "league", "key": "NFL", "side": "Under"},
-            {"split": "league", "key": "NFL", "side": "Over"},
-            {"split": "league", "key": "NBA", "side": "Under"},
-        ),
-        30,
-        "league",
-    )
+    out = by_side_grid(_recommended_stats(), "league")
     assert list(zip(out["League"], out["Side"], strict=True)) == [
+        ("NBA", "Over"),
         ("NBA", "Under"),
-        ("NFL", "Over"),
-        ("NFL", "Under"),
+        ("WNBA", "Over"),
+        ("WNBA", "Under"),
+    ]
+
+
+def test_grid_splits_on_the_quote_class():
+    out = by_side_grid(_recommended_stats(), "quote")
+    assert list(zip(out["Quote"], out["Side"], strict=True)) == [
+        ("fallback", "Over"),
+        ("quoted", "Over"),
+        ("quoted", "Under"),
     ]
 
 
 def test_grid_scales_rates_to_percentage_points():
-    row = by_side_grid(_ledger({"roi": -0.05}), 30, "side").iloc[0]
-    assert row["Hit%"] == pytest.approx(60.0)
-    assert row["Model%"] == pytest.approx(58.0)
-    assert row["Book%"] == pytest.approx(50.0)
-    assert row["ROI"] == pytest.approx(-5.0)
-    assert row["Units"] == pytest.approx(3.1)
+    row = by_side_grid(_recommended_stats(), "side").iloc[0]
+    # The five Over legs: I and K hit; reads 0.62, 0.62, 0.61, 0.72, 0.72 over books
+    # 0.55, 0.55, 0.60, 0.60, 0.60; payouts 1.78, 1.75, 1.78, 1.5, 1.5.
+    assert row["Hit%"] == pytest.approx(40.0)
+    assert row["Breakeven%"] == pytest.approx(100 * 5 / 8.31)
+    assert row["Model%"] == pytest.approx(65.8)
+    assert row["Book%"] == pytest.approx(58.0)
+    assert row["Units"] == pytest.approx(-2.0)
+    assert row["ROI"] == pytest.approx(-40.0)
 
 
 def test_grid_empty_input_keeps_the_display_columns():
-    out = by_side_grid(_ledger(), 30, "league")
+    out = by_side_grid(_recommended_stats(HISTORY.iloc[:0]), "league")
     assert out.empty
     assert list(out.columns) == ["League", *_GRID_COLS]
 
 
 def test_render_runs_in_bare_mode():
-    # The empty-ledger caption, a one-sided ledger (Under reads "—"), and a two-sided
-    # ledger through the controls, the metric pair and the themed grid.
-    render_by_side(pd.DataFrame())
-    render_by_side(_ledger({}))
-    render_by_side(_ledger({}, {"side": "Under", "roi": -0.02, "units": -0.8}))
+    # The empty-cohort caption, a one-sided cohort (Under reads "—"), and both sides
+    # through the control, the metric pair and the themed grid.
+    render_by_side(_recommended_stats(HISTORY.iloc[:0]))
+    render_by_side(_recommended_stats(HISTORY[HISTORY["Bet"] == "Over"]))
+    render_by_side(_recommended_stats())
+
+
+def test_sport_filter_reaches_the_panel(monkeypatch):
+    drawn = []
+    monkeypatch.setattr(by_side, "render_themed_grid", lambda grid, **_: drawn.append(grid))
+    monkeypatch.setitem(st.session_state, "sport", "NBA")
+    render_by_side(_recommended_stats(sport_filtered(HISTORY)))
+    # Only the NBA legs: both A offers Over, B and C Under.
+    assert drawn[0]["Bets"].tolist() == [2, 2]

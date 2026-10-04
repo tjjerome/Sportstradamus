@@ -1,10 +1,10 @@
-"""Realized-by-side panel: the model's Over and Under recs priced at the platforms' payouts.
+"""Realized-by-side panel: the model's recommended Over and Under legs at the platforms' payouts.
 
-Folded into the Receipts surface (``surfaces/receipts.py``) under the skeptic checks. Reads
-the long ledger ``realized.compute_realized_by_side`` writes nightly and shows its
-``recommended`` cohort — the legs the model actually told the owner to bet — as a headline
-Over / Under ROI pair plus a themed grid over one trailing window and one split.
-``by_side_grid`` is the pure shaping step; ``render_by_side`` draws the controls and the grid.
+Folded into the Receipts surface (``surfaces/receipts.py``) under the skeptic checks. The page
+hands it ``realized.by_split`` of its window's recommended legs, so the sport switch, the
+sidebar filters and the page window all reach it. It shows a headline Over / Under ROI pair
+and a themed grid under one split. ``by_side_grid`` is the pure shaping step;
+``render_by_side`` draws the split control and the grid.
 """
 
 import pandas as pd
@@ -12,12 +12,10 @@ import streamlit as st
 
 from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
-from sportstradamus.realized import REALIZED_WINDOWS, RECOMMENDED_EDGE_MIN
+from sportstradamus.realized import RECOMMENDED_EDGE_MIN, RECOMMENDED_PAYOUT_MAX
 
-# Only the recommended cohort is shown: bettable-but-unrecommended legs were never picks.
-_COHORT = "recommended"
-# Ledger ``split`` value -> control label, also the grid's first-column header. The side
-# split (key "all") is labelled "All": its own name would collide with the Over / Under column.
+# ``by_split`` split -> control label, also the grid's first-column header. The side split
+# (key "all") is labelled "All": its own name would collide with the Over / Under column.
 _SPLIT_LABELS = {
     "side": "All",
     "league": "League",
@@ -26,25 +24,34 @@ _SPLIT_LABELS = {
     "payout_band": "Payout band",
     "cell": "Cell",
     "model_version": "Model version",
+    "quote": "Quote",
 }
-_WINDOW_LABELS = {days: f"{days}d" for days in REALIZED_WINDOWS}
 _SIDE_ORDER = ["Over", "Under"]
+# Under a two-point claim over the book, Edge captured is a ratio of noise (real cells read
+# −60 at a half-point floor).
+_EDGE_CLAIM_MIN = 0.02
+_EDGE_CAPTURED_HELP = (
+    "The share of the model's claimed edge over the book that realized: (Hit − Book) / "
+    "(Model − Book). 1 = the claim was right, 0 = the book was right."
+)
 
 
-def by_side_grid(df: pd.DataFrame, window: int, split: str) -> pd.DataFrame:
-    """The recommended cohort at ``window`` days under ``split`` (a ledger split value), one
-    row per (key, side), keys ascending and Over before Under, shaped for the themed grid.
+def by_side_grid(stats: pd.DataFrame, split: str) -> pd.DataFrame:
+    """``stats`` (a ``realized.by_split`` result) under ``split``, shaped for the themed grid.
 
-    The first column is the split's label and holds the ledger ``key``; ``Hit%`` /
-    ``Model%`` / ``Book%`` / ``ROI`` are the ledger fractions in percentage points. Empty
-    in, empty out with the same columns.
+    One row per (key, side), keys ascending and Over before Under. The first column is the
+    split's label and holds the ``key``; ``Hit%`` / ``Breakeven%`` / ``Model%`` / ``Book%``
+    / ``ROI`` are the fractions in percentage points. ``Edge captured`` is ``(hit_rate -
+    book_rate) / (pred_rate - book_rate)``, NaN (a blank cell) where the model claims less
+    than ``_EDGE_CLAIM_MIN`` over the book. Empty in, empty out with the same columns.
     """
-    rows = df[(df["window_days"] == window) & (df["cohort"] == _COHORT) & (df["split"] == split)]
+    rows = stats[stats["split"] == split]
     rows = (
         rows.assign(side=pd.Categorical(rows["side"], _SIDE_ORDER))
         .sort_values(["key", "side"])
         .reset_index(drop=True)
     )
+    claimed = rows["pred_rate"] - rows["book_rate"]
     return pd.DataFrame(
         {
             _SPLIT_LABELS[split]: rows["key"],
@@ -52,30 +59,23 @@ def by_side_grid(df: pd.DataFrame, window: int, split: str) -> pd.DataFrame:
             "Bets": rows["n"],
             # The themed grid's percent formatter expects percentage points, not fractions.
             "Hit%": rows["hit_rate"] * 100,
+            "Breakeven%": rows["breakeven_rate"] * 100,
             "Model%": rows["pred_rate"] * 100,
             "Book%": rows["book_rate"] * 100,
+            "Edge captured": ((rows["hit_rate"] - rows["book_rate"]) / claimed).where(
+                claimed.abs() >= _EDGE_CLAIM_MIN
+            ),
             "Units": rows["units"].round(1),
             "ROI": rows["roi"] * 100,
         }
     )
 
 
-def render_by_side(df: pd.DataFrame) -> None:
-    """Window + split controls, the headline Over / Under ROI pair and the themed grid."""
-    if df.empty:
-        st.caption("The realized-by-side ledger appears after the first nightly `reflect`.")
+def render_by_side(stats: pd.DataFrame) -> None:
+    """Split control, the headline Over / Under ROI pair and the themed grid over ``stats``."""
+    if stats.empty:
+        st.caption("No recommended legs settled in this window.")
         return
-    default_window = REALIZED_WINDOWS[0]
-    window = (
-        st.segmented_control(
-            "Window",
-            list(_WINDOW_LABELS),
-            default=default_window,
-            format_func=_WINDOW_LABELS.get,
-            key="receipts_by_side_window",
-        )
-        or default_window
-    )
     split = (
         st.segmented_control(
             "Split",
@@ -88,13 +88,13 @@ def render_by_side(df: pd.DataFrame) -> None:
     )
     st.caption(
         f"Recommended legs only — model edge ≥ {RECOMMENDED_EDGE_MIN:.0%} at the platform "
-        "payout — one bet per platform, settled only. Payout is the platform's real "
-        f"multiplier: Underdog boost × {UNDERDOG_BOOST_BASELINE} baseline, Sleeper decimal."
+        f"payout, payouts capped at {RECOMMENDED_PAYOUT_MAX:g}x — one bet per platform, "
+        "settled only, in the page window. Payout is the platform's real multiplier: Underdog "
+        f"boost × {UNDERDOG_BOOST_BASELINE} baseline, Sleeper decimal; Breakeven% is the hit "
+        f"rate those payouts need. Edge captured: {_EDGE_CAPTURED_HELP}"
     )
 
-    headline = df[
-        (df["window_days"] == window) & (df["cohort"] == _COHORT) & (df["split"] == "side")
-    ]
+    headline = stats[stats["split"] == "side"]
     for column, side in zip(st.columns(2), _SIDE_ORDER, strict=True):
         row = headline.loc[headline["side"] == side]
         if row.empty:
@@ -107,16 +107,23 @@ def render_by_side(df: pd.DataFrame) -> None:
             delta_color="normal",  # negative units render red — losers are shown, never hidden
         )
 
-    grid = by_side_grid(df, window, split)
-    if grid.empty:
-        st.caption("No rows in this slice.")
-        return
     render_themed_grid(
-        grid,
-        numeric_cols=["Bets", "Hit%", "Model%", "Book%", "Units", "ROI"],
+        by_side_grid(stats, split),
+        numeric_cols=[
+            "Bets",
+            "Hit%",
+            "Breakeven%",
+            "Model%",
+            "Book%",
+            "Edge captured",
+            "Units",
+            "ROI",
+        ],
         heatmap_col="ROI",
         heatmap_center=0.0,
-        percent_cols=["Hit%", "Model%", "Book%", "ROI"],
+        header_help={"Edge captured": _EDGE_CAPTURED_HELP},
+        percent_cols=["Hit%", "Breakeven%", "Model%", "Book%", "ROI"],
+        decimal_cols=["Edge captured"],
         height=320,
         key="receipts_by_side_grid",
     )

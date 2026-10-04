@@ -1,220 +1,113 @@
-"""Pure skeptic aggregations behind the Receipts surface.
+"""Pure shaping behind the Receipts hero and its by-side grid.
 
-Hero (``tailed_record``), the EV>5% skeptic record (``ev_threshold_record``),
-``worst_month``, and the by-dimension ``record_grid`` — all over the exploded,
-Push-dropped per-offer frame that ``get_filtered_history`` already returns. The
-accounting is the flat -110 juice the surface's "Profit Units" KPI used, so the
-hero number is provably the same as before. No Streamlit, no I/O.
+``window_offers`` cuts the page window where the nightly ledger cuts its own;
+``cohort_figures`` formats one ``realized.cohort_summary`` for the hero and its context row;
+``by_side_grid`` adds ``Breakeven%`` and ``Edge captured`` to a ``realized.by_split``
+result. All over the reconciliation fixture's history. No Streamlit, no I/O.
 """
 
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
-from sportstradamus.analysis import (
-    _FLAT_DECIMAL_ODDS,
-    JUICE_PAYOUT,
-    dedup_bets,
-    ev_threshold_record,
-    record_grid,
-    tailed_record,
-    worst_month,
-)
+from sportstradamus.dashboard.components.by_side import by_side_grid
+from sportstradamus.dashboard.components.receipts_hero import cohort_figures, window_offers
+from sportstradamus.realized import by_split, cohort_summary, settled_offers, window
+from tests.golden.test_receipts_reconciles_ledger import HISTORY, NOW
 
 
-def test_dedup_bets_collapses_per_book_duplicates():
-    # The snapshot lists one real-world prop under every book that posts it; tailing it
-    # once — not once per book — is the honest unit. Same (player, market, line, side,
-    # date) collapses; a different line is a different bet and survives.
-    df = pd.DataFrame(
-        [
-            {
-                "Date": "2026-06-15",
-                "Player": "A",
-                "Market": "PTS",
-                "Line": 25.5,
-                "Bet": "Over",
-                "Platform": "Underdog",
-            },
-            {
-                "Date": "2026-06-15",
-                "Player": "A",
-                "Market": "PTS",
-                "Line": 25.5,
-                "Bet": "Over",
-                "Platform": "Sleeper",
-            },
-            {
-                "Date": "2026-06-15",
-                "Player": "A",
-                "Market": "PTS",
-                "Line": 26.5,
-                "Bet": "Over",
-                "Platform": "Underdog",
-            },
-            {
-                "Date": "2026-06-15",
-                "Player": "B",
-                "Market": "AST",
-                "Line": 5.5,
-                "Bet": "Under",
-                "Platform": "Underdog",
-            },
-        ]
+def test_the_all_window_keeps_every_offer():
+    offers = settled_offers(HISTORY)
+    assert window_offers(offers, "All", NOW).equals(offers)
+
+
+@pytest.mark.parametrize(("label", "days"), [("7d", 7), ("30d", 30), ("3m", 91), ("1y", 365)])
+def test_a_dated_window_cuts_where_the_ledger_cuts(label, days):
+    offers = settled_offers(HISTORY)
+    assert window_offers(offers, label, NOW).equals(window(offers, days, NOW))
+
+
+def test_cohort_figures_carry_explicit_signs():
+    gain = cohort_figures(
+        {
+            "n": 1234,
+            "hit_rate": 0.496,
+            "pred_rate": 0.65,
+            "book_rate": 0.56,
+            "payout": 1.83,
+            "breakeven_rate": 0.5464,
+            "units": 38.4,
+            "roi": 0.0311,
+        }
     )
-    out = dedup_bets(df)
-    assert len(out) == 3  # the two identical props collapse to one; the 26.5 line stays
-    assert dedup_bets(pd.DataFrame()).empty
+    assert gain == {
+        "n": "1,234",
+        "roi": "+3.1%",
+        "hit_rate": "49.6%",
+        "pred_rate": "65.0%",
+        "breakeven_rate": "54.6%",
+        "payout": "1.83x",
+        "record": "612–622",
+        "units": "+38",
+    }
+    # A losing cohort reads "-1,296", never the "+-1296" a hard-coded plus produced.
+    loss = cohort_figures(
+        {
+            "n": 12345,
+            "hit_rate": 0.5,
+            "pred_rate": 0.6,
+            "book_rate": 0.55,
+            "payout": 1.8,
+            "breakeven_rate": 0.5556,
+            "units": -1296.2,
+            "roi": -0.105,
+        }
+    )
+    assert (loss["units"], loss["roi"]) == ("-1,296", "-10.5%")
 
 
-def _exploded() -> pd.DataFrame:
-    # Six resolved offers, no precomputed Hit (the aggregations derive it).
-    # Win Prob spans the 0.55 EV>5% boundary (0.55 included; 0.52/0.50 excluded).
-    return pd.DataFrame(
-        [
-            {
-                "Bet": "Over",
-                "Result": "Over",
-                "Win Prob": 0.60,
-                "Date": "2026-01-15",
-                "League": "NBA",
-                "Market": "PTS",
-                "Platform": "Underdog",
-            },
-            {
-                "Bet": "Over",
-                "Result": "Under",
-                "Win Prob": 0.58,
-                "Date": "2026-01-20",
-                "League": "NBA",
-                "Market": "PTS",
-                "Platform": "Underdog",
-            },
-            {
-                "Bet": "Under",
-                "Result": "Under",
-                "Win Prob": 0.70,
-                "Date": "2026-02-10",
-                "League": "NBA",
-                "Market": "AST",
-                "Platform": "Sleeper",
-            },
-            {
-                "Bet": "Over",
-                "Result": "Under",
-                "Win Prob": 0.52,
-                "Date": "2026-02-15",
-                "League": "WNBA",
-                "Market": "PTS",
-                "Platform": "Underdog",
-            },
-            {
-                "Bet": "Under",
-                "Result": "Under",
-                "Win Prob": 0.55,
-                "Date": "2026-03-05",
-                "League": "WNBA",
-                "Market": "REB",
-                "Platform": "Sleeper",
-            },
-            {
-                "Bet": "Over",
-                "Result": "Over",
-                "Win Prob": 0.50,
-                "Date": "2026-03-10",
-                "League": "NBA",
-                "Market": "PTS",
-                "Platform": "Underdog",
-            },
-        ]
+def test_cohort_figures_of_the_fixtures_recommended_legs():
+    offers = window(settled_offers(HISTORY), 90, NOW)
+    figures = cohort_figures(cohort_summary(offers[offers["Recommended"]]))
+    # B and I hit; both A offers, C, D and J miss: 0.75 + 0.5 - 5 = -3.75 units over 7.
+    assert (figures["n"], figures["record"], figures["units"], figures["roi"]) == (
+        "7",
+        "2–5",
+        "-4",
+        "-53.6%",
     )
 
 
-def test_tailed_record_hero_parity():
-    df = _exploded()
-    rec = tailed_record(df)
-    # The exact inline accounting receipts.py used for its "Profit Units" KPI.
-    hit = (df["Bet"] == df["Result"]).astype(int)
-    legacy_units = (hit * JUICE_PAYOUT - (1 - hit)).sum()
-    assert rec["units"] == pytest.approx(legacy_units)
-    assert rec["n"] == 6
-    assert rec["wins"] == 4
-    assert rec["losses"] == 2
-    assert rec["wins"] + rec["losses"] == rec["n"]
-    assert rec["roi"] == pytest.approx(rec["units"] / rec["n"])
-    assert rec["win_pct"] == pytest.approx(4 / 6)
+def test_cohort_figures_of_an_empty_cohort():
+    figures = cohort_figures(cohort_summary(settled_offers(HISTORY.iloc[:0])))
+    assert figures == {
+        "n": "0",
+        "record": "0–0",
+        "units": "+0",
+        "roi": "—",
+        "hit_rate": "—",
+        "pred_rate": "—",
+        "breakeven_rate": "—",
+        "payout": "—",
+    }
 
 
-def test_tailed_record_empty():
-    rec = tailed_record(pd.DataFrame())
-    assert rec["n"] == 0
-    assert rec["units"] == 0
-    assert rec["win_pct"] == 0
-    assert rec["roi"] == 0
+def test_breakeven_is_the_hit_rate_the_payouts_need_in_points():
+    grid = by_side_grid(by_split(settled_offers(HISTORY)), "platform")
+    row = grid[(grid["Platform"] == "Sleeper") & (grid["Side"] == "Under")].iloc[0]
+    # B at 1.75 and F at 1.875: two legs need 2 / 3.625 of a hit each to break even.
+    assert row["Breakeven%"] == pytest.approx(100 * 2 / (1.75 + 1.875))
 
 
-def test_ev_threshold_record_flat_edge_boundary():
-    df = _exploded()
-    rec = ev_threshold_record(df, edge_min=0.05)
-    # 0.55 is the exact boundary: 0.55 * (1 + 100/110) - 1 == 0.05.
-    assert pytest.approx(0.05) == 0.55 * _FLAT_DECIMAL_ODDS - 1
-    # Qualifiers: 0.60 (hit), 0.58 (miss), 0.70 (hit), 0.55 (hit). 0.52/0.50 drop out.
-    assert rec["n"] == 4
-    assert rec["wins"] == 3
-    assert rec["losses"] == 1
-    assert rec["win_pct"] == pytest.approx(0.75)
-    units = 3 * JUICE_PAYOUT - 1
-    assert rec["units"] == pytest.approx(units)
-    assert rec["roi"] == pytest.approx(units / 4)
+def test_edge_captured_is_the_realized_share_of_the_claimed_edge():
+    grid = by_side_grid(by_split(settled_offers(HISTORY)), "cell")
+    row = grid[(grid["Cell"] == "NBA/REB") & (grid["Side"] == "Under")].iloc[0]
+    # B alone hit on a 0.64 read over a 0.52 book: (1 - 0.52) / (0.64 - 0.52).
+    assert row["Edge captured"] == pytest.approx(4.0)
 
 
-def test_ev_threshold_record_none_qualify():
-    df = _exploded().assign(**{"Win Prob": 0.40})
-    rec = ev_threshold_record(df, edge_min=0.05)
-    assert rec["n"] == 0
-    assert rec["units"] == 0
-    assert rec["win_pct"] == 0
-
-
-def test_worst_month_min_units_ties_earliest():
-    wm = worst_month(_exploded())
-    # 2026-01 and 2026-02 each net one hit + one miss (== JUICE_PAYOUT - 1);
-    # the tie breaks to the earlier month.
-    assert wm["month"] == "2026-01"
-    assert wm["units"] == pytest.approx(JUICE_PAYOUT - 1)
-    assert wm["n"] == 2
-    assert wm["win_pct"] == pytest.approx(0.5)
-
-
-def test_worst_month_empty():
-    assert worst_month(pd.DataFrame()) == {}
-
-
-def test_record_grid_by_league_sorted_by_units_desc():
-    grid = record_grid(_exploded(), by="League")
-    assert list(grid["League"]) == ["NBA", "WNBA"]  # +1.727u > -0.091u
-    nba = grid.loc[grid["League"] == "NBA"].iloc[0]
-    assert nba["Bets"] == 4
-    assert nba["Win%"] == pytest.approx(0.75)
-    assert nba["Units"] == pytest.approx(3 * JUICE_PAYOUT - 1)
-    wnba = grid.loc[grid["League"] == "WNBA"].iloc[0]
-    assert wnba["Bets"] == 2
-    assert wnba["Win%"] == pytest.approx(0.5)
-    assert wnba["Units"] == pytest.approx(JUICE_PAYOUT - 1)
-
-
-def test_record_grid_by_platform():
-    grid = record_grid(_exploded(), by="Platform")
-    assert list(grid["Platform"]) == ["Sleeper", "Underdog"]  # +1.818u > -0.182u
-    sleeper = grid.loc[grid["Platform"] == "Sleeper"].iloc[0]
-    assert sleeper["Bets"] == 2
-    assert sleeper["Win%"] == pytest.approx(1.0)
-    assert sleeper["Units"] == pytest.approx(2 * JUICE_PAYOUT)
-    assert sleeper["ROI"] == pytest.approx(JUICE_PAYOUT)
-
-
-def test_record_grid_empty():
-    grid = record_grid(pd.DataFrame(), by="League")
-    assert grid.empty
-    assert list(grid.columns) == ["League", "Bets", "Win%", "Units", "ROI"]
+def test_edge_captured_blanks_a_claim_under_the_floor():
+    thin = HISTORY.assign(**{"Market Prob": HISTORY["Win Prob"] - 0.015})
+    grid = by_side_grid(by_split(settled_offers(thin)), "cell")
+    assert grid["Edge captured"].isna().all()
+    assert grid["Hit%"].notna().all()

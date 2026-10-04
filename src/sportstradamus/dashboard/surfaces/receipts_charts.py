@@ -1,4 +1,4 @@
-"""Chart builders for the Receipts calibration + cumulative-units panels."""
+"""Chart builders for the Receipts calibration, cumulative-units and rolling-accuracy panels."""
 
 import pandas as pd
 import plotly.express as px
@@ -25,13 +25,18 @@ def _marker_size(n: pd.Series) -> pd.Series:
 
 
 def reliability_diagram(cal_summary: pd.DataFrame) -> go.Figure:
-    """Two-series reliability diagram: standard-line bins vs. alt-line/ladder bins.
+    """Two-series reliability diagram of posted legs: standard-line bins vs. alt-line/ladder bins.
+
+    ``cal_summary`` is the nightly ``realized.calibration_summary`` frame; only its
+    ``posted`` cohort is drawn. The recommended cohort is a subset of those legs, and its
+    read against its hit rate is the hero's to show.
 
     Gold marks the alt/ladder series identity, not a data value — the point's own
     position (predicted vs. actual) carries the calibration signal; gold only says
     which population a dot belongs to, the same role as a legend swatch (DESIGN.md
     §2's second sanctioned gold-on-chart exception).
     """
+    posted = cal_summary.loc[cal_summary["Cohort"] == "posted"]
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -44,7 +49,7 @@ def reliability_diagram(cal_summary: pd.DataFrame) -> go.Figure:
         )
     )
     for alt_line, spec in _SERIES.items():
-        split = cal_summary.loc[cal_summary["Alt Line"] == alt_line]
+        split = posted.loc[posted["Alt Line"] == alt_line]
         if split.empty:
             continue
         fig.add_trace(
@@ -106,4 +111,31 @@ def cumulative_profit_chart(daily_profit: pd.DataFrame, wm: dict) -> go.Figure:
                 hovertemplate=f"Worst month: {wm['month']}<br>{wm['units']:+.1f}u",
             )
         )
+    return fig
+
+
+# Trailing rows (days with settled legs) per league behind the "Rolling 30-Day" hit rate.
+_ROLLING_DAYS = 30
+
+
+def rolling_accuracy_chart(offers: pd.DataFrame, breakeven: float) -> go.Figure:
+    """Rolling hit rate per league, with a dashed reference line at ``breakeven``.
+
+    ``offers`` are ``realized.settled_offers`` rows carrying the surface's ``_date``; each
+    league's line is its hits over its legs across its trailing ``_ROLLING_DAYS`` dated rows.
+    ``breakeven`` is the hit rate the posted payouts need (``cohort_summary``'s
+    ``breakeven_rate``), the line a hit rate has to clear to make money.
+    """
+    daily = (
+        offers.groupby(["League", "_date"])
+        .agg(Hits=("Hit", "sum"), Bets=("Hit", "size"))
+        .reset_index()
+    )
+    fig = go.Figure()
+    for league, rows in daily.groupby("League"):
+        hits = rows["Hits"].rolling(_ROLLING_DAYS, min_periods=1).sum()
+        bets = rows["Bets"].rolling(_ROLLING_DAYS, min_periods=1).sum()
+        fig.add_trace(go.Scatter(x=rows["_date"], y=hits / bets, mode="lines", name=league))
+    fig.add_hline(y=breakeven, line_dash="dash", line_color=theme.GRAY, annotation_text="breakeven")
+    fig.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
     return fig

@@ -2,7 +2,9 @@
 
 ``cumulative_profit_chart`` is the drawdown-annotated cumulative-units area chart extracted
 out of receipts.py so the plan's "drawdown annotation present" exit criterion is a real CI
-assertion, not a manual-verify note — the same extraction precedent as ``reliability_diagram``.
+assertion, not a manual-verify note — the same extraction precedent as ``reliability_diagram``,
+which draws only the posted cohort of the two-cohort nightly frame, and
+``rolling_accuracy_chart``, whose reference line sits at the posted breakeven rate.
 """
 
 from __future__ import annotations
@@ -11,7 +13,13 @@ import pandas as pd
 import pytest
 
 from sportstradamus.dashboard import theme
-from sportstradamus.dashboard.surfaces.receipts_charts import cumulative_profit_chart
+from sportstradamus.dashboard.surfaces.receipts_charts import (
+    cumulative_profit_chart,
+    reliability_diagram,
+    rolling_accuracy_chart,
+)
+from sportstradamus.realized import calibration_summary, cohort_summary, settled_offers
+from tests.golden.test_receipts_reconciles_ledger import HISTORY
 
 
 def _daily_profit() -> pd.DataFrame:
@@ -71,3 +79,28 @@ def test_axes_carry_signed_units_and_month_tick_format():
     assert fig.layout.xaxis.dtick == "M1"
     assert "%b" in fig.layout.xaxis.tickformat
     assert "%y" in fig.layout.xaxis.tickformat
+
+
+def test_reliability_diagram_draws_only_the_posted_cohort():
+    cal = calibration_summary(settled_offers(HISTORY))
+    assert set(cal["Cohort"]) == {"posted", "recommended"}
+    posted = cal[cal["Cohort"] == "posted"]
+    fig = reliability_diagram(cal)
+    series = {trace.name: trace for trace in fig.data if trace.mode == "markers"}
+    for name, alt_line in (("Standard line", False), ("Alt line / ladder", True)):
+        split = posted[posted["Alt Line"] == alt_line]
+        assert list(series[name].x) == pytest.approx(split["Predicted"].tolist())
+        assert list(series[name].y) == pytest.approx(split["Actual"].tolist())
+
+
+def test_rolling_accuracy_reference_line_sits_at_breakeven():
+    offers = settled_offers(HISTORY).assign(_date=lambda o: pd.to_datetime(o["Date"]).dt.date)
+    breakeven = cohort_summary(offers)["breakeven_rate"]
+    fig = rolling_accuracy_chart(offers, breakeven)
+    line = fig.layout.shapes[0]
+    assert (line.y0, line.y1) == (breakeven, breakeven)
+    assert line.line.dash == "dash"
+    assert fig.layout.annotations[0].text == "breakeven"
+    assert [trace.name for trace in fig.data] == ["NBA", "WNBA"]
+    # NBA's five legs (B and E hit) sit inside one rolling window: 2 of 5 by the last date.
+    assert fig.data[0].y[-1] == pytest.approx(0.4)
