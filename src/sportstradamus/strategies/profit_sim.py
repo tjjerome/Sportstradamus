@@ -33,6 +33,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers import platform_payout
+
 # 100 MC runs is the dashboard default — enough to compute a stable 10-90 band
 # without making the Streamlit page sluggish. Gate callers override to 1.
 N_MONTE_CARLO_DEFAULT: int = 100
@@ -49,9 +51,6 @@ _DEFAULT_RNG_SEED: int = 42
 # branch never fires for the gate, so the run is fully deterministic.
 _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 
-# Underdog / default sportsbook -110 vig (100/110 payout per dollar staked).
-_DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
-
 # Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
     "Kelly": "Kelly",
@@ -64,18 +63,18 @@ def compute_payout(row: pd.Series) -> float:
     """Return the NET payout multiplier for a winning $1 bet on ``row``.
 
     Net profit per dollar staked, not gross — the win line settles
-    ``bet_size * payout``, so it must exclude the returned stake. Underdog /
-    unspecified platforms net -110 (100/110 per dollar); Sleeper's ``Boost`` is a
-    gross multiplier (stake returned with it), so its net is ``boost - 1``. The
-    per-row ``Boost`` scales the Underdog leg. A non-finite boost is unpriceable;
-    return 0.0 (no edge) so the eligibility filter and the Kelly guard drop it.
+    ``bet_size * payout``, so it must exclude the returned stake. The gross is the
+    platform's real payout (:func:`sportstradamus.helpers.platform_payout`): Underdog's
+    raw ``Boost`` scales its per-pick baseline, so an unboosted pick nets 0.78; Sleeper's
+    ``Boost`` is the posted decimal payout, so its net is ``boost - 1``. Only
+    ``"Underdog"`` scales, so any other or missing platform nets as posted too. A
+    non-finite boost is unpriceable; return 0.0 (no edge) so the eligibility filter and
+    the Kelly guard drop it.
     """
     boost = float(row.get("Boost", 1))
     if not np.isfinite(boost):
         return 0.0
-    if row.get("Platform", "") == "Sleeper":
-        return boost - 1.0
-    return _DEFAULT_AMERICAN_MINUS_110_PAYOUT * boost
+    return platform_payout(boost, row.get("Platform", "")) - 1.0
 
 
 def simulate_strategy(
@@ -339,8 +338,8 @@ def _settle_day(
 
     ``Payout`` is net profit per dollar (see :func:`compute_payout`), so the
     Kelly branch rebuilds decimal odds as ``net + 1`` and skips only a
-    non-positive net — it previously compared the net against 1 and so discarded
-    every Underdog leg (net 0.909). ``kelly_fraction`` scales the raw fraction
+    non-positive net — comparing the net against 1 would discard every unboosted
+    Underdog leg (net 0.78). ``kelly_fraction`` scales the raw fraction
     before the 5% cap (1.0 = full Kelly). Flat bets size off the initial bankroll
     when ``flat_off_initial`` else the current one. ``daily_exposure_cap`` (a
     fraction of bankroll, ``None`` = uncapped) bounds the day's total stake,
