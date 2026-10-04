@@ -4,6 +4,11 @@
 > **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
 > live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
 > owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
+> Premise under revision (2026-10-04): the R2 brief
+> [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md) found Underdog does tax
+> same-game correlation (per-game m ≤ 1) and Sleeper bans the pairs, so parlay EV is leg EV compounded;
+> the §1 money logic and the §3 volatile assumption are rewritten with the brief's text when I5e lands
+> ([honest-receipts.md](honest-receipts.md) §6).
 
 ## 1. Mission & money logic
 
