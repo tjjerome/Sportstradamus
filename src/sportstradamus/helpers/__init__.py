@@ -131,6 +131,7 @@ __all__ = [
     "no_vig_odds",
     "odds_api",
     "odds_to_prob",
+    "platform_payout",
     "predictive_std",
     "prob_to_odds",
     "remove_accents",
