@@ -93,7 +93,7 @@ rendering on the old snapshots. A `KeyError` on `Star` in Tonight means the load
 | `d37ef588`, `db6e834c`, `0806d11a` | engine takes a `lead`; the menu grows an Over-led and an Under-led story per game (`Kelly > 0` and edge ≥ 0.05 required of every leg, lead in both presets, led stories first, slate-wide headline dedup); pricing helpers moved to `stories/pricing.py` | `current_game_stories` |
 | `a3ca2684`, `c12b90af`, `624a45a8` | `game_headline` prefers the lead story; Tonight sorts `(urgent, −star, −favored, minutes)` behind the lead side's arrow; Games opens on the lead story with "Over-led · " / "Under-led · " labels | Tonight, Games |
 | `31a70732` | why/dek clauses read the defense (`gives`/`takes`) and the bet (`above_for` … `below_against`); `bank_cell` resolves `mistakes` before any `production` fallback | offer Why text, story deks |
-| `6fc2dbd4` … `c1354dfe` + the pins commit | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
+| `6fc2dbd4` … `c1354dfe`, `0450274f` | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
 
 Untouched on purpose: `strategies/profit_sim.py`, `strategies/_ledger_*.py` (sim-bettor lane),
 `analysis._add_kelly_columns` (same sign flip on history, latent because `profit_sim` filters
