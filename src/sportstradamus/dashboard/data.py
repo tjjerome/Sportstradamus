@@ -46,6 +46,7 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.history_schema import DECISION_COLS, PREDICTION_KEY, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.stories.context import ctxs_from_frame
+from sportstradamus.realized import settled_offers
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -765,3 +766,18 @@ def filtered_history_or_stop(history: pd.DataFrame, filters: dict) -> pd.DataFra
         st.info("No resolved predictions match the current filters.")
         st.stop()
     return df
+
+
+def posted_offers_or_stop(history: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    """Sidebar-filtered settled offers the platform posted, at its payout, or ``st.stop()``.
+
+    ``realized.settled_offers`` over :func:`filtered_history_or_stop`: one row per posted
+    offer per platform carrying ``Payout``, ``Breakeven``, ``Hit``, ``Unit``,
+    ``Recommended`` and ``Quote``. Unposted sides (``Boost == 0``) drop out here, so every
+    realized number a page shows reads the universe the nightly ledger prices.
+    """
+    offers = settled_offers(filtered_history_or_stop(history, filters))
+    if offers.empty:
+        st.info("No posted, settled offers match the current filters.")
+        st.stop()
+    return offers
