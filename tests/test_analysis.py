@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -11,13 +10,12 @@ import pytest
 from sklearn.metrics import brier_score_loss
 
 from sportstradamus.analysis import (
-    JUICE_PAYOUT,
-    _daily_calibration_tables,
-    _with_profit_units,
+    annotate_offer_outcomes,
     compute_book_brier_skill_score,
     compute_brier_skill_score,
-    compute_individual_metrics,
 )
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
+from sportstradamus.realized import RECOMMENDED_PAYOUT_MAX
 
 
 def _seeded_subset(n: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -183,71 +181,39 @@ def test_compute_brier_skill_score_does_not_crash_when_passes_outnumber_bets():
     assert math.isfinite(compute_brier_skill_score(subset))
 
 
-def _settlement_frame() -> pd.DataFrame:
-    """A resolved hit, a resolved miss, a push, and a legacy pre-flat-schema row.
-
-    The legacy row mirrors the ~15k history.parquet rows whose Line/Bet/Win Prob
-    are NaN with Actual filled -- their Result is NaN, so they are not settled
-    bets and must never grade as losses.
-    """
-    date = str(datetime.today().date() - timedelta(days=3))
-    rows = [
-        ("Over", "Over", 0.60, 25.5),
-        ("Over", "Under", 0.58, 10.5),
-        ("Under", "Push", 0.62, 5.5),
-        (np.nan, np.nan, np.nan, np.nan),
-    ]
-    return pd.DataFrame(
-        [
-            {
-                "Date": date,
-                "League": "NBA",
-                "Market": "PTS",
-                "Bet": bet,
-                "Result": result,
-                "Win Prob": prob,
-                "Line": line,
-            }
-            for bet, result, prob, line in rows
-        ]
-    )
+def _annotated(platform: str, boost: float, win_prob: float) -> pd.Series:
+    offer = {"Platform": platform, "Boost": boost, "Win Prob": win_prob, "Market Prob": 0.5}
+    return annotate_offer_outcomes(pd.DataFrame([offer])).iloc[0]
 
 
-def test_with_profit_units_grades_only_settled_rows():
-    df = _with_profit_units(_settlement_frame())
-    assert len(df) == 2
-    assert df["Hit"].tolist() == [1, 0]
-    assert df["Profit Unit"].sum() == pytest.approx(JUICE_PAYOUT - 1)
+@pytest.mark.parametrize(
+    ("platform", "boost", "payout"),
+    [
+        # Underdog persists its raw multiplier: 1.0 pays the per-pick baseline.
+        ("Underdog", 1.0, UNDERDOG_BOOST_BASELINE),
+        # Sleeper's Boost is already its posted payout.
+        ("Sleeper", 1.5, 1.5),
+        # The window is closed at the cap.
+        ("Sleeper", RECOMMENDED_PAYOUT_MAX, RECOMMENDED_PAYOUT_MAX),
+    ],
+)
+def test_kelly_sizes_at_the_platform_payout(platform, boost, payout):
+    out = _annotated(platform, boost, win_prob=0.75)
+    assert out["Model EV"] == pytest.approx(0.75 * payout)
+    assert out["Kelly"] == pytest.approx((0.75 * payout - 1) / (payout - 1))
+    assert out["Kelly"] > 0
 
 
-def test_with_profit_units_keeps_upstream_nan_safe_hit():
-    # _add_kelly_columns grades every resolved row, so a push arrives with Hit=0
-    # and only the unresolved row is NaN; the push must still drop out.
-    frame = _settlement_frame()
-    frame["Hit"] = [1.0, 0.0, 0.0, np.nan]
-    df = _with_profit_units(frame)
-    assert df["Hit"].tolist() == [1.0, 0.0]
-    assert df["Profit Unit"].sum() == pytest.approx(JUICE_PAYOUT - 1)
-
-
-def test_daily_calibration_tables_count_only_settled_bets():
-    frame = _settlement_frame()
-    frame["_date"] = pd.to_datetime(frame["Date"]).dt.date
-    daily, calibration = _daily_calibration_tables(frame, "Win Prob", datetime.today().date())
-    assert daily["Bets"].tolist() == [2]
-    assert daily["Hits"].tolist() == [1]
-    assert daily["Profit"].iloc[0] == pytest.approx(JUICE_PAYOUT - 1)
-    assert daily["Avg_Model_P"].iloc[0] == pytest.approx((0.60 + 0.58) / 2)
-    assert calibration["Count"].sum() == 2
-
-
-def test_compute_individual_metrics_drops_unresolved_and_push_at_entry():
-    # The entry filter must be isin(("Over", "Under")): a NaN Result passes
-    # ``!= "Push"`` and would grade as a loss in every downstream table.
-    frame = _settlement_frame()
-    frame["Model EV"] = [1.2, 1.2, 1.2, 1.2]
-    frame["Market EV"] = [1.1, 1.1, 1.1, 1.1]
-    hist_stats, daily, _calibration, roi = compute_individual_metrics(frame)
-    assert hist_stats["Samples"].max() == 2
-    assert daily["Bets"].tolist() == [2]
-    assert roi["Bets"].max() == 2
+@pytest.mark.parametrize(
+    ("platform", "boost"),
+    [
+        # Even money: the old rule divided by zero here.
+        ("Sleeper", 1.0),
+        # 0.56 x 1.78 pays just under even; the old rule's two negatives made Kelly +32.
+        ("Underdog", 0.56),
+        # Past the favored-payout cap, where the edge claim is not trusted.
+        ("Sleeper", RECOMMENDED_PAYOUT_MAX + 0.5),
+    ],
+)
+def test_kelly_is_zero_outside_the_payout_window(platform, boost):
+    assert _annotated(platform, boost, win_prob=0.9)["Kelly"] == 0.0

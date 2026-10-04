@@ -52,6 +52,7 @@ from sportstradamus.helpers.config import (
 )
 from sportstradamus.helpers.distributions import (
     GATE_PUBLISH_THRESHOLD,
+    MAX_FAVORED_PAYOUT,
     NONZERO_DENOM_GATE,
     UNDERDOG_BOOST_BASELINE,
     DecodedParams,
@@ -92,6 +93,7 @@ from sportstradamus.helpers.text import (
 __all__ = [
     "ABBR_MAP",
     "GATE_PUBLISH_THRESHOLD",
+    "MAX_FAVORED_PAYOUT",
     "NONZERO_DENOM_GATE",
     "UNDERDOG_BOOST_BASELINE",
     "Archive",

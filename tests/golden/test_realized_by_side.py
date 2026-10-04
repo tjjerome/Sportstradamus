@@ -14,14 +14,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus import analysis
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
-from sportstradamus.prediction import offer_records
 from sportstradamus.prediction.stories import menu
 from sportstradamus.realized import (
     REALIZED_BY_SIDE_COLS,
     RECOMMENDED_EDGE_MIN,
-    RECOMMENDED_PAYOUT_MAX,
     compute_realized_by_side,
 )
 
@@ -189,13 +186,8 @@ def test_quote_split_reads_fallback_before_the_sportsbook_quote():
         assert _one(out, split="quote", key=key)["n"] == 1
 
 
-def test_recommended_edge_matches_the_story_and_skeptic_floors():
+def test_recommended_edge_matches_the_story_menu_floor():
     assert RECOMMENDED_EDGE_MIN == menu._MENU_EDGE_FLOOR
-    assert RECOMMENDED_EDGE_MIN == analysis._EV_EDGE_MIN
-
-
-def test_recommended_payout_cap_matches_the_menu_kelly_cap():
-    assert RECOMMENDED_PAYOUT_MAX == offer_records.MAX_FAVORED_PAYOUT
 
 
 def test_30_day_window_drops_older_offers():

@@ -203,6 +203,20 @@ def test_calibration_summary_per_cohort_and_alt_split():
         assert splits.loc[split, "ROI"] == pytest.approx(roi)
 
 
+def test_calibration_summary_drops_a_split_with_no_binned_row():
+    # The alt leg settled, but its 0.35 sits under the first bin edge, so the alt split has
+    # no reliability row at all rather than an empty or NaN one.
+    sleeper = _OFFER | {"Platform": "Sleeper", "Boost": 2.0}
+    offers = settled_offers(
+        _frame(sleeper, sleeper | {"Player": "B", "Win Prob": 0.35, "Alt Line": True})
+    )
+    out = calibration_summary(offers)
+    assert set(zip(out["Cohort"], out["Alt Line"], strict=True)) == {
+        ("posted", False),
+        ("recommended", False),
+    }
+
+
 def test_calibration_summary_of_nothing_settled_is_empty_with_columns():
     out = calibration_summary(settled_offers(_frame(_OFFER | {"Actual": np.nan})))
     assert out.empty

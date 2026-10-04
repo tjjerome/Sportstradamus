@@ -252,8 +252,6 @@ def _parlay_day_files() -> list[Path]:
 
 def _write_parlay_day(day_df: pd.DataFrame, day) -> None:
     out = day_df.copy()
-    # _date is a transient column added by analysis.compute_parlay_metrics; never persist it.
-    out = out.drop(columns=[c for c in ("_date",) if c in out.columns])
     for col in _PARLAY_LIST_COLS:
         if col in out.columns:
             out[col] = out[col].apply(_seq_to_list)

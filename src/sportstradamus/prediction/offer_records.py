@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers import (
+    MAX_FAVORED_PAYOUT,
     UNDERDOG_BOOST_BASELINE,
     DecodedParams,
     LazyArchive,
@@ -38,12 +39,6 @@ _MAX_CONFIDENCE = 0.90
 # Above this the promo is an outlier (e.g. a discounted special) that distorts
 # the per-player distance ranking, so it is filtered out.
 _MAX_UNDERDOG_BOOST = 3.65
-
-# Full decimal payout above which Kelly is zeroed instead of computed. The realized
-# ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%
-# against a ~60% model read, so the edge claim isn't trusted past here. The cap moves
-# only on the realized_by_side payout-band split, never ad hoc.
-MAX_FAVORED_PAYOUT: float = 2.5
 
 # Drop an unquoted single-player leg when the model disagrees with the payout-implied
 # probability by more than this. Underdog prices its own boosts near-fair, so a model

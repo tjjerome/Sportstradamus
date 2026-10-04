@@ -157,14 +157,17 @@ def test_tonight_cards_embed_the_shipped_night_sky():
 
 
 @pytest.mark.parametrize(
-    ("surface", "slot"),
-    [("receipts", "ambient_receipts_hero"), ("games", "ambient_games_hero")],
+    ("source_rel", "slot"),
+    [
+        ("components/receipts_hero.py", "ambient_receipts_hero"),
+        ("surfaces/games.py", "ambient_games_hero"),
+    ],
 )
-def test_heroes_embed_the_shipped_nebula(surface, slot):
+def test_heroes_embed_the_shipped_nebula(source_rel, slot):
     """The page scripts don't import in bare mode (games.py is dropped from sys.modules
     when its body raises), so pin the wiring in source and the slot's render separately.
     """
-    source = (_SURFACES / f"{surface}.py").read_text(encoding="utf-8")
+    source = (_SURFACES.parent / source_rel).read_text(encoding="utf-8")
     assert f'_HERO_BG = ambient_css("{slot}", _HERO_BG_FALLBACK)' in source
     css = assets.ambient_css(slot, _FALLBACK)
     assert css.startswith("linear-gradient(rgba(26,29,36,0.84),rgba(26,29,36,0.84)),url(")

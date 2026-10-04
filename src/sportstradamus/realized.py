@@ -17,22 +17,20 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.analysis import annotate_offer_outcomes
-from sportstradamus.helpers import platform_payout
+from sportstradamus.helpers import MAX_FAVORED_PAYOUT, platform_payout
 
 # 30 matches the graduation window; 90 gives the payout bands enough legs to read.
 REALIZED_WINDOWS: tuple[int, ...] = (30, 90)
 # The owner-locked story / "why" edge floor. Pinned equal to menu._MENU_EDGE_FLOOR by test
 # rather than imported, since that constant is private to the story menu.
 RECOMMENDED_EDGE_MIN: float = 0.05
-# Equals offer_records.MAX_FAVORED_PAYOUT: the menu never shows a leg paying more (Kelly
-# is 0 there), so the recommended cohort stops where the menu does. Pinned by test, not
-# imported: importing offer_records loads the whole prediction package, torch included.
-RECOMMENDED_PAYOUT_MAX: float = 2.5
+# The menu's Kelly cap: the menu never shows a leg paying more (Kelly is 0 there), so the
+# recommended cohort stops where the menu does.
+RECOMMENDED_PAYOUT_MAX: float = MAX_FAVORED_PAYOUT
 # 2.5 is RECOMMENDED_PAYOUT_MAX; the bands show whether that cap should move.
 PAYOUT_BAND_EDGES: tuple[float, ...] = (1.0, 1.5, 2.0, 2.5, 3.0)
-# Reliability-diagram bin edges, reaching below the 0.5 floor of the daily calibration
-# tables so the alt/ladder split has room to show tail bins (alt lines carry more extreme
-# predicted probabilities).
+# Reliability-diagram bin edges, reaching below 0.5 so the alt/ladder split has room to
+# show tail bins (alt lines carry more extreme predicted probabilities).
 CAL_BINS = np.arange(0.40, 1.01, 0.05)
 REALIZED_BY_SIDE_COLS = [
     "computed_at",
@@ -231,9 +229,8 @@ def compute_realized_by_side(history: pd.DataFrame, *, now: datetime | None = No
 def worst_month(offers: pd.DataFrame) -> dict[str, str | float]:
     """The worst calendar month by realized units at the platform payout.
 
-    ``analysis.worst_month``'s contract on ``settled_offers`` rows: ``{month, units, n,
-    win_pct}`` for the ``YYYY-MM`` with the lowest summed ``Unit``, ties to the earliest
-    month; ``{}`` when nothing settled.
+    ``{month, units, n, win_pct}`` for the ``YYYY-MM`` with the lowest summed ``Unit``,
+    ties to the earliest month; ``{}`` when nothing settled.
     """
     if offers.empty:
         return {}

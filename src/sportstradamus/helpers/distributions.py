@@ -159,6 +159,12 @@ def no_vig_odds(over, under=None, method="proportional"):
 # ``correlation.py``) divide it back out.
 UNDERDOG_BOOST_BASELINE: float = 1.78
 
+# Full decimal payout above which Kelly is zeroed instead of computed. The realized
+# ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%
+# against a ~60% model read, so the edge claim isn't trusted past here. The cap moves
+# only on the realized_by_side payout-band split, never ad hoc.
+MAX_FAVORED_PAYOUT: float = 2.5
+
 
 def platform_payout(boost, platform):
     """Full decimal payout of a persisted DFS leg (``history.parquet`` conventions).
