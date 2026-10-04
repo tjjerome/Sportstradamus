@@ -55,6 +55,13 @@ def _row(player: str, model_over: float, model_under: float, boost_over: float) 
         "Projection": 25.5,
         "Push Prob": 0.0,
         "Market Projection": np.nan,
+        "Books STD": np.nan,
+        "Model Weight": 1.0,
+        "Quote Source": None,
+        "Quote Authenticity": None,
+        "Quote Books": np.nan,
+        "Quote Line": np.nan,
+        "Quote Observed At": pd.NaT,
     }
 
 

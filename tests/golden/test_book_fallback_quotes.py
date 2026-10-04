@@ -286,6 +286,12 @@ def _finalize_input(rows):
     df["Projection"] = 1.2
     df["Market Projection"] = 1.2
     df["Push Prob"] = 0.0
+    df["Model Weight"] = 0.0
+    for col in ("Quote Source", "Quote Authenticity"):
+        df[col] = None
+    for col in ("Quote Books", "Quote Line"):
+        df[col] = np.nan
+    df["Quote Observed At"] = pd.NaT
     return df
 
 

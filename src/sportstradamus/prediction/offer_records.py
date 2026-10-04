@@ -101,6 +101,13 @@ SCORED_RECORD_COLS = [
     "Step",
     "Model Version",
     "Model PIT Recal",
+    "Books STD",
+    "Model Weight",
+    "Quote Source",
+    "Quote Authenticity",
+    "Quote Books",
+    "Quote Line",
+    "Quote Observed At",
 ]
 
 
@@ -216,7 +223,15 @@ def finalize_records(
     particular must stay an int, never NaN, or correlation's position map breaks.
     """
     totals_map = archive.default_totals
-    for _col in ("Avg5", "AvgH2H", "H2HPlayed", "Total", "Defense position", "Moneyline"):
+    for _col in (
+        "Avg5",
+        "AvgH2H",
+        "H2HPlayed",
+        "Total",
+        "Defense position",
+        "Moneyline",
+        "Books STD",
+    ):
         if _col not in offer_df.columns:
             offer_df[_col] = np.nan
     if "Home" not in offer_df.columns:
