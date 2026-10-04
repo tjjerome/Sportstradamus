@@ -387,7 +387,7 @@ def test_model_book_leg_dfs_only_is_nan(archive, monkeypatch):
 
     offer_df = pd.DataFrame([_offer("Star Guard", 1.5)])
     offer_df.index = offer_df.Player
-    evs, sds = _model_book_leg(offer_df)
+    evs, sds, _ = _model_book_leg(offer_df)
 
     assert len(evs) == 1 and np.isnan(evs[0])
     assert len(sds) == 1 and np.isnan(sds[0])
@@ -405,8 +405,39 @@ def test_model_book_leg_prices_modal_cohort(archive, monkeypatch):
 
     offer_df = pd.DataFrame([_offer("Star Guard", 33.5)])
     offer_df.index = offer_df.Player
-    evs, sds = _model_book_leg(offer_df)
+    evs, sds, _ = _model_book_leg(offer_df)
 
     assert get_odds(33.5, evs[0], "NegBin", cv=0.5) == pytest.approx(0.65, abs=1e-6)
     # A single-market quote asserts nothing about spread beyond its own cv.
     assert sds[0] == pytest.approx(0.5 * evs[0])
+
+
+def test_model_book_leg_reports_the_quote_behind_each_mean(archive, monkeypatch):
+    """Each mean comes back with the quote it was inverted from, aligned with ``players``.
+
+    The DFS-only player's platform self-quote backs nothing, so it reports None and its
+    provenance columns read None/NaN/NaT beside the cohort player's real quote.
+    """
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    _insert_odds(archive, "Bench Guy", "Underdog", 0.675, 1.5, ev=1.17)
+    _insert_odds(archive, "Star Guard", "fanduel", 0.60, 33.5)
+    _insert_odds(archive, "Star Guard", "draftkings", 0.70, 33.5)
+
+    offer_df = pd.DataFrame([_offer("Bench Guy", 1.5), _offer("Star Guard", 33.5)])
+    offer_df.index = offer_df.Player
+    evs, _, quotes = _model_book_leg(offer_df)
+    frame = pd.DataFrame(index=offer_df.index)
+    book_quotes.annotate_quote_provenance(frame, quotes)
+
+    assert np.isnan(evs[0]) and quotes[0] is None
+    assert quotes[1].books == ("draftkings", "fanduel")
+    assert frame.loc["Star Guard"].to_dict() == {
+        "Quote Source": "book_direct",
+        "Quote Authenticity": "authentic",
+        "Quote Books": 2.0,
+        "Quote Line": 33.5,
+        "Quote Observed At": pd.Timestamp(_TS),
+    }
+    assert frame.loc["Bench Guy"].isna().all()
+    assert pd.api.types.is_float_dtype(frame["Quote Books"])
+    assert pd.api.types.is_datetime64_dtype(frame["Quote Observed At"])

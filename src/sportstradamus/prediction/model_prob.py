@@ -41,6 +41,7 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import VOLUME_STATS, market_file_slug, model_pickle_path
 from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
+    annotate_quote_provenance,
     book_evs_for_players,
     price_offers_at_quotes,
     servable_fallback_quotes,
@@ -1166,11 +1167,12 @@ def model_prob(
     if "Defense position" not in playerStats:
         playerStats["Defense position"] = playerStats["Defense avg"]
 
-    evs, sds = book_evs_for_players(
+    evs, sds, quotes = book_evs_for_players(
         offer_df, league, market, dist, cv, hist_gate, dateMap, stat_data, playerStats.index
     )
     playerStats["Market Projection"] = evs
     playerStats["Books STD"] = sds
+    annotate_quote_provenance(playerStats, quotes)
 
     _decode_model_params(
         prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization
@@ -1196,6 +1198,7 @@ def model_prob(
     )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
     _sanitize_model_ev(offer_df, dist)
+    offer_df["Model Weight"] = model_weight
     base_mean = _blend_with_book(
         offer_df, dist, model_weight, cv, hist_gate, league, market, posthoc_slug, posthoc_blob
     )
@@ -1294,6 +1297,7 @@ def book_fallback_prob(
         return []
 
     price_offers_at_quotes(offer_df, quotes, league, market, dist, cv, step)
+    annotate_quote_provenance(offer_df, [quotes[player] for player in offer_df.index])
 
     playerStats = stat_data.get_stats(market, offers)
     if not playerStats.empty:
@@ -1317,6 +1321,8 @@ def book_fallback_prob(
     offer_df["Model Over"] = _over
     offer_df["Model Under"] = 1 - _over
     offer_df["Projection"] = offer_df["Market Projection"]
+    # The fallback serve is the weight-0 blend, so the model's share is 0, not unknown.
+    offer_df["Model Weight"] = 0.0
 
     return finalize_records(
         offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION

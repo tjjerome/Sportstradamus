@@ -9,6 +9,8 @@ serve a price the market never made.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
@@ -49,7 +51,7 @@ def book_evs_for_players(
     date_map: dict,
     stat_data,
     players: pd.Index,
-) -> tuple[list, list]:
+) -> tuple[list[float], list[float], list[TrainingQuote | None]]:
     """Modal-cohort book means and spreads for the model path's book leg.
 
     Resolves the same admission-gated quotes as the fallback path and inverts each
@@ -64,12 +66,16 @@ def book_evs_for_players(
     asserts, but a quote carrying a component sum's shape has its own — the kernel
     added the component variances and their correlation, so ``cv * mean`` would
     substitute the composite cell's generic dispersion for a computed quantity.
+
+    Returns:
+        ``(means, sds, quotes)``, each aligned with ``players``. ``quotes`` holds the
+        quote each mean was inverted from, ``None`` where the mean is NaN.
     """
-    quotes = servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
+    servable = servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
+    quotes = [servable.get(player) for player in players]
     gate = None if dist == "SkewNormal" else hist_gate or None
     means, sds = [], []
-    for player in players:
-        quote = quotes.get(player)
+    for quote in quotes:
         if quote is None:
             means.append(np.nan)
             sds.append(np.nan)
@@ -77,7 +83,7 @@ def book_evs_for_players(
         mean = quote_pricing_params(quote, league, market, dist, cv, gate=gate).mean
         means.append(mean)
         sds.append(quote.sum_sd if quote.sum_sd is not None else cv * mean)
-    return means, sds
+    return means, sds, quotes
 
 
 def _has_serving_support(quote: TrainingQuote) -> bool:
@@ -231,3 +237,18 @@ def price_offers_at_quotes(
             for player, line, marginal in zip(offer_df.index, lines, over, strict=True)
         ]
     offer_df["Market EV"] = over
+
+
+def annotate_quote_provenance(frame: pd.DataFrame, quotes: Sequence[TrainingQuote | None]) -> None:
+    """Record which book quote backed each row, in place and row-aligned with ``quotes``.
+
+    Informational only — no scoring step reads these columns; they let a served leg be
+    traced to its quote (cohort or component sum, how many books, what line, how fresh).
+    ``None`` marks a row no servable quote backed, the model path's model-only blend,
+    and leaves its columns None/NaN/NaT.
+    """
+    frame["Quote Source"] = [q.source if q else None for q in quotes]
+    frame["Quote Authenticity"] = [q.authenticity if q else None for q in quotes]
+    frame["Quote Books"] = [float(q.book_count) if q else np.nan for q in quotes]
+    frame["Quote Line"] = [q.line if q else np.nan for q in quotes]
+    frame["Quote Observed At"] = pd.to_datetime([q.observed_at if q else None for q in quotes])
