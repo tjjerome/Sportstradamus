@@ -380,10 +380,13 @@ def _diag_row(league: str, market: str, i: int) -> dict:
 
 
 # 25 rows/cell so the market table (n>=5), the sharpness view, and the Murphy
-# decomposition panel (n>=20) all render real content for both cells.
-_DIAG_ROWS = [_diag_row("NBA", "PTS", i) for i in range(25)] + [
-    _diag_row("NBA", "AST", i) for i in range(25)
-]
+# decomposition panel (n>=20) all render real content for the PTS and AST cells. REB is
+# Boost 0 throughout: no platform posted it, so it was never a bet and must not surface.
+_DIAG_ROWS = (
+    [_diag_row("NBA", "PTS", i) for i in range(25)]
+    + [_diag_row("NBA", "AST", i) for i in range(25)]
+    + [{**_diag_row("NBA", "REB", i), "Boost": 0.0} for i in range(25)]
+)
 
 
 def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, tmp_path):
@@ -409,8 +412,10 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     assert not at.exception
     assert _hero_title(at) == "Market Diagnostics & Forecast Quality"
     assert any("Start here" in c.value for c in at.caption)
+    assert any("Posted sides only" in c.value for c in at.caption)
     tile_labels = {m.label for m in at.metric}
     assert {"NBA - PTS", "NBA - AST"} <= tile_labels
+    assert "NBA - REB" not in tile_labels
 
 
 def _training_cell(league: str, market: str, *, ship: bool, n_fails: int) -> dict:

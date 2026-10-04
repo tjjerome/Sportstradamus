@@ -1,7 +1,10 @@
 """Lab Diagnostics — market diagnostics and forecast quality.
 
 Combines market-level diagnostics with professional forecasting metrics
-following Gneiting & Raftery (2007) and Murphy (1973).
+following Gneiting & Raftery (2007) and Murphy (1973). Accuracy, Brier, BSS and
+reliability score the posted offers ``realized.settled_offers`` keeps; CRPS and
+interval coverage score every prediction once, posted or not, since neither
+depends on the side.
 """
 
 import numpy as np
@@ -18,10 +21,10 @@ from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
-    filtered_history_or_stop,
     get_prediction_history,
     load_resolved_history_or_stop,
     load_stat_meta,
+    posted_offers_or_stop,
     sidebar_filters,
     sport_filtered,
 )
@@ -64,14 +67,12 @@ if history.empty:
 filters = sidebar_filters(history, key_prefix="mkt_", time_window_key="mkt_time")
 cutoff = filters["cutoff"]
 
-df = filtered_history_or_stop(history, filters)
+df = posted_offers_or_stop(history, filters)
 df = apply_lab_filters(df, stat_meta, lab_sel)
 if df.empty:
     st.info("No data matches the current Lab filter selection.")
     st.stop()
 
-prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
-df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
 if cutoff is not None:
@@ -80,6 +81,11 @@ if cutoff is not None:
 if df.empty:
     st.info("No data for selected time window.")
     st.stop()
+
+st.caption(
+    "Posted sides only: a side the platform never posted was never a bet. "
+    "Each offer counts once per platform."
+)
 
 # Coverage is a diagnostics fact (share of predictions carrying a stored distribution),
 # not a filter — it lives in the page body, not the shared sidebar filter panel.
@@ -121,7 +127,7 @@ for (league, market), grp in df.groupby(["League", "Market"]):
     actual_over_pct = (grp["Result"] == "Over").mean()
     balance = pred_over_pct - actual_over_pct
 
-    brier = brier_score_loss(hits, grp[prob_col].clip(0, 1))
+    brier = brier_score_loss(hits, grp["Win Prob"].clip(0, 1))
     bss = compute_brier_skill_score(grp)
 
     row = {
@@ -194,9 +200,9 @@ sharp_df = df if selected_league == "All" else df.loc[df["League"] == selected_l
 if not sharp_df.empty:
     markets_to_show = sorted(sharp_df["Market"].value_counts().head(12).index)
     sharp_subset = sharp_df.loc[sharp_df["Market"].isin(markets_to_show)]
-    st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), width="stretch")
+    st.plotly_chart(sharpness_histogram(sharp_subset, "Win Prob"), width="stretch")
 
-    sharpness_df = sharp_df.groupby("Market")[prob_col].std().reset_index()
+    sharpness_df = sharp_df.groupby("Market")["Win Prob"].std().reset_index()
     sharpness_df.columns = ["Market", "Std(Win Prob)"]
     sharpness_df = sharpness_df.sort_values("Std(Win Prob)")
     low_sharp = sharpness_df.loc[sharpness_df["Std(Win Prob)"] < _LOW_SHARPNESS_STD]
@@ -224,11 +230,11 @@ st.header("Forecast Quality (Proper Scoring Rules)")
 st.subheader("Reliability Diagram")
 cal_df = df.copy()
 bins = np.linspace(0.5, 1.0, 11)
-cal_df["bin"] = pd.cut(cal_df[prob_col], bins=bins)
+cal_df["bin"] = pd.cut(cal_df["Win Prob"], bins=bins)
 cal_stats = (
     cal_df.groupby("bin", observed=False)
     .agg(
-        Predicted=(prob_col, "mean"),
+        Predicted=("Win Prob", "mean"),
         Actual=("Hit", "mean"),
         Count=("Hit", "count"),
     )
