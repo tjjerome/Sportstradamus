@@ -2,7 +2,8 @@
 
 Pins the contract the Receipts panel reads: a fixed long schema, units priced at the
 platform payout (not fair odds), unposted sides (``Boost == 0``) dropped, the recommended
-edge floor, right-closed payout bands, one row per real offer, and the trailing windows.
+edge floor and payout cap, right-closed payout bands, the breakeven rate, the quote split,
+one row per real offer, and the trailing windows.
 """
 
 from __future__ import annotations
@@ -15,10 +16,12 @@ import pytest
 
 from sportstradamus import analysis
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
+from sportstradamus.prediction import offer_records
 from sportstradamus.prediction.stories import menu
 from sportstradamus.realized import (
     REALIZED_BY_SIDE_COLS,
     RECOMMENDED_EDGE_MIN,
+    RECOMMENDED_PAYOUT_MAX,
     compute_realized_by_side,
 )
 
@@ -38,6 +41,7 @@ _OFFER = {
     "Market Prob": 0.55,
     "Alt Line": False,
     "Model Version": "v1",
+    "Market Projection": 19.5,
     "Actual": 18.0,
 }
 _EXPECTED_DTYPES = {
@@ -51,6 +55,7 @@ _EXPECTED_DTYPES = {
     "hit_rate": "float64",
     "pred_rate": "float64",
     "book_rate": "float64",
+    "breakeven_rate": "float64",
     "units": "float64",
     "roi": "float64",
 }
@@ -157,9 +162,40 @@ def test_split_keys_fill_legacy_rows():
     assert _keys(out, "cell") == {"NBA/PTS"}
 
 
+def test_recommended_stops_at_the_menu_payout_cap():
+    # Both Sleeper legs clear the edge floor; 2.5 sits on the cap, 3.0 pays past it, where
+    # the menu zeroes Kelly and never shows the leg.
+    out = _ledger(
+        _OFFER | {"Platform": "Sleeper", "Boost": 2.5},
+        _OFFER | {"Player": "B", "Platform": "Sleeper", "Boost": 3.0},
+    )
+    assert _keys(out, "payout_band") == {"2.00-2.50", "2.50-3.00"}
+    assert _keys(out, "payout_band", cohort="recommended") == {"2.00-2.50"}
+
+
+def test_breakeven_rate_is_n_over_the_summed_payout():
+    # Legs paying 1.78 and 2.0 break even at 2 / 3.78, not at the mean of 1 / payout.
+    out = _ledger(_OFFER, _OFFER | {"Player": "B", "Platform": "Sleeper", "Boost": 2.0})
+    assert _one(out)["breakeven_rate"] == pytest.approx(2 / (UNDERDOG_BOOST_BASELINE + 2.0))
+
+
+def test_quote_split_reads_fallback_before_the_sportsbook_quote():
+    out = _ledger(
+        _OFFER,
+        _OFFER | {"Player": "B", "Market Projection": np.nan},
+        _OFFER | {"Player": "C", "Model Version": "book_fallback"},
+    )
+    for key in ("quoted", "unquoted", "fallback"):
+        assert _one(out, split="quote", key=key)["n"] == 1
+
+
 def test_recommended_edge_matches_the_story_and_skeptic_floors():
     assert RECOMMENDED_EDGE_MIN == menu._MENU_EDGE_FLOOR
     assert RECOMMENDED_EDGE_MIN == analysis._EV_EDGE_MIN
+
+
+def test_recommended_payout_cap_matches_the_menu_kelly_cap():
+    assert RECOMMENDED_PAYOUT_MAX == offer_records.MAX_FAVORED_PAYOUT
 
 
 def test_30_day_window_drops_older_offers():

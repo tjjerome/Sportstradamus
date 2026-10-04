@@ -26,6 +26,7 @@ _ROW = {
     "hit_rate": 0.6,
     "pred_rate": 0.58,
     "book_rate": 0.5,
+    "breakeven_rate": 0.55,
     "units": 3.14159,
     "roi": 0.0785,
 }
