@@ -211,12 +211,16 @@ def test_version_present():
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
-        ("BOS/PHI", 1.0): "Garbage time waits, and Jayson Tatum banks the points before it",
+        ("BOS/PHI", 1.0): (
+            "Jayson Tatum runs up the score before the BOS/PHI spread pulls the starters"
+        ),
         ("BOS/PHI", 2.0): (
-            "The BOS/PHI margin sorts it: Jayson Tatum clears the points number "
+            "The BOS/PHI margin drains one side: Jayson Tatum clears the points number "
             "while Joel Embiid comes up short on points"
         ),
-        ("DEN/MIA", 1.0): "One-possession games need a passer, and Nikola Jokic closes DEN/MIA",
+        ("DEN/MIA", 1.0): (
+            "One-possession games need a passer, and Nikola Jokic carries DEN/MIA home"
+        ),
     }
 
 
