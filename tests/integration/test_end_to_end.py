@@ -436,6 +436,19 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Player position": "G",
                 "Position": f"G{i % 3 + 1}",
                 "Kelly": 1.0,
+                "Commence": "",
+                "Home": True,
+                "Avg 5": line,
+                "Avg H2H": line,
+                "Push Prob": 0.0,
+                "Projection STD": 4.0,
+                "Books STD": 4.0,
+                "Model Weight": 0.5,
+                "Quote Source": "book_direct",
+                "Quote Authenticity": "authentic",
+                "Quote Books": 2.0,
+                "Quote Line": line,
+                "Quote Observed At": pd.Timestamp("2026-05-08T12:00:00"),
             }
         )
     return pd.DataFrame(rows)

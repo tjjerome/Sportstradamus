@@ -51,4 +51,38 @@ OFFER_LEVEL_COLS = [
     "Payout Under",
 ]
 
-HISTORY_COLS = PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + ["Actual"]
+# Decision-time context the research and trust-layer work reads back from history:
+# what the scorer saw when it chose the side. Offer-level, never backfilled, NaN on
+# rows written before the column existed.
+DECISION_COLS = [
+    # One UTC stamp per prophecize run, so a row joins the archive state that run saw.
+    "Scored At",
+    # The sportsbook modal line the Alt Line flag was judged against.
+    "Consensus Line",
+    "Commence",
+    "Opponent",
+    "Home",
+    "Player position",
+    "Moneyline",
+    "O/U",
+    "DVPOA",
+    "Avg 5",
+    "Avg H2H",
+    "Push Prob",
+    "Projection STD",
+    "Books STD",
+    "Model EV",
+    "Kelly",
+    # The pickle's model/book blend weight (0.0 on the book-fallback path).
+    "Model Weight",
+    # Provenance of the book quote behind the serve; None/NaN when the leg was unquoted.
+    "Quote Source",
+    "Quote Authenticity",
+    "Quote Books",
+    "Quote Line",
+    "Quote Observed At",
+]
+
+HISTORY_COLS = (
+    PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + DECISION_COLS + ["Actual"]
+)

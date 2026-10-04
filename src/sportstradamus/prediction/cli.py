@@ -215,6 +215,9 @@ def main(progress, contest_variant, log_level):
         extra={"contest_variant": contest_variant},
     )
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
+    # One stamp per run: every history row this run writes joins the archive state
+    # the run saw, which is what point-in-time research needs.
+    scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
     sports = []
     stats = {}
@@ -410,11 +413,13 @@ def main(progress, contest_variant, log_level):
             all_df = _stamp_alt_line(all_df)
         else:
             all_df["Alt Line"] = False
+            all_df["Consensus Line"] = np.nan
         # Freshly scored offers always start unresolved; reflect fills these in.
         for col in ("Actual", "Close Market Prob", "Market CLV", "Model CLV"):
             all_df[col] = np.nan
         all_df["Payout Over"] = all_df["Boost_Over"]
         all_df["Payout Under"] = all_df["Boost_Under"]
+        all_df["Scored At"] = scored_at
         new_df = all_df[HISTORY_COLS].copy() if not all_df.empty else pd.DataFrame()
     else:
         new_df = pd.DataFrame()

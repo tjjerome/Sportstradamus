@@ -44,7 +44,7 @@ from sportstradamus.helpers.io import (
     read_parquet_safe,
     read_user_slips,
 )
-from sportstradamus.history_schema import PREDICTION_KEY, PREDICTION_LEVEL_COLS
+from sportstradamus.history_schema import DECISION_COLS, PREDICTION_KEY, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 # Column names that differ across league gamelog parquets.
@@ -151,7 +151,9 @@ def _load_history_cached(path: Path, mtime: float) -> pd.DataFrame:
     fresh cron write invalidates it. ``read_history()`` re-resolves the path
     itself, so ``path`` isn't touched in the body beyond keying the cache.
     """
-    history = read_history()
+    # The decision-time columns are research inputs no page reads; dropping them keeps
+    # the cached frame flat (errors="ignore": parquets written before they existed).
+    history = read_history().drop(columns=DECISION_COLS, errors="ignore")
     if history.empty:
         return history
 
