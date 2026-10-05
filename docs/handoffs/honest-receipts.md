@@ -3,10 +3,11 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–4 are on `devel` (§4); all three briefs returned (R1
+`docs/archive/` (§5). Status: OPEN — waves 1–5 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
 profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–14 (§2)
-are built (§6), bar the training-side cuts that wait for the next retrain and the four pair quotes (§8).
+are built (§6), bar the push label and the re-read of stored game lines, which went back to the
+owner with their measured size (§8 asks 5 and 6), and the four pair quotes (§8 ask 1).
 
 ## 1. Mission & money logic
 
@@ -147,6 +148,7 @@ nowhere on the page.
 | 4 | `a7ca8e21` | The temperature fit without its penalty (decision 14, I6c) |
 | 4 | `dcf084fe` | 14-day prior model files (`training/prior_models.py`, I6g) |
 | 4 | `1a8cabd8` | Sportsbook-only consensus line (decision 11): `Archive.get_line`, `get_reference_line`, the quote resolver's line vote, the book-weight fit, the board stamp ([archive/consensus_line_trace.md](../archive/consensus_line_trace.md)) |
+| 5 | `01b52c66` | Pre-game cutoff for the game lines training reads (decision 13, I6f): each sportsbook's newest Moneyline and Totals quote stamped by 15:00 UTC on the game date; a historical game-line fetch keeps its snapshot time ([archive/game_line_cutoff_design.md](../archive/game_line_cutoff_design.md)) |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
@@ -233,14 +235,23 @@ inside its group; §8 restates each open one as a plain question.
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
      difference between versions. Confirmed → retrain every 3–4 days. Null → KILL: the MLB pattern
      was calendar or regression to the mean.
-  3. **I6f as-of alignment of training's archive inputs** (training-side; needs a retrain;
-     correctness with a small expected gap effect). A pre-game cutoff for game lines in
-     `_enrich_team_markets` (`get_team_market_map(at=…)`, `stats/base.py:~630–690`): do it before the
-     next MLB retrain, because the leak grows as the archive fills (late-season MLB rows are 100 %
-     enriched). The NFL enrichment miss (62 % of 2026 rows sit at the 0.5 moneyline default; cause
-     unknown). The book-leg cutoff aligned to decision time where ladder polls exist
-     (`TRAINING_LOOKBACK_HOURS`, `helpers/archive.py:111–114`). Archiving the daily Savant affinity
-     CSVs, so MLB comps can be rebuilt point-in-time for 2027.
+  3. **I6f as-of alignment of training's archive inputs.** The pre-game cutoff for game lines is
+     built for every game ingested from now on, on both boxes: `_enrich_team_markets` takes each
+     sportsbook's newest Moneyline and Totals quote stamped at or before 15:00 UTC on the game date
+     (`GAME_LINE_TRAINING_CUTOFF`, `Archive.get_team_market_map(cutoff=…)`), and a historical
+     game-line fetch is stamped with its snapshot time. Serving's read of today's game is another
+     branch and does not change. On live-polled MLB team-games the team total correlates .58 with
+     the runs then scored as it was read before, .18 at the cutoff; seasons that hold only pre-game
+     snapshots sit at .16–.19
+     ([archive/game_line_cutoff_design.md](../archive/game_line_cutoff_design.md)). Games already
+     stored keep their values until re-read, and a retrain reads the stored values: §8 ask 6. The
+     NFL enrichment miss has a cause: a new row is looked up under its week's first game day, so 84
+     of the 90 team-games of 2026 sit at the default although the archive holds their lines (§8
+     ask 7). Still open: the other training reads that take the newest quote for a past date (the
+     MLB plate-appearance multiplier and starter-win leg, the NHL goalie legs, the Moneyline and
+     Totals book-weight fit); the book-leg cutoff aligned to decision time where ladder polls exist
+     (`TRAINING_LOOKBACK_HOURS`); archiving the daily Savant affinity CSVs, so MLB comps can be
+     rebuilt point-in-time for 2027.
   4. **Hygiene.** I6c — done (decision 14): `_brier_temperature_loss` is the Brier alone, with no
      penalty toward T = 1. T lives in each model file, so a cell changes at its next `meditate`.
      Refit on the 78 served cells, 73 pass the gates with the penalty and the same 73 without; the
@@ -248,10 +259,12 @@ inside its group; §8 restates each open one as a plain question.
      quarter; the cost is log-loss on the alternate rungs of four NFL cells (receptions, rushing
      yards, interceptions, passing TDs). The retrain checklist and the reversal rule are
      [archive/researcher_temperature_ridge.md](../archive/researcher_temperature_ridge.md) §5. Still
-     open, at the next retrain: I6a, one label helper (`training/labels.py`) with y = ½ at a push,
-     used at both label sites in `pipeline.py` (≤ 0.2 pp); `step` passed to SkewNormal `get_odds` in
-     `_step_compute_test_probabilities` and `_step_calibrate_temperature`. I6b is optional: align
-     training's non-authentic fusion to serving, never the reverse.
+     open: I6a, y = ½ at a push in training's labels, waits on §8 ask 5 (the label is derived at
+     eleven sites, not two, and "≤ 0.2 pp" was a pooled figure for recommended legs: the served Over
+     read falls 0.5 points on average and up to 11.5 in one cell,
+     [archive/push_label_design.md](../archive/push_label_design.md)); `step` passed to SkewNormal
+     `get_odds` in `_step_compute_test_probabilities` and `_step_calibrate_temperature`. I6b is
+     optional: align training's non-authentic fusion to serving, never the reverse.
   5. **I6d NFL at-market information** (research; no method is guaranteed). Order: after I6e's parity
      repair, and after the NFL count quote is levelled (`ev` and `under_prob` disagree, which
      contaminates every fused NFL number). Acceptance: fixed-effect logistic encompassing with
@@ -436,3 +449,38 @@ tested returns $1 per $1 while the legs are over-read).
    old rows are stamped `policy_v1` at the next settle. The ledger brief asks for the owner's
    sign-off on any schema change after live entries exist. "No" is a small revert, and v2 then
    continues the v1 balances.
+5. **Count a push as half an Over in training, now that its size is measured?** (yes / no.)
+   Decision 13 took it on a figure of "at most 0.2 pp", a pooled number for recommended legs and no
+   bound. The model's probabilities already count a tie as half an Over; the label they are fitted
+   to and graded on counts it as an Over win, so the calibration steps push the Over read up by
+   about half the tie share. A tie is 2.3 % of held-out rows, 5 % or more in 26 of the 78 served
+   cells and 18.8 % in WNBA TOV. With the label at ½ the served Over read falls 0.5 points on
+   average and 6 to 11 points in four cells (NFL `qb tds` 11.5, WNBA TOV 9.2, NFL targets 8.1, NBA
+   DREB 6.6); Gate 1 and Gate 5 read the same label and change with it, and the 73 cells that ship
+   today still ship (a replay that refits the temperature and the post-hoc map on the stored model,
+   not a retrain); the Kelly haircut moves by more than 0.01 in 11 cells. At half-point lines, where
+   no tie can happen, the read lands closer to the hit rate pooled over the 26 tie-heavy cells
+   (+1.4 → −0.5 points) and further from it in some (WNBA TOV +3.2 → −5.8). "Yes" is one commit
+   across eleven label sites; a cell changes at its next retrain. Record:
+   [archive/push_label_design.md](../archive/push_label_design.md).
+6. **Re-read the game lines of games already stored on the training box?** (yes / no.) Without it
+   the cutoff changes nothing a retrain sees for MLB and WNBA, whose seasons are over or ending. It
+   is more than the approved cut, in four ways. It needs one data fix first: 780,976 game-line rows
+   in the dev archive were written by historical backfills and carry the day the backfill ran, so a
+   cutoff cannot see them; moving each stamp onto its own game date changes no value that a key
+   without a live poll reads (dry run, 1,800,407 keys). It fills seasons that sit at the default
+   today because their lines were backfilled after the games were ingested: MLB training rows with a
+   real game line go from 4.6 % to 99.2 % and NHL from 49.1 % to 99.7 %, against the 6.0 % of MLB
+   rows, 9.7 % of WNBA and 3.2 % of NFL that the cut itself touches, and one retrain cannot tell the
+   fill from the cut. NBA has to stay out: 382 team-games would take in a total inflated ×1.44,
+   because the March–April 2026 archive rows repaired on this box return with every sync from
+   production. And the 93 cached training matrices are patched or rebuilt, which moves their
+   hashes, so stored confirm verdicts stop being evidence for them. Proposed scope: MLB, NHL, WNBA
+   and NFL, every row; NBA none. Record:
+   [archive/game_line_cutoff_design.md](../archive/game_line_cutoff_design.md) §5 and §7.3.
+7. **Fix the NFL game-line lookup?** (yes / no.) A new NFL row asks the archive for its week's
+   first game day (`stats/nfl.py` joins the schedule on the week alone), so 84 of the 90 team-games
+   of 2026 are stored at the default, a 0.5 win chance and the league-average total, while serving
+   reads the real line. Read from the code and matched by the pattern (the six rows that got a line
+   are the teams that played on the week's first game day); the update was not run to watch it. The
+   fix enriches after the true game day is set; stored rows are ask 6.
