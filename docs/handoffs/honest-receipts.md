@@ -213,7 +213,7 @@ inside its group; §8 restates each open one as a plain question.
   recommendation rule ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10, which also carries the
   ledger's open scars). I5e the premise rewrite in
   `parlay-dependence.md` §1 and `PARLAY_AUDIT.md`. **Open:** the sub-1 pair values and the lifted bans
-  wait for the owner's quotes through the Modifiers reconciler (§8). **Struck:** I5b symmetric Σ, I5c
+  wait for the owner's quotes from the app (§8 ask 1). **Struck:** I5b symmetric Σ, I5c
   `underdog_tax.py`. `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested
   value returns ≥ 1. I5's own acceptance = priced payout equals the quote on owner-captured slips
   (one Power, one Flex, one stacked same-game pair) and the ledger settles at it.
@@ -470,16 +470,19 @@ below was deferred by the owner until the rest was built; the others came out of
 asked because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting
 tested returns $1 per $1 while the legs are over-read).
 
-1. **Four pair quotes from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
-   For each slip: put the legs on the dashboard slip, open Model Lab › Modifiers, build the same entry
-   in the Underdog app, type the payout the app shows into "Actual quoted payout (x)", then "Save
-   corrected modifiers" and "Confirm save". The slips: two opposing running backs' rush attempts, one
-   Higher and one Lower; the same on rush yards; a quarterback's pass yards Higher with his own running
-   back's rush yards Lower, plus any third pick from another game (the app refuses a same-team pair
-   alone); a quarterback's pass TDs Higher with his own receiver's TDs Higher, plus any third pick.
-   No automated probing. One more number while the app is open: the Flex payouts for four 1.00×
-   picks from different games. The table on file says 7.2× for four of four and 1.8× for three of
-   four, the lowest bar of any entry kind (§7).
+1. **Four payouts read from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
+   Build each entry in the Underdog app and send back the all-or-nothing payout it shows and the
+   multiplier printed on each pick. The pair's modifier is that payout ÷ the table payout (3.5×
+   for two picks, 6.5× for three) ÷ the picks' multipliers. The entries: two opposing running
+   backs' rush attempts, one Higher and one Lower; the same on rush yards; a quarterback's pass
+   yards Higher with his own running back's rush yards Lower, plus any third pick from another
+   game (the app refuses a same-team pair alone); a quarterback's pass TDs Higher with his own
+   receiver's TDs Higher, plus any third pick. Nothing goes through the dashboard's Modifiers
+   page: it needs the legs on the dashboard slip, and the board carries no passing-yards leg and
+   one touchdown leg a game. No automated probing. One more number while the app is open: the
+   Flex payouts for four 1.00× picks from different games. The table on file says 7.2× for four
+   of four and 1.8× for three of four, the lowest bar of any entry kind (§7) and the kind the
+   `policy_v3` paper bettor draws most.
 2. **Does training's fantasy-points average count as blending with the DFS line?** (yes / no.) For
    a fantasy-points market, training moves the summed-components mean halfway to the platform's own
    fantasy quote (`Stats._book_mean_shift`). It touches training rows only, never a served
