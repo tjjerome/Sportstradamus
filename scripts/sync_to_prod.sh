@@ -8,8 +8,10 @@
 #
 # Three kinds of pass:
 #   * MODELS (mirror, --delete): the models dir is mirrored — prod-only orphans
-#     are deleted so a retired cell's pickle doesn't linger. The research subdir
-#     models/deterministic/ is excluded (and prod's copy protected from --delete).
+#     are deleted so a retired cell's pickle doesn't linger. Two subdirs nothing
+#     serves from are excluded (and prod's copies protected from --delete): the
+#     research models/deterministic/ and models/prior/, the superseded model files
+#     a retrain keeps on the box that ran it (training/prior_models.py).
 #     Before deleting any prod model absent on dev, the script lists them and asks
 #     for confirmation; with no orphans it proceeds silently.
 #   * COLLECTOR SNAPSHOTS (additive, NO --delete): the Cleaning the Glass (NBA),
@@ -106,7 +108,7 @@ sync_pass() {
         return 0
     fi
     local filter=(--timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH")
-    [[ "$use_delete" -eq 1 ]] && filter+=(--delete --exclude='deterministic/')
+    [[ "$use_delete" -eq 1 ]] && filter+=(--delete --exclude='deterministic/' --exclude='prior/')
 
     echo ">> sync: $src/ -> $dest/"
     # shellcheck disable=SC2029  # expand $src_rel locally into the remote mkdir

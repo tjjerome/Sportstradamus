@@ -106,6 +106,7 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     validate_strategy_selection,
 )
+from sportstradamus.training.prior_models import keep_prior_model
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
     _DISPERSION_C_BOUNDS,
@@ -2618,6 +2619,8 @@ def _step_persist_artifacts(
     the research harness can iterate without overwriting the production model
     dir. The test-set CSV still lives under the package ``data/test_sets/``.
     """
+    # style: allow-complexity -- a flat run of independent guards: per-family probe columns,
+    # optional audit columns, and the sandbox / deterministic / canonical output roots.
     X_test = splits["X_test"]
     y_test = splits["y_test"]
     B_test = splits["B_test"]
@@ -2721,6 +2724,9 @@ def _step_persist_artifacts(
     if artifact_output is None:
         csv_filepath = pkg_resources.files(data) / f"test_sets/{csv_subdir}{filename}.csv"
         mdl_filepath = mdl_dir / f"{filename}.mdl"
+    # Before either write, so a failure to keep the outgoing model leaves the old test set and
+    # the old model a matched pair.
+    keep_prior_model(mdl_filepath)
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
 
