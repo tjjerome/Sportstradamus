@@ -1,4 +1,4 @@
-"""Selection/RNG/persona-scoring layer for the simulated-bettor ledger (Policy v1).
+"""Selection/RNG/persona-scoring layer for the simulated-bettor ledger.
 
 Adapts same-game :class:`~sportstradamus.strategies.underdog_pickem.RecommendedEntry`
 candidates (and, later, cross-game candidates from a sibling module) into one
@@ -23,11 +23,14 @@ from sportstradamus.strategies import _ledger_store
 from sportstradamus.strategies.underdog_pickem import RecommendedEntry, leg_player
 
 LEDGER_REPLICATES: int = 40
+# Fixed consumption order on each replicate's one random stream. A new persona goes
+# last: it draws after the others, so their draws for a given seed never move.
 PERSONAS: tuple[str, ...] = (
     "safe",
     "high_ev",
     "kelly_growth",
-)  # fixed consumption order, load-bearing
+    "even_picks",
+)
 RUN_SLOTS: tuple[str, ...] = ("morning", "afternoon")
 
 K: float = 3.0  # Jaccard decay rate -- named v1 default, not fitted
@@ -60,6 +63,9 @@ class LedgerCandidate:
     lines: tuple[float, ...] = ()
     model_probs: tuple[float, ...] = ()
     book_devig: tuple[float, ...] = ()
+    # Product of the entry's same-game pair modifiers. Each leg's own multiplier is the
+    # raw ``boost`` on its ``canonical_legs`` entry; settlement reads both.
+    pair_modifier: float = 1.0
 
 
 def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
@@ -81,15 +87,16 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
         ev=entry.ev,
         stake=entry.recommended_stake,
         platform=entry.platform,
+        pair_modifier=entry.pair_modifier,
     )
 
 
-def ev_per_dollar(ev: float, joint_prob: float, stake: Decimal) -> float:
+def ev_per_dollar(candidate: LedgerCandidate) -> float:
     """Mirrors _pickem_emit.rank_and_dedupe's ranking key exactly (that file
-    is untouched -- this is an independent, intentional re-derivation so two
-    personas below can share one formula instead of two copies).
+    is untouched -- this is an independent, intentional re-derivation so the
+    personas below share one formula instead of a copy each).
     """
-    return (ev * joint_prob) / float(max(stake, Decimal("0.01")))
+    return (candidate.ev * candidate.joint_prob) / float(max(candidate.stake, Decimal("0.01")))
 
 
 def _entropy_from(date: datetime.date, run_slot: str, salt: str = "replicates") -> int:
@@ -110,9 +117,9 @@ def replicate_rngs(date: datetime.date, run_slot: str) -> list[np.random.Generat
     fresh SeedSequence -- this function keeps NO state across calls, so
     "same (date, run_slot) -> identical 40 children, every time" holds
     without needing a persistent parent object anywhere. Callers must pass
-    the SAME Generator instance to all 3 personas for one replicate_id, in a
-    fixed order -- this function only hands out streams, consumption order
-    is the caller's responsibility (a different module, not built yet).
+    the SAME Generator instance to every persona for one replicate_id, in
+    ``PERSONAS`` order -- this function only hands out streams, consumption
+    order is the caller's responsibility (``ledger.run_commit``).
     """
     parent = np.random.SeedSequence(_entropy_from(date, run_slot))
     return [np.random.default_rng(child) for child in parent.spawn(LEDGER_REPLICATES)]
@@ -185,11 +192,13 @@ def draw_entries(
 
 # kelly_growth's scorer is a draw-order proxy only -- actual sizing for this
 # persona comes from a portfolio solve elsewhere (ledger._resize_kelly_growth),
-# not from this score.
+# not from this score. even_picks ranks like high_ev; what sets it apart is its
+# pool (ledger.build_candidate_universe), Underdog entries of even picks alone.
 PERSONA_SCORERS: dict[str, Callable[[LedgerCandidate], float]] = {
     "safe": lambda c: c.joint_prob,
-    "high_ev": lambda c: ev_per_dollar(c.ev, c.joint_prob, c.stake),
-    "kelly_growth": lambda c: ev_per_dollar(c.ev, c.joint_prob, c.stake),
+    "high_ev": ev_per_dollar,
+    "kelly_growth": ev_per_dollar,
+    "even_picks": ev_per_dollar,
 }
 
 

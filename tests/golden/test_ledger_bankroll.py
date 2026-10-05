@@ -13,6 +13,9 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 
+import pandas as pd
+import pytest
+
 from sportstradamus.strategies import _ledger_bankroll
 
 DATE = datetime.date(2026, 7, 12)
@@ -36,6 +39,7 @@ def _settled_row(
     stake: str = "10.00",
     payout: str = "0.00",
     pnl: str = "-10.00",
+    policy_version: str = "policy_v1",
 ) -> dict:
     return {
         "id": rec_id,
@@ -54,7 +58,7 @@ def _settled_row(
         "pnl": Decimal(pnl),
         "game_span": 1,
         "committed_at": "2026-07-12T12:00:00Z",
-        "policy_version": "policy_v1",
+        "policy_version": policy_version,
         "git_sha": "deadbeef",
         "clv_leg_count": 2,
         "model_clv_mean": 0.03,
@@ -183,3 +187,32 @@ def test_update_bankroll_separates_persona_replicate_pairs(monkeypatch, tmp_path
     assert Decimal(str(safe_0["ending_bankroll"])) == Decimal("5010.00")
     assert Decimal(str(high_ev_0["ending_bankroll"])) == Decimal("4970.00")
     assert Decimal(str(safe_1["ending_bankroll"])) == Decimal("5005.00")
+
+
+@pytest.mark.parametrize("day_one_table", ["current", "written_before_policy_version"])
+def test_update_bankroll_keeps_policy_versions_apart(monkeypatch, tmp_path, day_one_table) -> None:
+    """A new policy version is a new bettor: it starts from the seed bankroll while the
+    old version's trajectory carries on. Holds too when day one sits in a table written
+    before the ``policy_version`` column existed, every row of which is policy_v1."""
+    _redirect(monkeypatch, tmp_path)
+    _ledger_bankroll.update_bankroll(DATE, [_settled_row("id-1", pnl="100.00")])
+    if day_one_table == "written_before_policy_version":
+        path = tmp_path / "bankroll.parquet"
+        pd.read_parquet(path).drop(columns="policy_version").to_parquet(path)
+
+    _ledger_bankroll.update_bankroll(
+        NEXT_DATE,
+        [
+            _settled_row("id-2", date=NEXT_DATE, pnl="-40.00"),
+            _settled_row("id-3", date=NEXT_DATE, pnl="25.00", policy_version="policy_v2"),
+        ],
+    )
+
+    df = _ledger_bankroll.read_parquet_safe(_ledger_bankroll.BANKROLL_PATH)
+    assert list(df.columns) == list(_ledger_bankroll._BANKROLL_COLUMNS)
+    assert df.loc[df["date"] == DATE.isoformat(), "policy_version"].tolist() == ["policy_v1"]
+    day_two = df.loc[df["date"] == NEXT_DATE.isoformat()].set_index("policy_version")
+    assert Decimal(str(day_two.loc["policy_v1", "starting_bankroll"])) == Decimal("5100.00")
+    assert Decimal(str(day_two.loc["policy_v1", "ending_bankroll"])) == Decimal("5060.00")
+    assert Decimal(str(day_two.loc["policy_v2", "starting_bankroll"])) == Decimal("5000")
+    assert Decimal(str(day_two.loc["policy_v2", "ending_bankroll"])) == Decimal("5025.00")

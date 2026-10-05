@@ -51,12 +51,14 @@ def _parlay(
     league="WNBA",
     game="A/B",
     platform="Underdog",
+    pair_modifiers=None,
 ):
     """Parlay row shaped like ``prediction.parlay``'s beam-search output.
 
     ``legs``: player names, or ``(player, raw platform market)`` pairs; bare
     names get the platform's raw Points market so shrinkage resolution has a
-    real ``stat_map`` key to map.
+    real ``stat_map`` key to map. ``pair_modifiers``: one per leg pair, every
+    pair unmodified when omitted.
     """
     default_market = "Points" if platform == "Underdog" else "points"
     pairs = [(leg, default_market) if isinstance(leg, str) else leg for leg in legs]
@@ -68,6 +70,7 @@ def _parlay(
         "Model EV": model_ev,
         "Market EV": model_ev * 0.95,
         "Boost": payout,
+        "Boost Pairs": pair_modifiers or (1.0,) * (len(legs) * (len(legs) - 1) // 2),
         "Rec Bet": 1.0,
         "Bet Size": bet_size or len(legs),
         "legs": [
@@ -271,6 +274,23 @@ def test_dedupe_max_overlap(fake_market_calibration):
         parlay_dfs=parlay_dfs,
     )
     assert len(out) == 1
+
+
+def test_entry_carries_the_product_of_its_pair_modifiers(fake_market_calibration):
+    """The search prices an entry on its legs' multipliers times the product of its
+    same-game pair modifiers; the ledger settles a winner on that same product."""
+    cfg = PickemConfig(min_ev=0.0, entry_sizes=(3,), contest_variants=("power",))
+    parlay_dfs = {
+        "power": pd.DataFrame(
+            [_parlay(["L1", "L2", "L3"], model_ev=1.5, pair_modifiers=(1.0, 0.9, 0.8))]
+        )
+    }
+
+    (entry,) = construct_entries(
+        datetime.date(2026, 5, 8), Decimal("500"), cfg, parlay_dfs=parlay_dfs
+    )
+
+    assert entry.pair_modifier == pytest.approx(0.72)
 
 
 # --- shrinkage resolution -----------------------------------------------------

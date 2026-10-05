@@ -1,4 +1,4 @@
-"""Cross-game candidate builder for the simulated-bettor ledger (Policy v1).
+"""Cross-game candidate builder for the simulated-bettor ledger.
 
 Builds Underdog- or Sleeper-style Pick'em combinations that span >=2 distinct
 games directly from already-scored single-leg offers, under an explicit
@@ -7,7 +7,7 @@ existing same-game parlay search (``prediction.parlay`` /
 ``prediction.correlation``) structurally cannot produce these -- it only ever
 combines legs sharing one ``Game`` -- so this module is a deliberately
 separate, independence-assumed path, not a duplicate of that search. See
-``docs/handoffs/sim-bettor-ledger.md`` for the surrounding Policy v1 design.
+``docs/handoffs/sim-bettor-ledger.md`` §10 for the surrounding policy design.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class _ScoredLeg:
     push_prob: float
     book_devig: float  # "Market Prob" column passthrough
     line: float
-    boost: float
+    boost: float  # the platform's raw multiplier for this pick
     display: str  # leg_label(leg) -- canonical rendering, do not reformat it yourself
     canonical_leg: dict  # build_leg() output, with leg["stat"] patched to the canonical market
 
@@ -125,31 +125,22 @@ def _pricing_rng(date: datetime.date, run_slot: str) -> np.random.Generator:
     return np.random.default_rng(seed_seq)
 
 
-def _price_combo(
-    legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platform: str
-) -> tuple[float, float]:
-    """Returns (joint_prob, model_ev). joint_prob is the plain product of
-    shrinkage-adjusted win probs (the "all legs hit" probability -- correct on
-    its own, but NOT sufficient to price flex's partial-payout tiers, which is
-    why model_ev goes through the push-aware pooled-curve pricer instead of
-    joint_prob * curve[0]).
+def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platform: str) -> float:
+    """Expected payout per $1 on the shrinkage-adjusted win probs, priced through the
+    push-aware pooled curve rather than as the all-hit probability times the top
+    tier, which would miss flex's partial-payout tiers.
     """
     n = len(legs)
-    p_win = np.array([leg.win_prob for leg in legs])
-    p_push = np.array([leg.push_prob for leg in legs])
-    boost = math.prod(leg.boost for leg in legs)
-    joint_prob = float(np.prod(p_win))
-    ev_payout = expected_payout_with_pushes(
-        p_win=p_win,
-        p_push=p_push,
+    return expected_payout_with_pushes(
+        p_win=np.array([leg.win_prob for leg in legs]),
+        p_push=np.array([leg.push_prob for leg in legs]),
         sigma=np.eye(n),
         bet_size=n,
-        boost=boost,
+        boost=np.array([leg.boost for leg in legs]),
         payout_curve=_POOLED_CURVES[platform],
         rng=rng,
         full_refund_below_size=SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None,
     )
-    return joint_prob, ev_payout
 
 
 def build_cross_game_candidates(
@@ -161,9 +152,10 @@ def build_cross_game_candidates(
 ) -> list[LedgerCandidate]:
     """Build independence-assumed (rho=0) parlay candidates spanning >=2 games.
 
-    Filters ``offers_df`` through the same leg gate ``construct_entries`` uses,
-    beam-expands cross-game combos up to ``_MAX_ENTRY_SIZE`` legs, prices each
-    via the pooled payout curve for ``platform``, and drops anything below
+    Filters ``offers_df`` (``Boost`` = the platform's raw pick multiplier)
+    through the same leg gate ``construct_entries`` uses, beam-expands
+    cross-game combos up to ``_MAX_ENTRY_SIZE`` legs, prices each via the
+    pooled payout curve for ``platform``, and drops anything below
     ``config.min_ev``. See the module docstring for why this independence
     assumption is safe.
 
@@ -174,20 +166,30 @@ def build_cross_game_candidates(
     eligible = filter_legs(offers_df, config)
     if eligible.empty:
         return []
-    legs = _score_legs(eligible, platform)
+    # A side the platform does not post carries a zero multiplier and no entry can hold
+    # it. Left in, a Flex loss tier would drop that zero as the smallest multiplier and
+    # price a payout nobody can collect.
+    legs = _score_legs(eligible[eligible["Boost"] > 0], platform)
     rng = _pricing_rng(date, run_slot)
     by_size = _enumerate_cross_game_combos(legs)
     by_idx = {leg.idx: leg for leg in legs}
 
     out: list[LedgerCandidate] = []
     for size, combos in by_size.items():
-        payout_mult = _POOLED_CURVES[platform][size][0]
+        table_tier = _POOLED_CURVES[platform][size][0]
         for combo in combos:
             combo_legs = tuple(by_idx[i] for i in combo)
-            joint_prob, ev_payout = _price_combo(combo_legs, rng, platform)
+            ev_payout = _price_combo(combo_legs, rng, platform)
             ev = ev_payout - 1.0
             if ev < config.min_ev:
                 continue
+            # Sized, ranked and recorded as a same-game entry is
+            # (underdog_pickem._row_to_entry): on what the entry pays when every pick
+            # hits, and the win probability that payout makes worth the priced EV. The
+            # all-hit probability on the bare table tier is blind to the pick multipliers
+            # and the flex loss tiers, and sizes most flex entries to nothing.
+            payout_mult = table_tier * math.prod(leg.boost for leg in combo_legs)
+            joint_prob = ev_payout / payout_mult
             stake = fractional_kelly_stake(
                 bankroll=BANKROLL_PER_REPLICATE,
                 win_prob=joint_prob,

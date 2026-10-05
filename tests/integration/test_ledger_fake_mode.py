@@ -146,6 +146,7 @@ def _fake_live_load(
         "Game": "BOS/LAL",
         "Bet Size": 2,
         "Boost": boost,
+        "Boost Pairs": (1.0,),
         "Model EV": model_ev,
         "Leg 1": f"{player} Over 22.5 points - 60.0%, 3.0x",
         "Leg 2": f"{platform} Second Leg Over 10.5 rebounds - 58.0%, 3.0x",

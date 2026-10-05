@@ -1,6 +1,6 @@
 # Simulated-Bettor Ledger
 
-> Status: ACTIVE (stage 1 + stage 2 built locally, unpushed — owner review next)
+> Status: ACTIVE (stages 1–2 live from cron on `devel` — stage 3 next)
 
 ## 1. Mission & money logic
 
@@ -172,7 +172,9 @@ the five CLAUDE.md triggers.
 - Never push `devel` directly — the curator carves ship PRs.
 - Durable non-obvious lesson? Offer a memory capture.
 
-## 10. Policy v1
+## 10. Policy
+
+### Policy v1
 
 Three independent simulated-bettor personas, each run as a **40-replicate
 Monte Carlo ensemble** (§ Ensemble sizing) against its own fixed $5,000
@@ -398,8 +400,90 @@ LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 
 # replicate 0 drives the circuit breaker + hindsight tests; 1-39 are the variance envelope only
 ```
 
+### Policy v2
+
+Policy v1 with the changes below; whatever v1 states and this section does
+not replace still holds. The commit path stamps every new record
+`policy_v2`.
+
+**Payouts.** Candidates are priced, and entries settled, on the platform's
+live payout table, and no Underdog same-game pair modifier exceeds 1.0
+([`underdog_api.md`](../underdog_api.md) §6.8 holds the table, the
+modifiers and the payout formula). A settled entry pays its table tier for
+the real outcome, times the pick multipliers the platform quotes that tier
+on, times the entry's pair modifier. One function,
+`prediction.payouts.outcome_payouts`, applies that rule to the pricers'
+sampled outcomes and to settlement's real one, so an entry is scored the
+way it was priced; its docstring carries the push and refund cases.
+Sleeper pays its own curve times the product of its posted multipliers.
+**Scar:** a Sleeper Flex entry settles on the stand-in table
+(`payout_curve_for("Sleeper", "flex")`), which has no loss tiers; the
+per-entry curve the search prices it on is not on the record.
+
+**Records.** Each `canonical_legs` entry's `boost` is the platform's raw
+multiplier for that pick, on the same-game and the cross-game path alike,
+and the record adds `pair_modifier`: the product of the entry's same-game
+pair modifiers as the search priced it, 1.0 for a cross-game entry.
+
+**Cross-game candidates.** Priced on each pick's raw multiplier, pick by
+pick rather than as one fused product, so their Flex loss tiers follow the
+settlement rule. v1 priced an Underdog pick on its multiplier scaled by
+the per-pick baseline, which overstated every cross-game Underdog EV. A
+side the platform does not post is never a leg. A cross-game candidate is
+sized, ranked and recorded as a same-game one: `payout_multiplier` is what
+the entry pays when every pick hits (table tier × pick multipliers) and
+`joint_prob` the win probability that payout makes worth the priced EV.
+v1 sized on the bare table tier and the all-hit probability, blind to the
+pick multipliers and the Flex loss tiers: every Sleeper cross-game entry
+and nearly every Flex one sized to $0, and a $0 stake ranks first for the
+EV-per-dollar personas.
+
+**Personas.** A fourth, *Even-picks* (`even_picks`), takes only Underdog
+entries whose every pick carries a raw multiplier of exactly 1.00 and
+ranks them as High-EV does. Its pool is built beside the shared universe,
+by the same builders under the same shared config, from Underdog's even
+picks alone: the all-even parlays of the same-game search, and cross-game
+combos over the even-pick offers. The shared universe filtered to even
+picks would hold only what the `top_k` cut and the cross-game beam keep
+after ranking those picks against every other leg. Building the pool
+leaves the shared universe as it is, and entry sizes, the Power/Flex
+split, the daily budget and same-game stake sizing are those of v1. Even-picks
+draws last on each replicate's shared stream, so for a given
+`(date, run_slot, replicate_id)` the first three personas draw exactly
+what they would without it. **Scar:** the pool is thin on many days all
+the same: the same-game search's EV floors and the shared `min_ev` bind
+on even picks before any cut does.
+
+**Versions stay apart.** `policy_v1` records stay in the store as
+committed and settle as they always have: on the bare tier of the live
+table, with no pick multiplier and no pair modifier. Settlement never
+reads a v1 record's `boost` (on a v1 cross-game Underdog leg it is the raw
+multiplier scaled by the per-pick baseline). Every settled row carries its
+`policy_version`, and `bankroll.parquet` keeps one trajectory per
+`(policy_version, persona, replicate_id)`, so a v2 replicate starts from
+the $5,000 seed instead of continuing a v1 balance. Stage-3 analytics
+report the versions apart, never pooled (§4).
+
+**Store scar (v1 and v2).** `_ledger_store.append_entries` refuses a
+record whose `id` is already in the day's file, whichever bettor wrote
+it. Replicate 0's morning draw is therefore whole, and every later draw
+(replicates 1–39, the afternoon run) keeps only the entries no bettor
+committed earlier that day: the store holds close to one replicate plus a
+de-duplicated union, not 40 independent ledgers. Keying the check on
+`(id, persona, replicate_id)` restores the ensemble and is a new policy
+version (§4); a same-slot retry then needs its own guard, because a
+second draw sees the first one's budget and draws differently.
+
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-10-05 · policy_v2 built (local, unpushed) · settle = table × pick
+  multipliers × pair modifier, one rule shared with pricers; record
+  +`pair_modifier`; cross-game priced per pick on raw multipliers; persona
+  `even_picks` (dev data, 53 days with parlay history: own pool under 5
+  candidates on 23, shared universe's even entries under 5 on 27);
+  cross-game stake on the all-hit payout and the priced EV; bankroll per
+  version; v1 keeps bare table · store scar found (replicate 0 holds 223
+  of 341 live records) · detail §10 Policy v2 · next: owner review + push
 - 2026-07-14 · cross-lane note (sleeper-parity stage 4, landed on
   `feature/sleeper-parity`, not yet merged `devel`) · Sleeper candidates now
   flow through this ledger: `build_candidate_universe`/`run_commit` draw both

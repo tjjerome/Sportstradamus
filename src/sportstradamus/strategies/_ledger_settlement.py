@@ -1,9 +1,11 @@
-"""Settlement layer for the simulated-bettor ledger (Policy v1).
+"""Settlement layer for the simulated-bettor ledger.
 
 Resolves one slate date's distinct legs exactly once and broadcasts the
 outcome across every committed entry that cites it, joins closing-line value
 (:mod:`sportstradamus.clv`) over the same distinct-leg set, and computes each
-entry's settled P&L in ``Decimal``. Never mutates the entries JSONL files --
+entry's settled P&L in ``Decimal`` at what the platform pays that outcome
+(:func:`sportstradamus.prediction.payouts.outcome_payouts`, the rule the
+pricers use). Never mutates the entries JSONL files --
 this module only reads them via :mod:`sportstradamus.strategies._ledger_store`.
 Persistence to parquet is a sibling module's job
 (:mod:`sportstradamus.strategies._ledger_bankroll`), not this one's; this
@@ -21,7 +23,14 @@ import pandas as pd
 from sportstradamus import clv
 from sportstradamus.analysis import _gameday_rows_for, _resolve_leg
 from sportstradamus.helpers.io import read_history
-from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
+from sportstradamus.prediction.payouts import (
+    LEG_LOSS,
+    LEG_PUSH,
+    LEG_WIN,
+    SLEEPER_FULL_REFUND_MAX_SIZE,
+    outcome_payouts,
+    payout_curve_for,
+)
 from sportstradamus.strategies import _ledger_bankroll, _ledger_store
 
 # CLV frame columns fill_from_archive needs but LEG_FIELDS doesn't carry;
@@ -29,6 +38,14 @@ from sportstradamus.strategies import _ledger_bankroll, _ledger_store
 # leaves these NaN, which fill_from_archive already treats as "no trained
 # model -- fall back to the composite-probability path", not an error.
 _CLV_JOIN_COLS = ["Player", "League", "Date", "Market", "Dist", "CV", "Gate", "Step"]
+
+# analysis._resolve_leg's verdict (0 hit, 1 miss, None push) as a payout-rule leg outcome.
+_LEG_OUTCOME = {0: LEG_WIN, 1: LEG_LOSS, None: LEG_PUSH}
+
+# Records of this version were committed before an entry carried its pair modifier and
+# its cross-game legs carried raw multipliers. They settle on the bare table tier, as
+# they always have, so one version is scored by one rule for the life of the ledger.
+_BARE_TABLE_POLICY = "policy_v1"
 
 
 def distinct_leg_key(leg: dict) -> tuple[str, str, float, str, str, str]:
@@ -100,7 +117,7 @@ def resolve_distinct_legs(
     """Resolve every distinct leg cited by ``entries`` exactly once.
 
     Cost is O(distinct legs), not O(entries): with ~1,200 entries/day sharing
-    legs across the 40-replicate ensemble and 3 personas by construction, the
+    legs across the 40-replicate ensemble and its personas by construction, the
     distinct-leg set is far smaller than the entry count, and this is the
     mechanism that keeps settlement cost flat as replicate/persona counts grow.
     Returns ``{distinct_leg_key(leg): outcome}`` where outcome is 0 (hit), 1
@@ -181,45 +198,6 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
     return out
 
 
-def realized_multiplier(
-    contest_variant: str,
-    entry_size: int,
-    effective_size: int,
-    misses: int,
-    *,
-    platform: str = "Underdog",
-) -> float:
-    """Deterministic realized payout multiplier -- no unknown outcome, no RNG.
-
-    The realized-outcome counterpart of
-    ``payouts.expected_payout_with_pushes``'s Monte-Carlo expectation: here
-    the outcome (misses, effective_size) is already known, so this is a
-    single curve lookup rather than an average over samples. Mirrors that
-    function's push edge cases: an entry reduced below the 2-leg minimum by
-    pushes refunds (x1) if nothing was lost, else busts (x0); a lookup past
-    the curve's recorded miss count also busts.
-
-    Sleeper diverges from this generic rule at its 2-pick minimum: any push
-    on an entry sized at or below ``SLEEPER_FULL_REFUND_MAX_SIZE`` refunds
-    the whole entry unconditionally, before the surviving leg's outcome even
-    matters (docs/handoffs/sleeper-parity.md §3 item 3).
-    """
-    pushes = entry_size - effective_size
-    # Must precede the generic effective_size<2 branch: it is strictly
-    # narrower (Sleeper + <=2 legs + >=1 push) and must win the cases where
-    # both would otherwise fire, e.g. entry_size=2/effective_size=1/misses=1
-    # refunds in full under this rule but would bust under the generic one.
-    if platform == "Sleeper" and entry_size <= SLEEPER_FULL_REFUND_MAX_SIZE and pushes >= 1:
-        return 1.0
-    if effective_size < 2:
-        return 0.0 if misses > 0 else 1.0
-    _, curve = payout_curve_for(platform, contest_variant)
-    row = curve.get(effective_size)
-    if row is None or misses >= len(row):
-        return 0.0
-    return row[misses]
-
-
 def _entry_clv_stats(record: dict, clv_by_leg: dict[tuple, dict]) -> dict:
     model_clvs = [
         clv_by_leg[distinct_leg_key(leg)]["model_clv"]
@@ -243,31 +221,37 @@ def _entry_clv_stats(record: dict, clv_by_leg: dict[tuple, dict]) -> dict:
 def settle_entry(
     record: dict, leg_outcomes: dict[tuple, int | None], clv_by_leg: dict[tuple, dict]
 ) -> dict:
-    """One entry's settled P&L in ``Decimal``.
+    """One entry's settled P&L in ``Decimal``, at what the platform pays its outcome.
+
+    The entry pays its table tier for the real outcome, times the multipliers
+    the platform quotes that tier on (each leg's raw ``boost`` in
+    ``canonical_legs``), times its ``pair_modifier``. A ``policy_v1`` record
+    pays the bare table tier.
 
     Every leg here has already passed :func:`settleable_entries`'s
     completeness gate (its game landed), so an outcome of ``None`` can only
     mean a genuine push -- never "ungraded". A future reorder that calls this
     on incomplete entries would silently misclassify ungraded legs as pushes.
     """
-    misses = 0
-    pushes = 0
-    for leg in record["canonical_legs"]:
-        outcome = leg_outcomes[distinct_leg_key(leg)]
-        if outcome is None:
-            pushes += 1
-        elif outcome == 1:
-            misses += 1
+    legs = record["canonical_legs"]
+    outcomes = np.array([[_LEG_OUTCOME[leg_outcomes[distinct_leg_key(leg)]] for leg in legs]])
+    misses = int((outcomes == LEG_LOSS).sum())
+    pushes = int((outcomes == LEG_PUSH).sum())
     effective_size = record["entry_size"] - pushes
     # .get() with a default, not record["platform"]: pre-existing immutable
     # records committed before the platform field existed have no such key,
     # and the append-only ledger must settle those old records forever.
-    mult = realized_multiplier(
-        record["contest_variant"],
-        record["entry_size"],
-        effective_size,
-        misses,
-        platform=record.get("platform", "Underdog"),
+    platform = record.get("platform", "Underdog")
+    _, payout_curve = payout_curve_for(platform, record["contest_variant"])
+    bare_table = record["policy_version"] == _BARE_TABLE_POLICY
+    mult = float(
+        outcome_payouts(
+            outcomes,
+            1.0 if bare_table else np.array([leg["boost"] for leg in legs]),
+            payout_curve,
+            full_refund_below_size=SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None,
+            pair_modifier=1.0 if bare_table else record["pair_modifier"],
+        )[0]
     )
     stake = Decimal(record["stake"])
     payout = Decimal(str(mult)) * stake

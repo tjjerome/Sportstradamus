@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 import click
 import pandas as pd
 
-from sportstradamus.helpers import odds_budget, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, odds_budget, stat_map
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
@@ -73,6 +74,8 @@ class RecommendedEntry:
     shrinkage: float = 1.0
     extras: dict[str, Any] = field(default_factory=dict)
     platform: str = "Underdog"
+    # Product of the entry's same-game pair modifiers, as the search priced it.
+    pair_modifier: float = 1.0
 
 
 def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
@@ -144,6 +147,7 @@ def _row_to_entry(
         shrinkage_source=source,
         extras={"league": str(row.get("League", "")), "game": str(row.get("Game", ""))},
         platform=platform,
+        pair_modifier=float(math.prod(row["Boost Pairs"])),
     )
 
 
@@ -300,7 +304,13 @@ def build_entries_from_scored(
 def live_load(
     config: PickemConfig, platform: str = "Underdog"
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
-    """Re-run the prophecize loader and search per variant. Heavy."""
+    """Re-run the prophecize loader and search per variant. Heavy.
+
+    Returns:
+        ``(parlay_dfs, offers_df)``. ``Boost`` on ``offers_df`` is the
+        platform's raw pick multiplier, the value the parlay rows' ``legs``
+        carry.
+    """
     from sportstradamus.books import get_sleeper, get_ud
     from sportstradamus.prediction.scoring import process_offers
     from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
@@ -326,7 +336,13 @@ def live_load(
     # process_offers doesn't stamp Platform — prophecize adds it to its own copies
     # (prediction/cli.py), and build_leg/parlay pricing require the column here too.
     offers_df["Platform"] = platform
-    return _parlays_per_variant(offers_df, stats, config, platform), offers_df
+    parlay_dfs = _parlays_per_variant(offers_df, stats, config, platform)
+    if platform == "Underdog":
+        # process_offers scales an Underdog Boost by the per-pick baseline and the search
+        # above divides it back out of its own copy; prophecize does the same before it
+        # persists (prediction/cli.py). An entry pays on the raw multiplier.
+        offers_df["Boost"] = offers_df["Boost"] / UNDERDOG_BOOST_BASELINE
+    return parlay_dfs, offers_df
 
 
 @click.command()

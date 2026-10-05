@@ -1,6 +1,6 @@
-"""Pin RNG reproducibility, Jaccard-draw weighting, and budget arithmetic of
-``_ledger_selection`` -- the selection/RNG/persona-scoring layer for the
-simulated-bettor ledger (Policy v1, docs/handoffs/sim-bettor-ledger.md §10).
+"""Pin RNG reproducibility, Jaccard-draw weighting, persona ranking, and budget
+arithmetic of ``_ledger_selection`` -- the selection/RNG/persona-scoring layer
+for the simulated-bettor ledger (docs/handoffs/sim-bettor-ledger.md §10).
 """
 
 from __future__ import annotations
@@ -142,6 +142,33 @@ def test_overlapping_candidate_gets_lower_effective_weight_than_disjoint() -> No
     disjoint_weight = effective_weight(disjoint, percentiles[1])
 
     assert overlapping_weight < disjoint_weight
+
+
+# --- personas: consumption order and ranking -----------------------------------
+
+
+def test_even_picks_draws_last_on_the_shared_stream() -> None:
+    """Every persona of a replicate consumes one random stream in this order, so a
+    persona placed anywhere but last would move the draws of those after it."""
+    assert sel.PERSONAS == ("safe", "high_ev", "kelly_growth", "even_picks")
+    assert set(sel.PERSONA_SCORERS) == set(sel.PERSONAS)
+
+
+def test_even_picks_ranks_candidates_as_high_ev_does() -> None:
+    """EV per dollar staked, not hit probability: its top candidate here is the long
+    shot ``safe`` ranks last."""
+    candidates = [
+        _candidate("likely", frozenset({"A"}), joint_prob=0.60, ev=0.06, stake=Decimal("20")),
+        _candidate("middle", frozenset({"B"}), joint_prob=0.40, ev=0.20, stake=Decimal("20")),
+        _candidate("long_shot", frozenset({"C"}), joint_prob=0.20, ev=0.90, stake=Decimal("10")),
+    ]
+
+    even_picks = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["even_picks"])
+    high_ev = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["high_ev"])
+    safe = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["safe"])
+
+    assert even_picks.tolist() == high_ev.tolist() == [0.0, 0.5, 1.0]
+    assert safe.tolist() == [1.0, 0.5, 0.0]
 
 
 # --- remaining budget / seen players / kelly fraction --------------------------

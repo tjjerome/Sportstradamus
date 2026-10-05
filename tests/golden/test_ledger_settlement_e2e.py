@@ -65,6 +65,7 @@ def _leg(
     league: str = "NBA",
     date: str = "2026-07-12",
     win_prob: float = 0.6,
+    boost: float = 1.0,
 ) -> dict:
     return {
         "player": player,
@@ -78,7 +79,7 @@ def _leg(
         "date": date,
         "platform": "Underdog",
         "win_prob": win_prob,
-        "boost": 1.0,
+        "boost": boost,
         "push_prob": 0.0,
         "kelly": 0.05,
     }
@@ -341,3 +342,39 @@ def test_write_resolve_meta_includes_ledger_resolved_field(monkeypatch, tmp_path
 
     meta = json.loads((tmp_path / "runtime" / "resolve_meta.json").read_text())
     assert meta["ledger_resolved"] == 5
+
+
+# --- 7. One entries file holding two policy versions ------------------------------
+
+
+def test_resolve_ledger_settles_each_policy_version_by_its_own_rule(monkeypatch, tmp_path) -> None:
+    """The day the policy version changes, one entries file holds both: the morning
+    run's policy_v1 records and the afternoon run's policy_v2 records. Each settles by
+    its own rule and rolls into its own bankroll, both from the seed."""
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    legs = [
+        _leg("Player A", "PTS", 20.5, "Over", "BOS/LAL", boost=0.87),  # 25 -> hit
+        _leg("Player B", "AST", 2.5, "Over", "BOS/LAL", boost=1.16),  # 4 -> hit
+    ]
+    v1_record = _record("morning", legs, stake="10")
+    v2_record = _record("afternoon", legs, stake="10", run_slot="afternoon") | {
+        "policy_version": "policy_v2",
+        "platform": "Underdog",
+        "pair_modifier": 0.9,
+    }
+    _ledger_store.append_entries(DATE, [v1_record, v2_record])
+
+    assert nightly._resolve_ledger(stats, history_only=False) == 2
+
+    table_tier = float(underdog_payouts["power"][2])
+    paid = table_tier * 0.87 * 1.16 * 0.9
+    settled = pd.read_parquet(tmp_path / "settled_entries.parquet").set_index("id")
+    assert settled.loc["morning", "realized_multiplier"] == pytest.approx(table_tier)
+    assert settled.loc["afternoon", "realized_multiplier"] == pytest.approx(paid)
+    bankroll = pd.read_parquet(tmp_path / "bankroll.parquet").set_index("policy_version")
+    assert bankroll["starting_bankroll"].tolist() == [5000.0, 5000.0]
+    assert bankroll.loc["policy_v1", "ending_bankroll"] == pytest.approx(
+        5000 + 10 * table_tier - 10
+    )
+    assert bankroll.loc["policy_v2", "ending_bankroll"] == pytest.approx(5000 + 10 * paid - 10)
