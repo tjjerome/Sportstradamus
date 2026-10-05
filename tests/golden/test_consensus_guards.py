@@ -1,12 +1,12 @@
-"""Consensus-read guards: line-divergence exclusion + DFS platform weight cap.
+"""Consensus-read guards: sportsbook-first cohort + line-divergence exclusion.
 
 The 2026-08 Sleeper WNBA incident: the platform posted discounted/moved lines
 (PRA 24.5 against a 33.5 sportsbook median) whose fabricated 50/50 pricing
 entered the archive as fair quotes and then dominated the weighted consensus
 (~92% effective Sleeper weight after zero-row books renormalized away).
-``Archive._weighted_book_ev`` now (1) drops rows whose line diverges from the
-cohort median, and (2) caps each DFS platform's normalized weight while a real
-sportsbook remains; ``dfs_boost_probs`` prices one-sided offers at their
+``Archive._weighted_book_ev`` now (1) narrows to the sportsbooks whenever one
+priced the entry, and (2) drops the rows among them whose line diverges from the
+cohort median; ``dfs_boost_probs`` prices one-sided offers at their
 payout-implied breakeven instead of a fabricated symmetric pair.
 
 The fake ``XLG``/``XMKT`` league/market keep ``book_weights`` lookups empty so
@@ -57,7 +57,8 @@ def test_divergent_line_row_is_dropped_from_consensus(archive):
     _insert(archive, "fanduel", 30.0, 33.5)
     _insert(archive, "draftkings", 31.0, 33.5)
     _insert(archive, "betmgm", 30.5, 34.0)
-    _insert(archive, "Sleeper", 24.0, 24.5)
+    # A sportsbook, so it reaches the filter: a platform row leaves with the cohort first.
+    _insert(archive, "caesars", 24.0, 24.5)
 
     # median 33.5, tolerance max(2.0, 0.25 * 33.5) = 8.375: |24.5 - 33.5| = 9 drops,
     # |34.0 - 33.5| = 0.5 survives.
@@ -93,6 +94,17 @@ def test_dfs_platform_drops_out_when_a_real_book_remains(archive, monkeypatch):
     # even split misprices: a pick'em platform's implied probability sits near 0.5
     # however far the truth is, so it contributes no signal beside a real book.
     assert archive.get_ev(_LG, _MKT, _DATE, "P") == pytest.approx(20.0)
+
+
+def test_dfs_lines_cannot_drop_a_sportsbook_as_divergent(archive):
+    """The platforms leave before the median is taken, so their line never sets it."""
+    _insert(archive, "fanduel", 21.0, 20.5)
+    _insert(archive, "Sleeper", 15.0, 14.5)
+    _insert(archive, "Underdog", 14.0, 14.5)
+
+    # Counted, the platforms put the median at 14.5 and the tolerance at 3.625,
+    # so the one sportsbook would drop as the divergent row.
+    assert archive.get_ev(_LG, _MKT, _DATE, "P") == pytest.approx(21.0)
 
 
 def test_dfs_only_cell_keeps_the_platforms(archive, monkeypatch):

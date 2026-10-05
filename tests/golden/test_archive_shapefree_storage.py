@@ -126,22 +126,58 @@ def test_training_quote_batch_matches_scalar_rows_and_lines(archive):
         "under_prob, line) VALUES "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 2.0, ?, 0.40, 1.5), "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 3.0, ?, 0.60, 2.5), "
-        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 'alpha', 2.4, ?, 0.55, 1.5)",
-        [_TS, later, later],
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 'alpha', 2.4, ?, 0.55, 1.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 'Underdog', 3.0, ?, 0.50, 3.5)",
+        [_TS, later, later, later],
     )
     archive._connection.execute(
         "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 2.5, ?), "
-        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 1.5, ?)",
-        [later, later],
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 1.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 3.5, ?)",
+        [later, later, later],
     )
+    entities = ["Q", "P", "Pickem", "Missing"]
 
-    batch = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", ["Q", "P", "Missing"])
+    batch = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", entities)
 
-    for entity in ("P", "Q", "Missing"):
+    for entity in entities:
         rows, line = batch[entity]
         assert rows == archive.get_training_book_quotes("WNBA", "AST", "2026-05-08", entity)
-        assert line == archive.get_line("WNBA", "AST", "2026-05-08", entity)
+        assert line == archive.get_reference_line("WNBA", "AST", "2026-05-08", entity)
+    # Only a pick'em platform lines this entry: a line of record, never a consensus.
+    assert batch["Pickem"][1] == 3.5
+    assert archive.get_line("WNBA", "AST", "2026-05-08", "Pickem") == 0.0
+
+
+def test_batch_readers_return_the_scalar_reference_line(archive):
+    """Sportsbook consensus where a sportsbook posts a line, else the line of record."""
+    for entity, book, line in (
+        ("Books", "fanduel", 4.5),
+        ("Books", "draftkings", 5.5),
+        ("Mixed", "fanduel", 4.5),
+        ("Mixed", "Underdog", 7.5),
+        ("Pickem", "Underdog", 7.5),
+    ):
+        _insert_book_row(archive, "WNBA", "AST", entity, book, 5.0, 0.5, line)
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Books', 4.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Mixed', 4.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Mixed', 7.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 7.5, ?)",
+        [_TS] * 4,
+    )
+    # The log's own median is 4.5 for Books and 6.0 for Mixed.
+    expected = {"Books": 5.0, "Mixed": 4.5, "Pickem": 7.5}
+
+    quote_inputs = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", list(expected))
+    ev_inputs = archive.get_ev_line_inputs("WNBA", "AST", "2026-05-08", list(expected))
+
+    for entity, line in expected.items():
+        assert archive.get_reference_line("WNBA", "AST", "2026-05-08", entity) == line
+        assert quote_inputs[entity][1] == line
+        assert ev_inputs[entity][1] == line
 
 
 def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(archive):
@@ -568,6 +604,18 @@ def test_to_pandas_ignores_book_shape(archive, monkeypatch):
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
     df1 = archive.to_pandas(league, market)
     assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
+
+
+def test_to_pandas_columns_are_the_books_and_nothing_else(archive):
+    """``fit_book_weights`` weighs every column it is handed, so each one must be a book."""
+    _insert_book_row(archive, "WNBA", "AST", "P", "fanduel", 5.0, 0.62, 1.5)
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 1.5, ?)",
+        [_TS],
+    )
+
+    assert list(archive.to_pandas("WNBA", "AST").columns) == ["fanduel"]
 
 
 def test_composite_under_prob_weights_books(archive):

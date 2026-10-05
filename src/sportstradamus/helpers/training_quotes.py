@@ -19,7 +19,6 @@ import numpy as np
 from sportstradamus.helpers.config import book_count_dispersion, book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_ev, get_odds
 
-CONSENSUS_LINE_POLICY = "modal-nearest-median-v1"
 AUTHENTIC = "authentic"
 DERIVED = "derived"
 SYNTHETIC = "synthetic"
@@ -273,7 +272,17 @@ def pickem_quote(
 def _direct_line_cohort(
     rows: Sequence[ArchivedBookQuote],
 ) -> tuple[float, list[ArchivedBookQuote]] | None:
-    direct = [row for row in rows if _positive(row.line) and _probability(row.under_probability)]
+    """The modal line among the directly priced rows, and the rows that quote it.
+
+    The rows narrow to their sportsbooks before the vote (:func:`sportsbook_cohort`), so
+    a pick'em platform's line never picks the line a sportsbook price is read at, and the
+    quote's ``books``/``book_count`` name exactly the rows that set its price. A cohort
+    with no sportsbook in it is a ``PICKEM`` quote: still a directly priced line, but not
+    book evidence.
+    """
+    direct = sportsbook_cohort(
+        [row for row in rows if _positive(row.line) and _probability(row.under_probability)]
+    )
     if not direct:
         return None
     lines = [float(row.line) for row in direct]
@@ -315,13 +324,7 @@ def _authentic_quote(
     ceiling. Neither inversion reproduces such a book, so the book leg of ``fused_loc`` is
     unsound for gated cells either way, a distribution-family question rather than a clamp
     choice.
-
-    The cohort narrows to its sportsbooks first (:func:`sportsbook_cohort`), so the
-    quote's ``books``/``book_count`` name exactly the rows that set its price. A cohort
-    with no sportsbook in it is a ``PICKEM`` quote: still a directly priced line, but not
-    book evidence.
     """
-    cohort = sportsbook_cohort(cohort)
     under = _weighted_value(cohort, "under_probability", weights)
     if under is None:  # Defensive; the cohort predicate guarantees this.
         raise ValueError("direct quote cohort has no probability")

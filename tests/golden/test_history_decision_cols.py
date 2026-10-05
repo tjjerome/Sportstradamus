@@ -1,11 +1,14 @@
-"""Decision-time history columns: schema membership, upsert over older rows, parquet round-trip."""
+"""Decision-time history columns: schema membership, upsert over older rows, parquet round-trip.
+
+Also the ``Alt Line`` flag the writer stamps beside ``Consensus Line``.
+"""
 
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers import io
+from sportstradamus.helpers import config, io
 from sportstradamus.history_schema import DECISION_COLS, HISTORY_COLS, OFFER_LEVEL_COLS
-from sportstradamus.prediction.cli import _upsert_history
+from sportstradamus.prediction.cli import _stamp_alt_line, _upsert_history
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 
 
@@ -70,3 +73,23 @@ def test_upsert_over_pre_schema_rows_round_trips(tmp_path, monkeypatch):
     assert pd.isna(back.loc["Underdog", "Quote Source"])
     assert pd.isna(back.loc["Underdog", "Scored At"])
     assert np.isnan(back.loc["Underdog", "Model Weight"])
+
+
+def test_alt_line_is_judged_against_the_reference_line(monkeypatch):
+    """An entry no sportsbook posts is still judged, at its own line of record."""
+    monkeypatch.setitem(config.stat_dist, "XLG", {"count": "NegBin", "yards": "Gamma"})
+    offers = pd.DataFrame(
+        {
+            "League": "XLG",
+            "Market": ["count", "count", "yards", "yards", "count"],
+            "Line": [5.0, 5.5, 52.5, 53.5, 9.5],
+            "Reference Line": [4.5, 4.5, 50.5, 50.5, np.nan],
+            "Consensus Line": np.nan,
+        }
+    )
+
+    flags = _stamp_alt_line(offers)["Alt Line"]
+
+    # Count lines move in half points and tolerate 0.75; continuous lines tolerate 2.5.
+    # With no reference line at all there is nothing to be an alternate of.
+    assert flags.tolist() == [False, True, False, True, False]

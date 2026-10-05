@@ -2464,7 +2464,7 @@ class Stats:
         sub_cv = stat_cv.get(self.league, {}).get(submarket, 1)
         sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
         v = archive.get_ev(self.league, submarket, date, player)
-        subline = archive.get_line(self.league, submarket, date, player)
+        subline = archive.get_reference_line(self.league, submarket, date, player)
         v = self._convert_to_market_dist(v, subline, sub_cv, sub_dist, dist, cv)
         return v, subline, sub_cv, sub_dist
 
@@ -2599,7 +2599,7 @@ class Stats:
         the market's own quoted mean where one exists (``_book_mean_shift``); the
         shape is the component sum's either way.
         The combo line is ``lines[player]`` when a mapping is given, else the
-        combo market's own archived consensus line; no positive line, no quote,
+        combo market's own archived reference line; no positive line, no quote,
         and none for an archived line the component sum dwarfs.
         Component inversions pass ``gate=None``: this layer's book-quote
         convention is ungated end to end (see ``_authentic_quote``), and a

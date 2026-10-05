@@ -22,7 +22,8 @@ from datetime import datetime as dt
 
 import pytest
 
-from sportstradamus.helpers.archive import Archive
+from sportstradamus.helpers.archive import Archive, _resolve_market, archive_market
+from sportstradamus.helpers.config import stat_map
 
 
 @pytest.fixture
@@ -42,11 +43,11 @@ def archive(tmp_path, monkeypatch):
     Archive._instance._initialized = False
 
 
-def _insert_odds(archive, *, league, market, d, entity, book, ev, observed_at):
+def _insert_odds(archive, *, league, market, d, entity, book, ev, observed_at, line=None):
     archive._connection.execute(
-        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [league, market, d, entity, book, float(ev), observed_at],
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, line) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [league, market, d, entity, book, float(ev), observed_at, line],
     )
 
 
@@ -83,6 +84,18 @@ def test_write_path_stamps_observed_at_and_reads_back(archive):
     line_rows = archive._connection.execute("SELECT line, observed_at FROM lines").fetchall()
     assert len(line_rows) == 1
     assert line_rows[0][0] == pytest.approx(22.5)
+
+
+def test_archive_market_applies_the_league_fixups_and_no_second_alias_pass():
+    """A reader holding a board label asks under the key the writer filed the row at."""
+    assert archive_market("NHL", "AST") == "assists"
+    assert archive_market("WNBA", "fantasy points underdog") == "fantasy points prizepicks"
+    assert archive_market("MLB", "walks") == "walks"
+
+    # The writer aliases a raw platform label first. Sleeper's alias is not idempotent,
+    # so a label that has been through it once must not go through it again.
+    assert _resolve_market("MLB", "bat_walks", stat_map["Sleeper"]) == "walks"
+    assert _resolve_market("MLB", "walks", stat_map["Sleeper"]) == "walks allowed"
 
 
 # --------------------------------------------------------------------------
@@ -140,7 +153,7 @@ def test_get_ev_at_picks_latest_per_book_at_or_before_cutoff(archive):
     ) == pytest.approx(0.60)
 
 
-def test_get_line_at_aggregates_distinct_lines_observed_through_cutoff(archive):
+def test_reference_line_at_aggregates_distinct_logged_lines_through_cutoff(archive):
     d = date(2026, 5, 8)
     base = dt(2026, 5, 8, 12, 0, 0)
     _insert_line(archive, league="WNBA", market="PTS", d=d, entity="P", line=22.0, observed_at=base)
@@ -163,14 +176,93 @@ def test_get_line_at_aggregates_distinct_lines_observed_through_cutoff(archive):
         observed_at=base + timedelta(hours=2),
     )
 
+    # No sportsbook posted a line, so there is no consensus and the log is the reference.
+    assert archive.get_line("WNBA", "PTS", "2026-05-08", "P") == 0.0
     # All lines visible at end → median = 23.0 → floor(46)/2 = 23.0.
-    assert archive.get_line("WNBA", "PTS", "2026-05-08", "P") == pytest.approx(23.0)
+    assert archive.get_reference_line("WNBA", "PTS", "2026-05-08", "P") == pytest.approx(23.0)
     # Only first two lines visible at +1h cutoff → median = 22.5 → floor(45)/2 = 22.5.
-    assert archive.get_line(
+    assert archive.get_reference_line(
         "WNBA", "PTS", "2026-05-08", "P", at=base + timedelta(hours=1)
     ) == pytest.approx(22.5)
     # Cutoff before any observation → empty result → 0.
-    assert archive.get_line("WNBA", "PTS", "2026-05-08", "P", at=base - timedelta(hours=1)) == 0
+    assert (
+        archive.get_reference_line("WNBA", "PTS", "2026-05-08", "P", at=base - timedelta(hours=1))
+        == 0
+    )
+
+
+_PTS_KEY = ("WNBA", "PTS", "2026-05-08", "P")
+_NOON = dt(2026, 5, 8, 12, 0, 0)
+
+
+def _post_line(archive, book, line, observed_at=_NOON):
+    """One ``odds`` row on ``_PTS_KEY``: ``book``'s posted ``line`` (NULL when ``None``)."""
+    _insert_odds(
+        archive,
+        league="WNBA",
+        market="PTS",
+        d=date(2026, 5, 8),
+        entity="P",
+        book=book,
+        ev=20.0,
+        observed_at=observed_at,
+        line=line,
+    )
+
+
+def _log_line(archive, line, observed_at=_NOON):
+    _insert_line(
+        archive,
+        league="WNBA",
+        market="PTS",
+        d=date(2026, 5, 8),
+        entity="P",
+        line=line,
+        observed_at=observed_at,
+    )
+
+
+def test_get_line_ignores_a_dfs_platform_line(archive):
+    """The log holds the Underdog rung beside the sportsbooks' median; only the books count."""
+    _post_line(archive, "fanduel", 22.5)
+    _post_line(archive, "draftkings", 23.5)
+    _post_line(archive, "Underdog", 30.5)
+    _log_line(archive, 23.0)
+    _log_line(archive, 30.5)
+
+    assert archive.get_line(*_PTS_KEY) == 23.0
+
+
+def test_dfs_only_entry_has_no_consensus_line_and_keeps_its_line_of_record(archive):
+    _post_line(archive, "Underdog", 30.5)
+    _log_line(archive, 30.5)
+
+    assert archive.get_line(*_PTS_KEY) == 0.0
+    assert archive.get_reference_line(*_PTS_KEY) == 30.5
+
+
+def test_get_line_counts_each_sportsbook_once_at_its_latest_line(archive):
+    moved = _NOON + timedelta(hours=2)
+    _post_line(archive, "fanduel", 22.5)
+    _post_line(archive, "draftkings", 23.5)
+    _post_line(archive, "fanduel", 24.5, observed_at=moved)
+    # Each poll logs the books' median: 23.0 at noon, 24.0 once fanduel moved.
+    _log_line(archive, 23.0)
+    _log_line(archive, 24.0, observed_at=moved)
+
+    # fanduel counts at 24.5 alone; the median of every line seen would be 23.5.
+    assert archive.get_line(*_PTS_KEY) == 24.0
+    assert archive.get_line(*_PTS_KEY, at=_NOON + timedelta(hours=1)) == 23.0
+    assert archive.get_line(*_PTS_KEY, at=_NOON - timedelta(hours=1)) == 0.0
+
+
+def test_reference_line_reads_the_log_for_a_sportsbook_row_archived_without_its_line(archive):
+    """The 2023-24 MLB shape: a sportsbook ``ev`` row whose line survives only in ``lines``."""
+    _post_line(archive, "fanduel", None)
+    _log_line(archive, 0.5)
+
+    assert archive.get_line(*_PTS_KEY) == 0.0
+    assert archive.get_reference_line(*_PTS_KEY) == 0.5
 
 
 # --------------------------------------------------------------------------

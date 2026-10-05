@@ -13,10 +13,13 @@ Schema (created on first connect):
   spreads / team markets. ``observed_at`` is set at write time so successive
   polls accrue a time-series rather than overwriting per-book EVs.
   ``under_prob``/``line`` are the shape-free quote (see the DDL below).
-* ``lines(league, market, game_date, entity, line, observed_at)`` — every
-  observed line value with its observation timestamp. Skipped for
-  moneyline / totals / spreads / team-only markets, which are pure EV.
-  No ``book`` column, so a reader cannot tell a DFS line from a sharp one.
+* ``lines(league, market, game_date, entity, line, observed_at)`` — the
+  line-of-record log: every observed line value with its observation
+  timestamp. Skipped for moneyline / totals / spreads / team-only markets,
+  which are pure EV. No ``book`` column, so a reader cannot tell a DFS line
+  from a sharp one: the consensus line is read from ``odds.line``
+  (:meth:`Archive.get_line`) and this log is only what an entry with no
+  sportsbook line is graded at (:meth:`Archive.get_reference_line`).
 * ``ladder(league, market, game_date, entity, book, line, p_over,
   observed_at)`` — every rung a book posted on every poll. ``odds`` keeps
   only one tier per player-market, so this is the sole record of how a
@@ -52,6 +55,7 @@ from sportstradamus.helpers.distributions import (
 )
 from sportstradamus.helpers.text import remove_accents
 from sportstradamus.helpers.training_quotes import (
+    DFS_PLATFORM_BOOKS,
     ArchivedBookQuote,
     pickem_quote,
     sportsbook_cohort,
@@ -191,6 +195,17 @@ def _consensus_line(values: list[float]) -> float:
     return 0.0 if np.isnan(line) else float(line)
 
 
+def _sportsbook_line(quotes: Iterable[tuple[str, float | None]]) -> float:
+    """Consensus over the lines the sportsbooks post; ``0.0`` when none posts one.
+
+    A pick'em platform's line never counts: it is the entry being graded, not
+    evidence of where the market sits.
+    """
+    return _consensus_line(
+        [line for book, line in quotes if line is not None and book not in DFS_PLATFORM_BOOKS]
+    )
+
+
 def _dfs_offer_probs(offer: dict, platform: str) -> list[float]:
     """Payout-implied ``[p_over, p_under]`` for one DFS offer.
 
@@ -229,15 +244,19 @@ def _drop_divergent_lines(
     ]
 
 
-def _resolve_market(league: str, raw_market: str, key: dict) -> str:
-    """Rename a sportsbook-native market string to its canonical per-league name."""
-    market = raw_market.replace("H2H ", "")
-    market = key.get(market, market)
+def archive_market(league: str, market: str) -> str:
+    """Archive key for a market label already renamed through its platform's ``stat_map``."""
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
     if league in ("NBA", "WNBA"):
         market = market.replace("underdog", "prizepicks")
     return market
+
+
+def _resolve_market(league: str, raw_market: str, key: dict) -> str:
+    """Rename a sportsbook-native market string to its canonical per-league name."""
+    market = raw_market.replace("H2H ", "")
+    return archive_market(league, key.get(market, market))
 
 
 def _devig_over(line, evs, dist, cv) -> float:
@@ -440,16 +459,15 @@ class Archive:
     ) -> float:
         """Weighted consensus over latest per-book rows, guarded against DFS poisoning.
 
-        Rows quoting a line far from the cohort median are a different offer
-        (a DFS platform's moved/discounted tier) and drop out; NULL-line rows
-        (team markets, pre-migration history) never do. What survives narrows to
-        its sportsbooks under the same :func:`sportsbook_cohort` policy the
-        shape-free quote resolver applies, so both consensus reads price off one
-        rule rather than two.
+        The rows narrow to their sportsbooks first, under the same
+        :func:`sportsbook_cohort` policy the shape-free quote resolver applies, so
+        both consensus reads price off one rule rather than two and a pick'em
+        platform's line never sets the median a sportsbook is judged against. Of
+        those, rows quoting a line far from the cohort median are a different offer
+        and drop out; NULL-line rows (team markets, pre-migration history) never do.
         """
-        usable = sportsbook_cohort(
-            _drop_divergent_lines([row for row in rows if row[1] is not None]),
-            operator.itemgetter(0),
+        usable = _drop_divergent_lines(
+            sportsbook_cohort([row for row in rows if row[1] is not None], operator.itemgetter(0))
         )
         if not usable:
             return float("nan")
@@ -567,7 +585,7 @@ class Archive:
         *,
         at: datetime.datetime | None = None,
     ) -> dict[str, tuple[list[ArchivedBookQuote], float]]:
-        """Batch coherent book rows and legacy lines for an entire training slate."""
+        """Batch coherent book rows and reference lines for an entire training slate."""
         d = _safe_date(date)
         ordered_entities = sorted(set(entities))
         if d is None or not ordered_entities:
@@ -600,9 +618,10 @@ class Archive:
         inputs = {}
         for entity in ordered_entities:
             values, seen_at = observed_lines.get(entity, ([], None))
-            legacy_line = _consensus_line(values)
-            rows = grouped[entity] or pickem_quote(market, legacy_line, seen_at)
-            inputs[entity] = (rows, legacy_line)
+            line_of_record = _consensus_line(values)
+            rows = grouped[entity] or pickem_quote(market, line_of_record, seen_at)
+            line = _sportsbook_line((row.book, row.line) for row in grouped[entity])
+            inputs[entity] = (rows, line or line_of_record)
         return inputs
 
     def _observed_lines(
@@ -613,7 +632,12 @@ class Archive:
         entities: list[str],
         at: datetime.datetime | None,
     ) -> dict[str, tuple[list[float], datetime.datetime | None]]:
-        """Distinct archived lines per entity, with the freshest observation time."""
+        """Distinct logged lines per entity, with the freshest observation time.
+
+        ``lines`` holds each pick'em platform's main rung beside the sportsbook medians
+        with no book to tell them apart, so the median of what this returns is a line of
+        record, never a consensus.
+        """
         placeholders = ",".join("?" for _ in entities)
         params: list = [league, market, d, *entities]
         sql = (
@@ -639,7 +663,7 @@ class Archive:
         *,
         at: datetime.datetime | None = None,
     ) -> dict[str, tuple[float, float]]:
-        """Batch the legacy weighted EV and consensus line for one slate."""
+        """Batch the legacy weighted EV and reference line for one slate."""
         d = _safe_date(date)
         ordered_entities = sorted(set(entities))
         if d is None or not ordered_entities:
@@ -666,24 +690,14 @@ class Archive:
         for entity, book, ev, line in self._connection.execute(odds_sql, odds_params).fetchall():
             ev_rows[entity].append((book, ev, line))
 
-        line_params: list = [league, market, d, *ordered_entities]
-        line_sql = (
-            "SELECT DISTINCT entity, line FROM lines "
-            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
-        )
-        if at is not None:
-            line_sql += " AND observed_at <= ?"
-            line_params.append(at)
-        line_values: dict[str, list[float]] = {entity: [] for entity in ordered_entities}
-        for entity, line in self._connection.execute(line_sql, line_params).fetchall():
-            if line is not None:
-                line_values[entity].append(float(line))
-
+        observed_lines = self._observed_lines(league, market, d, ordered_entities, at)
         inputs = {}
         for entity in ordered_entities:
             rows = ev_rows[entity]
             ev = self._weighted_book_ev(league, market, rows) if rows else float("nan")
-            inputs[entity] = (ev, _consensus_line(line_values[entity]))
+            line = _sportsbook_line((book, book_line) for book, _, book_line in rows)
+            values, _ = observed_lines.get(entity, ([], None))
+            inputs[entity] = (ev, line or _consensus_line(values))
         return inputs
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
@@ -816,32 +830,39 @@ class Archive:
         return {key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()}
 
     def get_line(self, league, market, date, player, *, at: datetime.datetime | None = None):
-        """Consensus line for ``player`` on ``date``: median, floored to ½.
+        """Sportsbook consensus line for ``player`` on ``date``: median, floored to ½.
 
-        ``at=None`` aggregates every distinct line ever observed for the
-        entity (the legacy semantics). Pass a ``datetime`` to median over
-        only the distinct lines observed at-or-before ``at``.
+        The median runs over each sportsbook's latest posted line at-or-before ``at``
+        (``at=None``: latest available). ``0.0`` when no sportsbook has posted one. A
+        pick'em platform's line is never a consensus; :meth:`get_reference_line` falls
+        back to it.
         """
+        quotes = self.get_training_book_quotes(league, market, date, player, at=at)
+        return _sportsbook_line((quote.book, quote.line) for quote in quotes)
+
+    def get_reference_line(
+        self, league, market, date, player, *, at: datetime.datetime | None = None
+    ):
+        """The line an entry is graded at: the sportsbook consensus, else its line of record.
+
+        The line of record is the median of every distinct line the archive logged for the
+        entry: a pick'em platform's own main rung, or a pre-2025 sportsbook row archived
+        without its line. It anchors a price that has no sportsbook line beside it. It is
+        never a consensus and never feeds one.
+        """
+        line = self.get_line(league, market, date, player, at=at)
         d = _safe_date(date)
-        if d is None:
-            return 0
-        params: list = [league, market, d, player]
-        sql = (
-            "SELECT DISTINCT line FROM lines "
-            "WHERE league=? AND market=? AND game_date=? AND entity=?"
-        )
-        if at is not None:
-            sql += " AND observed_at <= ?"
-            params.append(at)
-        arr = [row[0] for row in self._connection.execute(sql, params).fetchall()]
-        return _consensus_line(arr)
+        if line or d is None:
+            return line
+        values, _ = self._observed_lines(league, market, d, [player], at).get(player, ([], None))
+        return _consensus_line(values)
 
     def to_pandas(self, league, market):
         """Flatten one league/market into a wide DataFrame.
 
-        Indexed by ``(date, player)``, one column per book + a ``Line``
-        column carrying the consensus line. Drops pre-2023-05-03 rows for
-        non-totals markets (stale format) to match the legacy behaviour.
+        Indexed by ``(date, player)``, one column per book. Drops
+        pre-2023-05-03 rows for non-totals markets (stale format) to match
+        the legacy behaviour.
 
         Selects the latest observation per ``(date, player, book)`` so
         time-series storage does not change the per-book column semantics
@@ -874,27 +895,6 @@ class Archive:
         )
         wide.columns.name = None
         wide.index.names = ["date", "player"]
-
-        if market in _TEAM_ONLY_MARKETS:
-            return wide
-
-        lines_df = self._connection.execute(
-            "SELECT game_date, entity, line FROM lines WHERE league=? AND market=?",
-            [league, market],
-        ).fetchdf()
-        if lines_df.empty:
-            wide["Line"] = 0.0
-            return wide
-
-        lines_df["game_date"] = pd.to_datetime(lines_df["game_date"]).dt.strftime("%Y-%m-%d")
-        consensus = (
-            lines_df.groupby(["game_date", "entity"])["line"]
-            .apply(lambda s: float(np.floor(2 * np.median(s)) / 2))
-            .rename("Line")
-        )
-        consensus.index.names = ["date", "player"]
-        wide = wide.join(consensus, how="left")
-        wide["Line"] = wide["Line"].fillna(0.0)
         return wide
 
     def archived_players_by_date(self, league: str, market: str) -> dict[str, set[str]]:
@@ -1255,6 +1255,8 @@ class Archive:
         storing its payout-implied under-probability beside the encoded
         ``ev``. That is the rule ``prediction.line_movement`` picks a poll's
         main rung by, so the archived tier and the tracked line agree. The
+        lines row is the entry's line of record (:meth:`get_reference_line`),
+        never part of the consensus line (:meth:`get_line`). The
         ``key`` mapping renames sportsbook-native market strings into the
         canonical per-league market names used elsewhere in the pipeline.
         """
@@ -1295,10 +1297,9 @@ class Archive:
             # — an unboosted pick prices at 0.5, which sits below book_gate's population zero
             # rate on every high-zi count cell, so one prophecize wrote 6,055 of these. They
             # reach further than the sportsbook kind did: _sanitize_book_ev's runaway test is
-            # 10x line and deliberately spares 5x, and fit_book_weights drops only pinnacle,
-            # so the placeholder rode into both the served blend and the fitted weights.
-            # Storing NULL drops the platform from _weighted_book_ev instead; the quote and
-            # the line beside it are untouched and still carry the entry.
+            # 10x line and deliberately spares 5x, so the placeholder rode into the served
+            # blend. Storing NULL drops the platform from _weighted_book_ev instead; the quote
+            # and the line beside it are untouched and still carry the entry.
             clamped = ev >= max(SN_MAX_MEAN_FACTOR * line, 1.0)
             self._stage_book_ev(
                 league,

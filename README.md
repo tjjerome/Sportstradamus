@@ -125,7 +125,7 @@ JSON configs live in `src/sportstradamus/data/config/`. The ones you might touch
 | `stat_map.json` | manual | Stat-name mappings across APIs and sportsbooks |
 | `feature_filter.json` | manual | League-shared (`Common`) + per-market locked-in (`Always`) feature lists |
 | `playerCompStats.json` | `scripts/optimize_comp_weights.py` | Learned player-comp weights per league/position |
-| `book_weights.json` | `meditate` (gitignored) | Per-sportsbook reliability weights for consensus lines |
+| `book_weights.json` | `meditate` (gitignored) | Per-sportsbook reliability weights for the consensus price. Sportsbooks only: a DFS pick'em platform gets no weight |
 | `prop_books.json` | manual | Which sportsbooks to query per league |
 | `odds_api_budget.json` | manual | Odds API credit-governor knobs |
 

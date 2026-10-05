@@ -17,6 +17,7 @@ from sportstradamus.helpers import (
     stat_cv,
 )
 from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_mu_from_mean
+from sportstradamus.helpers.training_quotes import DFS_PLATFORM_BOOKS
 
 # Per-observation log-likelihood clamp for the DPO blend-weight fit — mirrors the
 # -20 outlier clamp in fit_model_weight so w is fit on the same scale.
@@ -206,8 +207,8 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
 
     logger.info("Fitting Book Weights - %s, %s", league, market)
     df = archive.to_pandas(league, market)
-    df = df[[col for col in df.columns if col != "pinnacle"]]
-    if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
+    df = df[[col for col in df.columns if col != "pinnacle" and col not in DFS_PLATFORM_BOOKS]]
+    if df.columns.empty:
         return {}
     cv = stat_cv[league].get(market, 1)
     stat_dist = load_distribution_config()
@@ -215,9 +216,6 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
 
     result, test_df = _extract_result_and_test_df(market, df, stat_data)
     objective = _make_book_objective(market, dist, cv)
-
-    if "Line" in test_df.columns:
-        test_df.drop(columns=["Line"], inplace=True)
 
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
     x[x < 0] = np.nan

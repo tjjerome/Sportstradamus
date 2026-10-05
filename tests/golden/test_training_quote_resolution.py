@@ -107,6 +107,49 @@ def test_direct_cohort_keeps_a_platform_no_sportsbook_quoted():
     assert quote.books == ("Sleeper", "Underdog")
 
 
+def test_dfs_lines_cannot_outvote_a_sportsbook_on_the_quote_line():
+    """Two platforms agreeing on their own line do not turn a priced entry into a pick'em quote."""
+    quote = resolve_training_quote(
+        [
+            _row("fanduel", None, 0.60, 1.5),
+            _row("Sleeper", None, 0.50, 2.5),
+            _row("Underdog", None, 0.50, 2.5),
+        ],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.line == 1.5
+    assert quote.over_probability == pytest.approx(0.40)
+    assert quote.authenticity == AUTHENTIC
+    assert quote.books == ("fanduel",)
+
+
+def test_dfs_lines_cannot_move_the_quote_to_a_sportsbook_minority_line():
+    """The modal line is the sportsbooks' own, however many platforms sit on another."""
+    quote = resolve_training_quote(
+        [
+            _row("betmgm", None, 0.48, 21.5),
+            _row("draftkings", None, 0.52, 20.5),
+            _row("fanduel", None, 0.56, 20.5),
+            _row("Sleeper", None, 0.50, 21.5),
+            _row("Underdog", None, 0.50, 21.5),
+        ],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+    )
+
+    assert quote.line == 20.5
+    assert quote.over_probability == pytest.approx(0.46)
+    assert quote.books == ("draftkings", "fanduel")
+
+
 def test_legacy_ev_inversion_is_explicitly_derived_and_synthetic():
     quote = resolve_training_quote(
         [_row("b", 3.0, None, None)],
@@ -318,9 +361,6 @@ class _FakeArchive:
 
     def get_training_book_quotes(self, *args, **kwargs):
         return self.rows
-
-    def get_line(self, *args, **kwargs):
-        return self.line
 
     def get_training_quote_inputs(self, _league, _market, _date, entities, **kwargs):
         return dict.fromkeys(entities, (self.rows, self.line))

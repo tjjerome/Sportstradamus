@@ -28,7 +28,7 @@ submodule path in new code.
 
 import requests
 
-from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
+from sportstradamus.helpers.archive import Archive, LazyArchive, archive_market, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
     banned,
@@ -104,6 +104,7 @@ __all__ = [
     "abbreviations",
     "apply_cdf_recal",
     "apply_temperature",
+    "archive_market",
     "banned",
     "book_gate",
     "book_skewnormal_shape",

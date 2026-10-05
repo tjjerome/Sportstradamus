@@ -33,8 +33,9 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # Display columns kept in current_offers.parquet. The dashboard reads:
 # - Offer details: League, Date, Team, Opponent, Home (is Team the host — orders the
 #   "{home} vs {away}" matchup label), Game (canonical matchup key),
-#   Player, Market, Platform, Bet, Line, Consensus Line (weighted-avg book line from
-#   archive.get_line — the Model-tab consensus marker, distinct from the DFS app Line), Boost
+#   Player, Market, Platform, Bet, Line, Consensus Line (the sportsbook consensus line from
+#   archive.get_line, NaN when no sportsbook posts one — the Model-tab consensus marker,
+#   distinct from the DFS app Line), Boost
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label),

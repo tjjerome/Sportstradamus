@@ -498,14 +498,20 @@ grepping the codebase for meaning.
   to one market.
 - **Line.** The numeric threshold the bookmaker sets for a market. Bettors bet
   over or under it.
-- **Book (sportsbook).** A source of odds: DraftKings, FanDuel, Pinnacle,
-  Caesars, PrizePicks, Underdog, Sleeper, ParlayPlay. Per-book reliability
-  weights live in `book_weights.json`.
+- **Book (sportsbook).** A source of market odds: DraftKings, FanDuel, Pinnacle,
+  Caesars. Per-book reliability weights live in `book_weights.json`. Only
+  sportsbooks set the consensus line and the book leg of the blend.
+- **DFS platform.** A pick'em app whose entries we grade: PrizePicks, Underdog,
+  Sleeper, ParlayPlay (the full list is `DFS_PLATFORM_BOOKS` in
+  `helpers/training_quotes.py`). A model is evaluated at the platform's line,
+  but that line is never part of the consensus line and never a book leg.
 - **Archive.** The `Archive` singleton in `helpers/archive.py` — a DuckDB store
   at `archive/archive.duckdb` with `odds(league, market, game_date, entity,
   book, ev)` and `lines(league, market, game_date, entity, line)` tables.
   Writes buffer in memory and flush on `Archive().write()`. Read methods:
-  `get_ev`, `get_line`, `get_moneyline`, `get_total`, `to_pandas`.
+  `get_ev`, `get_line`, `get_reference_line`, `get_moneyline`, `get_total`,
+  `to_pandas`; what the two line reads return is in the `archive.py` row of
+  [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Stats.** The `Stats` abstract base class in `stats/base.py` and its league
   subclasses — `StatsNBA` (`stats/nba.py`), `StatsWNBA` (`stats/wnba.py`,
   inherits `StatsNBA`), `StatsMLB` (`stats/mlb.py`), `StatsNFL`

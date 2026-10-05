@@ -21,6 +21,7 @@ from sportstradamus.helpers import (
     LazyArchive,
     apply_cdf_recal,
     apply_temperature,
+    archive_market,
     book_gate,
     decode_predictive_mean,
     fused_loc,
@@ -155,12 +156,7 @@ def normalize_market(league: str, market: str, platform: str) -> str:
     Applies the per-platform ``stat_map`` alias plus the NHL and NBA/WNBA
     fixups shared by ``match_offers``, ``model_prob``, and ``book_fallback_prob``.
     """
-    market = stat_map[platform].get(market, market)
-    if league == "NHL":
-        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
-    if league in ("NBA", "WNBA"):
-        market = market.replace("underdog", "prizepicks")
-    return market
+    return archive_market(league, stat_map[platform].get(market, market))
 
 
 def _decode_skewnormal(

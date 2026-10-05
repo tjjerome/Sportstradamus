@@ -1406,7 +1406,7 @@ class StatsMLB(Stats):
         hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
         hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
         v = archive.get_ev("MLB", "hits", date, player)
-        subline = archive.get_line("MLB", "hits", date, player)
+        subline = archive.get_reference_line("MLB", "hits", date, player)
         # No archived hits market to scale from: a missing hits EV is NaN and would make
         # get_ev invert a NaN under-prob (brentq raises); a 0 line is a degenerate source.
         if np.isnan(v) or subline == 0:
@@ -1428,7 +1428,7 @@ class StatsMLB(Stats):
             sub_cv = stat_cv.get("MLB", {}).get(submarket, 1)
             sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
             v = archive.get_ev("MLB", submarket, date, player)
-            subline = archive.get_line("MLB", submarket, date, player)
+            subline = archive.get_reference_line("MLB", submarket, date, player)
             if submarket == "pitcher win":
                 ev += (1 - get_odds(subline, v, sub_dist, cv=sub_cv)) * weight
             elif submarket == "quality start":

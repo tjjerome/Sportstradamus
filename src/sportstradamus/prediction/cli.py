@@ -28,6 +28,7 @@ from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
+    archive_market,
     get_logger,
     odds_budget,
     stat_dist,
@@ -176,16 +177,19 @@ def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
 
 
 def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
-    """Flag rows whose ``Line`` diverges from ``Consensus Line`` beyond tolerance.
+    """Flag rows whose ``Line`` diverges from ``Reference Line`` beyond tolerance.
 
-    Tolerance is picked per-row from the cell's distribution family in
-    ``stat_meta.json`` (count stats move in coarser steps than continuous ones);
-    NaN ``Consensus Line`` (no archive line yet) leaves ``Alt Line`` False.
+    The reference is the sportsbook consensus line, else the entry's line of record
+    (``Archive.get_reference_line``), so an entry no sportsbook posts is judged
+    against its platform's own main rung. Tolerance is picked per-row from the
+    cell's distribution family in ``stat_meta.json`` (count stats move in coarser
+    steps than continuous ones); NaN ``Reference Line`` (no archive line yet)
+    leaves ``Alt Line`` False.
     """
     dist = offers.apply(lambda r: stat_dist.get(r["League"], {}).get(r["Market"]), axis=1)
     tol = np.where(dist.isin(_COUNT_DISTS), _ALT_LINE_TOL_COUNT, _ALT_LINE_TOL_CONTINUOUS)
-    diff = (offers["Line"] - offers["Consensus Line"]).abs()
-    offers["Alt Line"] = (diff > tol).where(offers["Consensus Line"].notna(), False)
+    diff = (offers["Line"] - offers["Reference Line"]).abs()
+    offers["Alt Line"] = (diff > tol).where(offers["Reference Line"].notna(), False)
     return offers
 
 
@@ -347,15 +351,21 @@ def main(progress, contest_variant, log_level):
             ]
 
         key_cols = ["League", "Market", "Date", "Player"]
-        line_map = {
-            key: archive.get_line(*key)
-            for key in snapshot_offers[key_cols]
-            .drop_duplicates()
+        # The archive files a row under its own market key, not the board's label
+        # (an NHL board says AST where the archive says assists). A label missing from
+        # its platform's stat_map arrives NaN: it has no key, so it reads no line.
+        archive_keys = [
+            (league, archive_market(league, market), date, player)
+            for league, market, date, player in snapshot_offers[key_cols]
+            .fillna({"Market": ""})
             .itertuples(index=False, name=None)
-        }
-        snapshot_offers["Consensus Line"] = [
-            line_map[key] for key in snapshot_offers[key_cols].itertuples(index=False, name=None)
         ]
+        consensus = {key: archive.get_line(*key) for key in set(archive_keys)}
+        reference = {
+            key: line or archive.get_reference_line(*key) for key, line in consensus.items()
+        }
+        snapshot_offers["Consensus Line"] = [consensus[key] or np.nan for key in archive_keys]
+        snapshot_offers["Reference Line"] = [reference[key] or np.nan for key in archive_keys]
 
     snapshot_offers = attach_lineup_columns(snapshot_offers, stats)
     snapshot_offers = attach_prominence(snapshot_offers)
@@ -400,9 +410,9 @@ def main(progress, contest_variant, log_level):
         all_df = pd.concat(all_offers)
         if not snapshot_offers.empty and "Consensus Line" in snapshot_offers.columns:
             all_df = all_df.merge(
-                snapshot_offers[[*PREDICTION_KEY, "Consensus Line"]].drop_duplicates(
-                    PREDICTION_KEY
-                ),
+                snapshot_offers[
+                    [*PREDICTION_KEY, "Consensus Line", "Reference Line"]
+                ].drop_duplicates(PREDICTION_KEY),
                 on=PREDICTION_KEY,
                 how="left",
             )

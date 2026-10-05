@@ -43,10 +43,13 @@ OFFER_LEVEL_COLS = [
     "Close Market Prob",
     "Market CLV",
     "Model CLV",
-    # |Line - Consensus Line| > tolerance, stamped at write time (cli.py).
+    # |Line - reference line| > tolerance, stamped at write time (cli.py). The reference
+    # is Consensus Line, else the entry's line of record, which is not stored.
     "Alt Line",
     # Full decimal payout of each side on the platform (0 = side not posted); named
-    # "Payout" because `Boost` on this frame is Underdog's raw multiplier.
+    # "Payout" because `Boost` on this frame is Underdog's raw multiplier. Underdog's are at
+    # the UNDERDOG_BOOST_BASELINE in force when the row was scored, so read a side's raw
+    # multiplier as `Payout {side} x Boost / Payout {Bet}` (where the chosen side was posted).
     "Payout Over",
     "Payout Under",
 ]
@@ -57,7 +60,7 @@ OFFER_LEVEL_COLS = [
 DECISION_COLS = [
     # One UTC stamp per prophecize run, so a row joins the archive state that run saw.
     "Scored At",
-    # The sportsbook modal line the Alt Line flag was judged against.
+    # The sportsbook consensus line, NaN when no sportsbook posts one.
     "Consensus Line",
     "Commence",
     "Opponent",

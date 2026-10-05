@@ -22,7 +22,7 @@ class _FakeArchive:
     def get_ev(self, league, submarket, date, player):
         return self._evs.get(submarket, np.nan)
 
-    def get_line(self, league, submarket, date, player):
+    def get_reference_line(self, league, submarket, date, player):
         return self._lines.get(submarket, 0)
 
 
