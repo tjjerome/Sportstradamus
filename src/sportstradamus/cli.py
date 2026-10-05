@@ -100,6 +100,7 @@ cli.add_command(
             "backfill-history-eras": "sportstradamus.scripts.backfill_history_eras:backfill_history_eras",
             "count-family-screen": "sportstradamus.scripts.count_family_screen:main",
             "tail-scorecard": "sportstradamus.scripts.tail_scorecard:main",
+            "feature-parity": "sportstradamus.scripts.feature_parity:main",
             "restamp-identity": "sportstradamus.scripts.restamp_strategy_identity:main",
         },
     )

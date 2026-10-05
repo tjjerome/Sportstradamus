@@ -221,6 +221,13 @@ diagnostic and an acceptance input for model-information work
 ([handoffs/honest-receipts.md](handoffs/honest-receipts.md) §6). It is never a gate, and nothing in
 it demotes or withholds a cell.
 
+**The gates score training-matrix features, not served ones.** Every gate reads the held-out test
+set, whose rows carry the features the training matrix built. `sportstradamus admin feature-parity`
+compares what serving fed each model (the serve-time feature log) with the matrix row for the same
+player and game, feature by feature and by the model's own probability, and flags a cell whose
+difference has a standard deviation above one percentage point. It is a dev-side diagnostic like the
+tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
+
 ---
 
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)

@@ -1,0 +1,21 @@
+Usage: sportstradamus admin feature-parity [OPTIONS]
+
+  Check the serve-time feature log against the training matrices.
+
+  A dev-side diagnostic. Re-scores each logged row to confirm the log reproduces
+  what was served, compares it with its training-matrix row (features and the
+  model's own probability), lists settled cells and dates the log missed, and
+  writes every table to OUT.
+
+Options:
+  --league TEXT        Check only these leagues (repeatable). Default: every
+                       league in the log.
+  --start [%Y-%m-%d]   First game date. Default: the log's earliest partition.
+  --end [%Y-%m-%d]     Last game date. Default: no upper bound.
+  --log-dir DIRECTORY  Feature log root, read only (default:
+                       data/runtime/feature_log).
+  --versions           Also re-score each logged row under every other version
+                       of its cell on disk.
+  --out FILE           Sandbox CSV of every table.  [default:
+                       /tmp/feature_parity.csv]
+  --help               Show this message and exit.
