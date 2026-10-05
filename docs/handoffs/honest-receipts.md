@@ -4,8 +4,9 @@
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
 `docs/archive/` (§5). Status: OPEN — waves 1–3 landed on `devel` 2026-10-04, unpushed; all three briefs
-returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the gated
-model-side work (§6) waits on the owner's read.
+returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus
+sanity check found no profit in the sportsbook consensus at the platforms' real payouts (§7); the gated
+work (§6) waits on the owner's answers to §8.
 
 ## 1. Mission & money logic
 
@@ -43,8 +44,8 @@ the platform price, the served probability adds nothing out of sample, so the la
 model-free engine the owner ruled out. R2 found the parlay pricer sound and the legs at fault. R3 found
 that train/serve skews in the calibration chain and the quotes are worth at most 0.7 pp of the 12.5 pp
 post-fix gap; 89 % of it is selection on model–market disagreement where the served mean knows little
-beyond the market. So the "fix the models" track is model information at the market (I6, §6), judged
-on the selected tail by the tail scorecard (E).
+beyond the market. So the "fix the models" track is giving the models information the market does not
+have (labelled I6, §6), judged on the recommended legs by the tail scorecard (labelled E, §6).
 
 ## 2. Locked decisions (owner, 2026-10-04)
 
@@ -59,6 +60,13 @@ on the selected tail by the tail scorecard (E).
 4. **Menu stance under a thin honest menu is decided after R1 reports its volume/ROI frontier** per
    league with volume per day at every grid threshold; I4d is not specified until the owner picks the
    operating point. (Moot: R1 KILL, §5.)
+5. **The DFS main line is an evaluation reference only.** A model may be scored against it; it is
+   never a book leg in the blend and never part of the consensus line. Where the code stands against
+   this rule: §7.
+6. **The live Underdog Power table is confirmed**: 3.5 / 6.5 / 12 / 20 / 35 / 65 / 120 for 2–8 picks
+   ([underdog_api.md](../underdog_api.md) P-32). The owner answered the ask to confirm that capture in
+   the app with "Underdog payouts are confirmed correct"; it is read here as confirming the capture,
+   which makes `underdog_payouts.json` (3 / 6 / 10 / 20 / 25) the stale one.
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, the owner pushes, `stat_meta.json` never committed from a session.
@@ -95,7 +103,7 @@ nowhere on the page.
   the post-fix Underdog recommended cohort goes from 3,055 legs at −13.1 % to 6,115 legs at −6.3 %
   [−9.4, −3.3], both platforms from −11.8 % to −7.7 %; no sign flips. Changing it changes selection
   (Model EV, Kelly, the 5 % rule, the payout-implied `Market Prob` and leg admission all move together),
-  so it lands as I5a-1 after the owner confirms the live table in the app, never through reporting.
+  so it lands as I5a-1 on the owner's go (the table is confirmed, §2), never through reporting.
 - Clean data is thin: five weeks post-fix (Date ≥ 2026-08-31); per-side payouts since 2026-10-03; MLB
   (the largest share of recommended legs) ends late October; NBA starts late October with no clean data
   until late November. No brief measured an NBA cell, so every NBA read starts from zero.
@@ -131,7 +139,7 @@ model-free engine, no pull/demote/withhold; KILL is a valid verdict; archive ope
 | Brief | Decision question (short) | Deliverable | Gates |
 |---|---|---|---|
 | R1 `researcher_trust_layer.md` | Add a selection-aware probability layer (identity / L2 logistic in logit space / monotone shallow GBM; fit on all posted legs, applied post-argmax, monotone in served p, keyed to Model Version) whose `Trust Prob` drives recommendations at a threshold on `Trust EV − 1 ∈ {0, .02, .05, .08}`? KILL if nothing beats served `Win Prob` on the selected tail, or if dropping served p does not worsen day-clustered log-loss | ablation, regime map (routed to R3), volume/ROI frontier per league per day, the no-fit default | **KILL (2026-10-04)** — [archive/researcher_trust_layer.md](../archive/researcher_trust_layer.md): the pre-registered ablation fires (dropping served p costs no out-of-sample log-loss: logistic +0.00038 nats, p = .07; GBM p = .75), Tier B 0 of 12 after Holm; a market-anchored `Trust Prob` is the model-free engine the owner ruled out. Reopen only if the mid-November confirmatory re-run (frozen `r1/prereg.py`, I2 columns) passes K2 and live λ_sel's trailing-30-day CI lower bound clears 0 |
-| R2 `researcher_parlay_engine.md` | Which pricer repairs (symmetric game Σ, live payout tables, Underdog's per-game correlation modifier, book-anchored or Trust leg marginals) make priced joint probability and payout match realized parlays; what per-pick Underdog convention should the single-leg ledger use? | stage 1: payout tables vs live capture + the 1.78 verdict; stage 2: Σ, m, marginals, the beam gate as curse amplifier, ranked I5 list | **DONE (2026-10-04)** — [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md). Stage 1 READY: √3.5 = 1.8708 replaces 1.78 once the owner confirms the live table. Stage 2: the pricer is sound and the legs fail — on 818,844 synthetic parlays from post-fix posted legs the beam's admitted legs read 8–11 pp above their hit rate, compounding to realized/priced 0.71–0.77 at 2 legs and 0.41–0.44 at 5, while book-anchored marginals (a diagnostic, model-free) calibrate every size. I5b symmetric Σ KILL (Δ log-loss −0.00011, p = .12; the shipped Σ is indistinguishable from independence); I5c `underdog_tax.py` KILL (m < 1 on 3–7 % of entries, ≈ 0.99); I5a/I5d/I5e GO as truth, not calibration (68 % of gated entries carry a stale pair bonus, mean ×1.24; the ledger underpays stored winners by a median 1.68×). The Model EV ≥ 2.0 beam floor amplifies the curse (realized/priced 0.50 → 0.00 across priced-EV bands; today's gated entries hit 2.3 % against 29.7 % priced). The joint-ratio acceptance moves to I6 |
+| R2 `researcher_parlay_engine.md` | Which pricer repairs (symmetric game Σ, live payout tables, Underdog's per-game correlation modifier, book-anchored or Trust leg marginals) make priced joint probability and payout match realized parlays; what per-pick Underdog convention should the single-leg ledger use? | stage 1: payout tables vs live capture + the 1.78 verdict; stage 2: Σ, m, marginals, the beam gate as curse amplifier, ranked I5 list | **DONE (2026-10-04)** — [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md). Stage 1 READY: √3.5 = 1.8708 replaces 1.78 on the owner's go (the live table is confirmed, §2). Stage 2: the pricer is sound and the legs fail — on 818,844 synthetic parlays from post-fix posted legs the beam's admitted legs read 8–11 pp above their hit rate, compounding to realized/priced 0.71–0.77 at 2 legs and 0.41–0.44 at 5, while book-anchored marginals (a diagnostic, model-free) calibrate every size. I5b symmetric Σ KILL (Δ log-loss −0.00011, p = .12; the shipped Σ is indistinguishable from independence); I5c `underdog_tax.py` KILL (m < 1 on 3–7 % of entries, ≈ 0.99); I5a/I5d/I5e GO as truth, not calibration (68 % of gated entries carry a stale pair bonus, mean ×1.24; the ledger underpays stored winners by a median 1.68×). The Model EV ≥ 2.0 beam floor amplifies the curse (realized/priced 0.50 → 0.00 across priced-EV bands; today's gated entries hit 2.3 % against 29.7 % priced). The joint-ratio acceptance moves to I6 |
 | R3 `researcher_train_serve_skew.md` | Which train/serve skews (unquoted pooling at w = 1.0 vs w, combo-sum quotes, tie label, DFS-rung Market Prob from the consensus shape, tail reliability by z and alt flag, NFL Under bias by era, the evaluation design) explain the .650-read vs .496-hit gap, ranked by measured share? | ranked defect table with CIs, fix per defect, files touched, retrain need; the tail-scorecard spec (E) | **DONE (2026-10-04)** — [archive/researcher_train_serve_skew.md](../archive/researcher_train_serve_skew.md). No skew in the calibration chain or the quotes explains the gap. Post-fix recommended legs read .611 and hit .486 (+12.5 pp, 6,138 legs); walk-forward that is bulk miscalibration +1.5 pp [0.8, 2.1] (11 %) plus a selection residual +11.7 pp [9.2, 14.4] (89 %; 87 % at √3.5), the only two tests that survive Holm. Every pre-registered skew moves the cohort gap by ≤ 0.3 pp: unquoted pooling, combo-sum quotes, the rung decode, tail shape and the NFL matchup leak are KILLed as gap levers; the tie label is a correctness fix. Rank 1 is selection on model–market disagreement where the served mean carries little at-market information (within-cell logistic encompassing, b_model: MLB .26 (.07) live against .49–.66 offline May–August; NFL ≈ 0 offline at every distance from the booster's training cutoff, and live). R1's KILL closes the layer route, so the fix is model information (I6, §6). Largest live effect, exploratory: MLB recommended legs overstate by +5.6 pp in a version's first four days against +13.5 pp from day 4 on (difference −7.9 [−12.3, −2.9]; repeats in all three post-fix retrains; cause unknown; I6g is the test). Real but small or inconclusive: serve-path feature parity (same pickle, line and book leg: sd(ΔP) 2.8–5.9 pp; NFL overstatement 0.68× [0.58, 1.11] on training-path features), book-leg timing (training takes the quote at or before 12:00 UTC on game day, decisions come 5–11 h later, ≈ 0.1 of b_model), in-game quotes in training game lines (MLB total against team runs .57 enriched, .16 pre-game), the MLB comp snapshot look-ahead |
 
 R1 ran on proxies (decision time = the platform's last ladder poll of the line, quote class from
@@ -143,6 +151,13 @@ there; data artifacts are not kept, rerun the producing script): R1's re-run sta
 I6g from `r3/`.
 
 ## 6. Gated implementation (one module per subagent; entry = the brief's verdict + the owner's read)
+
+The labels, in plain words. **I4** is the trust layer: a second probability fitted on top of the
+model's (killed). **I5** makes the parlay builder and the ledger pay what Underdog really pays: the
+per-pick value of a leg, the payout table, the pair bonuses, the settlement. **I6** gives the models
+more information than the market has and makes training see what serving sees. **E** is the tail
+scorecard, the offline replay of the live recommendation rule. A suffix (I5a-1, I6e) names one change
+inside its group; §8 restates each open one as a plain question.
 
 - **I4 trust layer — KILLED with R1 (§5); nothing below is built.** The one piece that needs a new
   home is the Kelly no-evidence case: `strategies/kelly.py::resolve_shrinkage` still returns
@@ -156,7 +171,7 @@ I6g from `r3/`.
   `correlation.py::_select_bet_offers`, `strategies/kelly.py`); a `policy_v2` ledger persona A/B'd
   against `policy_v1`; Receipts shows model read and trust read side by side.
 - **I5 parlay pricer — R2's ranked list (§5), a factual refresh, not a calibration fix; each item
-  waits on the owner's read and the live-table confirmation:** I5a-1 `UNDERDOG_BOOST_BASELINE` 1.78 →
+  waits on the owner's go (the live table is confirmed, §2):** I5a-1 `UNDERDOG_BOOST_BASELINE` 1.78 →
   √3.5 = 1.8708 (moves Model EV, Kelly, the 5 % rule, the payout-implied `Market Prob`,
   `_dfs_offer_probs` and leg admission together; golden pins on 1.78 move; new selection era);
   I5a-2 `underdog_payouts.json` Power 2–8 = 3.5/6.5/12/20/35/65/120 and live Flex tiers,
@@ -167,8 +182,8 @@ I6g from `r3/`.
   from the legs' own multipliers (fallback: the committed `payout_multiplier` re-based); I5e the premise
   rewrite in `parlay-dependence.md` §1 and the volatile assumption (text in the brief) plus
   `PARLAY_AUDIT.md` §1.3 / §2.4 / §4. **Struck:** I5b symmetric Σ, I5c `underdog_tax.py`.
-  `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged pending the owner: no tested value
-  returns ≥ 1. I5's own acceptance = priced payout equals the quote on owner-captured slips (one Power, one
+  `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested value returns ≥ 1, so no
+  change is proposed (§8). I5's own acceptance = priced payout equals the quote on owner-captured slips (one Power, one
   Flex, one stacked same-game pair) and the ledger settles at it.
 - **I6 model information and train/serve alignment — R3's build order (§5); each item waits on the
   owner's read.** None pulls or demotes a model. `pipeline.py` is 5,109 lines: extract helpers,
@@ -212,7 +227,8 @@ I6g from `r3/`.
   **Not to build** (each measured; brief §5 and §7): w = 1 serving for unquoted rows; price-blind or
   distance-conditional recalibration as a gap fix; rung admission as a gap lever (it is a volume
   lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change; any trust
-  layer or fixed scalar shrink toward the book.
+  layer or fixed scalar shrink toward the book; the DFS main line as a book leg for unquoted legs
+  (owner decision 5, §2).
 - **E tail scorecard — built** (`sportstradamus admin tail-scorecard`; `scripts/tail_scorecard.py`
   with `tail_pricing.py` and `tail_information.py`, tests under `-m diagnostics`; spec = R3 brief
   §6). It re-serves every held-out test row at each Underdog and Sleeper rung the archive `ladder`
@@ -309,29 +325,96 @@ eras.
   (3,276 rows, 15 days, 9 cells), NFL −.16 [−.59, .30] (933 rows, 4 cells); neither can be told
   from zero. The brief's MLB .77 → .66 reference-timing pair reproduces exactly, but only on its
   530-row, 5-day subset holding both references, so the size of the timing effect is unmeasured.
+- Consensus sanity check (owner request; record with tables in
+  [archive/consensus_sanity_check.md](../archive/consensus_sanity_check.md)): the sportsbook consensus
+  is not profitable on DFS legs where it shows an edge. With no model anywhere, the same-line mean of
+  two or more sportsbooks and each platform's real payout rule, the consensus' edge legs return −17.5 %
+  per pick [−23.7, −11.0] (1,760 legs over 31 days; −37.0 % as real 2-pick entries), and no edge floor
+  turns it positive. The arithmetic reproduces two known answers: every side of every Underdog 1.00×
+  leg returns −12.5 % per 2-pick entry (3.5 × ¼ − 1), and the consensus is calibrated in bulk (+0.65 pp
+  on 39,332 lines). The cause is the market: the platforms price within 1.0–1.3 pp of the books (5 pp
+  apart on about a dozen rungs a day), and 79 % of the apparent edges are Underdog one-sided longshot
+  rungs where our consensus runs 3.6 pp high (one-way prices de-vigged at a flat 6.52 %, often two
+  books, quotes hours old).
+- The platform's cut is the hurdle, and it differs by kind of leg: 6.5 % per pick on an Underdog 1.00×
+  leg, 10–12 % on a priced two-sided leg on either platform, about 20 % on a one-sided rung. The
+  recommendation rule returns the cut on every kind but the Underdog 1.00× leg, where it sits at
+  break-even post-fix (2,153 recommended legs hit .533 against .535 needed and .490 for the legs it
+  passed, +4.4 pp [−0.4, 7.6]; no such gap before the fix date). A lead for selection scope and for
+  I6, not a proven edge (§8).
+- Payout rule for any replay: bet a side only when its multiplier is provable from one poll (the
+  record's "Method trap"; the check's first pass read a false +17 % without it). The tail scorecard's
+  `assumed` payout class (§6) uses a looser tolerance, so read its `posted` row until that is tightened.
+- Where the code stands against decision 5 (§2). The consensus *price* already excludes the DFS
+  platforms whenever a sportsbook quotes the entry (`training_quotes.sportsbook_cohort`, used by
+  `Archive._weighted_book_ev` and the quote resolver), and a leg whose only quote is a DFS platform is
+  scored model-only (`book_quotes._has_serving_support`). The consensus *line* does not:
+  `Archive.get_line` takes the median of every distinct line in the `lines` table, which has no book
+  column and receives each DFS platform's main rung from `add_dfs` beside the sportsbook lines. Where
+  both exist (66,101 player-market-days in the ladder era) the DFS lines move it on about 12 % (NFL
+  38 %, WNBA 48 %, MLB 10 %, NHL 3 %), by 0.7 on average when they do. Its readers: the `Consensus
+  Line` column, `get_closing_line`, the combo component sublines (`Stats._submarket_ev`,
+  `stats/mlb.py`) and the legacy line of the training quote resolver; not yet traced into every model
+  feature. The DFS platforms also sit as columns in the book-weight fit (`book_weights.json` carries
+  an Underdog weight in 68 cells and a Sleeper weight in 53), unused whenever a sportsbook quotes the
+  entry.
 
 ## 8. Owner asks (one each)
 
-- Push `devel` after reading §4 and the PR body's before/after tables.
-- Read the three briefs in `docs/archive/` (each TL;DR, then R3's §5 table) and say which I6 items to
-  open; R3's order is I6e, I6g, I6f, hygiene (I6a, I6c), I6d (§6). I6e and the 14-day pickle retention
-  have a clock: I6g's test runs on NBA and NHL from late October, and a leg served before the feature
-  log exists cannot be paired later.
-- Decide the T-ridge trade (I6c): removing it closes about 1 pp of the gap and cuts recommended volume
-  by 27–31 % for +0.001 to +0.002 bulk log-loss.
-- Decide whether the DFS main line may serve as a book leg for unquoted legs (R3 open question 3): it
-  carries the market's information (receptions b_market 0.79 [0.57, 1.12]) but conflicts with the
-  2026-09-29 decision that pickem rows are book-less, and a serving-only version is a train/serve skew
-  by construction.
-- Confirm the live Underdog Power/Flex table in the app for your state (blocks I5a-1 and I5a-2; the
-  convention itself is decided: √3.5).
-- Quote, through the Modifiers reconciler, the Over/Under side of the untaxed pair types (opposing RB
-  carries, opposing RB rush yds, QB pass yds × same-team RB rush yds) and re-quote QB pass TDs × same WR
-  TDs; no automated probing. These fill I5a-3 and decide whether any structural pair edge exists (only
-  opposing RB carries Over/Under reads above break-even, EV 0.96–1.07, and the engine builds Under/Under).
-- Decide the beam floor stance (`_MODEL_EV_FINAL_FLOOR`): no setting tested returns ≥ 1 per $1 on the
-  selected set.
-- Decide whether `book_fallback` legs keep an edge flag (R1 conclusion 6): they are priced off the decoded
-  sportsbook consensus alone and lose at the DFS payout; dropping the flag pulls no model.
-- Decision 4 (menu operating point) is moot under the KILL; the frontier in the brief §Frontier stays the
-  reference for what volume an honest menu would have had.
+Every ask is a yes/no or a pick, with the facts beside it. Settled and off this list: the live Underdog
+table (confirmed, §2); the DFS main line as a book leg (no, §2); the menu operating point (moot under
+R1's KILL). Not asked because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0;
+no setting tested returns $1 per $1 while the legs are over-read).
+
+1. **Push `devel`** after reading §4 and the PR body's before/after tables.
+2. **Value an Underdog pick at 1.871 instead of 1.78?** (I5a-1.) The code values a 1.00× Underdog pick
+   at 1.78× stake, the fourth root of the old 4-pick payout (10×). The confirmed table pays 3.5× on a
+   2-pick, so a pick is worth √3.5 = 1.871 (3-pick 1.866, 4-pick 1.861, 5-pick 1.821, 6-pick 1.809).
+   The change credits Underdog winners 5 % more (the same 3,055 post-fix recommended legs go from
+   −13.1 % to −8.7 %) and lowers the model read a 1.00× leg needs to be recommended from 59.0 % to
+   56.1 %, which recommends 3,105 more legs (they returned −3.9 %). A truth fix; it creates no edge.
+3. **Three factual fixes to parlay pricing, one go?** (I5a-2, I5a-3, I5d.) The payout file takes the
+   confirmed table (it still says 3 / 6 / 10 / 20 / 25, so a 2-pick is priced 14 % low and a 6-pick
+   29 % low). Pair bonuses above 1.0 in `banned_combos.json` become 1.0 (live Underdog never pays a
+   same-game pair above the table; 68 % of the parlays the builder selects carry such a bonus, mean
+   ×1.24). The sim ledger settles a winning parlay at table × each leg's multiplier (it leaves the leg
+   multipliers out today and underpays stored winners by a median 1.68×). No probability moves.
+4. **Keep the "recommended" flag on legs with no model?** A leg with no model is scored from the
+   sportsbook consensus alone (`book_fallback`) and can still be flagged: 4,463 such legs all-time
+   returned −9.9 %, 38 post-fix returned −26 %, and the consensus shows no edge at the platforms'
+   payouts (§7). Dropping the flag keeps the legs on the board and touches no model.
+5. **Make the consensus line sportsbook-only?** Decision 5 applied to the one place that breaks it
+   (§7). Step 1 traces every reader of `Archive.get_line`, so no training input shifts unseen; step 2
+   changes that one function to the median of sportsbook lines, with no consensus line where no
+   sportsbook posts one; the models pick it up at their next retrain.
+6. **Paper-trade "Underdog 1.00× legs only"?** A second paper bettor in the sim ledger that takes only
+   those legs, compared with the current one after four weeks. It is the one kind of leg where the
+   rule does not lose the platform's cut (§7). Nothing live changes.
+7. **Open the model-information work (I6) in this order?**
+   - First, log what the model saw (I6e): at scoring time, save each leg's model inputs to a
+     diagnostics file. Nothing can show today that the live model sees what training fed it; the same
+     model at the same line differs by 3–6 pp (standard deviation) between the two paths, worst on NFL.
+     No retrain, no served number moves. Clock: late October, when NBA and NHL open; a leg served before the log exists can never be
+     checked.
+   - With it, keep the previous model files for 14 days after each retrain (I6g): MLB recommended legs
+     are over-read by 5.6 pp in a model's first four days and 13.5 pp after, in all three post-fix
+     retrains. Old files let both versions score the same legs; if the pattern holds, retrain every
+     3–4 days.
+   - At the next retrain, cut training's game-line quotes at pre-game (I6f: late-season MLB rows carry
+     in-game quotes; the game-total quote correlates .57 with the team's runs where they leak in, .16
+     on pre-game quotes) and count a push as half an Over (I6a: a tie is an Over win today; ≤ 0.2 pp).
+   - After the log, NFL research (I6d): the NFL models add nothing measurable beyond the market on the
+     legs tested, and no method is guaranteed.
+8. **Drop the temperature penalty at the next retrain?** (I6c.) Each model has one number T that
+   flattens its probabilities toward 50 % when it is overconfident. Training holds T near 1 (no
+   flattening) with the penalty `0.01·(T−1)²`; in 12 of 48 cells the free T is more than 1.5× the
+   penalized one. Without it the over-read on recommended legs falls 1.0–1.2 pp (of 12.5), recommended
+   legs fall 27–31 %, and overall log-loss rises 0.001–0.002.
+9. **Optional: four pair quotes from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
+   For each slip: put the legs on the dashboard slip, open Model Lab › Modifiers, build the same entry
+   in the Underdog app, type the payout the app shows into "Actual quoted payout (x)", then "Save
+   corrected modifiers" and "Confirm save". The slips: two opposing running backs' rush attempts, one
+   Higher and one Lower; the same on rush yards; a quarterback's pass yards Higher with his own running
+   back's rush yards Lower, plus any third pick from another game (the app refuses a same-team pair
+   alone); a quarterback's pass TDs Higher with his own receiver's TDs Higher, plus any third pick.
+   No automated probing.
