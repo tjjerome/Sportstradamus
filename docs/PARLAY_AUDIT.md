@@ -68,9 +68,21 @@ entry carries one, and Underdog's NFL, NHL and MLB sections carry a few. A banne
 zeroes the parlay's product boost, so the `boost <= _MIN_PRODUCT_BOOST` gate
 (`parlay.py:133`) drops it from the beam search. prophecize publishes the modifiers it
 priced with to `current_pair_modifiers.parquet`, so the dashboard slip prices the same
-pairs and refuses to lock a banned one. The map is hand-documented and drifts.
-Disposition: corrections come from real app quotes through the Modifiers reconciler
-(dfs-products brief §3 and §4).
+pairs and refuses to lock a banned one.
+
+Cap rule: no Underdog value in the committed file exceeds 1.0. Underdog pays the table
+entry × the picks' own multipliers × a per-game modifier `m ≤ 1`, and quotes opposite
+sides and negatively associated pairs at exactly 1.0
+([underdog_api.md §6.8](underdog_api.md#68-entry-slip-pricing)), so a value above 1.0 is
+a bonus the app does not pay. `tests/golden/test_correlation_helpers.py` holds the
+committed file to the cap. The runtime overlay of captured quotes is merged on top
+unchanged, and a capture stores the pair's whole `[same, opposite]` list, so the slot
+it did not quote keeps the value it had at the capture.
+
+The map is hand-documented and drifts. Disposition: corrections come from real app
+quotes through the Modifiers reconciler (dfs-products brief §3 and §4); the sub-1
+values and bans still waiting on an owner quote are listed under I5a-3 in
+[honest-receipts.md §6](handoffs/honest-receipts.md).
 
 ---
 
@@ -113,16 +125,23 @@ module-level constants in `parlay.py` (`_BEAM_WIDTH`, `_PARLAY_GEO_MEAN_FLOOR`,
 
 ### 2.4 Payout source
 
-Payout curves load from `data/config/underdog_payouts.json` via `_payout_curve_for`
-(`parlay.py:128-195`) with contest variants (power / flex / insurance; pooled
-default); the old hardcoded search table and display-time `Boost` overwrite survive
-only behind `legacy=True` (`correlation.py:88-99`, default off), so search and display
-use the same regime on the current path.
+Payout curves load from `data/config/underdog_payouts.json` via `payout_curve_for`
+(`prediction/payouts.py`) with contest variants (power / flex; pooled default). Search
+and display read the same curve.
 
-Open items: the tables are **static config** — the app can change payouts mid-season
-and nothing detects it (per-season re-verify = hygiene-closeout stage 3); Sleeper's
-curve is a `[1.0, 1.0]` placeholder, so Sleeper Model EV degenerates to the raw joint
-probability (owned by sleeper-parity stage 0). Pointers only — no new item here.
+The Underdog table holds the live terms the owner confirmed in the app in October 2026:
+Power for 2–8 picks and the Flex tiers Underdog offers (numbers and capture:
+[underdog_api.md §6.8](underdog_api.md#68-entry-slip-pricing)). The pooled variant
+prices each size on the schedule an entry of even-money picks beats at the lower
+per-pick hit rate, which is Power at 2–3 picks and Flex at 4–6, and a Flex tier with
+`k` losses multiplies only the `n − k` largest pick multipliers. The table runs to
+8 picks; the engine builds entries of at most 6 (`UNDERDOG_FLEX_CAP` in
+`prediction/payouts.py`).
+
+The tables are still **static config**: the app can change payouts mid-season and
+nothing detects it, so the per-season re-verify stays hygiene-closeout stage 3's
+recurring check. Sleeper's constants (`data/config/sleeper_payouts.json`) belong to
+sleeper-parity. Pointers only — no new item here.
 
 ### 2.5 Output ranking and dedup
 
@@ -185,10 +204,10 @@ it early.
 | Beam heuristic unbounded (§1.1) | ranking-only EV leak | parked | here + same stage-3 scope |
 | Cross-game ρ=0 (§1.1) | accepted for player-only slips | mixed-slip case → dfs-products | here + dfs-products brief |
 | PSD-repair distortion (§2.2) | drop-bias fixed; distortion unmeasured | YES — read-only rider on production re-run | hygiene-closeout stage 2 + here |
-| Payout staleness (§2.4) | known; homes exist | already homed | hygiene stage 3 + sleeper-parity stage 0 |
+| Payout staleness (§2.4) | Underdog table at the owner-confirmed live terms (October 2026); still static config | recurring per-season re-verify | hygiene stage 3 + sleeper-parity stage 0 |
 | Parlay-path Kelly no-shrinkage (§2.6) | **highest live-money finding** | routed (owner 2026-07-10) → sleeper-parity stage 1 | here §2.6 + sleeper-parity stage 1 |
 | Substring same-player guard (§1.2) | minor correctness | parked | here + parlay-dependence stage-3 scope |
 | Shrink-to-zero credibility (§1.1) | superseded by R3 hierarchical Fisher-z EB | resolved-by-design pending D3 | R3 brief / model track §6.11 |
 | Production calibration never run (§3) | only empirical check + D3 stage-4 baseline | YES (owner-assisted) | hygiene-closeout stage 2 + here |
-| banned_combos drift (§1.3) | hand-documented; `0.0` bans enforced in beam search + live slip | ongoing — owner quotes via the Modifiers reconciler | here + dfs-products §3/§4 |
+| banned_combos drift (§1.3) | hand-documented; Underdog values capped at 1.0; `0.0` bans enforced in beam search + live slip | ongoing — owner quotes via the Modifiers reconciler | here + dfs-products §3/§4 |
 | ρ not line-stratified | tail-dependence question | no new item — R3 t-branch test gates it | R3 brief |

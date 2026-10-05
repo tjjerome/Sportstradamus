@@ -17,8 +17,14 @@ PAYOUT_CLIP_HI: float = 100.0
 _PUSH_MC_SAMPLES: int = 50_000
 
 # Pooled-variant split: slips of this size or smaller pay on the all-or-nothing
-# ``power`` schedule; larger slips pay on the partial-hit ``flex`` schedule.
+# ``power`` schedule; larger slips, up to UNDERDOG_FLEX_CAP, pay on the
+# partial-hit ``flex`` schedule.
 POWER_MAX_SIZE: int = 3
+
+# Largest Underdog entry the engine builds, and the last size the pooled variant
+# prices on ``flex``. OUR construction convention, like SLEEPER_FLEX_CAP: the app
+# takes 8 picks and the payout table runs that far.
+UNDERDOG_FLEX_CAP: int = 6
 
 # Sleeper Max/Flex split: OUR recommendation-construction convention (not a
 # platform rule -- the real app allows toggling either mode up to 8 legs).
@@ -35,32 +41,29 @@ SLEEPER_FLEX_MIN_MULTIPLIER: float = 1.25
 # docs/handoffs/sleeper-parity.md §3 item 3.
 SLEEPER_FULL_REFUND_MAX_SIZE: int = 2
 
+# One leg's result, as the pricer samples it and settlement resolves it.
+LEG_LOSS, LEG_PUSH, LEG_WIN = 0, 1, 2
+
 
 def _pooled_underdog_curve() -> dict[int, list[float]]:
-    """Build the single combined Underdog payout pool keyed by bet size.
+    """Build the single combined Underdog payout pool keyed by entry size.
 
-    Underdog entries are not separate interchangeable contests: a 2- or
-    3-leg slip pays out on the all-or-nothing ``power`` schedule, while a
-    4+-leg slip pays out on the partial-hit ``flex`` schedule. The legacy
-    ``insurance`` table is an old alias of ``flex`` and is intentionally not
-    consulted here.
+    Every size in the table, 2 to 8 picks, gets one schedule: the one an entry
+    of even-money picks breaks even on at the lower per-pick hit rate. That is
+    ``flex`` from ``POWER_MAX_SIZE + 1`` to ``UNDERDOG_FLEX_CAP`` picks and the
+    all-or-nothing ``power`` multiplier at every other size. The split is fixed
+    here because the play-type labels and the ledger share it;
+    ``tests/golden/test_parlay_search.py`` re-derives it from the table, so a
+    payout change that moves it fails there.
     """
-    power = underdog_payouts["power"]
-    flex = underdog_payouts["flex"]
-    curve: dict[int, list[float]] = {}
-    for sz_str, mult in power.items():
-        sz = int(sz_str)
-        if sz <= POWER_MAX_SIZE:
-            curve[sz] = [float(mult), 0.0]
-    for sz_str, row in flex.items():
-        sz = int(sz_str)
-        if sz > POWER_MAX_SIZE:
-            curve[sz] = [float(v) for v in row]
+    curve = {sz: [float(mult), 0.0] for sz, mult in underdog_payouts["power"].items()}
+    for sz in range(POWER_MAX_SIZE + 1, UNDERDOG_FLEX_CAP + 1):
+        curve[sz] = [float(v) for v in underdog_payouts["flex"][sz]]
     return curve
 
 
 def _sleeper_curve(
-    contest_variant: Literal["pooled", "power", "flex", "insurance"],
+    contest_variant: Literal["pooled", "power", "flex"],
 ) -> dict[int, list[float]]:
     """Sleeper payout curve keyed by bet size.
 
@@ -114,19 +117,22 @@ def _sleeper_curve(
 
 def payout_curve_for(
     platform: str,
-    contest_variant: Literal["pooled", "power", "flex", "insurance"],
+    contest_variant: Literal["pooled", "power", "flex"],
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.
 
     The first return drives beam-search ranking (single multiplier per size,
-    indexed ``[bet_size - 2]``). The second drives push-aware EV and the
-    display ``Boost`` column (full payout curve indexed by miss count).
+    indexed ``[bet_size - 2]``), and its length sets the largest entry the
+    search builds. The second drives push-aware EV, settlement and the display
+    ``Boost`` column (full payout curve indexed by miss count).
 
-    Underdog pulls from ``data/underdog_payouts.json``. The default
-    ``"pooled"`` variant builds one combined pool (``power`` for sizes 2-3,
-    ``flex`` for sizes 4+); the legacy single-variant names are still
-    accepted for the ``pickem-build`` path. Other platforms (PrizePicks,
-    Sleeper, ParlayPlay, Chalkboard) keep the legacy single-payout table.
+    Underdog pulls from ``data/config/underdog_payouts.json``. The default
+    ``"pooled"`` variant builds one combined pool
+    (:func:`_pooled_underdog_curve`); the single-variant names serve the
+    ``pickem-build`` path and settlement. An Underdog payout table carries
+    every size the app takes, while the search list stops at
+    ``UNDERDOG_FLEX_CAP``. PrizePicks, ParlayPlay and Chalkboard keep the
+    legacy single-payout table.
     """
     if platform == "Sleeper":
         full_curve = _sleeper_curve(contest_variant)
@@ -146,27 +152,95 @@ def payout_curve_for(
 
     if contest_variant == "pooled":
         full_curve = _pooled_underdog_curve()
-        max_size = max(full_curve.keys())
-        for sz in range(2, max_size + 1):
-            full_curve.setdefault(sz, [0.0])
-        search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
-        return search, full_curve
-
-    variant_table = underdog_payouts[contest_variant]
-    if contest_variant in ("flex", "insurance"):
-        full_curve = {int(sz): [float(v) for v in row] for sz, row in variant_table.items()}
+    elif contest_variant == "flex":
+        full_curve = {sz: [float(v) for v in row] for sz, row in underdog_payouts["flex"].items()}
     else:
-        full_curve = {int(sz): [float(variant_table[sz]), 0.0] for sz in variant_table}
+        full_curve = {
+            sz: [float(mult), 0.0] for sz, mult in underdog_payouts[contest_variant].items()
+        }
 
-    # Pad sizes below the variant's minimum with zero-payout placeholders so
-    # the beam-search ranking heuristic indexes by ``size - 2`` consistently
-    # and the EV pre-checks naturally reject those sizes (insurance only
-    # exists at 5/6, flex at 3-6).
-    max_size = max(full_curve.keys())
-    for sz in range(2, max_size + 1):
+    # Flex starts at 3 picks: zero-pad below a variant's minimum so the search
+    # list indexes by ``size - 2`` and the EV pre-checks reject the padded size.
+    for sz in range(2, UNDERDOG_FLEX_CAP + 1):
         full_curve.setdefault(sz, [0.0])
-    search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
+    search = [full_curve[sz][0] for sz in range(2, UNDERDOG_FLEX_CAP + 1)]
     return search, full_curve
+
+
+def outcome_payouts(
+    outcomes: np.ndarray,
+    boost: float | np.ndarray,
+    payout_curve: dict[int, list[float]],
+    *,
+    full_refund_below_size: int | None = None,
+    pair_modifier: float = 1.0,
+) -> np.ndarray:
+    """Payout per $1 staked for each entry outcome: the rule pricing and settlement share.
+
+    The pricer hands in its sampled outcomes and averages the result;
+    settlement hands in the one real outcome. Each row pays the payout curve
+    at its (effective size, losses) cell, where a push drops the entry one
+    leg per Underdog rules, times the picks' own multipliers and the pair
+    modifier. An entry pushed below the minimum size with no losses is a
+    refund (×1).
+
+    Args:
+        outcomes: ``(n_outcomes, bet_size)`` leg results, each ``LEG_LOSS``,
+            ``LEG_PUSH`` or ``LEG_WIN``.
+        boost: The picks' own payout multipliers. A per-leg ``np.ndarray``
+            (shape ``(bet_size,)``) pays each outcome the way Underdog quotes
+            it: a pushed leg's multiplier drops out, and a tier with ``k``
+            losses leaves out the ``k`` smallest of the remaining
+            multipliers, whichever legs lost (docs/underdog_api.md §6.8). A
+            scalar is one fused product applied to every outcome.
+        payout_curve: ``{size: [mult_at_0_misses, mult_at_1_miss, ...]}``.
+        full_refund_below_size: When set, any outcome with at least one push
+            on an entry sized at or below this threshold refunds in full
+            (×1) regardless of losses — Sleeper's 2-pick divergence from the
+            generic drop-and-reprice rule (docs/handoffs/sleeper-parity.md §4).
+        pair_modifier: Product of the slip's same-game pair modifiers
+            (``GameArrays.M``). Multiplies every outcome; it travels beside a
+            per-leg ``boost`` because folding it into one leg's multiplier
+            would change which multipliers rank smallest.
+
+    Returns:
+        np.ndarray: One payout multiple per outcome row.
+    """
+    bet_size = outcomes.shape[1]
+    pushes = (outcomes == LEG_PUSH).sum(axis=1)
+    losses = (outcomes == LEG_LOSS).sum(axis=1)
+    eff_size = bet_size - pushes
+
+    if isinstance(boost, np.ndarray):
+        # Walk the non-pushed legs from the smallest multiplier up and skip one
+        # per loss: what is left is the set Underdog quotes the tier on.
+        order = np.argsort(boost)
+        live = outcomes[:, order] != LEG_PUSH
+        kept = live & (np.cumsum(live, axis=1) > losses[:, None])
+        sample_boost = np.where(kept, boost[order], 1.0).prod(axis=1)
+    else:
+        sample_boost = boost
+    sample_boost = np.clip(sample_boost * pair_modifier, 0.0, PAYOUT_CLIP_HI)
+
+    # lookup[size, misses] → payout multiplier.
+    max_idx = bet_size + 1
+    lookup = np.zeros((max_idx, max_idx), dtype=float)
+    for sz in range(2, bet_size + 1):
+        curve = payout_curve.get(sz)
+        if curve is None:
+            continue
+        for miss_idx, mult in enumerate(curve):
+            if miss_idx < max_idx:
+                lookup[sz, miss_idx] = float(mult)
+
+    payouts = sample_boost * lookup[eff_size, losses]
+
+    # Pushed below the two-pick minimum, an entry refunds when nothing lost and busts
+    # otherwise. A refund is the stake back: no pick multiplier or pair modifier applies.
+    payouts = np.where(eff_size < 2, np.where(losses == 0, 1.0, 0.0), payouts)
+    if full_refund_below_size is not None and bet_size <= full_refund_below_size:
+        payouts = np.where(pushes >= 1, 1.0, payouts)
+    return payouts
 
 
 def expected_payout_with_pushes(
@@ -179,33 +253,25 @@ def expected_payout_with_pushes(
     rng: np.random.Generator | None = None,
     *,
     full_refund_below_size: int | None = None,
+    pair_modifier: float = 1.0,
 ) -> float:
     """Expected payout for a parlay where some legs may push.
 
     Samples ``_PUSH_MC_SAMPLES`` draws from the multivariate normal copula,
-    classifies each leg as WIN / PUSH / LOSS via inverse-CDF cuts, and applies
-    the variant payout curve at the resulting (effective_size, misses) cell.
-    Pushes drop the parlay one leg per Underdog rules; an entry that pushes
-    below the minimum bet size with no losses is treated as a refund (×1).
+    classifies each leg as WIN / PUSH / LOSS via inverse-CDF cuts, and
+    averages what :func:`outcome_payouts` pays those sampled outcomes.
 
     Args:
         p_win: Per-leg chosen-side probability (already direction-adjusted).
         p_push: Per-leg push probability. Zeros where push is impossible.
         sigma: PSD-repaired correlation matrix for the parlay's legs.
         bet_size: Number of legs (``len(p_win)``).
-        boost: Modifier-product boost for this parlay. Pass a per-leg
-            ``np.ndarray`` (shape ``(bet_size,)``) to reprice a pushed leg's
-            multiplier out of the sample instead of applying one fused
-            scalar to every sample regardless of which legs actually
-            survived — see ``sportstradamus.prediction.parlay``'s
-            ``leg_boost`` construction for how callers fold a pairwise
-            modifier product into this array losslessly.
+        boost: The picks' own payout multipliers, per leg or one fused scalar.
         payout_curve: ``{size: [mult_at_0_misses, mult_at_1_miss, ...]}``.
         rng: Optional ``np.random.Generator`` for deterministic tests.
-        full_refund_below_size: When set, any sample with at least one push
-            and effective size at or below this threshold refunds in full
-            (×1) regardless of losses — Sleeper's 2-pick divergence from the
-            generic drop-and-reprice rule (docs/handoffs/sleeper-parity.md §4).
+        full_refund_below_size: Entry size at or below which any push refunds
+            the entry in full.
+        pair_modifier: Product of the slip's same-game pair modifiers.
 
     Returns:
         float: Expected payout, ready to be compared against the EV floor.
@@ -219,49 +285,19 @@ def expected_payout_with_pushes(
     cut_lose = norm.ppf(np.clip(p_lose, 1e-9, 1 - 1e-9))
     cut_push_top = norm.ppf(np.clip(p_lose + p_push, 1e-9, 1 - 1e-9))
 
-    # Classification: 0 = LOSS, 1 = PUSH, 2 = WIN.
-    classification = np.where(
+    outcomes = np.where(
         samples < cut_lose,
-        0,
-        np.where(samples < cut_push_top, 1, 2),
+        LEG_LOSS,
+        np.where(samples < cut_push_top, LEG_PUSH, LEG_WIN),
     )
-
-    if isinstance(boost, np.ndarray):
-        surviving = np.where(classification == 1, 1.0, boost)
-        sample_boost = np.clip(surviving.prod(axis=1), 0.0, PAYOUT_CLIP_HI)
-    else:
-        sample_boost = np.clip(boost, 0.0, PAYOUT_CLIP_HI)
-
-    pushes = (classification == 1).sum(axis=1)
-    losses = (classification == 0).sum(axis=1)
-    eff_size = bet_size - pushes
-
-    # Flat lookup table: lookup[size, misses] → payout multiplier. Sizes below
-    # the parlay minimum are treated as refund (×1) iff there are no losses.
-    max_idx = bet_size + 1
-    lookup = np.zeros((max_idx, max_idx), dtype=float)
-    for sz in range(2, bet_size + 1):
-        curve = payout_curve.get(sz)
-        if curve is None:
-            continue
-        for miss_idx, mult in enumerate(curve):
-            if miss_idx < max_idx:
-                lookup[sz, miss_idx] = float(mult)
-
-    safe_size = np.clip(eff_size, 0, max_idx - 1)
-    safe_miss = np.clip(losses, 0, max_idx - 1)
-    payouts = lookup[safe_size, safe_miss]
-
-    # Special-case the "all pushes (no losses)" outcome: refund.
-    all_push_no_loss = (eff_size < 2) & (losses == 0)
-    payouts = np.where(all_push_no_loss, 1.0, payouts)
-    # Sub-minimum size with at least one loss → bust.
-    payouts = np.where((eff_size < 2) & (losses > 0), 0.0, payouts)
-
-    if full_refund_below_size is not None and bet_size <= full_refund_below_size:
-        payouts = np.where(pushes >= 1, 1.0, payouts)
-
-    return float(np.mean(sample_boost * payouts))
+    payouts = outcome_payouts(
+        outcomes,
+        boost,
+        payout_curve,
+        full_refund_below_size=full_refund_below_size,
+        pair_modifier=pair_modifier,
+    )
+    return float(np.mean(payouts))
 
 
 def poisson_binomial_pmf(probs: np.ndarray) -> np.ndarray:

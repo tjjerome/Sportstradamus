@@ -14,15 +14,19 @@ Covers the four targets from ``docs/PARLAY_AUDIT.md`` remediation:
 
 from __future__ import annotations
 
+from math import comb
+
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.optimize import brentq
 
-from sportstradamus.helpers import sleeper_payouts
+from sportstradamus.helpers import sleeper_payouts, underdog_payouts
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.joint import _PSD_EIG_TOLERANCE, _nearest_psd
 from sportstradamus.prediction.parlay import (
     GameArrays,
+    _leg_boost_payout,
     beam_search_parlays,
     resolve_leg_stat,
 )
@@ -32,6 +36,7 @@ from sportstradamus.prediction.payouts import (
     SLEEPER_FLEX_MIN_MULTIPLIER,
     SLEEPER_FLEX_MIN_SIZE,
     SLEEPER_MAX_SIZE,
+    UNDERDOG_FLEX_CAP,
     expected_payout_with_pushes,
     payout_curve_for,
     poisson_binomial_pmf,
@@ -171,9 +176,60 @@ def test_payout_curve_loader_returns_power_by_default() -> None:
     """``payout_curve_for("Underdog", "power")`` reads the
     JSON config and returns the 0-misses entries as the search list."""
     search, full = payout_curve_for("Underdog", "power")
-    assert search[0] == pytest.approx(3.0)  # 2-leg power
-    assert full[2][0] == pytest.approx(3.0)
+    assert search[0] == pytest.approx(3.5)  # 2-leg power
+    assert full[2][0] == pytest.approx(3.5)
     assert full[2][1] == 0.0  # power: no payout at 1 miss
+
+
+def test_underdog_payout_file_carries_the_confirmed_table() -> None:
+    """The live table the owner confirmed in the app (docs/underdog_api.md §6.8): Power for
+    2 to 8 picks, the Flex tiers Underdog offers, and no other variant."""
+    assert underdog_payouts == {
+        "power": {2: 3.5, 3: 6.5, 4: 12.0, 5: 20.0, 6: 35.0, 7: 65.0, 8: 120.0},
+        "flex": {
+            3: [3.25, 1.09],
+            4: [7.2, 1.8],
+            5: [10.0, 2.5],
+            6: [25.0, 2.6, 0.25],
+            7: [40.0, 2.75, 0.5],
+            8: [80.0, 3.0, 1.0],
+        },
+    }
+
+
+def test_underdog_curves_cover_two_to_eight_picks_and_build_to_the_cap() -> None:
+    """Every Underdog payout table runs to the app's 8 picks, while the search list, whose
+    length sets the largest entry beam search builds, still stops at UNDERDOG_FLEX_CAP."""
+    for variant in ("pooled", "power", "flex"):
+        search, full = payout_curve_for("Underdog", variant)
+        assert sorted(full) == list(range(2, 9)), variant
+        assert search == [full[size][0] for size in range(2, UNDERDOG_FLEX_CAP + 1)], variant
+
+
+def _even_pick_breakeven(row: list[float], size: int) -> float:
+    """Per-pick hit rate at which ``size`` independent even-money picks return the stake."""
+
+    def edge(p: float) -> float:
+        tiers = (
+            mult * comb(size, k) * p ** (size - k) * (1 - p) ** k for k, mult in enumerate(row)
+        )
+        return sum(tiers) - 1.0
+
+    return brentq(edge, 0.01, 0.99)
+
+
+def test_underdog_pooled_curve_takes_the_lower_breakeven_schedule() -> None:
+    """The pooled Power-versus-Flex choice at the live terms: each size pays on the schedule
+    an entry of even-money picks beats at the lower per-pick hit rate
+    (docs/archive/researcher_parlay_engine.md S1-a). A payout change that flips a size fails
+    here; the split in ``payouts._pooled_underdog_curve`` then moves with it."""
+    _, pooled = payout_curve_for("Underdog", "pooled")
+    for size, mult in underdog_payouts["power"].items():
+        best = [float(mult), 0.0]
+        flex = underdog_payouts["flex"].get(size)
+        if flex and _even_pick_breakeven(flex, size) < _even_pick_breakeven(best, size):
+            best = flex
+        assert pooled[size] == best, f"{size} picks"
 
 
 def test_psd_repair_keeps_correlation_units_diagonal() -> None:
@@ -422,12 +478,12 @@ def test_expected_payout_with_pushes_array_boost_excludes_pushed_leg_multiplier(
     assert ev == pytest.approx(6.0, abs=1e-6)
 
 
-def test_expected_payout_with_pushes_array_boost_preserves_full_survival_product() -> None:
-    """Proves the §3b fold-in construction: leg_boost[0] *= boost / prod(boosts_leg)
-    reconstructs the true fused scalar (M's pairwise product included) exactly,
-    so the array path matches the scalar path when no leg pushes. The naive
-    alternative -- passing boosts_leg alone, silently dropping M's contribution
-    -- does NOT match (asserted below as the regression this test guards against).
+def test_expected_payout_with_pushes_pair_modifier_restores_the_fused_boost() -> None:
+    """Per-pick multipliers plus ``pair_modifier`` price like the fused scalar when no leg
+    pushes: M's pairwise product travels beside the per-leg array, which has to stay clean
+    for the Flex loss-tier ranking. The naive alternative -- passing boosts_leg alone,
+    silently dropping M's contribution -- does NOT match (asserted below as the regression
+    this test guards against).
     """
     p_win = np.array([0.7, 0.6])
     p_push = np.zeros(2)
@@ -435,28 +491,93 @@ def test_expected_payout_with_pushes_array_boost_preserves_full_survival_product
     curve = {2: [3.0, 0.0]}
 
     boosts_leg = np.array([1.2, 1.3])
-    m_pairwise = 1.25  # simulates GameArrays.M's pairwise contribution, M != 1
+    m_pairwise = 0.8  # simulates GameArrays.M's pairwise contribution, M != 1
     boost = m_pairwise * np.prod(boosts_leg)  # true fused scalar _parlay_admissible computes
-
-    leg_boost = boosts_leg.copy()
-    leg_boost[0] *= boost / np.prod(boosts_leg)
-    assert np.prod(leg_boost) == pytest.approx(boost)
 
     rng_scalar = np.random.default_rng(9)
     ev_scalar = expected_payout_with_pushes(
         p_win, p_push, sigma, 2, boost=boost, payout_curve=curve, rng=rng_scalar
     )
-    rng_folded = np.random.default_rng(9)
-    ev_folded = expected_payout_with_pushes(
-        p_win, p_push, sigma, 2, boost=leg_boost, payout_curve=curve, rng=rng_folded
+    rng_split = np.random.default_rng(9)
+    ev_split = expected_payout_with_pushes(
+        p_win,
+        p_push,
+        sigma,
+        2,
+        boost=boosts_leg,
+        payout_curve=curve,
+        rng=rng_split,
+        pair_modifier=m_pairwise,
     )
-    assert ev_folded == pytest.approx(ev_scalar)
+    assert ev_split == pytest.approx(ev_scalar)
 
     rng_naive = np.random.default_rng(9)
     ev_naive = expected_payout_with_pushes(
         p_win, p_push, sigma, 2, boost=boosts_leg, payout_curve=curve, rng=rng_naive
     )
     assert ev_naive != pytest.approx(ev_scalar), "naive boosts_leg (dropping M) should not match"
+
+
+def test_flex_loss_tier_multiplies_the_largest_remaining_multipliers() -> None:
+    """Underdog quotes a k-loss Flex tier on the n - k largest pick multipliers, whichever
+    picks lose (docs/underdog_api.md §6.8: picks at 0.87 / 1.16 / 0.74 quote the 1-loss
+    tier at 1.09 x 0.87 x 1.16).
+
+    Here the 1.16 pick is the one that loses, so the tier differs from both the product of
+    all three multipliers and the product of the two picks that hit.
+    """
+    boost = np.array([0.87, 1.16, 0.74])
+    curve = {3: [3.25, 1.09]}
+
+    ev_one_loss = expected_payout_with_pushes(
+        np.array([1.0, 0.0, 1.0]),
+        np.zeros(3),
+        np.eye(3),
+        3,
+        boost=boost,
+        payout_curve=curve,
+        rng=np.random.default_rng(21),
+    )
+    assert ev_one_loss == pytest.approx(1.09 * 0.87 * 1.16)
+
+    ev_all_hit = expected_payout_with_pushes(
+        np.ones(3),
+        np.zeros(3),
+        np.eye(3),
+        3,
+        boost=boost,
+        payout_curve=curve,
+        rng=np.random.default_rng(21),
+    )
+    assert ev_all_hit == pytest.approx(3.25 * 0.87 * 1.16 * 0.74)
+
+
+def test_leg_boost_payout_applies_the_pair_modifier_on_the_monte_carlo_path() -> None:
+    """Beam search hands the Monte-Carlo scorer the legs' own multipliers and M's pairwise
+    product apart, so a taxed stack prices at its modifier product times the untaxed price.
+
+    Three legs at multiplier 1.0, so the fused boost is the pair product alone: three pairs
+    at 0.8. The Flex curve routes to the unseeded 50k-draw sampler, hence the loose
+    tolerance against the 0.8 ** 3 = 0.512 ratio.
+    """
+    g = _beam_inputs()["g"]
+    bet_id = (0, 1, 2)
+    prices = {
+        boost: _leg_boost_payout(
+            g,
+            bet_id,
+            3,
+            boost,
+            3.25 * boost,
+            g.p_model[np.ix_(bet_id)],
+            np.eye(3),
+            {3: [3.25, 1.09]},
+            3.25,
+            None,
+        )
+        for boost in (1.0, 0.8**3)
+    }
+    assert prices[0.8**3] == pytest.approx(0.8**3 * prices[1.0], rel=0.03)
 
 
 # --- Sleeper 2-leg full-refund special case (§4) ----------------------------
@@ -518,6 +639,26 @@ def test_sleeper_three_leg_push_drops_and_reprices_not_full_refund() -> None:
         full_refund_below_size=2,
     )
     assert ev == pytest.approx(5.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("full_refund_below_size", [None, 2])
+def test_refund_returns_the_stake_not_the_surviving_pick_multiplier(
+    full_refund_below_size,
+) -> None:
+    """A 2-pick whose other leg pushed is refunded at 1.0x on both platforms: the winning
+    survivor's 1.8x multiplier and the pair modifier belong to a payout, not to a refund."""
+    ev = expected_payout_with_pushes(
+        np.array([0.0, 1.0]),
+        np.array([1.0, 0.0]),
+        np.eye(2),
+        2,
+        boost=np.array([1.5, 1.8]),
+        payout_curve={2: [3.5, 0.0]},
+        rng=np.random.default_rng(17),
+        full_refund_below_size=full_refund_below_size,
+        pair_modifier=0.9,
+    )
+    assert ev == pytest.approx(1.0, abs=1e-9)
 
 
 # --- poisson_binomial_pmf (§4b-i) -------------------------------------------

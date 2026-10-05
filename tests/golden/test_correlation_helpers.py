@@ -30,6 +30,7 @@ so the correlation arithmetic is pinned on real values with no SciPy randomness.
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
+import json
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,7 @@ import pyarrow as pa
 import pytest
 
 from sportstradamus import data
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
@@ -119,8 +121,9 @@ def test_find_correlation_empty_slate_returns_column_stable_frames() -> None:
 # verbatim. Books P = clip(Model P - 0.08, .05, .95) (book-prob proxy; snapshot
 # drops it), K = round(Model P, 4) (Kelly sort key; snapshot drops it),
 # Player position = first-seen-player index mod 5 + 1 → positions["NBA"]
-# (snapshot drops it). Processed as Underdog (Boost is /UNDERDOG_BOOST_BASELINE
-# normalized, so displayed multipliers are the real boost ÷ 1.78).
+# (snapshot drops it). Processed as Underdog, which divides UNDERDOG_BOOST_BASELINE out
+# of Boost: the frame carries boost ÷ 1.78 x the baseline, so the multipliers searched
+# stay the real boost ÷ 1.78 the snapshot below was pinned at, whatever the baseline is.
 def _nba_offers() -> list[dict]:
     raw = [
         # team, opp, player, market, line, boost, bet, model_p, model, books
@@ -159,7 +162,7 @@ def _nba_offers() -> list[dict]:
             "Player": player,
             "Market": market,
             "Line": line,
-            "Boost": boost,
+            "Boost": boost / 1.78 * UNDERDOG_BOOST_BASELINE,
             "Bet": bet,
             "Win Prob": mp,
             "Market Prob": round(min(max(mp - 0.08, 0.05), 0.95), 4),
@@ -204,7 +207,7 @@ def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
 
 # Characterization snapshot of the offer_df correlation annotations under the synthetic c_map
 # above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
-# the c_map is fixed — 8/12 legs annotate, with the Corr Same and Corr Opp columns both
+# the c_map is fixed — 10/12 legs annotate, with the Corr Same and Corr Opp columns both
 # exercised. Each partner is the structured record ``_annotate_correlation_columns`` writes
 # (player/market/bet/line/mult) — ``leg_schema.leg_label`` renders it to a string on demand,
 # so the test pins the structured fields directly rather than a formatted label.
@@ -246,18 +249,46 @@ _EXPECTED_OFFER_CORR = [
             {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
         ],
         [
+            {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.08},
             {
                 "player": "Mitchell Robinson",
                 "market": "REB",
                 "bet": "Over",
                 "line": 5.5,
                 "mult": 1.06,
-            }
+            },
         ],
     ),
     ("Jalen Brunson", "AST", [], []),
-    ("Jalen Brunson", "FTM", [], []),
-    ("Jose Alvarado", "PTS", [], []),
+    (
+        "Jalen Brunson",
+        "FTM",
+        [],
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.04,
+            }
+        ],
+    ),
+    (
+        "Jose Alvarado",
+        "PTS",
+        [],
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.09,
+            },
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.08},
+        ],
+    ),
     ("Jose Alvarado", "STL", [], []),
     (
         "Luke Kornet",
@@ -333,13 +364,15 @@ _EXPECTED_OFFER_CORR = [
         "BLST",
         [{"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03}],
         [
+            {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.09},
+            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.04},
             {
                 "player": "Mitchell Robinson",
                 "market": "PRA",
                 "bet": "Over",
                 "line": 9.5,
                 "mult": 1.03,
-            }
+            },
         ],
     ),
 ]
@@ -396,7 +429,7 @@ def _wnba_offers() -> list[dict]:
             "Player": player,
             "Market": market,
             "Line": line,
-            "Boost": 1.78,  # == UNDERDOG_BOOST_BASELINE → post-normalization 1.0
+            "Boost": UNDERDOG_BOOST_BASELINE,  # post-normalization 1.0
             "Bet": "Over",
             "Win Prob": mp,
             "Market Prob": round(mp - 0.10, 4),
@@ -585,7 +618,7 @@ def _mlb_offers() -> list[dict]:
             "Player": player,
             "Market": market,
             "Line": line,
-            "Boost": 1.78,  # == UNDERDOG_BOOST_BASELINE -> post-normalization 1.0
+            "Boost": UNDERDOG_BOOST_BASELINE,  # post-normalization 1.0
             "Bet": "Over",
             "Win Prob": 0.81,
             "Market Prob": 0.71,
@@ -804,6 +837,24 @@ def test_leg_pair_corr_boost_applies_banned_modifier() -> None:
     )
     assert boost_same == pytest.approx(2.0)
     assert boost_opp == pytest.approx(0.5)
+
+
+def test_committed_underdog_pair_modifiers_never_exceed_one() -> None:
+    """Underdog pays table x pick multipliers x m with m <= 1 (docs/underdog_api.md §6.8),
+    so a value above 1.0 is a bonus the app does not pay.
+
+    Reads the committed file, not ``helpers.banned``: that one also carries the runtime
+    overlay of owner-captured quotes, which stay authoritative.
+    """
+    combos = json.loads((pkg_resources.files(data) / "config" / "banned_combos.json").read_text())
+    above_one = {
+        f"{league} {relation} {pair}": modifiers
+        for league, relations in combos["Underdog"].items()
+        for relation, pairs in relations.items()
+        for pair, modifiers in pairs.items()
+        if max(modifiers) > 1.0
+    }
+    assert not above_one
 
 
 def _matrix_game() -> tuple[pd.DataFrame, dict]:

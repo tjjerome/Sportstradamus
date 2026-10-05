@@ -4,43 +4,43 @@
             "team": {
                 "QB.completions & WR.receptions": [
                     0.73,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & WR.receiving yards": [
                     0.83,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & WR.yards": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.completions & WR.targets": [
                     0.74,
-                    1.35
+                    1.0
                 ],
                 "QB.completions & WR.fantasy points underdog": [
                     0.83,
-                    1.21
+                    1.0
                 ],
                 "QB.completions & TE.receptions": [
                     0.73,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & TE.receiving yards": [
                     0.78,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & TE.targets": [
                     0.74,
-                    1.35
+                    1.0
                 ],
                 "QB.completions & RB.receptions": [
                     0.73,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & RB.receiving yards": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "QB.completions & RB.first downs": [
                     0.00,
@@ -48,131 +48,131 @@
                 ],
                 "QB.passing yards & WR.receptions": [
                     0.82,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & WR.receiving yards": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & WR.yards": [
                     0.79,
-                    1.27
+                    1.0
                 ],
                 "QB.passing yards & WR.targets": [
                     0.8,
-                    1.25
+                    1.0
                 ],
                 "QB.passing yards & WR.fantasy points underdog": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.passing yards & TE.receptions": [
                     0.82,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & TE.receiving yards": [
                     0.77,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & TE.targets": [
                     0.8,
-                    1.25
+                    1.0
                 ],
                 "QB.passing yards & TE.fantasy points underdog": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.passing yards & RB.receptions": [
                     0.82,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & RB.carries": [
                     0.94,
-                    1.02
+                    1.0
                 ],
                 "QB.passing yards & RB.receiving yards": [
                     0.83,
-                    1.05
+                    1.0
                 ],
                 "QB.passing yards & RB.rushing yards": [
-                    1.03,
+                    1.0,
                     0.95
                 ],
                 "QB.passing yards & RB.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.attempts & WR.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & WR.receiving yards": [
                     0.84,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & WR.yards": [
                     0.87,
-                    1.14
+                    1.0
                 ],
                 "QB.attempts & WR.targets": [
                     0.66,
-                    1.2
+                    1.0
                 ],
                 "QB.attempts & WR.fantasy points underdog": [
                     0.88,
-                    1.13
+                    1.0
                 ],
                 "QB.attempts & TE.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & TE.receiving yards": [
                     0.81,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & TE.targets": [
                     0.66,
-                    1.2
+                    1.0
                 ],
                 "QB.attempts & RB.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & RB.carries": [
-                    1.15,
+                    1.0,
                     0.87
                 ],
                 "QB.attempts & RB.receiving yards": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "QB.attempts & RB.rushing yards": [
-                    1.27,
+                    1.0,
                     0.77
                 ],
                 "QB.attempts & RB.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.interceptions & WR.targets": [
                     0.76,
-                    1.2
+                    1.0
                 ],
                 "QB.passing first downs & WR.yards": [
                     0.82,
-                    1.22
+                    1.0
                 ],
                 "QB.passing first downs & WR.targets": [
                     0.72,
-                    1.39
+                    1.0
                 ],
                 "QB.passing first downs & WR.fantasy points underdog": [
                     0.89,
-                    1.12
+                    1.0
                 ],
                 "QB.passing first downs & TE.fantasy points underdog": [
                     0.89,
-                    1.12
+                    1.0
                 ],
                 "QB.passing first downs & RB.first downs": [
                     0.00,
@@ -180,159 +180,159 @@
                 ],
                 "QB.completion percentage & WR.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & WR.receiving yards": [
                     0.83,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & TE.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & TE.receiving yards": [
                     0.78,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & RB.receptions": [
                     0.79,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & RB.receiving yards": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "QB.completion percentage & RB.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.qb yards & WR.receptions": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "QB.qb yards & WR.receiving yards": [
                     0.83,
-                    1.05
+                    1.0
                 ],
                 "QB.qb yards & WR.yards": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "QB.qb yards & WR.targets": [
                     0.81,
-                    1.09
+                    1.0
                 ],
                 "QB.qb yards & WR.fantasy points underdog": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.qb yards & TE.receptions": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "QB.qb yards & TE.receiving yards": [
                     0.83,
-                    1.05
+                    1.0
                 ],
                 "QB.qb yards & TE.targets": [
                     0.81,
-                    1.23
+                    1.0
                 ],
                 "QB.qb yards & TE.fantasy points underdog": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.qb yards & RB.receptions": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "QB.qb yards & RB.receiving yards": [
                     0.71,
-                    1.1
+                    1.0
                 ],
                 "QB.qb yards & RB.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.receptions": [
                     0.88,
-                    1.05
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.receiving yards": [
                     0.86,
-                    1.05
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.yards": [
                     0.86,
-                    1.16
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.targets": [
                     0.91,
-                    1.09
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.fantasy points underdog": [
                     0.81,
-                    1.23
+                    1.0
                 ],
                 "QB.fantasy points underdog & TE.receptions": [
                     0.88,
-                    1.05
+                    1.0
                 ],
                 "QB.fantasy points underdog & TE.receiving yards": [
                     0.86,
-                    1.05
+                    1.0
                 ],
                 "QB.fantasy points underdog & TE.targets": [
                     0.91,
-                    1.09
+                    1.0
                 ],
                 "QB.fantasy points underdog & TE.fantasy points underdog": [
                     0.81,
-                    1.23
+                    1.0
                 ],
                 "QB.fantasy points underdog & RB.fantasy points underdog": [
                     0.9,
-                    1.11
+                    1.0
                 ],
                 "QB.fantasy points underdog & RB.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "RB.carries & RB.carries": [
                     0.94,
-                    1.05
+                    1.0
                 ],
                 "RB.carries & RB.rushing yards": [
                     0.91,
-                    1.07
+                    1.0
                 ],
                 "RB.rushing yards & RB.rushing yards": [
                     0.9,
-                    1.07
+                    1.0
                 ],
                 "RB.rushing yards & RB.yards": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "QB.passing yards & WR.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.attempts & WR.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.completion percentage & WR.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.qb yards & WR.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.fantasy points underdog & WR.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.completions & WR.first downs": [
                     0.00,
@@ -340,23 +340,23 @@
                 ],
                 "QB.passing yards & TE.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.attempts & TE.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.completion percentage & TE.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.qb yards & TE.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.fantasy points underdog & TE.first downs": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "QB.completions & TE.first downs": [
                     0.00,
@@ -437,43 +437,43 @@
             },
             "opponent": {
                 "QB.passing yards & QB.passing yards": [
-                    0.9,
-                    1.1
+                    1.0,
+                    1.0
                 ],
                 "QB.carries & RB.carries": [
-                    1.06,
+                    1.0,
                     0.94
                 ],
                 "QB.passing yards & RB.carries": [
-                    1.04,
+                    1.0,
                     0.92
                 ],
                 "QB.passing yards & RB.rushing yards": [
-                    1.02,
+                    1.0,
                     0.97
                 ],
                 "QB.attempts & RB.yards": [
                     0.92,
-                    1.05
+                    1.0
                 ],
                 "RB.carries & RB.carries": [
-                    1.16,
+                    1.0,
                     0.86
                 ],
                 "RB.carries & RB.rushing yards": [
-                    1.06,
+                    1.0,
                     0.93
                 ],
                 "RB.carries & RB.yards": [
-                    1.08,
+                    1.0,
                     0.90
                 ],
                 "RB.rushing yards & RB.rushing yards": [
-                    1.03,
+                    1.0,
                     0.95
                 ],
                 "RB.yards & RB.yards": [
-                    1.06,
+                    1.0,
                     0.89
                 ]
             }
@@ -490,287 +490,287 @@
             "team": {
                 "G.goalie fantasy points underdog & D.points": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & D.goals": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & D.assists": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & D.powerPlayPoints": [
                     0.76,
-                    1.12
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & D.skater fantasy points underdog": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & C.points": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & C.goals": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & C.assists": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & C.powerPlayPoints": [
                     0.89,
-                    1.03
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & C.skater fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & W.points": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & W.goals": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & W.assists": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & W.powerPlayPoints": [
                     0.89,
-                    1.03
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & W.skater fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "D.points & D.points": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "D.points & D.goals": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "D.points & D.assists": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "D.points & D.powerPlayPoints": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "D.points & D.skater fantasy points underdog": [
                     0.79,
-                    1.27
+                    1.0
                 ],
                 "D.points & C.points": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "D.points & C.goals": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "D.points & C.assists": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "D.points & C.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "D.points & C.skater fantasy points underdog": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.points & G.goalie fantasy points underdog": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "D.points & W.points": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "D.points & W.goals": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "D.points & W.assists": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "D.points & W.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "D.points & W.skater fantasy points underdog": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & D.points": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "D.goals & D.powerPlayPoints": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "D.goals & C.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & C.assists": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & C.powerPlayPoints": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & G.goalie fantasy points underdog": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "D.goals & W.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & W.assists": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.goals & W.powerPlayPoints": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.assists & D.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "D.assists & D.assists": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "D.assists & D.powerPlayPoints": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "D.assists & D.skater fantasy points underdog": [
                     0.84,
-                    1.19
+                    1.0
                 ],
                 "D.assists & C.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.assists & C.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "D.assists & C.assists": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "D.assists & C.powerPlayPoints": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.assists & C.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "D.assists & G.goalie fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.assists & W.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.assists & W.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "D.assists & W.assists": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "D.assists & W.powerPlayPoints": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.assists & W.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "D.powerPlayPoints & D.points": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "D.powerPlayPoints & D.goals": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "D.powerPlayPoints & D.assists": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "D.powerPlayPoints & D.skater fantasy points underdog": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "D.powerPlayPoints & C.points": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "D.powerPlayPoints & C.goals": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "D.powerPlayPoints & C.assists": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "D.powerPlayPoints & C.skater fantasy points underdog": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "D.powerPlayPoints & G.goalie fantasy points underdog": [
                     0.76,
-                    1.12
+                    1.0
                 ],
                 "D.powerPlayPoints & W.points": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "D.powerPlayPoints & W.goals": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "D.powerPlayPoints & W.assists": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "D.powerPlayPoints & W.skater fantasy points underdog": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "D.skater fantasy points underdog & D.points": [
                     0.79,
-                    1.27
+                    1.0
                 ],
                 "D.skater fantasy points underdog & D.assists": [
                     0.84,
-                    1.19
+                    1.0
                 ],
                 "D.skater fantasy points underdog & D.powerPlayPoints": [
                     0.85,
-                    1.18
+                    1.0
                 ],
                 "D.skater fantasy points underdog & D.skater fantasy points underdog": [
                     1,
@@ -778,631 +778,631 @@
                 ],
                 "D.skater fantasy points underdog & C.points": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & C.goals": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & C.assists": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & C.powerPlayPoints": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & C.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "D.skater fantasy points underdog & G.goalie fantasy points underdog": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "D.skater fantasy points underdog & W.points": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & W.goals": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & W.assists": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & W.powerPlayPoints": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "D.skater fantasy points underdog & W.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.points & C.points": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "C.points & C.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.points & C.assists": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.points & C.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.points & C.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.points & G.goalie fantasy points underdog": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "C.points & D.points": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "C.points & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.points & D.assists": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.points & D.powerPlayPoints": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "C.points & D.skater fantasy points underdog": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "C.points & W.points": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "C.points & W.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.points & W.assists": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.points & W.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.points & W.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.goals & C.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.goals & C.assists": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "C.goals & C.powerPlayPoints": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "C.goals & C.skater fantasy points underdog": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.goals & G.goalie fantasy points underdog": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "C.goals & D.points": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "C.goals & D.assists": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.goals & D.powerPlayPoints": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "C.goals & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "C.goals & W.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.goals & W.assists": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "C.goals & W.powerPlayPoints": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "C.goals & W.skater fantasy points underdog": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.assists & C.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.assists & C.goals": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "C.assists & C.assists": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "C.assists & C.powerPlayPoints": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.assists & C.skater fantasy points underdog": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "C.assists & G.goalie fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "C.assists & D.points": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.assists & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.assists & D.assists": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "C.assists & D.powerPlayPoints": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "C.assists & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "C.assists & W.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.assists & W.goals": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "C.assists & W.assists": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "C.assists & W.powerPlayPoints": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.assists & W.skater fantasy points underdog": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "C.powerPlayPoints & C.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.powerPlayPoints & C.goals": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "C.powerPlayPoints & C.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.powerPlayPoints & C.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.powerPlayPoints & G.goalie fantasy points underdog": [
                     0.89,
-                    1.03
+                    1.0
                 ],
                 "C.powerPlayPoints & D.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.powerPlayPoints & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.powerPlayPoints & D.assists": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "C.powerPlayPoints & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "C.powerPlayPoints & W.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.powerPlayPoints & W.goals": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "C.powerPlayPoints & W.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.powerPlayPoints & W.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.skater fantasy points underdog & C.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.skater fantasy points underdog & C.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.skater fantasy points underdog & C.assists": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "C.skater fantasy points underdog & C.powerPlayPoints": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.skater fantasy points underdog & C.skater fantasy points underdog": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "C.skater fantasy points underdog & G.goalie fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "C.skater fantasy points underdog & D.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "C.skater fantasy points underdog & D.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.skater fantasy points underdog & D.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "C.skater fantasy points underdog & D.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "C.skater fantasy points underdog & W.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.skater fantasy points underdog & W.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.skater fantasy points underdog & W.assists": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "C.skater fantasy points underdog & W.powerPlayPoints": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "C.skater fantasy points underdog & W.skater fantasy points underdog": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "W.points & C.points": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "W.points & C.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.points & C.assists": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.points & C.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.points & C.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.points & G.goalie fantasy points underdog": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "W.points & D.points": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "W.points & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.points & D.assists": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.points & D.powerPlayPoints": [
                     0.76,
-                    1.14
+                    1.0
                 ],
                 "W.points & D.skater fantasy points underdog": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "W.points & W.points": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "W.points & W.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.points & W.assists": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.points & W.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.points & W.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.goals & C.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.goals & C.assists": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "W.goals & C.powerPlayPoints": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "W.goals & C.skater fantasy points underdog": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.goals & G.goalie fantasy points underdog": [
                     0.89,
-                    1.06
+                    1.0
                 ],
                 "W.goals & D.points": [
                     0.87,
-                    1.07
+                    1.0
                 ],
                 "W.goals & D.assists": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.goals & D.powerPlayPoints": [
                     0.91,
-                    1.04
+                    1.0
                 ],
                 "W.goals & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "W.goals & W.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.goals & W.assists": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "W.goals & W.powerPlayPoints": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "W.goals & W.skater fantasy points underdog": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.assists & C.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.assists & C.goals": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "W.assists & C.assists": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "W.assists & C.powerPlayPoints": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.assists & C.skater fantasy points underdog": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "W.assists & G.goalie fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "W.assists & D.points": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.assists & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.assists & D.assists": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "W.assists & D.powerPlayPoints": [
                     0.89,
-                    1.05
+                    1.0
                 ],
                 "W.assists & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "W.assists & W.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.assists & W.goals": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "W.assists & W.assists": [
                     0.88,
-                    1.07
+                    1.0
                 ],
                 "W.assists & W.powerPlayPoints": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.assists & W.skater fantasy points underdog": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "W.powerPlayPoints & C.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.powerPlayPoints & C.goals": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "W.powerPlayPoints & C.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.powerPlayPoints & C.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.powerPlayPoints & G.goalie fantasy points underdog": [
                     0.89,
-                    1.03
+                    1.0
                 ],
                 "W.powerPlayPoints & D.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.powerPlayPoints & D.goals": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.powerPlayPoints & D.assists": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "W.powerPlayPoints & D.skater fantasy points underdog": [
                     0.9,
-                    1.06
+                    1.0
                 ],
                 "W.powerPlayPoints & W.points": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.powerPlayPoints & W.goals": [
                     0.92,
-                    1.04
+                    1.0
                 ],
                 "W.powerPlayPoints & W.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.powerPlayPoints & W.skater fantasy points underdog": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.skater fantasy points underdog & C.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.skater fantasy points underdog & C.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.skater fantasy points underdog & C.assists": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "W.skater fantasy points underdog & C.powerPlayPoints": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.skater fantasy points underdog & C.skater fantasy points underdog": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "W.skater fantasy points underdog & G.goalie fantasy points underdog": [
                     0.89,
-                    1.07
+                    1.0
                 ],
                 "W.skater fantasy points underdog & D.points": [
                     0.86,
-                    1.09
+                    1.0
                 ],
                 "W.skater fantasy points underdog & D.assists": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.skater fantasy points underdog & D.powerPlayPoints": [
                     0.85,
-                    1.09
+                    1.0
                 ],
                 "W.skater fantasy points underdog & D.skater fantasy points underdog": [
                     0.88,
-                    1.08
+                    1.0
                 ],
                 "W.skater fantasy points underdog & W.points": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.skater fantasy points underdog & W.goals": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.skater fantasy points underdog & W.assists": [
                     0.84,
-                    1.11
+                    1.0
                 ],
                 "W.skater fantasy points underdog & W.powerPlayPoints": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "W.skater fantasy points underdog & W.skater fantasy points underdog": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "C.powerPlayPoints & C.powerPlayPoints": [
                     0,
@@ -1432,291 +1432,291 @@
             "opponent": {
                 "G.goalsAgainst & G.goalie fantasy points underdog": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "G.goalsAgainst & D.points": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "G.goalsAgainst & D.goals": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "G.goalsAgainst & D.assists": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "G.goalsAgainst & D.powerPlayPoints": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "G.goalsAgainst & D.skater fantasy points underdog": [
                     0.82,
-                    1.13
+                    1.0
                 ],
                 "G.goalsAgainst & C.points": [
                     0.77,
-                    1.18
+                    1.0
                 ],
                 "G.goalsAgainst & C.goals": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "G.goalsAgainst & C.assists": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "G.goalsAgainst & C.powerPlayPoints": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "G.goalsAgainst & C.skater fantasy points underdog": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "G.goalsAgainst & W.points": [
                     0.77,
-                    1.18
+                    1.0
                 ],
                 "G.goalsAgainst & W.goals": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "G.goalsAgainst & W.assists": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "G.goalsAgainst & W.powerPlayPoints": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "G.goalsAgainst & W.skater fantasy points underdog": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "G.saves & G.saves": [
-                    1.05,
+                    1.0,
                     0.91
                 ],
                 "G.saves & G.goalie fantasy points underdog": [
-                    1.12,
+                    1.0,
                     0.83
                 ],
                 "G.saves & D.shots": [
                     0.78,
-                    1.1
+                    1.0
                 ],
                 "G.saves & C.shots": [
                     0.78,
-                    1.1
+                    1.0
                 ],
                 "G.saves & W.shots": [
                     0.78,
-                    1.1
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & G.goalsAgainst": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "G.goalie fantasy points underdog & G.saves": [
-                    1.12,
+                    1.0,
                     0.83
                 ],
                 "G.goalie fantasy points underdog & G.goalie fantasy points underdog": [
-                    1.31,
+                    1.0,
                     0.67
                 ],
                 "G.goalie fantasy points underdog & D.points": [
-                    1.16,
+                    1.0,
                     0.76
                 ],
                 "G.goalie fantasy points underdog & D.goals": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "G.goalie fantasy points underdog & D.assists": [
-                    1.19,
+                    1.0,
                     0.77
                 ],
                 "G.goalie fantasy points underdog & D.powerPlayPoints": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "G.goalie fantasy points underdog & D.skater fantasy points underdog": [
-                    1.09,
+                    1.0,
                     0.86
                 ],
                 "G.goalie fantasy points underdog & C.points": [
-                    1.19,
+                    1.0,
                     0.76
                 ],
                 "G.goalie fantasy points underdog & C.goals": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "G.goalie fantasy points underdog & C.assists": [
-                    1.16,
+                    1.0,
                     0.79
                 ],
                 "G.goalie fantasy points underdog & C.powerPlayPoints": [
-                    1.07,
+                    1.0,
                     0.88
                 ],
                 "G.goalie fantasy points underdog & C.skater fantasy points underdog": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "G.goalie fantasy points underdog & W.points": [
-                    1.19,
+                    1.0,
                     0.76
                 ],
                 "G.goalie fantasy points underdog & W.goals": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "G.goalie fantasy points underdog & W.assists": [
-                    1.16,
+                    1.0,
                     0.79
                 ],
                 "G.goalie fantasy points underdog & W.powerPlayPoints": [
-                    1.07,
+                    1.0,
                     0.88
                 ],
                 "G.goalie fantasy points underdog & W.skater fantasy points underdog": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "D.points & G.goalsAgainst": [
                     0.79,
-                    1.16
+                    1.0
                 ],
                 "D.points & G.goalie fantasy points underdog": [
-                    1.16,
+                    1.0,
                     0.76
                 ],
                 "D.goals & G.goalsAgainst": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "D.goals & G.goalie fantasy points underdog": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "D.assists & G.goalsAgainst": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "D.assists & G.goalie fantasy points underdog": [
-                    1.19,
+                    1.0,
                     0.77
                 ],
                 "D.powerPlayPoints & G.goalsAgainst": [
                     0.83,
-                    1.12
+                    1.0
                 ],
                 "D.powerPlayPoints & G.goalie fantasy points underdog": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "D.skater fantasy points underdog & G.goalsAgainst": [
                     0.82,
-                    1.13
+                    1.0
                 ],
                 "D.skater fantasy points underdog & G.goalie fantasy points underdog": [
-                    1.09,
+                    1.0,
                     0.86
                 ],
                 "C.points & G.goalsAgainst": [
                     0.77,
-                    1.18
+                    1.0
                 ],
                 "C.points & G.goalie fantasy points underdog": [
-                    1.19,
+                    1.0,
                     0.76
                 ],
                 "C.goals & G.goalsAgainst": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "C.goals & G.goalie fantasy points underdog": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "C.assists & G.goalsAgainst": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "C.assists & G.goalie fantasy points underdog": [
-                    1.16,
+                    1.0,
                     0.79
                 ],
                 "C.powerPlayPoints & G.goalsAgainst": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "C.powerPlayPoints & G.goalie fantasy points underdog": [
-                    1.07,
+                    1.0,
                     0.88
                 ],
                 "C.skater fantasy points underdog & G.goalsAgainst": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "C.skater fantasy points underdog & G.goalie fantasy points underdog": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "D.shots & G.saves": [
                     0.78,
-                    1.1
+                    1.0
                 ],
                 "C.shots & G.saves": [
                     0.78,
-                    1.1
+                    1.0
                 ],
                 "W.points & G.goalsAgainst": [
                     0.77,
-                    1.18
+                    1.0
                 ],
                 "W.points & G.goalie fantasy points underdog": [
-                    1.19,
+                    1.0,
                     0.76
                 ],
                 "W.goals & G.goalsAgainst": [
                     0.81,
-                    1.14
+                    1.0
                 ],
                 "W.goals & G.goalie fantasy points underdog": [
-                    1.13,
+                    1.0,
                     0.81
                 ],
                 "W.assists & G.goalsAgainst": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "W.assists & G.goalie fantasy points underdog": [
-                    1.16,
+                    1.0,
                     0.79
                 ],
                 "W.powerPlayPoints & G.goalsAgainst": [
                     0.87,
-                    1.08
+                    1.0
                 ],
                 "W.powerPlayPoints & G.goalie fantasy points underdog": [
-                    1.07,
+                    1.0,
                     0.88
                 ],
                 "W.skater fantasy points underdog & G.goalsAgainst": [
                     0.78,
-                    1.17
+                    1.0
                 ],
                 "W.skater fantasy points underdog & G.goalie fantasy points underdog": [
-                    1.14,
+                    1.0,
                     0.81
                 ],
                 "W.shots & G.saves": [
                     0.78,
-                    1.1
+                    1.0
                 ]
             }
         },
@@ -1724,317 +1724,317 @@
             "team": {
                 "P.pitcher fantasy points underdog & B.hitter fantasy points underdog": [
                     0.93,
-                    1.02
+                    1.0
                 ],
                 "B.home runs & B.hitter fantasy points underdog": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.home runs & B.total bases": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.home runs & B.hits+runs+rbi": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.home runs & B.rbi": [
                     0.9,
-                    1.02
+                    1.0
                 ],
                 "B.home runs & B.runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.home runs & B.singles": [
                     0.95,
-                    1.02
+                    1.0
                 ],
                 "B.home runs & B.doubles": [
                     0.95,
-                    1.02
+                    1.0
                 ],
                 "B.home runs & B.hits": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.home runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.hitter fantasy points underdog": [
                     0.82,
-                    1.07
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.total bases": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.hits+runs+rbi": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.rbi": [
                     0.75,
-                    1.2
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & B.runs": [
                     0.79,
-                    1.15
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & P.pitcher fantasy points underdog": [
                     0.93,
-                    1.02
+                    1.0
                 ],
                 "B.total bases & B.home runs": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.total bases & B.hitter fantasy points underdog": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.total bases & B.total bases": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "B.total bases & B.hits+runs+rbi": [
                     0.88,
-                    1.05
+                    1.0
                 ],
                 "B.total bases & B.rbi": [
                     0.81,
-                    1.1
+                    1.0
                 ],
                 "B.total bases & B.runs": [
                     0.84,
-                    1.08
+                    1.0
                 ],
                 "B.total bases & B.hits": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.home runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.hitter fantasy points underdog": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.total bases": [
                     0.88,
-                    1.05
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.hits+runs+rbi": [
                     0.81,
-                    1.1
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.rbi": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.singles": [
                     0.91,
-                    1.03
+                    1.0
                 ],
                 "B.hits+runs+rbi & B.hits": [
                     0.87,
-                    1.06
+                    1.0
                 ],
                 "B.hits & B.home runs": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.hits & B.total bases": [
                     0.9,
-                    1.05
+                    1.0
                 ],
                 "B.hits & B.hits+runs+rbi": [
                     0.87,
-                    1.06
+                    1.0
                 ],
                 "B.hits & B.hits": [
                     0.87,
-                    1.06
+                    1.0
                 ],
                 "B.rbi & B.home runs": [
                     0.9,
-                    1.02
+                    1.0
                 ],
                 "B.rbi & B.hitter fantasy points underdog": [
                     0.75,
-                    1.2
+                    1.0
                 ],
                 "B.rbi & B.total bases": [
                     0.81,
-                    1.1
+                    1.0
                 ],
                 "B.rbi & B.hits+runs+rbi": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.rbi & B.runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.runs & B.home runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.runs & B.hitter fantasy points underdog": [
                     0.79,
-                    1.15
+                    1.0
                 ],
                 "B.runs & B.total bases": [
                     0.84,
-                    1.08
+                    1.0
                 ],
                 "B.runs & B.hits+runs+rbi": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.runs & B.rbi": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.runs & B.runs": [
                     0.82,
-                    1.1
+                    1.0
                 ],
                 "B.singles & B.home runs": [
                     0.95,
-                    1.02
+                    1.0
                 ],
                 "B.singles & B.hits+runs+rbi": [
                     0.91,
-                    1.03
+                    1.0
                 ],
                 "B.doubles & B.home runs": [
                     0.95,
-                    1.02
+                    1.0
                 ]
             },
             "opponent": {
                 "P.pitcher strikeouts & B.home runs": [
-                    1.05,
+                    1.0,
                     0.85
                 ],
                 "P.pitcher strikeouts & B.hitter fantasy points underdog": [
-                    1.04,
+                    1.0,
                     0.9
                 ],
                 "P.pitcher strikeouts & B.hits+runs+rbi": [
-                    1.06,
+                    1.0,
                     0.86
                 ],
                 "P.pitcher strikeouts & B.hits": [
-                    1.03,
+                    1.0,
                     0.9
                 ],
                 "P.pitcher strikeouts & B.runs": [
-                    1.03,
+                    1.0,
                     0.91
                 ],
                 "P.pitcher strikeouts & B.batter strikeouts": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "P.pitcher fantasy points underdog & B.home runs": [
-                    1.1,
+                    1.0,
                     0.77
                 ],
                 "P.pitcher fantasy points underdog & B.hitter fantasy points underdog": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "P.pitcher fantasy points underdog & B.total bases": [
-                    1.08,
+                    1.0,
                     0.85
                 ],
                 "P.pitcher fantasy points underdog & B.hits+runs+rbi": [
-                    1.2,
+                    1.0,
                     0.76
                 ],
                 "P.pitcher fantasy points underdog & B.rbi": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "P.pitcher fantasy points underdog & B.runs": [
-                    1.2,
+                    1.0,
                     0.76
                 ],
                 "P.pitcher fantasy points underdog & B.singles": [
-                    1.06,
+                    1.0,
                     0.87
                 ],
                 "P.pitcher fantasy points underdog & B.doubles": [
-                    1.05,
+                    1.0,
                     0.87
                 ],
                 "P.pitcher fantasy points underdog & P.pitcher fantasy points underdog": [
-                    1.06,
+                    1.0,
                     0.87
                 ],
                 "P.runs allowed & B.hitter fantasy points underdog": [
                     0.78,
-                    1.15
+                    1.0
                 ],
                 "P.runs allowed & B.total bases": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "P.runs allowed & B.singles": [
                     0.9,
-                    1.04
+                    1.0
                 ],
                 "P.runs allowed & B.doubles": [
                     0.9,
-                    1.02
+                    1.0
                 ],
                 "P.hits allowed & B.home runs": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "P.hits allowed & B.hitter fantasy points underdog": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "P.hits allowed & B.total bases": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "P.hits allowed & B.hits+runs+rbi": [
                     0.77,
-                    1.2
+                    1.0
                 ],
                 "P.hits allowed & B.hits": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "P.hits allowed & B.runs": [
                     0.82,
-                    1.1
+                    1.0
                 ],
                 "P.hits allowed & B.singles": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "P.hits allowed & B.doubles": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "P.1st inning runs allowed & B.hits+runs+rbi": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "P.1st inning runs allowed & B.runs": [
                     0.75,
-                    1.05
+                    1.0
                 ],
                 "P.1st inning hits allowed & B.hitter fantasy points underdog": [
                     0.9,
@@ -2058,218 +2058,218 @@
                 ],
                 "P.pitching outs & P.pitching outs": [
                     0.9,
-                    1.04
+                    1.0
                 ],
                 "P.pitching outs & B.home runs": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "P.pitching outs & B.hitter fantasy points underdog": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "P.pitching outs & B.total bases": [
-                    1.05,
+                    1.0,
                     0.85
                 ],
                 "P.pitching outs & B.hits+runs+rbi": [
-                    1.1,
+                    1.0,
                     0.82
                 ],
                 "P.pitching outs & B.rbi": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "P.pitching outs & B.runs": [
-                    1.04,
+                    1.0,
                     0.89
                 ],
                 "P.pitching outs & B.walks": [
-                    1.1,
+                    1.0,
                     0.82
                 ],
                 "P.pitching outs & B.singles": [
-                    1.05,
+                    1.0,
                     0.88
                 ],
                 "P.pitching outs & B.doubles": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "P.walks allowed & B.hitter fantasy points underdog": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "B.home runs & P.pitcher strikeouts": [
-                    1.05,
+                    1.0,
                     0.85
                 ],
                 "B.home runs & P.pitcher fantasy points underdog": [
-                    1.1,
+                    1.0,
                     0.77
                 ],
                 "B.home runs & P.hits allowed": [
                     0.8,
-                    1.1
+                    1.0
                 ],
                 "B.home runs & P.pitching outs": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "B.hitter fantasy points underdog & P.pitcher strikeouts": [
-                    1.04,
+                    1.0,
                     0.9
                 ],
                 "B.hitter fantasy points underdog & P.pitcher fantasy points underdog": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "B.hitter fantasy points underdog & P.runs allowed": [
                     0.78,
-                    1.15
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & P.hits allowed": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "B.hitter fantasy points underdog & P.1st inning hits allowed": [
                     0.9,
                     1
                 ],
                 "B.hitter fantasy points underdog & P.pitching outs": [
-                    1.1,
+                    1.0,
                     0.8
                 ],
                 "B.hitter fantasy points underdog & P.walks allowed": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "B.total bases & P.pitcher fantasy points underdog": [
-                    1.08,
+                    1.0,
                     0.85
                 ],
                 "B.total bases & P.runs allowed": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "B.total bases & P.hits allowed": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "B.total bases & P.1st inning hits allowed": [
                     0.9,
                     1
                 ],
                 "B.total bases & P.pitching outs": [
-                    1.05,
+                    1.0,
                     0.85
                 ],
                 "B.hits+runs+rbi & P.pitcher strikeouts": [
-                    1.06,
+                    1.0,
                     0.86
                 ],
                 "B.hits+runs+rbi & P.pitcher fantasy points underdog": [
-                    1.2,
+                    1.0,
                     0.76
                 ],
                 "B.hits+runs+rbi & P.hits allowed": [
                     0.77,
-                    1.2
+                    1.0
                 ],
                 "B.hits+runs+rbi & P.1st inning runs allowed": [
                     0.85,
-                    1.05
+                    1.0
                 ],
                 "B.hits+runs+rbi & P.1st inning hits allowed": [
                     0.85,
                     1
                 ],
                 "B.hits+runs+rbi & P.pitching outs": [
-                    1.1,
+                    1.0,
                     0.82
                 ],
                 "B.hits & P.pitcher strikeouts": [
-                    1.03,
+                    1.0,
                     0.9
                 ],
                 "B.hits & P.hits allowed": [
                     0.85,
-                    1.1
+                    1.0
                 ],
                 "B.hits & P.1st inning hits allowed": [
                     0.85,
                     1
                 ],
                 "B.rbi & P.pitcher fantasy points underdog": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "B.rbi & P.pitching outs": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "B.runs & P.pitcher strikeouts": [
-                    1.03,
+                    1.0,
                     0.91
                 ],
                 "B.runs & P.pitcher fantasy points underdog": [
-                    1.2,
+                    1.0,
                     0.76
                 ],
                 "B.runs & P.hits allowed": [
                     0.82,
-                    1.1
+                    1.0
                 ],
                 "B.runs & P.1st inning runs allowed": [
                     0.75,
-                    1.05
+                    1.0
                 ],
                 "B.runs & P.pitching outs": [
-                    1.04,
+                    1.0,
                     0.89
                 ],
                 "B.singles & P.pitcher fantasy points underdog": [
-                    1.06,
+                    1.0,
                     0.87
                 ],
                 "B.singles & P.runs allowed": [
                     0.9,
-                    1.04
+                    1.0
                 ],
                 "B.singles & P.hits allowed": [
                     0.83,
-                    1.08
+                    1.0
                 ],
                 "B.singles & P.1st inning hits allowed": [
                     0.9,
                     1
                 ],
                 "B.singles & P.pitching outs": [
-                    1.05,
+                    1.0,
                     0.88
                 ],
                 "B.doubles & P.pitcher fantasy points underdog": [
-                    1.05,
+                    1.0,
                     0.87
                 ],
                 "B.doubles & P.runs allowed": [
                     0.9,
-                    1.02
+                    1.0
                 ],
                 "B.doubles & P.hits allowed": [
                     0.85,
-                    1.08
+                    1.0
                 ],
                 "B.doubles & P.pitching outs": [
-                    1.02,
+                    1.0,
                     0.9
                 ],
                 "B.batter strikeouts & P.pitcher strikeouts": [
                     0.86,
-                    1.06
+                    1.0
                 ],
                 "B.walks & P.pitching outs": [
-                    1.1,
+                    1.0,
                     0.82
                 ],
                 "P.runs allowed & B.runs": [

@@ -119,10 +119,11 @@ def score_slip(
 
     sig = psd_or_none(_block_diagonal_sig(legs, ctxs))
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
-    boost = float(
-        np.prod([float(leg["boost"]) for leg in legs]) * np.prod([m for _, _, m in pair_mods])
+    leg_boosts = np.array([float(leg["boost"]) for leg in legs])
+    pair_modifier = float(np.prod([m for _, _, m in pair_mods]))
+    payout = float(
+        np.clip(leg_boosts.prod() * pair_modifier * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
     )
-    payout = float(np.clip(boost * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
     push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
     full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
     model_ev = float(
@@ -131,11 +132,12 @@ def score_slip(
             push,
             sig,
             n,
-            boost,
+            leg_boosts,
             payout,
             full_payouts,
             base,
             full_refund_below_size=full_refund_below_size,
+            pair_modifier=pair_modifier,
         )
     )
     kelly_win = model_ev / payout if payout > 0 else 0.0
@@ -243,9 +245,9 @@ def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
 
     Both platforms read a real pooled schedule (Underdog Power/Flex, Sleeper
     Max/Flex, sportstradamus.prediction.payouts) — ``base`` is the per-size
-    multiplier ``score_slip``'s ``boost * base`` composition applies on top of.
-    Sizes above a platform's configured max (``SLEEPER_FLEX_CAP`` / Underdog's
-    payout-table max, both 6 today) silently return ``base=0.0``, which
+    multiplier ``score_slip`` scales by the legs' boosts and pair modifiers.
+    Sizes above a platform's configured max (``SLEEPER_FLEX_CAP`` /
+    ``UNDERDOG_FLEX_CAP``, both 6 today) silently return ``base=0.0``, which
     ``score_slip``'s early-return guard turns into a zero-payout/zero-EV score
     rather than an error — pre-existing, symmetric across both platforms.
     """

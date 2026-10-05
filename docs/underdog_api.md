@@ -465,18 +465,18 @@ multiplier inside a mixed slip), `checksum`.
 Quotes on 2026-09-10 for $5 slips of even-money (`payout_multiplier` 1.0) player props
 from different games **[P-32]**:
 
-| Picks | Power `odds.multiplier` | Flex `offerings` (`decimal` by losses; `max_losses` 1 up to 5 picks, 2 from 6) | `underdog_payouts.json` today (`power`; `flex`; `insurance`) |
-|---|---|---|---|
-| 2 | 3.5 | not offered (needs 3) | 3.0; —; 3 / 0 |
-| 3 | 6.5 | 0: 3.25 · 1: 1.09 | 6.0; 2.25 / 1.25; 6 / 0 |
-| 4 | 12.0 | 0: 7.2 · 1: 1.8 | 10.0; 5.0 / 1.5 / 0.4; 10 / 0 |
-| 5 | 20.0 | 0: 10.0 · 1: 2.5 | 20.0; 10 / 2.0 / 0.4 / 0.4; 10 / 2.5 |
-| 6 | 35.0 | 0: 25.0 · 1: 2.6 · 2: 0.25 | 25.0; 25 / 2.0 / 0.4 / 0.4 / 0.4; 25 / 2.6 / 0.25 |
-| 7 | 65.0 | 0: 40.0 · 1: 2.75 · 2: 0.5 | absent |
-| 8 | 120.0 | 0: 80.0 · 1: 3.0 · 2: 1.0 | absent |
+| Picks | Power `odds.multiplier` | Flex `offerings` (`decimal` by losses; `max_losses` 1 up to 5 picks, 2 from 6) |
+|---|---|---|
+| 2 | 3.5 | not offered (needs 3) |
+| 3 | 6.5 | 0: 3.25 · 1: 1.09 |
+| 4 | 12.0 | 0: 7.2 · 1: 1.8 |
+| 5 | 20.0 | 0: 10.0 · 1: 2.5 |
+| 6 | 35.0 | 0: 25.0 · 1: 2.6 · 2: 0.25 |
+| 7 | 65.0 | 0: 40.0 · 1: 2.75 · 2: 0.5 |
+| 8 | 120.0 | 0: 80.0 · 1: 3.0 · 2: 1.0 |
 
-The static file matches the live Flex only through its `insurance` rows for 5 and 6
-picks, is off everywhere else, and stops at 6 picks, so the quote, not the file, is the
+The owner re-confirmed this table in the app in October 2026 **[OWNER]**, and the static
+`underdog_payouts.json` (`power`, `flex`) carries it. The quote, not the file, stays the
 settle-truth for a priced slip. Composition and rules seen **[P-32] [P-35]**:
 
 - A 2.57× rung (James Cook 1.5+ TDs) with an even pick quoted 8.99 = 3.5 × 2.57: rung
@@ -975,10 +975,9 @@ pill sweep is the fallback if the feed retires, priced above.
 | `app…/client-version` (34 B) | only if a client ever sends `Client-Version`; public reads do not need it | [P-3] |
 
 Payout tables are not a reference download; `entry_slips/estimate` quotes them per slip
-with a token (§6.8), and the quotes disagree with the static `underdog_payouts.json` on
-most cells. The file stays the offline table (canonical:
-[hygiene-closeout.md](handoffs/hygiene-closeout.md)) until a tokened refresh rewrites
-it from quotes.
+with a token (§6.8). The static `underdog_payouts.json` is the offline copy of those
+quotes; re-verifying it each season is
+[hygiene-closeout.md](handoffs/hygiene-closeout.md)'s recurring check.
 
 ### 9.4 Alternate rungs
 
@@ -1060,7 +1059,7 @@ Each lever names where the data sits and the gate before it can be trusted.
    table and the correlation-adjusted multiplier for any candidate slip (same-team
    same-direction QB-to-receiver pairs are taxed, opposite sides and other pairs are
    not, §6.8), and `entry_slip_limits` the stake caps (§6.7) **[P-31] [P-32] [P-38]**.
-   It is the oracle for `underdog_payouts.json` (off on most cells today), and the Flex
+   It is the oracle for `underdog_payouts.json`, and the Flex
    modifier it applies is reproducible offline from the ρ table in §6.8. Gate: a
    token, ten minutes at a time, so a manual refresh session rather than cron.
 5. **`status`, `expires_at`, `lineup_status_id`.** All on the legacy feed **[P-1]**;
@@ -1189,9 +1188,9 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 
 ## Changelog
 
+- 2026-10-04 `underdog_payouts.json` set to the §6.8 quotes (owner re-confirmed in app); file-vs-quote column dropped
 - 2026-09-11 team and game markets for every modeled league from one `match_grouped_lines?market_categories[]=` read per sport (P45, §7.6): NFL pills dropped; markets keyed `team <slug>` / `match <slug>`; mass-option lines skipped
 - 2026-09-11 scraper rebuilt on this doc (`books/underdog.py`): feed + core + budgeted rungs (three workers, 120 s, empty-streak stop; the origin answers empty past ~36/s, §9.4); `/v1/teams` and `rival_lines` gone; team codes from lobby `teams` dicts (esports titles list the away side first, §7.3)
 - 2026-09-10 modifier mapped: slip = table × Π picks × m; Flex m = Gaussian copula, ρ 0.48 per pair type; Power m pair-specific + asymmetric; untaxed pairs = free correlation. Rivals retired, Ladders replaced them (owner)
 - 2026-09-10 authed batch: `entry_slips/estimate` quotes payout tables (2–8 picks) + which pairs are taxed; scaffolds/sections public, `market_filters` needs token; `state_configs` needs lat/long; ladders not on web
 - 2026-09-10 alternates path found (`v3/over_unders/<id>/alternate_projections`); team/game markets catalogued (5 categories, 29-pill sweep); feed filters by `over_under_ids`; `limit` needs a pill
-- 2026-09-10 first version from HAR + 39 probes; legacy feed = full new schema, no alternates; lobby lines public, sections 401

@@ -39,7 +39,7 @@ def shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
 def independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
     """Cheap proxy: (independent EV, independent log-growth) — no copula, no MC."""
     p_ind = float(np.prod(sctx.g.p_model[np.asarray(bet_id)]))
-    _boost, payout = _boost_payout(bet_id, sctx)
+    _pair_modifier, payout = _modifier_payout(bet_id, sctx)
     return p_ind * payout, _log_growth(p_ind, payout)
 
 
@@ -48,7 +48,7 @@ def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict)
     size = len(bet_id)
     g = sctx.g
     arr = np.asarray(bet_id)
-    boost, payout = _boost_payout(bet_id, sctx)
+    pair_modifier, payout = _modifier_payout(bet_id, sctx)
     sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
     model_ev = float(
         parlay_payout_prob(
@@ -56,10 +56,11 @@ def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict)
             g.p_push[arr],
             sig,
             size,
-            boost,
+            g.boosts[arr],
             payout,
             sctx.full_payouts,
             sctx.payout_base_by_size[size],
+            pair_modifier=pair_modifier,
         )
     )
     win_prob = model_ev / payout if payout > 0 else 0.0
@@ -86,14 +87,14 @@ def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict)
     }
 
 
-def _boost_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
-    """Modifier-product boost and clipped payout multiplier for a subset (no admissibility gate)."""
+def _modifier_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
+    """Pair-modifier product and clipped payout multiplier for a subset (no admissibility gate)."""
     size = len(bet_id)
     g = sctx.g
-    pairs = g.M[np.ix_(bet_id, bet_id)][np.triu_indices(size, 1)]
-    boost = float(np.prod(pairs) * np.prod(g.boosts[np.asarray(bet_id)]))
+    pair_modifier = float(np.prod(g.M[np.ix_(bet_id, bet_id)][np.triu_indices(size, 1)]))
+    boost = pair_modifier * np.prod(g.boosts[np.asarray(bet_id)])
     payout = float(np.clip(boost * sctx.payout_base_by_size[size], PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
-    return boost, payout
+    return pair_modifier, payout
 
 
 def _kelly_fraction(p: float, payout: float) -> float:

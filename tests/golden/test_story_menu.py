@@ -112,7 +112,7 @@ def _ctx(
         leg_indices=tuple(range(n)),
         full_payouts=full,
         payout_base_by_size=pay_base,
-        max_size=max(full),
+        max_size=max(pay_base),
     )
     offers = pd.DataFrame(
         [
@@ -444,7 +444,9 @@ def test_log_growth_closed_form():
 
 def test_play_type_cap_honored():
     corr = _block_diag_corr([6], 0.25)
-    probs = [0.66, 0.65, 0.64, 0.63, 0.62, 0.61]
+    # Every pick sits above 0.64, where the 6-pick Flex's all-hit proxy (25 p^6) outranks
+    # the 3-pick Power's (6.5 p^3) and so reaches the exact scorer through the shortlist.
+    probs = [0.71, 0.70, 0.69, 0.68, 0.67, 0.66]
     # Underdog pooled reaches the 6-leg flex.
     ud = build_game_stories([_ctx(probs, corr)[0]], _ctx(probs, corr)[1], pd.DataFrame(), None)
     assert ud["bet_size"].max() == 6
@@ -488,6 +490,20 @@ def test_model_ev_is_the_real_copula_scorer():
         )
     )
     assert scored["model_ev"] == direct
+
+
+def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier():
+    # One sure loss on a 4-pick Flex: the 1-loss tier pays on the three largest pick
+    # multipliers, whichever pick lost, times the pair-modifier product.
+    sctx, _ = _ctx([1.0, 1.0, 0.0, 1.0], np.eye(4))
+    sctx.g.boosts[:] = [0.9, 1.1, 1.2, 0.8]  # the loser holds the largest multiplier
+    sctx.g.M[0, 1] = sctx.g.M[1, 0] = 0.85
+    new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
+
+    scored = score_subset((0, 1, 2, 3), sctx, new_map)
+
+    one_loss_tier = sctx.full_payouts[4][1]
+    assert scored["model_ev"] == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
 
 
 def test_edge_floor_value_is_owner_locked():

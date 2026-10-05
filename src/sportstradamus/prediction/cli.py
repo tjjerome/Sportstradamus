@@ -192,11 +192,11 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @click.option(
     "--contest-variant",
-    type=click.Choice(["pooled", "power", "flex", "insurance"]),
+    type=click.Choice(["pooled", "power", "flex"]),
     default="pooled",
     help=(
         "Underdog payout pool for parlay scoring. Default 'pooled' "
-        "combines power (2-3 legs) and flex (4+ legs) into one pool; "
+        "combines power (2-3 legs) and flex (4-6 legs) into one pool; "
         "single-variant names are kept for the pickem-build path."
     ),
 )

@@ -139,7 +139,7 @@ relevant stage-0 capture, revise this brief in place, resume.
   opposing QBs in a shootout) are free correlation and the only place a same-game
   Power stack is ever fairly priced; (d) opposite-side and WR + WR pairs are quoted as
   independent although the joint probability is lower, so they are always overpriced.
-  The Power/Flex tables it quotes differ from `underdog_payouts.json` on most cells. Stage-4 edge thesis is therefore
+  `underdog_payouts.json` carries the Power/Flex tables it quotes. Stage-4 edge thesis is therefore
   tax-vs-true-ρ mismatch per pair-type, not an untaxed coupling; B8's "taxed ⇒ kill"
   fires only if the tax-curve sweep (weak/strong/negative-ρ pairs, filler variation)
   shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`): probe P1

@@ -280,6 +280,24 @@ def test_repriced_pair_matches_direct_parlay_call_with_modifier_in_boost():
     assert score.model_ev == pytest.approx(expected, rel=1e-9)
 
 
+def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier():
+    """One sure loss on a 4-pick Flex pays the 1-loss tier on the three largest pick
+    multipliers, whichever pick lost, times the same-game pair modifier."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 1.0, 0.9, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 1.0, 1.1, "X/Y"),
+        _leg("C", "AST", "Over", 5.5, 0.0, 1.2, "X/Y"),  # the loser holds the largest multiplier
+        _leg("D", "STL", "Over", 1.5, 1.0, 0.8, "X/Y"),
+    ]
+    mods = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.85)])
+    score = score_slip(legs, _corr([]), mods, platform="Underdog", bankroll=Decimal("1000"))
+
+    one_loss_tier = payout_curve_for("Underdog", "pooled")[1][4][1]
+    # score_slip clips each probability a hair inside (0, 1), so a stray sample can
+    # land in another tier: the tolerance covers that, not a pricing difference.
+    assert score.model_ev == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
+
+
 def test_mods_off_the_slips_game_or_platform_are_ignored():
     legs = [
         _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
@@ -407,7 +425,7 @@ def test_astrolabe_payload_shape_and_crowns():
     assert payload == {
         "legs": 2,
         "play_type": "Power",
-        "payout": pytest.approx(3.0),
+        "payout": pytest.approx(3.5),
         "payout_approximate": False,
         "win_corr": pytest.approx(score.joint_p),
         "win_indep": pytest.approx(score.indep_p),

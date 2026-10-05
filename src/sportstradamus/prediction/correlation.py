@@ -596,7 +596,9 @@ def _append_story_context(
             payout_base_by_size={
                 s: search_payouts[s - 2] for s in range(2, len(search_payouts) + 2)
             },
-            max_size=max(full_payouts),
+            # The search list, not the payout table: Underdog's table runs to
+            # sizes the engine does not build.
+            max_size=len(search_payouts) + 1,
         )
     )
 
@@ -720,7 +722,7 @@ def find_correlation(
     stats,
     platform,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance"] = "pooled",
+    contest_variant: Literal["pooled", "power", "flex"] = "pooled",
     corr_sink: list | None = None,
     story_sink: list | None = None,
 ):
@@ -735,7 +737,7 @@ def find_correlation(
         stats: ``{league: Stats}`` dict for active leagues.
         platform: DFS platform name (e.g. ``"Underdog"``).
         contest_variant: Underdog payout pool. Default ``"pooled"`` combines
-            ``power`` (sizes 2-3) and ``flex`` (sizes 4+) into one pool;
+            ``power`` (sizes 2-3) and ``flex`` (sizes 4-6) into one pool;
             the single-variant names are accepted for the ``pickem-build``
             path. Ignored for non-Underdog platforms.
         corr_sink: When provided, each game appends its upper-triangle

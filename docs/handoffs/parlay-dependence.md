@@ -4,11 +4,11 @@
 > **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
 > live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
 > owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
-> Premise under revision (2026-10-04): the R2 brief
+> Premise revised (2026-10-04): the R2 brief
 > [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md) found Underdog does tax
 > same-game correlation (per-game m ≤ 1) and Sleeper bans the pairs, so parlay EV is leg EV compounded;
-> the §1 money logic and the §3 volatile assumption are rewritten with the brief's text when I5e lands
-> ([honest-receipts.md](honest-receipts.md) §6).
+> the §1 money logic and the §3 volatile assumption carry the brief's text
+> ([honest-receipts.md](honest-receipts.md) §6, I5e).
 
 ## 1. Mission & money logic
 
@@ -24,13 +24,21 @@ same-game groups vs the under-independence prediction. At parlay dimensions
 Gaussian-vs-t is the open question for the research brief.
 
 Money logic: the five ship gates certify **marginals only**; the product is
-**parlays**; and the DFS apps largely don't tax leg correlation — that
-asymmetry is the core of why they're beatable. The predecessor design calls
-this "the audit's single largest *product*-EV lever"
-([archived v2 §1.2](../archive/sportstradamus_roadmap_v2.md)); the model
-track defers it here (roadmap v3 §4 lane row — "biggest product-EV lever",
-gated on calibrated marginals, D3). Better joint pricing multiplies the EV of
-every entry on both apps.
+**parlays**. Underdog does tax same-game correlation: it prices each same-game
+pick set with its own Gaussian ρ per pair type and pays T × Π b × m with m ≤ 1,
+and Sleeper bans the correlated pairs outright, so a correlated stack earns its
+independence EV times P_true / P_platform — at most break-even on the one
+untaxed pair type where the truth departs from the platform (opposing RB
+carries Over/Under, EV 0.96–1.07 at even picks) and never enough to carry an
+entry without leg edge. Parlay EV is therefore leg EV compounded: post-fix,
+admitted legs read 8–11 pp above their hit rate, the joint over-prediction
+grows with entry size (realized/priced 0.71–0.77 at two legs, 0.41–0.44 at
+five), and no Σ or payout repair moves it; only selection-calibrated leg
+probabilities do. T is the payout-table entry for the slip's size, b a pick's
+own multiplier and m the per-game modifier
+([underdog_api.md §6.8](../underdog_api.md#68-entry-slip-pricing)); post-fix
+is Date ≥ 2026-08-31; the evidence is the R2 brief
+([archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md)).
 
 ## 2. Read first (in order)
 
@@ -91,9 +99,11 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 
 ### Volatile product assumptions
 
-- **Apps don't fully tax leg correlation.** The whole lane's edge. Re-verify
-  at stage 0 and stage 4: the audit harness's `gap_indep` vs `gap_copula`
-  split shows what the apps' pricing already absorbs.
+- **Platforms price leg correlation** (Underdog's per-game m, Sleeper's bans).
+  Re-verify the payout table and the pair-type ρ by owner in-app quote each
+  season (`docs/underdog_api.md` §6.8, §7.4); any edge in this lane lives only
+  in pair types where the platform's ρ departs from the hit-event ρ at posted
+  lines.
 - **Payout curves / leg caps** (`data/underdog_payouts.json`, Sleeper 3-leg
   cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own

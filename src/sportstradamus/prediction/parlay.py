@@ -195,24 +195,23 @@ def _leg_boost_payout(
     payout_base,
     full_refund_below_size,
 ):
-    """Price a Max/Underdog candidate via the per-leg boost array push-repricing path."""
+    """Price a Max/Underdog candidate on its legs' own multipliers and the pair-modifier product."""
     boosts_leg = g.boosts[np.ix_(bet_id)]
-    leg_boost = boosts_leg.copy()
-    # Fold M's pairwise product into one slot so prod(leg_boost) == boost
-    # exactly when no leg pushes. Division is safe: _parlay_admissible
-    # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg entry
-    # can be zero here without the candidate already rejected.
-    leg_boost[0] *= boost / np.prod(boosts_leg)
     return parlay_payout_prob(
         p,
         g.p_push[np.ix_(bet_id)],
         SIG,
         bet_size,
-        leg_boost,
+        boosts_leg,
         payout,
         full_payouts,
         payout_base,
         full_refund_below_size=full_refund_below_size,
+        # M's pairwise product, passed apart from the per-leg multipliers so a
+        # Flex loss tier can rank them. Division is safe: _parlay_admissible
+        # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg
+        # entry can be zero here without the candidate already rejected.
+        pair_modifier=boost / np.prod(boosts_leg),
     )
 
 
@@ -332,7 +331,7 @@ def beam_search_parlays(
     opp,
     stat_map,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance"] = "pooled",
+    contest_variant: Literal["pooled", "power", "flex"] = "pooled",
     full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
