@@ -57,9 +57,14 @@ TEST_SETS_DIR = Path(str(pkg_resources.files(data) / "test_sets"))
 _DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
 _DEFAULT_OUT = Path("/tmp/tail_scorecard.csv")
 
-# Posted payout x stored price: 1 on a one-sided rung, at most ~0.89 on a two-sided one
-# (a 12%+ hold devigged away).
+# Posted payout as the archive encoded it x stored price: 1 on a one-sided rung, at most
+# ~0.92 on a two-sided one (a 9%+ hold devigged away).
 _ONE_SIDED_TOL = 0.02
+
+# The archive prices a one-sided Underdog rung through UNDERDOG_BOOST_BASELINE, so a rung
+# last polled before the deploy that moved it (archive clock, naive UTC) holds the old value.
+_BASELINE_BEFORE_MOVE = 1.78
+_BASELINE_MOVED_AT = pd.Timestamp("2026-10-05 12:00")
 
 # Below this many selected legs a gap is descriptive only (spec section 6, Power).
 DESCRIPTIVE_MIN_SELECTED = 100
@@ -116,11 +121,13 @@ def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     ``Live Bet`` / ``Live Boost`` are history's chosen side at the rung and its raw boost (0
     when never posted), NaN where history never scored the rung. The ladder stores the
-    devigged price, or a one-sided rung's raw breakeven (``dfs_boost_probs``), so posted
-    payout x stored price reads 1 on a one-sided rung, where the side opposite an unposted
-    pick pays its raw breakeven and the side opposite a posted pick was never offered, and
-    1/overround on a two-sided rung; that recovers which sides a rung posted. A side history
-    never priced pays 1 / (price x overround), and ``main`` flags it ``assumed``.
+    devigged price, or a one-sided rung's raw breakeven (``dfs_boost_probs``) at what a
+    1.00x Underdog pick was worth when the rung was last polled. Posted payout at that
+    encoding x stored price therefore reads 1 on a one-sided rung, where the side opposite
+    an unposted pick pays its raw breakeven and the side opposite a posted pick was never
+    offered; that recovers which sides a rung posted. The live posted payout x stored price
+    is 1/overround on a two-sided rung. A side history never priced pays
+    1 / (price x overround), and ``main`` flags it ``assumed``.
 
     Returns:
         The rungs with ``Boost_Over``, ``Boost_Under`` and ``One Sided``, and the overround
@@ -128,10 +135,15 @@ def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         pays the baseline both ways, 2 / baseline) and its rung count per ``Platform``.
     """
     per_boost = platform_payout(1.0, rungs["Platform"])  # full payout per unit of raw boost
+    # What the archive counted a unit of raw boost as when it stored a one-sided price.
+    at_old_baseline = rungs["Platform"].eq("Underdog") & (rungs["last_poll"] < _BASELINE_MOVED_AT)
+    stored_per_boost = np.where(at_old_baseline, _BASELINE_BEFORE_MOVE, per_boost)
     live_payout = rungs["Live Boost"] * per_boost
     price = {"Over": rungs["p_dfs"], "Under": 1 - rungs["p_dfs"]}
-    held = live_payout * price["Over"].where(rungs["Live Bet"].eq("Over"), price["Under"])
-    one_sided = live_payout.eq(0) | (held - 1).abs().lt(_ONE_SIDED_TOL)
+    live_price = price["Over"].where(rungs["Live Bet"].eq("Over"), price["Under"])
+    held = live_payout * live_price
+    encoded = rungs["Live Boost"] * stored_per_boost * live_price
+    one_sided = live_payout.eq(0) | (encoded - 1).abs().lt(_ONE_SIDED_TOL)
     # Underdog's standard rung pays the baseline both ways, which devigs to exactly 0.5.
     standard = rungs["Platform"].eq("Underdog") & np.isclose(rungs["p_dfs"], 0.5)
     measured = rungs["Live Bet"].notna() & ~one_sided & ~standard
@@ -145,7 +157,7 @@ def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     boosts = {
         f"Boost_{side}": np.select(
             [rungs["Live Bet"].eq(side), one_sided],
-            [rungs["Live Boost"], np.where(live_payout.eq(0), 1 / (p * per_boost), 0.0)],
+            [rungs["Live Boost"], np.where(live_payout.eq(0), 1 / (p * stored_per_boost), 0.0)],
             1 / (p * rung_overround * per_boost),
         )
         for side, p in price.items()

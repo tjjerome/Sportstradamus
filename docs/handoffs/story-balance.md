@@ -152,6 +152,7 @@ from prod, or on prod as the `sportstradamus` user.
 ```bash
 poetry run python - <<'EOF'
 import pandas as pd
+from sportstradamus.helpers import platform_payout
 R = "src/sportstradamus/data/runtime/"
 o = pd.read_parquet(R + "current_offers.parquet")
 s = pd.read_parquet(R + "current_game_stories.parquet")
@@ -163,7 +164,7 @@ print(f"Over share of lead headlines where both sides exist: {over_share:.2f}  (
 legs = pd.DataFrame([dict(l, story=r.story_id) for r in s.itertuples() for l in r.legs])
 print("story legs below the floor or with Kelly <= 0:", int(((legs["Model EV"] - 1 < 0.05) | (legs["Kelly"] <= 0)).sum()), "(want 0)")
 print("-EV offers with Kelly > 0:", int(((o["Model EV"] < 1) & (o["Kelly"] > 0)).sum()), "| payout > 2.5 with Kelly > 0:",
-      int(((o["Boost"].where(o["Platform"] != "Underdog", o["Boost"] * 1.78) > 2.5) & (o["Kelly"] > 0)).sum()), "(want 0, 0)")
+      int(((platform_payout(o["Boost"], o["Platform"]) > 2.5) & (o["Kelly"] > 0)).sum()), "(want 0, 0)")
 r = pd.read_parquet(R + "realized_by_side.parquet")
 print(r[(r["window_days"] == 30) & (r["cohort"] == "recommended") & (r["split"] == "side")][["side", "n", "hit_rate", "pred_rate", "book_rate", "roi"]].to_string(index=False))
 h = pd.read_parquet(R + "history.parquet")

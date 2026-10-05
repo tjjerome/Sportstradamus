@@ -1,9 +1,10 @@
-"""Golden tests for the honest-Kelly / favored-payout-cap rule in
-:func:`sportstradamus.prediction.offer_records.finalize_records`.
+"""Golden tests for the honest-Kelly / favored-payout-cap rule and the per-player rung trim
+in :func:`sportstradamus.prediction.offer_records.finalize_records`.
 
 Kelly is zeroed rather than computed outside ``(1, MAX_FAVORED_PAYOUT]``: a payout at
 or below 1x can never carry edge, and the realized ledger doesn't trust the model's
-edge claim above the cap (see ``MAX_FAVORED_PAYOUT``'s module comment).
+edge claim above the cap (see ``MAX_FAVORED_PAYOUT``'s module comment). The trim ranks
+and caps a player's rungs against the platform's even pick.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
+from sportstradamus.helpers.archive import _dfs_offer_probs
 from sportstradamus.prediction import offer_records
 
 _LEAGUE = "NBA"
@@ -65,18 +68,21 @@ def _row(player: str, model_over: float, model_under: float, boost_over: float) 
     }
 
 
-def _finalize(row: dict, platform: str) -> dict:
-    df = pd.DataFrame([row])
-    records = offer_records.finalize_records(
-        df, _LEAGUE, platform, _DIST, _CV, _STEP, None, 1.0, _MODEL_VERSION
+def _finalize_all(rows: list[dict], platform: str) -> list[dict]:
+    return offer_records.finalize_records(
+        pd.DataFrame(rows), _LEAGUE, platform, _DIST, _CV, _STEP, None, 1.0, _MODEL_VERSION
     )
+
+
+def _finalize(row: dict, platform: str) -> dict:
+    records = _finalize_all([row], platform)
     assert len(records) == 1
     return records[0]
 
 
 def test_underdog_payout_at_or_below_one_zeroes_kelly():
-    # Raw Underdog multiplier 0.56 x the 1.78 baseline is a ~0.997x full payout.
-    rec = _finalize(_row("Case A", 0.90, 0.05, 0.56), "Underdog")
+    # A raw Underdog multiplier whose full payout is 0.99x.
+    rec = _finalize(_row("Case A", 0.90, 0.05, 0.99 / UNDERDOG_BOOST_BASELINE), "Underdog")
     assert rec["Model EV"] < 1
     assert rec["Kelly"] == 0.0
 
@@ -92,3 +98,44 @@ def test_payout_within_range_computes_kelly():
     rec = _finalize(_row("Case C", 0.8, 0.1, 1.5), "Sleeper")
     assert rec["Model EV"] == pytest.approx(1.2)
     assert rec["Kelly"] == pytest.approx((1.2 - 1) / 0.5)
+
+
+@pytest.mark.parametrize(
+    ("platform", "at_cap", "past_cap"),
+    [
+        # Underdog's boost is the raw multiplier: 2.05 x 1.78 is a 3.649x payout.
+        ("Underdog", 2.05, 2.06),
+        ("Sleeper", 3.65, 3.66),
+    ],
+)
+def test_boost_cap_passes_what_a_3_65x_payout_passed_at_the_1_78_even_pick(
+    platform, at_cap, past_cap
+):
+    # The cap was set as a 3.65x payout when an even pick paid 1.78x on both platforms; what
+    # a 1.00x Underdog pick is worth since must not move which legs clear it.
+    rows = [_row("at cap", 0.6, 0.1, at_cap), _row("past cap", 0.6, 0.1, past_cap)]
+    assert [rec["Player"] for rec in _finalize_all(rows, platform)] == ["at cap"]
+
+
+@pytest.mark.parametrize(
+    ("platform", "boosts", "farthest"),
+    [
+        # Underdog ranks on the raw multiplier, whatever a 1.00x pick is worth.
+        ("Underdog", [0.95, 0.97, 1.0, 1.03], 0.95),
+        # Sleeper ranks its posted payout against its own even pick, 1.78x.
+        ("Sleeper", [1.70, 1.78, 1.87, 1.95], 1.95),
+    ],
+)
+def test_a_players_rungs_trim_to_the_three_nearest_the_even_pick(platform, boosts, farthest):
+    rows = [_row("Case D", 0.6, 0.1, boost) | {"Line": boost} for boost in boosts]
+    kept = {rec["Line"] for rec in _finalize_all(rows, platform)}
+    assert kept == set(boosts) - {farthest}
+
+
+def test_unquoted_one_sided_market_prob_is_the_price_the_archive_stores():
+    # clv subtracts a leg's Market Prob from the close the archive hands back. With no book
+    # on the leg both are the platform's own price, so an unmoved rung has to read the same
+    # in the two places or it shows a closing-line move that never happened.
+    rec = _finalize(_row("Case E", 0.45, 0.1, 1.4) | {"Market EV": np.nan}, "Underdog")
+    stored_over, _ = _dfs_offer_probs({"Boost_Over": 1.4, "Boost_Under": 0}, "Underdog")
+    assert rec["Market Prob"] == pytest.approx(stored_over)

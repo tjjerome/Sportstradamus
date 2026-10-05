@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
     RANKING_MAP,
@@ -21,8 +22,9 @@ from sportstradamus.strategies.profit_sim import (
     summarize_runs,
 )
 
-# Net win per $1 on an unboosted Underdog pick (raw Boost 1.0): 1.78 gross per pick.
-_UNDERDOG_NET = 0.78
+# Net win per $1 on an unboosted Underdog pick (raw Boost 1.0): the per-pick baseline less
+# the stake.
+_UNDERDOG_NET = UNDERDOG_BOOST_BASELINE - 1
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -61,11 +63,13 @@ def _make_offers(n_days: int = 3, hit_pattern: list[bool] | None = None) -> pd.D
 
 
 def test_payout_underdog_scales_raw_boost_by_baseline():
-    # Underdog persists its raw multiplier; the gross payout is boost x 1.78 per pick.
+    # Underdog persists its raw multiplier; the gross payout is boost x the per-pick baseline.
     assert compute_payout(pd.Series({"Platform": "Underdog", "Boost": 1.0})) == pytest.approx(
         _UNDERDOG_NET
     )
-    assert compute_payout(pd.Series({"Platform": "Underdog", "Boost": 2.0})) == pytest.approx(2.56)
+    assert compute_payout(pd.Series({"Platform": "Underdog", "Boost": 2.0})) == pytest.approx(
+        2.0 * UNDERDOG_BOOST_BASELINE - 1
+    )
 
 
 def test_payout_sleeper_net_is_boost_minus_one():
@@ -168,10 +172,10 @@ def test_flat_sizing_one_run_columns_and_progression():
     )
     assert list(result.columns) == ["date", "run", "bankroll", "daily_pnl"]
     assert len(result) == 3
-    # Day 1: stake = 100, win nets 100 * 0.78 = 78 → bankroll 1078
+    # Day 1: stake = 100, win nets 100 * 0.83 = 83 → bankroll 1083
     expected_d1 = 1000.0 + 100.0 * _UNDERDOG_NET
     assert result.iloc[0]["bankroll"] == pytest.approx(expected_d1)
-    # Day 2: stake = 107.8, loss → bankroll = 1078 - 107.8 = 970.2
+    # Day 2: stake = 108.3, loss → bankroll = 1083 - 108.3 = 974.7
     expected_d2 = expected_d1 - expected_d1 * 0.10
     assert result.iloc[1]["bankroll"] == pytest.approx(expected_d2)
 
@@ -200,10 +204,10 @@ def test_kelly_sizing_caps_at_five_percent():
 
 
 def test_kelly_bets_underdog_at_platform_payout():
-    # Bug 2: Payout is NET (0.78 for an unboosted Underdog pick), so the Kelly branch
-    # rebuilds decimal odds (net + 1 = 1.78) and bets the leg instead of skipping every
-    # Underdog row. p=0.7 → kelly_f = (0.7 * 1.78 - 1) / 0.78 ≈ 0.315, capped at
-    # 0.05 → stake 50; win settles +50 * 0.78 = +39.
+    # Bug 2: Payout is NET (0.83 for an unboosted Underdog pick), so the Kelly branch
+    # rebuilds decimal odds (net + 1 = 1.83) and bets the leg instead of skipping every
+    # Underdog row. p=0.7 → kelly_f = (0.7 * 1.83 - 1) / 0.83 ≈ 0.339, capped at
+    # 0.05 → stake 50; win settles +50 * 0.83 = +41.5.
     df = _make_offers(n_days=1, hit_pattern=[True])
     result = simulate_strategy(
         df,
@@ -408,11 +412,11 @@ def test_flat_off_initial_sizes_off_starting_bankroll():
 
 def test_kelly_fraction_reduces_stake():
     # Half-Kelly stakes (and so wins) exactly half of full Kelly when the raw
-    # fraction is below the 5% cap (p=0.57 at the 1.78 Underdog payout → kelly_f ≈
-    # 0.019 < 0.05). Below breakeven (p < 1/1.78) both stake nothing and the halving
+    # fraction is below the 5% cap (a point over the Underdog breakeven → kelly_f ≈
+    # 0.022 < 0.05). Below breakeven (p < 1 / payout) both stake nothing and the halving
     # check passes vacuously, so pin that full Kelly bet.
     df = _make_offers(n_days=1, hit_pattern=[True])
-    df.loc[0, "Win Prob"] = 0.57
+    df.loc[0, "Win Prob"] = 1 / UNDERDOG_BOOST_BASELINE + 0.01
     common = {
         "prob_col": "Win Prob",
         "ranking": "Kelly",

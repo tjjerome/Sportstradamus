@@ -6,6 +6,7 @@
     same slates handed over the way ``model_prob`` builds them, graded at realized's rule.
 (c) The archive is opened read-only, and the rung, consensus and decision-time quote reads
     take the right rows from it.
+(d) The per-side boosts read back off stored rung prices are the ones the archive encoded.
 
 Self-contained: a few real test-set rows per cell with the knobs copied out of its pickle
 (never the booster), a synthetic slate fixture, and a scratch DuckDB file.
@@ -22,6 +23,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, archive
+from sportstradamus.helpers.archive import _dfs_offer_probs
 from sportstradamus.prediction import offer_records
 from sportstradamus.prediction.offer_records import book_over_prob, finalize_records
 from sportstradamus.realized import RECOMMENDED_EDGE_MIN, RECOMMENDED_PAYOUT_MAX
@@ -32,7 +35,11 @@ from sportstradamus.scripts.tail_pricing import (
     open_archive,
     reconstruction_error,
 )
-from sportstradamus.scripts.tail_scorecard import replay_live_rule
+from sportstradamus.scripts.tail_scorecard import (
+    _BASELINE_MOVED_AT,
+    replay_live_rule,
+    side_boosts,
+)
 
 pytestmark = pytest.mark.diagnostics
 
@@ -333,6 +340,45 @@ def test_replay_recommends_what_finalize_records_keeps(monkeypatch):
         ("Underdog", "2026-09-11", "Alpha", 1.5),
     }
     assert got.loc[got["Date"].eq("2026-09-11"), "Win Prob"].item() == pytest.approx(0.9)
+
+
+# The raw boosts a platform posted on a rung (0 = side not posted) and the side history
+# chose there: a one-sided rung with the posted and then the unposted side chosen, a
+# two-sided rung off the standard, the standard rung, and a one-sided Sleeper rung.
+_POSTED = """\
+Platform,Boost_Over,Boost_Under,Live Bet
+Underdog,1.4,0,Over
+Underdog,2.2,0,Under
+Underdog,1.2,0.85,Over
+Underdog,1.0,1.0,Over
+Sleeper,2.6,0,Under
+"""
+
+
+@pytest.mark.parametrize(
+    ("last_poll", "even_pick"),
+    [
+        # Polled since the per-pick value moved: whatever Archive.add_dfs encodes at today.
+        (_BASELINE_MOVED_AT, UNDERDOG_BOOST_BASELINE),
+        (_BASELINE_MOVED_AT - pd.Timedelta(seconds=1), 1.78),
+    ],
+)
+def test_side_boosts_inverts_the_archive_encoding_of_the_rungs_era(
+    last_poll, even_pick, monkeypatch
+):
+    monkeypatch.setattr(archive, "UNDERDOG_BOOST_BASELINE", even_pick)
+    posted = pd.read_csv(io.StringIO(_POSTED))
+    sides = ["Boost_Over", "Boost_Under"]
+    rungs = posted[["Platform", "Live Bet"]].assign(
+        p_dfs=[_dfs_offer_probs(rung, rung["Platform"])[0] for rung in posted.to_dict("records")],
+        last_poll=last_poll,
+        **{"Live Boost": posted[sides[0]].where(posted["Live Bet"].eq("Over"), posted[sides[1]])},
+    )
+
+    decoded, _ = side_boosts(rungs)
+
+    np.testing.assert_allclose(decoded[sides], posted[sides], rtol=0, atol=1e-12)
+    assert decoded["One Sided"].tolist() == [True, True, False, False, True]
 
 
 # Alpha's NFL receptions rungs on 2026-09-14. Underdog 4.5 is polled twice (the later price

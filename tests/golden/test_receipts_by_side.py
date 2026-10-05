@@ -16,6 +16,7 @@ import streamlit as st
 from sportstradamus.dashboard.components import by_side
 from sportstradamus.dashboard.components.by_side import by_side_grid, render_by_side
 from sportstradamus.dashboard.data import sport_filtered
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.realized import by_split, settled_offers
 from tests.golden.test_receipts_reconciles_ledger import HISTORY
 
@@ -67,9 +68,10 @@ def test_grid_splits_on_the_quote_class():
 def test_grid_scales_rates_to_percentage_points():
     row = by_side_grid(_recommended_stats(), "side").iloc[0]
     # The five Over legs: I and K hit; reads 0.62, 0.62, 0.61, 0.72, 0.72 over books
-    # 0.55, 0.55, 0.60, 0.60, 0.60; payouts 1.78, 1.75, 1.78, 1.5, 1.5.
+    # 0.55, 0.55, 0.60, 0.60, 0.60; the two Underdog legs pay the per-pick baseline and the
+    # Sleeper legs 1.75, 1.5, 1.5.
     assert row["Hit%"] == pytest.approx(40.0)
-    assert row["Breakeven%"] == pytest.approx(100 * 5 / 8.31)
+    assert row["Breakeven%"] == pytest.approx(100 * 5 / (2 * UNDERDOG_BOOST_BASELINE + 4.75))
     assert row["Model%"] == pytest.approx(65.8)
     assert row["Book%"] == pytest.approx(58.0)
     assert row["Units"] == pytest.approx(-2.0)

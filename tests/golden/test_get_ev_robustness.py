@@ -136,10 +136,9 @@ class _CaptureArchive:
 def test_add_dfs_one_sided_underdog_offer_converts_through_baseline():
     """An Underdog one-sided boost is a payout *modifier*, not decimal odds.
 
-    The raw 1.67 modifier scales the standard 1.78 slot payout to decimal
-    2.97, so the stored under-probability is its payout-implied complement
-    ``1 - 1/2.97`` — not a fabricated symmetric 0.5, and not the raw
-    modifier's breakeven.
+    The raw 1.67 modifier scales what a 1.00x pick is worth to a full decimal
+    payout, so the stored under-probability is that payout's implied complement
+    — not a fabricated symmetric 0.5, and not the raw modifier's breakeven.
     """
     offer = {
         "Player": "Nikola Jokic",

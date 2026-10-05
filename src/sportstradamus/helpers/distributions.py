@@ -151,13 +151,17 @@ def no_vig_odds(over, under=None, method="proportional"):
     return [o / juice, u / juice]
 
 
-# Per-pick fair payout for an unboosted Underdog Power pick: power[4] ** (1/4)
-# = 10 ** 0.25 ≈ 1.778. Used by model_prob to convert the raw promo multiplier
-# from the Underdog API into a payout-inclusive value so ``Model = P * Boost``
-# yields true per-$1 expected return; consumers that want the raw modifier
-# (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
-# ``correlation.py``) divide it back out.
-UNDERDOG_BOOST_BASELINE: float = 1.78
+# What one unboosted (1.00x) Underdog pick is worth. An entry pays its table multiplier
+# times the legs' own multipliers, so a single pick has no payout of its own: this is the
+# geometric mean of the per-pick roots of the Power entries the owner plays, 3, 5 and 6
+# picks (6.5 ** (1/3) = 1.866, 20 ** (1/5) = 1.821, 35 ** (1/6) = 1.809;
+# ``underdog_payouts.json``). ``finalize_records`` and ``platform_payout`` multiply it into
+# the raw API multiplier so ``Model EV = P * Boost`` is a per-$1 expected return; it is
+# divided back out before a ``Boost`` is persisted or an entry is priced. ``Archive.add_dfs``
+# prices a one-sided offer through it as well, so an unquoted leg's ``Market Prob`` and the
+# close the archive later hands ``clv`` are on one scale. Moving it does not re-price rows
+# already archived (``tail_scorecard.side_boosts`` decodes them by era).
+UNDERDOG_BOOST_BASELINE: float = 1.83
 
 # Full decimal payout above which Kelly is zeroed instead of computed. The realized
 # ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%

@@ -35,10 +35,15 @@ archive = LazyArchive()
 # Maximum allowed model confidence before applying a boost.
 _MAX_CONFIDENCE = 0.90
 
-# Maximum Underdog boost multiplier kept when de-duplicating a player's offers.
-# Above this the promo is an outlier (e.g. a discounted special) that distorts
-# the per-player distance ranking, so it is filtered out.
-_MAX_UNDERDOG_BOOST = 3.65
+# What an even pick pays on each platform; a player's rungs are ranked and capped against
+# it. Sleeper's is its most common posted payout (history, 2026-07 to 10), kept apart from
+# UNDERDOG_BOOST_BASELINE so moving that cannot retrim Sleeper boards.
+_EVEN_PICK_PAYOUT = {"Underdog": UNDERDOG_BOOST_BASELINE, "Sleeper": 1.78}
+
+# A chosen side paying more than this many even picks is an outlier (e.g. a discounted
+# special) that distorts the per-player distance ranking, so it is filtered out. Set as
+# a 3.65x payout when an even pick paid 1.78x on both platforms.
+_MAX_EVEN_PICK_MULTIPLE = 3.65 / 1.78
 
 # Drop an unquoted single-player leg when the model disagrees with the payout-implied
 # probability by more than this. Underdog prices its own boosts near-fair, so a model
@@ -293,12 +298,15 @@ def finalize_records(
         (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1),
         0.0,
     )
-    offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
+    even_pick = _EVEN_PICK_PAYOUT[platform]
+    offer_df["Distance"] = offer_df["Boost"] / even_pick
     offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
         1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
     )
     offer_df = (
-        offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
+        # As a ratio: multiplying the cap back out to a payout rounds below a side at
+        # exactly the cap and would drop it.
+        offer_df.loc[offer_df["Boost"] / even_pick <= _MAX_EVEN_PICK_MULTIPLE]
         .sort_values("Distance", ascending=True)
         .groupby("Player")
         .head(_MAX_OFFERS_PER_PLAYER)

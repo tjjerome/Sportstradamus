@@ -65,7 +65,7 @@ def compute_payout(row: pd.Series) -> float:
     Net profit per dollar staked, not gross — the win line settles
     ``bet_size * payout``, so it must exclude the returned stake. The gross is the
     platform's real payout (:func:`sportstradamus.helpers.platform_payout`): Underdog's
-    raw ``Boost`` scales its per-pick baseline, so an unboosted pick nets 0.78; Sleeper's
+    raw ``Boost`` scales its per-pick baseline, so an unboosted pick nets under 1; Sleeper's
     ``Boost`` is the posted decimal payout, so its net is ``boost - 1``. Only
     ``"Underdog"`` scales, so any other or missing platform nets as posted too. A
     non-finite boost is unpriceable; return 0.0 (no edge) so the eligibility filter and
@@ -339,7 +339,7 @@ def _settle_day(
     ``Payout`` is net profit per dollar (see :func:`compute_payout`), so the
     Kelly branch rebuilds decimal odds as ``net + 1`` and skips only a
     non-positive net — comparing the net against 1 would discard every unboosted
-    Underdog leg (net 0.78). ``kelly_fraction`` scales the raw fraction
+    Underdog leg (its net is under 1). ``kelly_fraction`` scales the raw fraction
     before the 5% cap (1.0 = full Kelly). Flat bets size off the initial bankroll
     when ``flat_off_initial`` else the current one. ``daily_exposure_cap`` (a
     fraction of bankroll, ``None`` = uncapped) bounds the day's total stake,

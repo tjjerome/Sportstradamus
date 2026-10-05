@@ -21,7 +21,8 @@ from sportstradamus.prediction import offer_records
 _BOARD = {
     "Underdog": [
         ("flat", 1.0, 0.62),
-        ("under even", 0.56, 0.80),
+        # A raw multiplier whose full payout is 0.99x.
+        ("under even", 0.99 / UNDERDOG_BOOST_BASELINE, 0.80),
         # Model Over clips to 0.90 before Win Prob is set, so the persisted Win Prob is
         # already the clipped one and the clip cannot split the two rules.
         ("clipped", 1.2, 0.95),

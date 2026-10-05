@@ -28,7 +28,7 @@ from sportstradamus.realized import (
 _NOW = datetime(2026, 10, 3, 12)
 # The chosen Under at 20.5 hits on 18 and misses on 25.
 _HIT, _MISS = 18.0, 25.0
-# A settled Underdog Under that hit, posted at the flat payout (Boost 1.0 -> 1.78), with a
+# A settled Underdog Under that hit, posted at the flat payout (Boost 1.0 -> 1.83), with a
 # servable sportsbook quote behind it.
 _OFFER = {
     "Player": "A",

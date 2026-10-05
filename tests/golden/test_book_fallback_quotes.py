@@ -299,7 +299,7 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
     monkeypatch.setattr(offer_records, "archive", _TotalsOnlyArchive())
     decimal = 1.55 * UNDERDOG_BOOST_BASELINE
     rows = [
-        # Unquoted boosted over at the payout-implied breakeven; model gap 0.1375
+        # Unquoted boosted over at the payout-implied breakeven; model gap 0.1475
         # sits inside the 0.15 tolerance, so the row survives.
         {
             "Player": "Near Miss",
@@ -310,7 +310,7 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
             "Boost_Over": 1.55,
             "Boost_Under": np.nan,
         },
-        # Same boost, model 0.55: the gap to ~0.3625 exceeds 0.15 — the +51%-edge
+        # Same boost, model 0.55: the gap to ~0.3525 exceeds 0.15 — the +51%-edge
         # phantom class — so the row is dropped.
         {
             "Player": "Phantom",

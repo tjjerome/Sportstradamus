@@ -24,7 +24,7 @@ from sportstradamus.realized import (
 
 _NOW = datetime(2026, 10, 3, 12)
 # A settled Underdog Under that hit (Actual below Line), posted at the flat payout
-# (Boost 1.0 -> 1.78) with a 0.6 x 1.78 - 1 = 0.068 edge, so it sits in both cohorts.
+# (Boost 1.0 -> 1.83) with a 0.6 x 1.83 - 1 = 0.098 edge, so it sits in both cohorts.
 _OFFER = {
     "Player": "A",
     "League": "NBA",
@@ -171,7 +171,7 @@ def test_recommended_stops_at_the_menu_payout_cap():
 
 
 def test_breakeven_rate_is_n_over_the_summed_payout():
-    # Legs paying 1.78 and 2.0 break even at 2 / 3.78, not at the mean of 1 / payout.
+    # Legs paying 1.83 and 2.0 break even at 2 / 3.83, not at the mean of 1 / payout.
     out = _ledger(_OFFER, _OFFER | {"Player": "B", "Platform": "Sleeper", "Boost": 2.0})
     assert _one(out)["breakeven_rate"] == pytest.approx(2 / (UNDERDOG_BOOST_BASELINE + 2.0))
 

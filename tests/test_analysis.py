@@ -209,8 +209,8 @@ def test_kelly_sizes_at_the_platform_payout(platform, boost, payout):
     [
         # Even money: the old rule divided by zero here.
         ("Sleeper", 1.0),
-        # 0.56 x 1.78 pays just under even; the old rule's two negatives made Kelly +32.
-        ("Underdog", 0.56),
+        # A 0.99x payout, just under even; the old rule's two negatives made Kelly +11.
+        ("Underdog", 0.99 / UNDERDOG_BOOST_BASELINE),
         # Past the favored-payout cap, where the edge claim is not trusted.
         ("Sleeper", RECOMMENDED_PAYOUT_MAX + 0.5),
     ],
