@@ -43,6 +43,7 @@ def test_pipeline_smoke(
     fixtures_dir: Path,
     reset_archive_singleton,
     preserve_data_files,
+    feature_log_dir: Path,
 ) -> None:
     """Touch every stage of the pipeline; assert the wiring is intact.
 
@@ -174,8 +175,21 @@ def test_pipeline_smoke(
     if not _REAL_APIS:
         _stub_stats_loaders(monkeypatch)
 
+    # The stubbed process_offers scores nothing, so this run logs no features (the write
+    # is covered by tests/golden/test_feature_log.py); what it owns is the retention prune.
+    from sportstradamus.prediction.feature_log import FEATURE_LOG_RETENTION_DAYS
+
+    today = datetime.date.today()
+    expired = today - datetime.timedelta(days=FEATURE_LOG_RETENTION_DAYS + 1)
+    for game_date in (expired, today):
+        (feature_log_dir / f"date={game_date}").mkdir(parents=True)
+
     result = runner.invoke(prediction_cli.main, [], catch_exceptions=False)
     assert result.exit_code == 0, f"prophecize failed: {result.output}"
+
+    assert [partition.name for partition in feature_log_dir.iterdir()] == [f"date={today}"], (
+        "prophecize must prune the feature log past its retention window, and only that"
+    )
 
     # The parquet snapshot writer was reached but no real disk write fired.
     snapshot_calls = writes["offers"]

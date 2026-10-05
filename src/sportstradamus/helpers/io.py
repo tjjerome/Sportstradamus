@@ -10,6 +10,7 @@ removed from the data package; readers no longer fall back to them.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.resources as pkg_resources
 import json
 import math
@@ -88,6 +89,10 @@ USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 # Dashboard-captured correlation modifiers/rakes awaiting fold-in to the
 # committed configs (helpers.config merges it at load; the CLI folds it).
 MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
+# Serve-time feature log: "date=YYYY-MM-DD/{LEAGUE}_{market}.parquet", partitioned by
+# game date. Train/serve parity diagnostics model_prob writes as it scores; the dashboard
+# never reads it.
+FEATURE_LOG_DIR = _RUNTIME_DIR / "feature_log"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
@@ -140,6 +145,29 @@ def model_pickle_path(league: str, market: str) -> Path:
         The ``.mdl`` path under ``data/models/`` (not guaranteed to exist).
     """
     return Path(str(MODELS_DIR / f"{market_file_slug(league, market)}.mdl"))
+
+
+# resolve_model_version's memo of synthesized legacy ids, keyed by (pickle path, mtime).
+_MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
+
+
+def resolve_model_version(filepath: str, filedict: dict) -> str:
+    """The stamped ``model_version``, or a stable ``legacy.<sha10>`` for pre-stamp pickles.
+
+    ~53 pickles trained before the train-time stamp carry no ``model_version``;
+    for those we synthesize one from a sha1 of the pickle bytes so each legacy
+    model still attributes to a distinct, reproducible id. Memoized per
+    ``(path, mtime)`` so the file-hash cost is paid once per model per process.
+    """
+    version = filedict.get("model_version")
+    if version is not None:
+        return version
+    key = (filepath, Path(filepath).stat().st_mtime)
+    cached = _MODEL_VERSION_CACHE.get(key)
+    if cached is None:
+        cached = "legacy." + hashlib.sha1(Path(filepath).read_bytes()).hexdigest()[:10]
+        _MODEL_VERSION_CACHE[key] = cached
+    return cached
 
 
 def prune_model_pickle(league: str, market: str) -> bool:

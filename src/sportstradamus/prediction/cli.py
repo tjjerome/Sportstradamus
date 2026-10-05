@@ -41,6 +41,7 @@ from sportstradamus.helpers.io import (
     write_history,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_KEY
+from sportstradamus.prediction.feature_log import prune_feature_log
 from sportstradamus.prediction.line_movement import build_line_movement
 from sportstradamus.prediction.persist import (
     write_current_game_context,
@@ -435,6 +436,8 @@ def main(progress, contest_variant, log_level):
         <= gameDates
     ]
     write_history(history)
+    # Last, so a prune that raises costs the run no capture or snapshot.
+    prune_feature_log()
 
     # Non-zero only after every capture and snapshot has landed: run_job.sh pings
     # Healthchecks /fail on the exit code, and a swallowed platform that exits 0

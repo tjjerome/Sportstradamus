@@ -2,7 +2,7 @@
 
 Train-time :func:`sportstradamus.training.pipeline._build_filedict` appends a
 ``trained_at`` / ``model_version`` pair to the model pickle; serve-time
-:func:`sportstradamus.prediction.model_prob.resolve_model_version` reads it back
+:func:`sportstradamus.helpers.io.resolve_model_version` reads it back
 and synthesizes a stable ``legacy.<sha>`` for the pre-stamp pickles. These pins
 guard the two invariants the flow depends on: the stamp is *purely additive*
 (no existing pickle key changes, so no served probability moves), and a fresh
@@ -16,6 +16,7 @@ import pickle
 
 import pandas as pd
 
+from sportstradamus.helpers.io import resolve_model_version
 from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     corner_fingerprint,
@@ -25,10 +26,6 @@ from sportstradamus.training.pipeline import _build_filedict, _model_version
 from sportstradamus.training.structural_strategies import (
     TWO_PART_STRATEGY,
 )
-
-# ``sportstradamus.prediction`` re-exports ``model_prob`` the function, shadowing
-# the submodule under attribute access — import the module explicitly.
-mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 
 class _StubModel:
@@ -259,7 +256,7 @@ def test_resolve_model_version_prefers_stamp(tmp_path):
     filedict = {"model_version": "20260708.ratio_meanyr.deadbeef", "cv": 0.9}
     pkl.write_bytes(pickle.dumps(filedict))
 
-    assert mp.resolve_model_version(str(pkl), filedict) == "20260708.ratio_meanyr.deadbeef"
+    assert resolve_model_version(str(pkl), filedict) == "20260708.ratio_meanyr.deadbeef"
 
 
 def test_resolve_model_version_synthesizes_stable_legacy(tmp_path):
@@ -267,8 +264,8 @@ def test_resolve_model_version_synthesizes_stable_legacy(tmp_path):
     legacy = {"cv": 0.9, "weight": 0.4}  # no model_version key
     pkl.write_bytes(pickle.dumps(legacy))
 
-    v1 = mp.resolve_model_version(str(pkl), legacy)
-    v2 = mp.resolve_model_version(str(pkl), legacy)
+    v1 = resolve_model_version(str(pkl), legacy)
+    v2 = resolve_model_version(str(pkl), legacy)
 
     assert v1.startswith("legacy.")
     assert len(v1) == len("legacy.") + 10
@@ -277,4 +274,4 @@ def test_resolve_model_version_synthesizes_stable_legacy(tmp_path):
     # A different legacy pickle hashes to a different id.
     other = tmp_path / "legacy2.pkl"
     other.write_bytes(pickle.dumps({"cv": 0.5}))
-    assert mp.resolve_model_version(str(other), {"cv": 0.5}) != v1
+    assert resolve_model_version(str(other), {"cv": 0.5}) != v1

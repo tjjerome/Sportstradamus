@@ -108,3 +108,20 @@ def preserve_data_files():
     yield
     for name, payload in snapshots.items():
         (data_root / name).write_bytes(payload)
+
+
+@pytest.fixture(autouse=True)
+def feature_log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the serve-time feature log at a scratch directory; return it.
+
+    ``model_prob`` upserts into the log and ``prophecize`` prunes it. Redirected rather
+    than snapshotted like the files above: the log is a directory tree that grows a
+    partition per game date, and an unredirected prune would delete the developer's real
+    partitions past the retention window. Autouse so the live-path tests, which score
+    synthetic offers through the real ``model_prob``, are covered without opting in.
+    """
+    from sportstradamus.prediction import feature_log
+
+    log_dir = tmp_path / "feature_log"
+    monkeypatch.setattr(feature_log, "FEATURE_LOG_DIR", log_dir)
+    return log_dir

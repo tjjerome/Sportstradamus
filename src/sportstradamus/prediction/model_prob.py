@@ -9,10 +9,8 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 
 from __future__ import annotations
 
-import hashlib
 import os.path
 import pickle
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -38,7 +36,12 @@ from sportstradamus.helpers import (
     stat_zi,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
-from sportstradamus.helpers.io import VOLUME_STATS, market_file_slug, model_pickle_path
+from sportstradamus.helpers.io import (
+    VOLUME_STATS,
+    market_file_slug,
+    model_pickle_path,
+    resolve_model_version,
+)
 from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
     annotate_quote_provenance,
@@ -46,6 +49,7 @@ from sportstradamus.prediction.book_quotes import (
     price_offers_at_quotes,
     servable_fallback_quotes,
 )
+from sportstradamus.prediction.feature_log import upsert_feature_log
 from sportstradamus.prediction.offer_records import (
     book_over_prob,
     col_or_none,
@@ -137,35 +141,12 @@ _OWN_SCALE_MIN: float = 0.1
 _DIVERGED_DISPERSION_FLOOR: float = 0.1005
 _DIVERGED_DISPERSION_CEIL: float = 9.95
 
-# Serve-time model-version cache keyed by (pickle path, mtime): the legacy synthesis
-# hashes the whole pickle file, so it runs once per model per process. See resolve_model_version.
-_MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
-
 # Attribution id for a leg scored off devigged book odds (no trained model pickle).
 _BOOK_FALLBACK_VERSION = "book_fallback"
 
 # The two-part validation operator settles every quoted line from these
 # adjacent integer CDF endpoints, independent of the pickle's generic step.
 _TWO_PART_SETTLEMENT_STEP = 1.0
-
-
-def resolve_model_version(filepath: str, filedict: dict) -> str:
-    """The stamped ``model_version``, or a stable ``legacy.<sha10>`` for pre-stamp pickles.
-
-    ~53 pickles trained before the train-time stamp carry no ``model_version``;
-    for those we synthesize one from a sha1 of the pickle bytes so each legacy
-    model still attributes to a distinct, reproducible id. Memoized per
-    ``(path, mtime)`` so the file-hash cost is paid once per model per process.
-    """
-    version = filedict.get("model_version")
-    if version is not None:
-        return version
-    key = (filepath, Path(filepath).stat().st_mtime)
-    cached = _MODEL_VERSION_CACHE.get(key)
-    if cached is None:
-        cached = "legacy." + hashlib.sha1(Path(filepath).read_bytes()).hexdigest()[:10]
-        _MODEL_VERSION_CACHE[key] = cached
-    return cached
 
 
 def normalize_market(league: str, market: str, platform: str) -> str:
@@ -1177,6 +1158,27 @@ def model_prob(
     _decode_model_params(
         prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization
     )
+
+    # The feature log is diagnostics, so nothing that goes wrong in it may cost the market its
+    # predictions: an exception leaving here is caught by the per-market bulkhead in
+    # scoring._match_league_offers, which drops the whole market for the run.
+    try:
+        upsert_feature_log(
+            league,
+            market,
+            platform,
+            offers,
+            stat_data,
+            playerStats,
+            prob_params,
+            quotes,
+            model_version=model_version,
+            step=step,
+            model_weight=model_weight,
+            hist_gate=hist_gate,
+        )
+    except Exception:
+        logger.exception(f"{filename} feature log not written")
 
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
