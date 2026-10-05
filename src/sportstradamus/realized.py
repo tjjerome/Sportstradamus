@@ -79,6 +79,13 @@ _DTYPES = {
 _CAL_SUMMARY_COLS = ["Cohort", "Alt Line", "Bin", "Predicted", "Actual", "N", "ECE", "ROI"]
 
 
+def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
+    """Whether each side is recommended, by the one rule Receipts and the paper ledger share."""
+    return (win_prob * payout - 1 >= RECOMMENDED_EDGE_MIN) & payout.between(
+        1, RECOMMENDED_PAYOUT_MAX, inclusive="right"
+    )
+
+
 def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
     """One row per settled offer the platform posted, priced at its platform payout.
 
@@ -115,8 +122,7 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
         Breakeven=1 / payout,
         Hit=hit,
         Unit=hit * payout - 1,
-        Recommended=(offers["Win Prob"] * payout - 1 >= RECOMMENDED_EDGE_MIN)
-        & payout.between(1, RECOMMENDED_PAYOUT_MAX, inclusive="right"),
+        Recommended=recommended(offers["Win Prob"], payout),
         Quote=np.select(
             [offers["Model Version"].eq("book_fallback"), offers["Market Projection"].notna()],
             ["fallback", "quoted"],

@@ -3,7 +3,8 @@
 Implements ``docs/handoffs/sim-bettor-ledger.md`` §10: builds the shared
 same-game + cross-game candidate universe once per run -- one live scrape per
 platform (Underdog and Sleeper), combined into a single pool, plus the
-``even_picks`` persona's own pool -- then draws and sizes entries for each
+``even_picks`` persona's own pool, cross-game entries of the Underdog even
+picks the product recommends -- then draws and sizes entries for each
 persona × 40 Monte-Carlo replicates and appends them to the append-only JSONL
 ledger. Pure orchestration over
 :mod:`sportstradamus.strategies._ledger_selection`,
@@ -29,11 +30,7 @@ from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_en
 
 _logger = get_logger("ledger-commit")
 
-POLICY_VERSION = "policy_v2"
-
-# Underdog's raw multiplier on a pick it neither discounts nor boosts: an even pick
-# (docs/underdog_api.md §6.8). The even_picks persona takes entries of these alone.
-_EVEN_PICK_MULTIPLIER: float = 1.0
+POLICY_VERSION = "policy_v3"
 
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
@@ -95,10 +92,6 @@ def _platform_candidates(
     return same_game + cross_game
 
 
-def _all_even_picks(legs: list[dict]) -> bool:
-    return all(leg["boost"] == _EVEN_PICK_MULTIPLIER for leg in legs)
-
-
 def build_candidate_universe(
     date: datetime.date, run_slot: str
 ) -> dict[str, list[_ledger_selection.LedgerCandidate]]:
@@ -106,10 +99,12 @@ def build_candidate_universe(
 
     Returns:
         The candidates each persona draws from, keyed by persona. Every persona
-        shares one universe except ``even_picks``, whose pool comes from the
-        same builders under the same shared config, fed Underdog's even picks
-        alone: the shared top-k cut and cross-game beam rank those picks
-        against every other leg and keep few of them.
+        shares one universe except ``even_picks``, whose pool is built beside it
+        from Underdog's offers alone: cross-game entries of the even picks the
+        product recommends on ``date``'s games, at their served read. The shared
+        builders keep few such picks: their leg gate wants a read close to the
+        book, which sits near a coin flip on an even pick, and they cut the read
+        by its cell's trust.
     """
     universe: list[_ledger_selection.LedgerCandidate] = []
     even_picks_pool: list[_ledger_selection.LedgerCandidate] = []
@@ -117,14 +112,8 @@ def build_candidate_universe(
         parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform)
         universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
         if platform == "Underdog":
-            even_parlays = {
-                variant: parlays[parlays["legs"].map(_all_even_picks)]
-                for variant, parlays in parlay_dfs.items()
-                if not parlays.empty
-            }
-            even_offers = offers_df[offers_df["Boost"] == _EVEN_PICK_MULTIPLIER]
-            even_picks_pool = _platform_candidates(
-                even_parlays, even_offers, date, run_slot, platform
+            even_picks_pool = _ledger_cross_game.build_even_pick_candidates(
+                offers_df, _SHARED_CONFIG, date, run_slot
             )
     return dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": even_picks_pool}
 

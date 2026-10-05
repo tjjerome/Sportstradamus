@@ -590,12 +590,12 @@ def test_record_of_a_later_policy_version_settles_by_the_current_rule() -> None:
         _leg(f"Player {i}", "PTS", 10.5, "Over", "BOS/LAL", boost=boost)
         for i, boost in enumerate((0.87, 1.16))
     ]
-    record = _record("later", legs, pair_modifier=0.9) | {"policy_version": "policy_v3"}
+    record = _record("later", legs, pair_modifier=0.9) | {"policy_version": "policy_v9"}
     leg_outcomes = {_ledger_settlement.distinct_leg_key(leg): _HIT for leg in legs}
 
     row = _ledger_settlement.settle_entry(record, leg_outcomes, {})
 
-    assert row["policy_version"] == "policy_v3"
+    assert row["policy_version"] == "policy_v9"
     assert row["realized_multiplier"] == pytest.approx(
         float(underdog_payouts["power"][2]) * 0.87 * 1.16 * 0.9
     )

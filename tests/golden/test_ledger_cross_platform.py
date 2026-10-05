@@ -95,7 +95,7 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
 
 def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
     def _fake_live_load(config, platform):
-        return {}, pd.DataFrame(columns=["Boost"])
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
 
     def _fake_construct_entries(date, bankroll, config, *, parlay_dfs, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
@@ -129,7 +129,7 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
         assert candidate.platform == expected_platform
 
 
-# --- even_picks draws from Underdog's even picks alone -------------------------
+# --- even_picks draws Underdog's recommended even picks, across games ----------
 
 
 def _same_game_parlay(players: tuple[str, str], boosts: tuple[float, float], platform: str) -> dict:
@@ -147,7 +147,7 @@ def _same_game_parlay(players: tuple[str, str], boosts: tuple[float, float], pla
     }
 
 
-def _offer(player: str, game: str, boost: float, platform: str) -> dict:
+def _offer(player: str, game: str, boost: float, platform: str, win_prob: float = 0.60) -> dict:
     team, opponent = game.split("/")
     return {
         "Player": player,
@@ -160,16 +160,19 @@ def _offer(player: str, game: str, boost: float, platform: str) -> dict:
         "Date": DATE.isoformat(),
         "Line": 4.5,
         "Bet": "Over",
-        "Win Prob": 0.60,
-        "Market Prob": 0.57,
+        "Win Prob": win_prob,
+        # An even pick's book sits at a coin flip, further from a read worth recommending
+        # than the shared leg gate allows. A moved multiplier's book is inside the gate.
+        "Market Prob": 0.50 if boost == 1.0 else 0.57,
         "Boost": boost,
     }
 
 
 def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """What ``live_load`` hands back: same-game parlays and offers, some all even picks,
-    some discounted or boosted. The Sleeper frames carry 1.0 multipliers too, so a pool
-    that admitted them on the multiplier alone would show it.
+    some discounted or boosted, one even pick read too weakly to recommend. The Sleeper
+    frames carry 1.0 multipliers too, so a pool that admitted them on the multiplier
+    alone would show it.
     """
     if platform == "Sleeper":
         parlays = [_same_game_parlay(("SL A", "SL B"), (1.0, 1.0), platform)]
@@ -186,6 +189,7 @@ def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd
         offers = [
             _offer("Even X", "NYK/MIA", 1.0, platform),
             _offer("Even Y", "DAL/PHX", 1.0, platform),
+            _offer("Weak Even V", "BKN/ORL", 1.0, platform, win_prob=0.55),
             _offer("Boost Z", "GSW/SAC", 1.1, platform),
             _offer("Discount W", "CHI/DET", 0.9, platform),
         ]
@@ -203,18 +207,22 @@ def _load_mixed_multiplier_frames(monkeypatch) -> dict:
     return frames
 
 
-def test_even_picks_pool_holds_only_underdog_entries_of_even_picks(monkeypatch) -> None:
+def test_even_picks_pool_is_underdogs_recommended_even_picks_across_games(monkeypatch) -> None:
+    """One entry: no all-even same-game parlay, no weakly read even pick, no moved
+    multiplier, nothing of Sleeper's."""
     _load_mixed_multiplier_frames(monkeypatch)
+    # No cell is trusted at all: the pool prices the served read, so its entry stands.
+    monkeypatch.setattr(
+        ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (0.0, "training")
+    )
 
     pools = ledger.build_candidate_universe(DATE, "morning")
 
-    pool = pools["even_picks"]
-    assert {c.players for c in pool} == {
-        frozenset({"Even A", "Even B"}),  # same-game
-        frozenset({"Even X", "Even Y"}),  # cross-game
-    }
-    assert all(c.platform == "Underdog" for c in pool)
-    assert all(leg["boost"] == 1.0 for c in pool for leg in c.canonical_legs)
+    (entry,) = pools["even_picks"]
+    assert entry.players == frozenset({"Even X", "Even Y"})
+    assert entry.game_span == 2
+    assert entry.platform == "Underdog"
+    assert entry.model_probs == (0.60, 0.60)
 
 
 def test_shared_universe_is_every_candidate_whatever_its_multipliers(monkeypatch) -> None:
