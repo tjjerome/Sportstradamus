@@ -309,8 +309,10 @@ eras.
   (fresh-version MLB legs sit at .91; nothing measured gets there).
 - Standing risks: until the models carry more at-market information the per-leg selected gap stays near
   +10 to +13 pp and parlays compound it (R3 §8); I6d is research with no guaranteed method; the
-  version-age effect is observational until I6g; NFL fp team features go dark 2026-10-11 unless
-  `team_data/NFL/2026` is backfilled (memory note, not re-verified).
+  version-age effect is observational until I6g. The NFL team-feature cliff feared for 2026-10-11
+  did not arrive: both boxes hold `team_data/NFL/2026` weeks 1–3, and the serve-time log shows the
+  Team and Defense blocks filled on every row for the games of 10-11 and 10-12 (checked
+  2026-10-05). It rests on the weekly `fp-fetch` from here.
 - Phantom rows (unquoted, |Win Prob − Market Prob| > 0.15, dropped at `offer_records.py`) are not
   persisted, and R1 keeps it that way: keep the phantom gate, never write those rows into history.
 - `strategies/profit_sim._settle_day` recomputes Kelly from prob and payout and ignores the
@@ -386,10 +388,14 @@ eras.
   books, quotes hours old).
 - The platform's cut is the hurdle, and it differs by kind of leg: 6.5 % per pick on an Underdog 1.00×
   leg, 10–12 % on a priced two-sided leg on either platform, about 20 % on a one-sided rung. The
-  recommendation rule returns the cut on every kind but the Underdog 1.00× leg, where it sits at
-  break-even post-fix (2,153 recommended legs hit .533 against .535 needed and .490 for the legs it
-  passed, +4.4 pp [−0.4, 7.6]; no such gap before the fix date). A lead for selection scope and for
-  I6, not a proven edge (§8).
+  recommendation rule returns the cut on every kind but the Underdog 1.00× leg, where it sits near
+  break-even post-fix when every posted line counts as a leg (2,153 recommended legs hit .533
+  against .535 needed and .490 for the legs it passed, +4.4 pp [−0.4, 7.6]; no such gap before the
+  fix date). That count is generous. History keeps a row for each line a prop was posted at, so a
+  prop whose line moved counts once per line (46 % of the recommended 1.00× rows), and a bettor
+  holds one of them. Each prop once, the same rule's legs hit .515 [.485, .545] on 1,640 props
+  against .499 for the props it passed, below what a 2-pick needs (§8 ask 8). A lead for selection
+  scope and for I6, not a proven edge.
 - Payout rule for any replay: bet a side only when its multiplier is provable from one poll (the
   record's "Method trap"; the check's first pass read a false +17 % without it). The tail scorecard's
   `assumed` payout class (§6) uses a looser tolerance, so read its `posted` row until that is tightened.
@@ -410,9 +416,26 @@ eras.
   (§8), `Archive.get_movement` and `get_line_history` (diagnostics on the mixed log), and
   `Archive.get_ev` on an entry only a DFS platform posts.
 - The per-pick move to 1.83 (decision 8), replayed on post-fix legs: Underdog 1.00× recommended legs
-  go from 1,082 at −6.2 % per pick to 1,657 at −1.8 % (hit .5365 against .5464 needed); 77 unquoted
-  one-sided Underdog rows newly fail the ±0.15 phantom gate (14 of them posted NFL Overs that read
-  .767 and hit .462); the boost cap and the per-player trim pass exactly the same legs.
+  go from 1,082 at −6.2 % per pick to 1,657 at −1.8 % (hit .5365 against .5464 needed), counting
+  every posted line; each prop once they go from 814 at −8.9 % to 1,262 at −4.5 % [−10.2, +2.5]
+  (hit .522). 77 unquoted one-sided Underdog rows newly fail the ±0.15 phantom gate (14 of them
+  posted NFL Overs that read .767 and hit .462); the boost cap and the per-player trim pass exactly
+  the same legs.
+- What an entry kind asks of a leg, from the live tables at 1.00× picks from different games. The
+  hit rate per pick at which an entry breaks even: 4-pick Flex .518; 2-, 3- and 4-pick Power .535,
+  .536 and .537; 6-pick Flex .538; 5-pick Flex .548; 5-pick Power .549; 6-pick Power .553; 3-pick
+  Flex .554. For every hit rate from .49 to .565 the 4-pick Flex returns the most per entry of
+  those nine. The post-fix recommended 1.00× legs settled as real entries (each prop once, every
+  leg in one entry a day, never two legs of a game, 31 days, day-block bootstrap): 4-pick Flex
+  +6.0 % [−12.8, +34.0], 3-pick Power −4.9 % [−21.1, +21.1], 5-pick Power −17.2 % [−42.6, +26.8],
+  6-pick Power −21.1 % [−52.1, +43.2]. No kind is told from zero. The gaps between kinds are: on
+  the same days the 4-pick Flex returns 10.8 points more than the 3-pick Power [7.7, 15.1] and
+  23.2 more than the 5-pick Power [6.3, 32.5]. Decision 8's 1.83 is the mean of the Power roots at
+  the owner's sizes, while `payouts.py` builds 4- to 6-pick Underdog entries as Flex
+  (`POWER_MAX_SIZE` = 3) and the paper ledger plays Power at 2–3 picks and Flex at 4–6. By side,
+  each prop once: recommended Unders hit .537 [.501, .584] (903 props) and recommended Overs .482
+  [.408, .546] (359), while Under wins .508 of all posted 1.00× lines. One window, cut after the
+  fact. Scripts and logs: `~/backups/sportstradamus/2026-10-04-honest-receipts/main/entry_types/`.
 - The production paper ledger's last committed entries are dated 2026-09-20: every run since ends
   "committed 0 new entries", and the cause is not pinned down. One lead: the 40 highest-probability
   gated Underdog legs are sides the platform does not post on nearly every day, the v1 cross-game
@@ -433,7 +456,9 @@ tested returns $1 per $1 while the legs are over-read).
    Higher and one Lower; the same on rush yards; a quarterback's pass yards Higher with his own running
    back's rush yards Lower, plus any third pick from another game (the app refuses a same-team pair
    alone); a quarterback's pass TDs Higher with his own receiver's TDs Higher, plus any third pick.
-   No automated probing.
+   No automated probing. One more number while the app is open: the Flex payouts for four 1.00×
+   picks from different games. The table on file says 7.2× for four of four and 1.8× for three of
+   four, the lowest bar of any entry kind (§7).
 2. **Does training's fantasy-points average count as blending with the DFS line?** (yes / no.) For
    a fantasy-points market, training moves the summed-components mean halfway to the platform's own
    fantasy quote (`Stats._book_mean_shift`). It touches training rows only, never a served
@@ -484,3 +509,18 @@ tested returns $1 per $1 while the legs are over-read).
    reads the real line. Read from the code and matched by the pattern (the six rows that got a line
    are the teams that played on the week's first game day); the update was not run to watch it. The
    fix enriches after the true game day is set; stored rows are ask 6.
+8. **Count a prop once in Receipts when its line moved?** (yes / no.) Receipts and the realized
+   ledger count every line a prop was posted at as its own leg, so a rushing-yards prop that moved
+   33.5 → 34.5 → 35.5 counts three times while a bettor holds one. Over all recommended legs since
+   2026-08-31 the difference is small (7,649 lines at −9.1 % per pick, 6,250 props at −9.7 %); on
+   Underdog 1.00× legs it is not (1,657 lines at −1.8 %, 1,262 props at −4.5 %). "Yes" keeps, for
+   each prop and platform, the lines still posted at its last scoring (`Scored At`, stored since
+   2026-10-04); alternate rungs posted side by side stay separate legs; rows from before the stamp
+   keep today's count, and the page says so.
+9. **Restart the dashboard once per deploy, not at every job?** (yes / no.) `scripts/run_job.sh`
+   restarts the dashboard when a pull moved dashboard code or a config file, but it compares the
+   checkout's last move (`HEAD@{1}..HEAD`), not this pull's. After such a deploy every job restarts
+   the dashboard again until the next deploy that touches neither: 26 restarts on 2026-10-05, 22 of
+   them from the ten-minute closing-line job, each dropping an open dashboard session. The same
+   comparison decides `poetry install`. "Yes" is three lines: note the commit before the pull and
+   compare against it.
