@@ -1639,9 +1639,12 @@ Copula research is **done** (R3 brief `/tmp/researcher_copula_stage0.md`).
 - **Selected-tail read (honest-receipts R3).** The recommended-leg overstatement is not a
   tail-shape or rung-decode defect: 75 % of the gap sits at |z| < 0.5, and `Market Prob` decoded
   from the consensus agrees with real sportsbook rungs (MAD 2.4 pp; log-loss difference +0.003
-  [−0.003, +0.009]). The one calibration item with a measurable effect is the temperature ridge
-  (`0.01·(T−1)²` in `_brier_temperature_loss`): −1.0 to −1.2 pp at a small bulk log-loss cost
-  ([honest-receipts.md](honest-receipts.md) §6, I6c).
+  [−0.003, +0.009]). The one calibration item with a measurable effect was the `0.01·(T−1)²`
+  penalty in `_brier_temperature_loss`, which the temperature fit no longer carries: replayed
+  over all 78 served cells it flips no gate verdict, and it lowers the recommended-leg gap on
+  the tail scorecard by about 3 pp at a log-loss cost on the alternate rungs of four NFL cells.
+  Each cell picks it up at its next `meditate`; the retrain check and the reversal rule are in
+  [researcher_temperature_ridge.md](../archive/researcher_temperature_ridge.md) §5.
 - **Parlay dependence (copula) — R3 verdict.** Gaussian copula default; **t-copula only as a
   tested branch** (adopt iff pooled exceedance-Spearman clears a simulated Gaussian null in both
   tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10, ν̂≤15 — never per-pair ν). EB

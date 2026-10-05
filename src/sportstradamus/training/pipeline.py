@@ -2839,11 +2839,13 @@ def _dispersion_pit_ks_loss(
 
 
 def _brier_temperature_loss(T: float, val_logits: np.ndarray, y_class_val: np.ndarray) -> float:
-    """Brier + (T-1)² regularization at temperature ``T``. Pure."""
+    """Brier score at temperature ``T``, deliberately with no penalty toward ``T = 1``.
+
+    A fixed-weight penalty stops the fit short of the Brier minimum at every row count
+    (docs/archive/researcher_temperature_ridge.md).
+    """
     cal = expit(val_logits / T)
-    brier = np.mean((cal - y_class_val) ** 2)
-    reg = 0.01 * (T - 1) ** 2
-    return brier + reg
+    return np.mean((cal - y_class_val) ** 2)
 
 
 def _blended_val_pit(fused: dict, y_val: np.ndarray) -> np.ndarray:

@@ -388,3 +388,22 @@ def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override(
     assert _resolve_cell_knob(sm, "WNBA", "FTM", "zinb_mode", "joint", LOSS_AUTO) == "hurdle"
     assert _resolve_cell_knob(sm, "WNBA", "PA", "zinb_mode", "joint", LOSS_AUTO) == "joint"
     assert _resolve_cell_knob(sm, "WNBA", "FTM", "zinb_mode", "joint", "joint") == "joint"
+
+
+def test_temperature_objective_is_the_brier_alone():
+    """The temperature fit has no pull toward ``T = 1`` (research brief
+    docs/archive/researcher_temperature_ridge.md): on rows whose true probability is the
+    model's flattened threefold, the minimizer lands on 3. A ``0.01 * (T - 1) ** 2`` penalty
+    stops the same fit at 1.73."""
+    from scipy.optimize import minimize_scalar
+    from scipy.special import expit
+
+    from sportstradamus.training.pipeline import _brier_temperature_loss
+
+    rng = np.random.default_rng(0)
+    logits = rng.normal(0.0, 2.0, 200_000)
+    y = (rng.random(logits.size) < expit(logits / 3.0)).astype(float)
+    fit = minimize_scalar(
+        lambda T: _brier_temperature_loss(T, logits, y), bounds=(1.0, 10.0), method="bounded"
+    )
+    assert fit.x == pytest.approx(3.0, abs=0.1)
