@@ -464,7 +464,7 @@ multiplier scaled by the per-pick baseline). Every settled row carries its
 the $5,000 seed instead of continuing a v1 balance. Stage-3 analytics
 report the versions apart, never pooled (§4).
 
-**Store scar (v1 and v2).** `_ledger_store.append_entries` refuses a
+**Store scar (v1 to v3).** `_ledger_store.append_entries` refuses a
 record whose `id` is already in the day's file, whichever bettor wrote
 it. Replicate 0's morning draw is therefore whole, and every later draw
 (replicates 1–39, the afternoon run) keeps only the entries no bettor
@@ -474,8 +474,96 @@ de-duplicated union, not 40 independent ledgers. Keying the check on
 version (§4); a same-slot retry then needs its own guard, because a
 second draw sees the first one's budget and draws differently.
 
+### Policy v3
+
+Policy v2 with the Even-picks bettor rebuilt and one key fixed; whatever
+v1 and v2 state and this section does not replace still holds. The commit
+path stamps every new record `policy_v3`. No `policy_v2` record exists:
+v2 committed nothing before it was replaced (2026-10-05).
+
+**Even-picks.** This replaces v2's paragraph on the bettor. It takes the
+Underdog even picks the product recommends for games on the slate date:
+a side whose raw multiplier is exactly 1.00 and whose edge at the
+per-pick payout clears the Receipts floor (`realized.recommended`: served
+`Win Prob` × 1.83 − 1 ≥ 0.05, a read of .574 or more). Its legs skip the
+shared leg gate and the trust haircut and are priced, sized and recorded
+at the served read, because the bettor exists to put the recommendation
+rule on paper as real entries (honest-receipts decision 12). Entries are
+dealt evenly: up to 200 at each size from 2 to 6, each a random set of
+the day's legs with a game per leg, so the table payout is exact and no
+leg carries the pool. The pool holds no same-game entry. Pricing on the
+pooled curve, the `min_ev` floor, quarter Kelly under the 0.5 % cap, the
+High-EV ranking and the daily budget of five entries are v2's cross-game
+path.
+
+**Why v2's pool was empty.** v2 built the pool behind the shared leg
+gate (`filter_legs`: read and book both above .5 and within .04 of each
+other). A recommended leg has the model well away from the book. On
+production's morning board of 2026-10-05, 25 of the 155 even picks were
+recommended and none of the 25 passed the gate; the 12 even picks that
+did pass priced a best entry of +0.8 % after the haircut, against the
++5 % floor. Replayed on that board, v3's pool holds 99 candidates (25
+two-pick, 38 three-pick, 28 four-pick, 8 five-pick) over the day's 8
+recommended even picks in 5 games: every entry those legs allow. A first
+cut that reused the shared beam (the 200 entries with the highest joint
+read at each size, legs of any game date) put one leg in 53 % of its
+candidates and would have re-entered a Sunday leg on every commit day of
+the week; hence the even deal and the game-day rule.
+
+**Scars.** Measured by running the commit path on two boards production
+saved on 2026-10-05 (99 and 735 candidates), into a scratch store. (1)
+The draw still ranks as High-EV does, so it leans inside the pool: the
+stronger half of the legs held 55 % and 59 % of the leg slots, and on
+the larger board the four-pick Flex took 45 % of the 104 records against
+27 % of the candidates, the six-pick one record against 15 %. In the five
+weeks before the bettor started the strongest reads hit no better than
+the rest (honest-receipts §7). (2) A slate needs recommended even
+picks in two games to give an entry and in six to give a six-pick, and a
+game that starts before the morning run (14:05 UTC) is missed. (3) The
+pool is scored at commit time, while Receipts grades the stored snapshot,
+which for half of a game-day board is an earlier one (honest-receipts §8
+ask 10): until that is fixed the two recommended sets differ. (4) The
+store scar above costs more on a small pool: from the 99 candidates the
+store kept 58 records where forty independent copies would hold about
+122, and ten copies held none.
+
+**Cross-game leg keys.** A cross-game leg's `stat`, and the shared
+path's trust lookup, use the league's own market key
+(`helpers.archive_market`). An NHL Assists leg carries `assists`, the
+gamelog's column; v1 and v2 wrote `AST`, which the gamelog lacks and
+settlement would have read as a push. NHL Points moves the same way
+(`PTS` to `points`), and NBA and WNBA Underdog fantasy points move to
+the model cell's key, a column that holds the same number. No stored
+record holds an NHL leg.
+
+**The three shared bettors are unchanged but for that key, and
+silent**; their last entries are dated 2026-09-20. On the 2026-10-05
+board 598 of the 1,267 Underdog rows passed the leg gate, at a mean pick
+multiplier of 0.71 and 2 % even picks: discounted favorites. The trust
+figure (`resolve_market_shrinkage`) was 0 for 81 % of them, so a mean read of
+.681 became .505, and the best two-pick the beam kept priced at −24.9 %
+(−17.5 % at the served read; Sleeper −19.3 % and −12.5 %). Across the 70
+served cells the figure is 0 in 34, at most .05 in 27 more and above .3
+in four (NFL receptions .475, NFL rushing yards .455, NHL goals .361,
+NHL skater fantasy points .331). Training skill is above 0 in 40 of the
+70, and the live rung sets 24 of those to 0. That rung is
+`clip(2 × (share of closed legs that beat the close − .5))`; a line that
+did not move counts as not beaten (20 % of 498,882 closed rows, against
+39.5 % moved for the bet side and 40.1 % against), and the close it
+reads is stamped before the game on most rows (honest-receipts §8
+ask 10).
+
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-10-05 · policy_v3 (`6adcfae8`) · Even-picks rebuilt on the
+  recommendation rule at the served read: game-day legs, entries dealt
+  evenly, a game per leg · v2's pool sat behind the shared leg gate,
+  which no recommended leg passes (0 of 25 on the 2026-10-05 board), and
+  v2 committed nothing · cross-game `stat` and trust lookup on the
+  league's own key · shared bettors unchanged, silent since 2026-09-20
+  (trust figure 0 in 34 of 70 served cells) · replay on that board: 99
+  candidates · detail §10 Policy v3 · next: first production runs, then
+  the four-week read
 - 2026-10-05 · policy_v2 built (local, unpushed) · settle = table × pick
   multipliers × pair modifier, one rule shared with pricers; record
   +`pair_modifier`; cross-game priced per pick on raw multipliers; persona

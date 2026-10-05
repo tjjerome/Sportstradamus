@@ -3,11 +3,13 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–5 are on `devel` (§4); all three briefs returned (R1
+`docs/archive/` (§5). Status: OPEN — waves 1–6 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
 profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–14 (§2)
 are built (§6), bar the push label and the re-read of stored game lines, which went back to the
-owner with their measured size (§8 asks 5 and 6), and the four pair quotes (§8 ask 1).
+owner with their measured size (§8 asks 5 and 6), and the four pair quotes (§8 ask 1). Two
+defects found on the way wait on the owner: closing prices stamped before the game (§8 ask 10)
+and a trust lookup under the wrong key (§8 ask 11).
 
 ## 1. Mission & money logic
 
@@ -149,6 +151,7 @@ nowhere on the page.
 | 4 | `dcf084fe` | 14-day prior model files (`training/prior_models.py`, I6g) |
 | 4 | `1a8cabd8` | Sportsbook-only consensus line (decision 11): `Archive.get_line`, `get_reference_line`, the quote resolver's line vote, the book-weight fit, the board stamp ([archive/consensus_line_trace.md](../archive/consensus_line_trace.md)) |
 | 5 | `01b52c66` | Pre-game cutoff for the game lines training reads (decision 13, I6f): each sportsbook's newest Moneyline and Totals quote stamped by 15:00 UTC on the game date; a historical game-line fetch keeps its snapshot time ([archive/game_line_cutoff_design.md](../archive/game_line_cutoff_design.md)) |
+| 6 | `6adcfae8` | Sim ledger `policy_v3` (decision 12, rebuilt): the `even_picks` paper bettor takes the Underdog even picks the product recommends for the day's games, at the served read, in evenly dealt entries with a game per leg; a cross-game leg's `stat` and trust lookup use the league's own market key ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10) |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
@@ -205,8 +208,10 @@ inside its group; §8 restates each open one as a plain question.
   same-direction 0.9 on a pair Underdog quotes untaxed (opposing quarterbacks' passing yards). I5d the
   ledger settles
   at T_live × Π b × m through `payouts.outcome_payouts`, the one rule the pricers and settlement
-  share, under `policy_v2` ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10, which also carries the
-  `even_picks` paper bettor of decision 12 and the ledger's open scars). I5e the premise rewrite in
+  share, under `policy_v2`. The `even_picks` paper bettor of decision 12 is `policy_v3`: v2 built
+  it behind the shared leg gate, which no recommended leg passes, so it was rebuilt on the
+  recommendation rule ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10, which also carries the
+  ledger's open scars). I5e the premise rewrite in
   `parlay-dependence.md` §1 and `PARLAY_AUDIT.md`. **Open:** the sub-1 pair values and the lifted bans
   wait for the owner's quotes through the Modifiers reconciler (§8). **Struck:** I5b symmetric Σ, I5c
   `underdog_tax.py`. `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested
@@ -436,11 +441,27 @@ eras.
   each prop once: recommended Unders hit .537 [.501, .584] (903 props) and recommended Overs .482
   [.408, .546] (359), while Under wins .508 of all posted 1.00× lines. One window, cut after the
   fact. Scripts and logs: `~/backups/sportstradamus/2026-10-04-honest-receipts/main/entry_types/`.
-- The production paper ledger's last committed entries are dated 2026-09-20: every run since ends
-  "committed 0 new entries", and the cause is not pinned down. One lead: the 40 highest-probability
-  gated Underdog legs are sides the platform does not post on nearly every day, the v1 cross-game
-  beam ranks on probability alone, and such a side prices an entry at zero. `policy_v2` drops those
-  sides before the beam; its first runs are the test.
+- The production paper ledger committed nothing between its entries of 2026-09-20 and
+  `policy_v3`, and the cause is its own leg gate and trust haircut, not a fault. The gate keeps
+  legs whose read sits within .04 of the book, which are discounted favorites; the Kelly trust
+  figure is 0 in 34 of the 70 served cells; and the best entry the beam kept on the 2026-10-05
+  board priced at −24.9 % against a +5 % floor. `policy_v2`'s Even-picks bettor sat behind the
+  same gate, which no recommended leg passes (0 of 25 that day), so it could not bet either;
+  `policy_v3` rebuilds it on the recommendation rule at the served read. The replay, the trust
+  figure cell by cell and the three bettors left as they are:
+  [sim-bettor-ledger.md](sim-bettor-ledger.md) §10 Policy v3. The same figure gates the
+  dashboard's parlay search (a parlay is dropped when its least-trusted leg sizes it under half a
+  unit), so that board holds legs from the few cells above about .05: three parlays on the
+  morning board of 2026-10-05, all NFL.
+- On Underdog 1.00× legs the hit rate does not rise with the model's read (2026-08-31 to 10-02,
+  each prop once, day-block bootstrap). Every posted leg by read: .50–.52 hit .500 (2,296 props),
+  .52–.54 .495 (1,442), .54–.56 .498 (965), .56–.574 .494 (404), then .538 [.495, .586] on the
+  430 just above the bar (.574–.59), .517 at .59–.61 (296), .499 at .61–.64 (304) and .497 at .64
+  and up (125). Among recommended legs the eight strongest reads of a day hit .502 (237 props)
+  against .526 for the rest (1,025): −2.8 points [−10.0, +5.1]. NFL's strongest (.64 and up) hit
+  .425 [.281, .475] on 74. One window, cut after the fact. It is why the `policy_v3` Even-picks
+  bettor deals its entries evenly over the day's recommended legs instead of keeping the entries
+  with the highest joint read.
 
 ## 8. Owner asks (one each)
 
@@ -468,12 +489,13 @@ tested returns $1 per $1 while the legs are over-read).
 3. **Fix the paper ledger's 40 copies as a new policy version?** (yes / no.) Each paper bettor is
    meant to run as 40 independent copies. The store refuses an entry any copy already holds that
    day, so copy 0 carries 223 of the 341 entries ever committed and the other 39 are near empty. The
-   fix is small and, by the ledger's own rule, a new version (`policy_v3`).
+   fix is small and, by the ledger's own rule, a new version (`policy_v4`; `policy_v3` is the
+   Even-picks rebuild).
 4. **Sign off the bankroll table's new column?** (yes / no.) `bankroll.parquet` gained
-   `policy_version` so a `policy_v2` bettor starts from $5,000 instead of continuing a v1 balance;
-   old rows are stamped `policy_v1` at the next settle. The ledger brief asks for the owner's
-   sign-off on any schema change after live entries exist. "No" is a small revert, and v2 then
-   continues the v1 balances.
+   `policy_version` so a bettor of a new policy version (`policy_v3` today) starts from $5,000
+   instead of continuing an older balance; old rows are stamped `policy_v1` at the next settle.
+   The ledger brief asks for the owner's sign-off on any schema change after live entries exist.
+   "No" is a small revert, and every version then continues the v1 balances.
 5. **Count a push as half an Over in training, now that its size is measured?** (yes / no.)
    Decision 13 took it on a figure of "at most 0.2 pp", a pooled number for recommended legs and no
    bound. The model's probabilities already count a tie as half an Over; the label they are fitted
@@ -514,9 +536,10 @@ tested returns $1 per $1 while the legs are over-read).
    33.5 → 34.5 → 35.5 counts three times while a bettor holds one. Over all recommended legs since
    2026-08-31 the difference is small (7,649 lines at −9.1 % per pick, 6,250 props at −9.7 %); on
    Underdog 1.00× legs it is not (1,657 lines at −1.8 %, 1,262 props at −4.5 %). "Yes" keeps, for
-   each prop and platform, the lines still posted at its last scoring (`Scored At`, stored since
-   2026-10-04); alternate rungs posted side by side stay separate legs; rows from before the stamp
-   keep today's count, and the page says so.
+   each prop and platform, the lines still posted at its last scoring (`Scored At`, stamped since
+   the 13:50 UTC run of 2026-10-05); alternate rungs posted side by side stay separate legs; rows
+   from before the stamp keep today's count, and the page says so. It needs ask 10 first: a row
+   closed early stops taking the stamp, so its last scoring is unknown.
 9. **Restart the dashboard once per deploy, not at every job?** (yes / no.) `scripts/run_job.sh`
    restarts the dashboard when a pull moved dashboard code or a config file, but it compares the
    checkout's last move (`HEAD@{1}..HEAD`), not this pull's. After such a deploy every job restarts
@@ -524,3 +547,28 @@ tested returns $1 per $1 while the legs are over-read).
    them from the ten-minute closing-line job, each dropping an open dashboard session. The same
    comparison decides `poetry install`. "Yes" is three lines: note the commit before the pull and
    compare against it.
+10. **Stamp a closing price only once the game is under way?** (yes / no.) The nightly job
+    (`reflect`, 07:00 UTC) gives every history row that lacks a closing price the newest
+    sportsbook quote, games not yet played included (`clv.fill_from_archive` reads the archive
+    "as of" 20:00 UTC on the game date, which is still ahead). A row that has one is never
+    filled again, and it wins over every later scoring of the same prop and line, so its read,
+    its payout and its chosen side stop updating. On 2026-10-05 at 14:48 UTC, before any game of
+    the day, 1,529 of the 2,361 rows for that day's games carried a "closing" price, and so did
+    744 rows for games on later days. Against the live board, 1,179 of 2,241 rows (53 %) were
+    frozen at an earlier snapshot: the stored read differed on 93 % of them (1.6 points on
+    average, more than 5 on 7.5 %), the chosen side on 5 %, the payout on 64 %; 70 stored rows
+    were recommended against 45 on the board, 31 in both. So for half of a game-day board
+    Receipts grades the read from before 07:00 UTC, not the last one before the game;
+    "closing-line value" measures a few overnight hours; and the Kelly trust figure is built on
+    it. "Yes" skips a game whose closing cut has not passed, a few lines in `clv.py`. No served
+    probability moves; from then on Receipts grades the last snapshot before the game, and the
+    trust figure follows as real closes accumulate. Each night without it freezes one more day
+    of rows. Not proposed: re-reading the closes already stored.
+11. **Give NBA fantasy-points legs their own trust figure in the parlay search?** (yes / no.)
+    The dashboard's parlay search looks a leg's trust up under the platform's market key, and
+    for three markets the model's cell sits under the league's own: NHL points and assists, and
+    NBA fantasy points on Underdog. Those lookups find nothing and return the no-evidence value
+    .01, which drops every parlay holding such a leg. For the two NHL markets the cell's figure
+    is 0, so nothing changes; for NBA fantasy points it is .163, so those parlays would appear
+    once the NBA opens. "Yes" is the rename `policy_v3` applied to the ledger's legs, at two
+    more sites (`correlation._leg_shrinkage`, `underdog_pickem._parlay_shrinkage`).
