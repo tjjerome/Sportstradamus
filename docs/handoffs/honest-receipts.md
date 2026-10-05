@@ -3,10 +3,10 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–3 landed on `devel` 2026-10-04 and are pushed; all three
-briefs returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the
-consensus sanity check found no profit in the sportsbook consensus at the platforms' real payouts (§7);
-the owner answered the asks the same day (§2, decisions 7–14) and the gated work (§6) is being built.
+`docs/archive/` (§5). Status: OPEN — waves 1–4 are on `devel` (§4); all three briefs returned (R1
+KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
+profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–14 (§2)
+are built (§6), bar the training-side cuts that wait for the next retrain and the four pair quotes (§8).
 
 ## 1. Mission & money logic
 
@@ -114,19 +114,20 @@ nowhere on the page.
 
 ### Volatile product assumptions
 
-- `helpers.distributions.UNDERDOG_BOOST_BASELINE = 1.78` is the per-pick convention selection used when
-  every persisted leg was recommended, so the ledger keeps it on purpose. Live Underdog Power tables
-  ([underdog_api.md](../underdog_api.md) P-32: 3.5/6.5/12/20/35/65/120) imply per-pick roots 1.81–1.87,
-  so 1.78 under-credits Underdog winners. R2 (2026-10-04) measured it: at the 2-pick root √3.5 = 1.8708
-  the post-fix Underdog recommended cohort goes from 3,055 legs at −13.1 % to 6,115 legs at −6.3 %
-  [−9.4, −3.3], both platforms from −11.8 % to −7.7 %; no sign flips. Changing it changes selection
-  (Model EV, Kelly, the 5 % rule, the payout-implied `Market Prob` and leg admission all move together),
-  so it lands as I5a-1 on the owner's go (the table is confirmed, §2), never through reporting.
+- `helpers.distributions.UNDERDOG_BOOST_BASELINE = 1.83` is what one unboosted Underdog pick is
+  worth: the geometric mean of the 3-, 5- and 6-pick Power roots (decision 8; the live table is
+  [underdog_api.md](../underdog_api.md) P-32). Model EV, Kelly, the 5 % rule, the payout-implied
+  `Market Prob` and leg admission all read it, and `Archive.add_dfs` prices a one-sided rung through
+  it, so a leg scored or a rung archived before 2026-10-05 12:00 UTC sits at 1.78: a new selection
+  era, never pooled with the old one (the tail scorecard decodes a rung by its last poll time).
+  Replayed on post-fix legs, 1.83 takes the Underdog recommended cohort from 3,055 legs at −13.1 % to
+  4,566 at −8.2 % and both platforms from −11.8 % to −9.1 %; the 2-pick root 1.871 would give 6,123
+  at −6.3 %. No sign flips.
 - Clean data is thin: five weeks post-fix (Date ≥ 2026-08-31); per-side payouts since 2026-10-03; MLB
   (the largest share of recommended legs) ends late October; NBA starts late October with no clean data
   until late November. No brief measured an NBA cell, so every NBA read starts from zero.
 
-## 4. What landed (all on `devel`, 2026-10-04)
+## 4. What landed (all on `devel`)
 
 | Wave | Commits | What |
 |---|---|---|
@@ -139,10 +140,16 @@ nowhere on the page.
 | 2 | `73e7821b` | `reflect`: calibration summary from realized pricing; the fair-odds profit sims stop scaling Sleeper's posted payout as a promo (I3a) |
 | 3 | `1c9fc738`, `ccedaa3f`, `0f35e617`, `b3084815`, `2142ec91` | `dashboard.data.posted_offers_or_stop`; Receipts hero = the recommended cohort at the platform payout with the all-posted context row, by-side panel live from `by_split` with "edge captured", calibration panel by cohort, rolling-accuracy line at breakeven; Lab › Diagnostics on the same universe; the −110 helpers retired to `src/deprecated/`; `analysis._add_kelly_columns` sized at the platform payout (I3b) |
 | 3 | `2fb154c8` | E: `sportstradamus admin tail-scorecard` replays the live recommendation rule on held-out test rows at the archived DFS rungs and reports the selected-tail gap, the live gap for the same cells, the Model Version age split and the information test (§6, §7); a diagnostic, never a gate |
+| 4 | `1d2efb58` | Parlay payout facts (decision 9): `underdog_payouts.json` carries the live Power and Flex tables to 8 picks, a Flex loss tier pays on the largest remaining pick multipliers, the pair modifier travels beside them, the 523 Underdog pair values above 1.0 become 1.0 |
+| 4 | `f6138bab` | `UNDERDOG_BOOST_BASELINE` 1.78 → 1.83 (decision 8); the archive prices a one-sided rung through the same constant, so `Market Prob` and the close `clv` reads stay on one scale |
+| 4 | `308db57c` | Sim ledger `policy_v2` (decisions 9, 12): settlement at table × pick multipliers × pair modifier through `payouts.outcome_payouts`, the rule the pricers use; the `even_picks` paper bettor; cross-game stakes on the all-hit payout and the priced EV ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10) |
+| 4 | `fe394eb6`, `6f6dcb3d` | Serve-time feature log (`prediction/feature_log.py`) and `sportstradamus admin feature-parity` (decision 13, I6e) |
+| 4 | `a7ca8e21` | The temperature fit without its penalty (decision 14, I6c) |
+| 4 | `dcf084fe` | 14-day prior model files (`training/prior_models.py`, I6g) |
+| 4 | `1a8cabd8` | Sportsbook-only consensus line (decision 11): `Archive.get_line`, `get_reference_line`, the quote resolver's line vote, the book-weight fit, the board stamp ([archive/consensus_line_trace.md](../archive/consensus_line_trace.md)) |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
-(`nightly._build_cell_row`); `_ledger_settlement.realized_multiplier` omits per-pick multipliers and the
-Underdog modifier (I5d); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
+(`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
 the I4 bullet); the `SPORTSTRADAMUS_ARCHIVE_DB` default-path expression now repeats in four scripts
 beside `helpers/archive.py`. `docs/ship_gate.md`'s devel → main row no longer describes a
 `profit_sim_kelly_yield ≥ 0` money rule: no code implemented it and the owner's rule forbids it.
@@ -188,33 +195,40 @@ inside its group; §8 restates each open one as a plain question.
   `Recommended` flag after clip/argmax/phantom gate; consumers one subagent each (`stories/menu.py`,
   `correlation.py::_select_bet_offers`, `strategies/kelly.py`); a `policy_v2` ledger persona A/B'd
   against `policy_v1`; Receipts shows model read and trust read side by side.
-- **I5 parlay pricer — R2's ranked list (§5), a factual refresh, not a calibration fix; each item
-  waits on the owner's go (the live table is confirmed, §2):** I5a-1 `UNDERDOG_BOOST_BASELINE` 1.78 →
-  √3.5 = 1.8708 (moves Model EV, Kelly, the 5 % rule, the payout-implied `Market Prob`,
-  `_dfs_offer_probs` and leg admission together; golden pins on 1.78 move; new selection era);
-  I5a-2 `underdog_payouts.json` Power 2–8 = 3.5/6.5/12/20/35/65/120 and live Flex tiers,
-  `payouts._pooled_underdog_curve` to 8 picks, Flex k-loss on the n−k largest multipliers (+43 % gated
-  volume, no detectable return change); I5a-3 `banned_combos.json` Underdog values > 1 → 1.0, same-direction
-  sub-1 values on untaxed pairs → 1.0, opposite-direction sub-1 values and lifted bans wait for owner quotes
-  through the Modifiers reconciler; I5d `_ledger_settlement.realized_multiplier` settles at T_live × Π b × m
-  from the legs' own multipliers (fallback: the committed `payout_multiplier` re-based); I5e the premise
-  rewrite in `parlay-dependence.md` §1 and the volatile assumption (text in the brief) plus
-  `PARLAY_AUDIT.md` §1.3 / §2.4 / §4. **Struck:** I5b symmetric Σ, I5c `underdog_tax.py`.
-  `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested value returns ≥ 1, so no
-  change is proposed (§8). I5's own acceptance = priced payout equals the quote on owner-captured slips
+- **I5 parlay pricer — built (decisions 8, 9; R2's ranked list, §5): a factual refresh, not a
+  calibration fix.** I5a-1 `UNDERDOG_BOOST_BASELINE` = 1.83 (§3). I5a-2 `underdog_payouts.json` Power
+  2–8 = 3.5/6.5/12/20/35/65/120 and the live Flex tiers; the payout tables run to 8 picks while the
+  search still builds to 6; a Flex tier with k losses pays on the n−k largest pick multipliers.
+  I5a-3 `banned_combos.json`: every Underdog value above 1 is 1.0 (523 values), and so is the one
+  same-direction 0.9 on a pair Underdog quotes untaxed (opposing quarterbacks' passing yards). I5d the
+  ledger settles
+  at T_live × Π b × m through `payouts.outcome_payouts`, the one rule the pricers and settlement
+  share, under `policy_v2` ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10, which also carries the
+  `even_picks` paper bettor of decision 12 and the ledger's open scars). I5e the premise rewrite in
+  `parlay-dependence.md` §1 and `PARLAY_AUDIT.md`. **Open:** the sub-1 pair values and the lifted bans
+  wait for the owner's quotes through the Modifiers reconciler (§8). **Struck:** I5b symmetric Σ, I5c
+  `underdog_tax.py`. `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested
+  value returns ≥ 1. I5's own acceptance = priced payout equals the quote on owner-captured slips
   (one Power, one Flex, one stacked same-game pair) and the ledger settles at it.
-- **I6 model information and train/serve alignment — R3's build order (§5); each item waits on the
-  owner's read.** None pulls or demotes a model. `pipeline.py` is 5,109 lines: extract helpers,
-  never grow it. Retrains go through `meditate` and the existing gates unchanged.
-  1. **I6e serve-time feature log + parity monitor** (engineering; no retrain, no served probability
-     moves). Per scored leg, persist the `expected_columns` feature slice, `Model Skew`, `Step`, the
-     probable pitcher and the decision-time book leg to a diagnostics parquet
-     (`prediction/scoring.py::_score_market`; never `history.parquet` or a dashboard snapshot). A
-     nightly job compares each leg with its matrix row once the matrix catches up and alarms on a
-     per-cell sd(ΔP) above 1 pp; repair feature by feature (worst today: NFL completions, receptions,
-     interceptions, qb yards). It also unblocks I6g and the live SkewNormal re-serve.
-  2. **I6g version-age test** (pre-registered; a cadence change only if it confirms). Keep the prior
-     pickle set for 14 days after each retrain and re-serve the logged legs through it offline.
+- **I6 model information and train/serve alignment — R3's build order (§5), opened by decision 13.**
+  None pulls or demotes a model. `pipeline.py` is over 5,000 lines: extract helpers, never grow it.
+  Retrains go through `meditate` and the existing gates unchanged.
+  1. **I6e serve-time feature log + parity monitor — built** (no retrain, no served probability
+     moves). `model_prob` upserts one row per scored player and game to
+     `data/runtime/feature_log/date=<game date>/` (`prediction/feature_log.py`: the frame fed to the
+     model, the decision-time book leg, the model's outputs, the probable pitcher; 30 days kept; never
+     `history.parquet` or a dashboard snapshot). `sportstradamus admin feature-parity` replays it by
+     hand, not from cron: it checks each logged batch reproduces through the file carrying its
+     `Model Version`, compares each row with its training-matrix row once the matrix catches up
+     (flag at a per-cell sd(ΔP) above 1 pp), re-scores under the other versions on disk
+     (`--versions`) and lists the settled cells with no log rows. No logged game is in a matrix yet,
+     so the first real parity read follows the next `meditate`. First finding, with no matrix needed:
+     serving feeds `inf` where training holds 0 (all 48 logged WNBA rows carry it in `Team
+     BLK_RATIO` or `Team OPP_BLK_RATIO`; setting it to 0 moves WNBA PR by −0.7 pp on average). Then
+     repair feature by feature (R3's worst: NFL completions, receptions, interceptions, qb yards).
+  2. **I6g version-age test** (pre-registered; a cadence change only if it confirms). `meditate`
+     keeps each model file it replaces for 14 days (`training/prior_models.py`, `data/models/prior/`)
+     and `feature-parity --versions` re-serves the logged legs through it offline.
      Primary statistic: fresh (version days 0–3) minus aged (days 4+) recommended gap, day-clustered,
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
      difference between versions. Confirmed → retrain every 3–4 days. Null → KILL: the MLB pattern
@@ -227,14 +241,17 @@ inside its group; §8 restates each open one as a plain question.
      unknown). The book-leg cutoff aligned to decision time where ladder polls exist
      (`TRAINING_LOOKBACK_HOURS`, `helpers/archive.py:111–114`). Archiving the daily Savant affinity
      CSVs, so MLB comps can be rebuilt point-in-time for 2027.
-  4. **Hygiene.** I6a: one label helper (`training/labels.py`) with y = ½ at a push, used at
-     `pipeline.py:3204` and `5002` (≤ 0.2 pp). I6c, reframed: remove the `0.01·(T−1)²` ridge in
-     `_brier_temperature_loss` (`pipeline.py:2841`) or set its weight by CV, and fit T and
-     `PROB_STAGE` on a population that includes the scorecard's DFS-rung rows (gap −1.0 to −1.2 pp,
-     recommended volume −27 to −31 %, bulk log-loss +0.001 to +0.002: an owner trade-off). Pass
-     `step` to SkewNormal `get_odds` in `_step_compute_test_probabilities` and
-     `_step_calibrate_temperature`. I6b is optional: align training's non-authentic fusion to
-     serving, never the reverse.
+  4. **Hygiene.** I6c — done (decision 14): `_brier_temperature_loss` is the Brier alone, with no
+     penalty toward T = 1. T lives in each model file, so a cell changes at its next `meditate`.
+     Refit on the 78 served cells, 73 pass the gates with the penalty and the same 73 without; the
+     recommended-leg gap on the tail scorecard falls about 3 pp and recommended volume about a
+     quarter; the cost is log-loss on the alternate rungs of four NFL cells (receptions, rushing
+     yards, interceptions, passing TDs). The retrain checklist and the reversal rule are
+     [archive/researcher_temperature_ridge.md](../archive/researcher_temperature_ridge.md) §5. Still
+     open, at the next retrain: I6a, one label helper (`training/labels.py`) with y = ½ at a push,
+     used at both label sites in `pipeline.py` (≤ 0.2 pp); `step` passed to SkewNormal `get_odds` in
+     `_step_compute_test_probabilities` and `_step_calibrate_temperature`. I6b is optional: align
+     training's non-authentic fusion to serving, never the reverse.
   5. **I6d NFL at-market information** (research; no method is guaranteed). Order: after I6e's parity
      repair, and after the NFL count quote is levelled (`ev` and `under_prob` disagree, which
      contaminates every fused NFL number). Acceptance: fixed-effect logistic encompassing with
@@ -303,9 +320,8 @@ eras.
   (version-age decay; R3 replicated it live with a level-robust estimator, §5; I6g is the test). R3 counts
   1.3 % of MLB hitter legs with no plate appearance; dropping them raises the recommended gap by 0.7 pp, so
   every hit rate here is slightly flattering.
-- `book_fallback` recommendations are a model-free engine today: 4,463 legs all-time at −9.9% on the decoded-book
-  edge alone, 38 since 2026-08-31 at −26.0%. Whether those legs keep an edge flag is the owner's call (§8); it
-  pulls no model.
+- `book_fallback` recommendations are a model-free engine: 4,463 legs all-time at −9.9% on the decoded-book
+  edge alone, 38 since 2026-08-31 at −26.0%. They keep their recommended flag (decision 10).
 - The Receipts calibration panel guards a pre-cohort `calibration_summary.parquet` (no `Cohort` column → "No
   calibration data yet"); drop the guard after the first post-deploy `reflect`. The panel reads the nightly
   snapshot of every resolved leg, so its tiles do not follow the sidebar range or the page window (caption says so).
@@ -325,7 +341,8 @@ eras.
   not a lever; training uses the realized opposing starter and serving the probable one (unmeasured
   until I6e persists it); validation weight stays high where live encompassing says ≈ 0 (receptions
   w = .80 against b_model −.10; lead: the mis-levelled NFL count quote); Underdog prices at an overround
-  near 1.178 when the price moves against 1.1236 standard (the scorecard re-estimates it each run); 17
+  near 1.178 when the price moves, against 2 / `UNDERDOG_BOOST_BASELINE` standard (1.1236 at the 1.78
+  R3 measured under; the scorecard re-estimates it each run); 17
   NFL rows carry game date 09-09 under a later-dated version. Estimator rules for any information read:
   cell fixed effects, an intercept, model-only probabilities and the decision-time reference (a
   through-origin slope is level-contaminated; pooled encompassing without fixed effects read .78 where
@@ -363,25 +380,38 @@ eras.
 - Payout rule for any replay: bet a side only when its multiplier is provable from one poll (the
   record's "Method trap"; the check's first pass read a false +17 % without it). The tail scorecard's
   `assumed` payout class (§6) uses a looser tolerance, so read its `posted` row until that is tightened.
-- Where the code stands against decision 5 (§2). The consensus *price* already excludes the DFS
-  platforms whenever a sportsbook quotes the entry (`training_quotes.sportsbook_cohort`, used by
-  `Archive._weighted_book_ev` and the quote resolver), and a leg whose only quote is a DFS platform is
-  scored model-only (`book_quotes._has_serving_support`). The consensus *line* does not:
-  `Archive.get_line` takes the median of every distinct line in the `lines` table, which has no book
-  column and receives each DFS platform's main rung from `add_dfs` beside the sportsbook lines. Where
-  both exist (66,101 player-market-days in the ladder era) the DFS lines move it on about 12 % (NFL
-  38 %, WNBA 48 %, MLB 10 %, NHL 3 %), by 0.7 on average when they do. Its readers: the `Consensus
-  Line` column, `get_closing_line`, the combo component sublines (`Stats._submarket_ev`,
-  `stats/mlb.py`) and the legacy line of the training quote resolver; not yet traced into every model
-  feature. The DFS platforms also sit as columns in the book-weight fit (`book_weights.json` carries
-  an Underdog weight in 68 cells and a Sleeper weight in 53), unused whenever a sportsbook quotes the
-  entry.
+- Where the code stands against decision 5 (§2): the consensus is sportsbook-only in price and in
+  line (decision 11; every reader and the ten edits are in
+  [archive/consensus_line_trace.md](../archive/consensus_line_trace.md)). `Archive.get_line` is the
+  median of each sportsbook's latest posted line and 0.0 when none posts one; an entry only a DFS
+  platform posts is graded at `get_reference_line`, its line of record, which never feeds a
+  consensus. A DFS line no longer votes on the line a sportsbook price is read at, no longer sets the
+  median a sportsbook row is judged divergent against, and gets no fitted book weight
+  (`book_weights.json` keeps its DFS keys until the next refit). Measured on the archive: the old
+  line differed from the sportsbook consensus on 13 % of entries both kinds post (NFL 45 %, WNBA
+  61 %, MLB 8 %, NHL 4 %); the board's `Consensus Line` changes on a third of rows and is blank on
+  10 % (46 % of modeled player-market-days have no sportsbook line at decision time); the one served
+  probability that moves is the book leg on about 1.5 % of mixed entries (median 0.02–0.05 before
+  the model weight); no model feature reads the consensus line, so no retrain is forced. Left as
+  they are: `Stats._book_mean_shift`
+  (§8), `Archive.get_movement` and `get_line_history` (diagnostics on the mixed log), and
+  `Archive.get_ev` on an entry only a DFS platform posts.
+- The per-pick move to 1.83 (decision 8), replayed on post-fix legs: Underdog 1.00× recommended legs
+  go from 1,082 at −6.2 % per pick to 1,657 at −1.8 % (hit .5365 against .5464 needed); 77 unquoted
+  one-sided Underdog rows newly fail the ±0.15 phantom gate (14 of them posted NFL Overs that read
+  .767 and hit .462); the boost cap and the per-player trim pass exactly the same legs.
+- The production paper ledger's last committed entries are dated 2026-09-20: every run since ends
+  "committed 0 new entries", and the cause is not pinned down. One lead: the 40 highest-probability
+  gated Underdog legs are sides the platform does not post on nearly every day, the v1 cross-game
+  beam ranks on probability alone, and such a side prices an entry at zero. `policy_v2` drops those
+  sides before the beam; its first runs are the test.
 
 ## 8. Owner asks (one each)
 
-The eight asks that stood here were answered on 2026-10-04 and are decisions 7–14 (§2). One remains,
-deferred by the owner until the rest is built. Not asked because no change is proposed: the parlay
-floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while the legs are over-read).
+The eight asks that stood here were answered on 2026-10-04 and are decisions 7–14 (§2). The first
+below was deferred by the owner until the rest was built; the others came out of building it. Not
+asked because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting
+tested returns $1 per $1 while the legs are over-read).
 
 1. **Four pair quotes from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
    For each slip: put the legs on the dashboard slip, open Model Lab › Modifiers, build the same entry
@@ -391,3 +421,18 @@ floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while 
    back's rush yards Lower, plus any third pick from another game (the app refuses a same-team pair
    alone); a quarterback's pass TDs Higher with his own receiver's TDs Higher, plus any third pick.
    No automated probing.
+2. **Does training's fantasy-points average count as blending with the DFS line?** (yes / no.) For
+   a fantasy-points market, training moves the summed-components mean halfway to the platform's own
+   fantasy quote (`Stats._book_mean_shift`). It touches training rows only, never a served
+   probability, and it is the best-calibrated of the three choices measured (distribution fit error
+   0.221 on the component sum alone, 0.072 on the platform quote alone, 0.067 averaged). Left as it
+   is; "yes" removes it at the next retrain.
+3. **Fix the paper ledger's 40 copies as a new policy version?** (yes / no.) Each paper bettor is
+   meant to run as 40 independent copies. The store refuses an entry any copy already holds that
+   day, so copy 0 carries 223 of the 341 entries ever committed and the other 39 are near empty. The
+   fix is small and, by the ledger's own rule, a new version (`policy_v3`).
+4. **Sign off the bankroll table's new column?** (yes / no.) `bankroll.parquet` gained
+   `policy_version` so a `policy_v2` bettor starts from $5,000 instead of continuing a v1 balance;
+   old rows are stamped `policy_v1` at the next settle. The ledger brief asks for the owner's
+   sign-off on any schema change after live entries exist. "No" is a small revert, and v2 then
+   continues the v1 balances.

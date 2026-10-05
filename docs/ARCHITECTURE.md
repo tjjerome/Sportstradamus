@@ -65,7 +65,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `config.py` | Loads the JSON config files and `creds/keys.json` at import time. Exposes `stat_meta` (per-cell union of committed `stat_meta.json` and the runtime-recomputed `stat_calibration.json`), the per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi`, plus `stat_map`, `book_weights`, `feature_filter`, `name_map`, `abbreviations`, and the other config dicts |
-| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Writes buffer in memory and flush on `write()`: `add_dfs`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports |
+| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_reference_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. `get_line` is the sportsbook consensus line, the median of each sportsbook's latest `odds.line` and `0.0` when no sportsbook posts one; `get_reference_line` falls back to the line of record in `lines`, which also logs each pick'em platform's own line and so never feeds the consensus. Writes buffer in memory and flush on `write()`: `add_dfs`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports |
 | `scraping.py` | `Scrape` — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
 | `odds_budget.py` | Odds API credit-budget governor: usage ledger, cycle math, cost estimates, broad-run league admission, season/activity windows (`league_is_live`, `update_window_open`, `season_opener`). Loads `config/odds_api_budget.json` itself — the one exception to `config.py` owning config loads |
 | `distributions.py` | Model/bookmaker fusion math: `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds` |
@@ -115,6 +115,7 @@ Sportstradamus/
 | `graduation.py` | Shared lifecycle classification for `(league, market)` cells |
 | `ship_config.py` / `config.py` | Per-cell ship-config resolution and JSON I/O for the split config files |
 | `shap.py` | Post-train drift-monitoring SHAP only — writes `feature_importances.csv` / `feature_correlations.csv`; does not drive feature selection |
+| `prior_models.py` | `keep_prior_model` — before a retrain overwrites a served pickle, copies it to `data/models/prior/{LEAGUE}_{market}__{version}.mdl`, named for the `Model Version` that model stamped in history, so an offline pass (`sportstradamus admin feature-parity --versions`) can score the same legs with the previous model. The same call deletes prior files superseded more than `PRIOR_MODEL_RETENTION_DAYS` (14) ago. Nothing serves from `prior/`, and `sync_to_prod.sh` leaves it out of the models mirror |
 | `lineage.py` / `matrix_audit.py` | Deterministic matrix manifests for quarantined rebuilds; read-only cache integrity audit |
 | `model_strategy/` | Per-cell strategy sweep/confirm harness (registry, sweep, confirm, TPE search) |
 | `role_specs.py`, `structural_context.py`, `structural_strategies.py` | Role/position group columns and shared context for the structural calibration methods |
@@ -133,6 +134,7 @@ Sportstradamus/
 | `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam |
 | `stories/` | Narrative generation for the dashboard: game context, offer "why" text, parlay theses, offer details |
 | `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, `write_current_pickem`, game corr + pair modifiers, context/stories/details) — the only files the dashboard reads |
+| `feature_log.py` | `upsert_feature_log`, `prune_feature_log` — the serve-time feature log, `data/runtime/feature_log/date=YYYY-MM-DD/{LEAGUE}_{market}.parquet`: one row per scored player and game holding the frame fed to the model, its outputs before the book blend, and the decision-time book leg (row contract in the module docstring). Train/serve parity diagnostics, read by `sportstradamus admin feature-parity` and kept `FEATURE_LOG_RETENTION_DAYS`; not a dashboard input and never part of `history.parquet` |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays`) |
 
 ### `strategies/` — Bet sizing and contest construction
@@ -210,16 +212,17 @@ meditate  (training/cli.py)
     ├─ hyperparams.tune_hyperparameters()      (Optuna)
     ├─ LightGBMLSS.fit()
     ├─ dispersion calibration + temperature scaling
-    └─ model pickle → data/models/{LEAGUE}_{market}.pkl
+    └─ model pickle → data/models/{LEAGUE}_{market}.mdl
   training/report.report() → data/training/model_stats.parquet (+ .csv mirror)
 
 prophecize  (prediction/cli.py)
   books.get_ud() / get_sleeper()   ← Underdog / Sleeper APIs
-  Archive.get_line() / get_ev()
+  Archive.get_line() / get_reference_line() / get_ev()
   Stats{League}.get_stats(market, offers, date)
         │
         ▼
   prediction/scoring.process_offers()  →  model_prob.model_prob()
+    └─ prediction/feature_log.py  →  data/runtime/feature_log/  (diagnostics)
   prediction/correlation.find_correlation()
   prediction/parlay.beam_search_parlays()
   prediction/stories.*
@@ -267,6 +270,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |
 | Find why a comp feature has a certain weight | `data/config/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | See how a cell's recommended legs would have done on held-out rows | `sportstradamus admin tail-scorecard` (`scripts/tail_scorecard.py`; re-serve in `tail_pricing.py`, information test in `tail_information.py`) — the live rule replayed at the archived DFS rungs; a diagnostic, never a gate |
+| Check that serving feeds a model the features it trained on | `sportstradamus admin feature-parity` (`scripts/feature_parity.py`) — re-scores the serve-time feature log through the model file each row names (the served pickle or its `data/models/prior/` copy), compares each logged row with its training-matrix row feature by feature and by the model's own probability, flags a cell whose difference has a standard deviation above one percentage point, and lists settled cells and dates the log missed; `--versions` adds the paired same-leg difference between model versions. Dev-side and read-only; a diagnostic, never a gate |
 | Read archived / removed code | `src/deprecated/` (reintroduction protocol in its README) |
 
 ---
@@ -383,8 +387,9 @@ order:
    `posthoc` slug on the validation split
 9. **Evaluation + diagnostics** — held-out test set scoring; diagnostics are
    written into the model pickle alongside the model
-10. **Save** — pickle to `data/models/{LEAGUE}_{market}.pkl`; `report()`
-    then rebuilds `model_stats.parquet` and computes the ship gates
+10. **Save** — pickle to `data/models/{LEAGUE}_{market}.mdl`, after
+    `prior_models.keep_prior_model` sets aside the served file it replaces;
+    `report()` then rebuilds `model_stats.parquet` and computes the ship gates
 
 There is no feature selection at training time: every cell trains on the full
 candidate set returned by `Stats.get_stat_columns(market)`. `training/shap.py`

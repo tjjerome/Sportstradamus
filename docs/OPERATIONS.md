@@ -55,7 +55,7 @@ stays invisible.
 |---|---|---|
 | `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
-| `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy_v1) |
+| `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
 | `meditate` | Fri 1am | retrain models |
 | `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
@@ -100,7 +100,10 @@ crontab — they run on the dev box beside the manual weekly `meditate`, then
 `scripts/sync_to_prod.sh` uploads the models, the gitignored serving artifacts
 (`book_weights.json`, `stat_calibration.json`, `model_stats.{parquet,csv}`,
 per-league `corr_*` matrices — see the script header), and their snapshots
-(snapshots additive, never `--delete`). When training runs dev-side this way,
+(snapshots additive, never `--delete`). The models mirror skips
+`data/models/prior/`: the superseded model files a retrain keeps stay on the box
+that trained them (`training/prior_models.py` in
+[ARCHITECTURE.md](ARCHITECTURE.md)). When training runs dev-side this way,
 prod's `meditate` cron line stays commented out — the two workflows overwrite
 each other's models and serving artifacts.
 Both are `run_job.sh` cases, so scheduling either (with a

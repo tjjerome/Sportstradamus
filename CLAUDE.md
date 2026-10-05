@@ -254,7 +254,7 @@ poetry run ruff check src/sportstradamus/
 poetry run pytest tests/golden/             # parallel via pytest-xdist (-n auto lives in addopts)
 poetry run pytest -m integration -n0        # fake-mode end-to-end, no network; -n0: integration is not xdist-safe
 
-# Dev-only diagnostic-script tests (zinb-routing, icc, tail-scorecard), excluded from the default loop
+# Dev-only diagnostic-script tests (zinb-routing, icc, tail-scorecard, feature-parity), excluded from the default loop
 poetry run pytest -m diagnostics
 
 # Regenerate CLI help snapshots after an intentional flag change
@@ -368,7 +368,8 @@ bloats the DB ~10× for this row count; sorted-on-disk data + zone-map pruning g
 ~1 ms point lookups without it). Writes accumulate in in-memory buffers
 (`_pending_odds`, `_pending_lines`, `_replace_keys`) and flush bulk-deduped on
 `Archive().write()` — same in-memory-mutate-then-dump semantics as the old klepto
-backend. Public methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`,
+backend. Public methods: `get_ev`, `get_line` (sportsbook consensus line),
+`get_reference_line` (that, else the entry's line of record), `get_moneyline`, `get_total`,
 `get_team_market`, `to_pandas`, `add_dfs`, `merge_player_books`, `set_team_books`,
 `archived_players_by_date`, `write`, `clean_archive`.
 
