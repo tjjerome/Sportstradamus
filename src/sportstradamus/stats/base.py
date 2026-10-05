@@ -42,7 +42,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.archive import TRAINING_LOOKBACK
+from sportstradamus.helpers.archive import GAME_LINE_TRAINING_CUTOFF, TRAINING_LOOKBACK
 from sportstradamus.helpers.combined_markets import (
     ComboComponent,
     combo_sum_quote,
@@ -648,6 +648,10 @@ class Stats:
         serial queries and took minutes. The bulk path is two queries plus
         an in-Python dict lookup per row.
 
+        Lines are read as of :data:`GAME_LINE_TRAINING_CUTOFF` on each row's
+        game date. The newest quote the archive holds for a finished game is
+        often one taken during play, which serving never sees.
+
         Args:
             df: Frame to enrich. Must have a date column and a team column;
                 values are written back via ``df.loc[mask, col]``.
@@ -669,8 +673,12 @@ class Stats:
             return
         subset = df.loc[mask]
         unique_dates = subset[date_col].unique()
-        ml_map = archive.get_team_market_map(self.league, "Moneyline", dates=unique_dates)
-        tot_map = archive.get_team_market_map(self.league, "Totals", dates=unique_dates)
+        ml_map = archive.get_team_market_map(
+            self.league, "Moneyline", dates=unique_dates, cutoff=GAME_LINE_TRAINING_CUTOFF
+        )
+        tot_map = archive.get_team_market_map(
+            self.league, "Totals", dates=unique_dates, cutoff=GAME_LINE_TRAINING_CUTOFF
+        )
         default_total = archive.default_totals.get(self.league, 1)
         keys = list(zip(subset[date_col].astype(str).str[:10], subset[team_col], strict=False))
         df.loc[mask, "moneyline"] = [ml_map.get(k, 0.5) for k in keys]

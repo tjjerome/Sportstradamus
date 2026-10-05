@@ -448,7 +448,7 @@ def _parse_market_books(game):
     return moneyline_home, moneyline_away, totals, spread_home, spread_away
 
 
-def _store_game_moneylines(archive, game, league, date, dayDelta):
+def _store_game_moneylines(archive, game, league, date, dayDelta, observed_at):
     """Resolve one game's date + teams and write its moneyline/totals books."""
     gameDate = datetime.fromisoformat(game["commence_time"]).astimezone(
         pytz.timezone("America/Chicago")
@@ -463,14 +463,15 @@ def _store_game_moneylines(archive, game, league, date, dayDelta):
         return
 
     moneyline_home, moneyline_away, totals, spread_home, spread_away = _parse_market_books(game)
-    archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away)
-    archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home)
+    archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away, observed_at)
+    archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home, observed_at)
     archive.set_team_books(
         league,
         "Totals",
         gameDate,
         awayTeam,
         {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()},
+        observed_at,
     )
     archive.set_team_books(
         league,
@@ -478,6 +479,7 @@ def _store_game_moneylines(archive, game, league, date, dayDelta):
         gameDate,
         homeTeam,
         {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()},
+        observed_at,
     )
 
 
@@ -496,9 +498,13 @@ def get_moneylines(
     or to ``leagues`` when the broad-run budget governor passes an allowance.
     When called with an explicit ``sport`` + ``key`` the caller supplies
     the Odds API sport key directly (used by ``scripts/moneylines_hist.py``
-    for backfills).
+    for backfills); rows fetched for a historical ``date`` are stamped with
+    that as-of time, not with the time of the run.
     """
     historical = date.date() != datetime.today().date()
+    # A historical snapshot keeps its own as-of time, not the day the backfill ran, so the
+    # training cutoff reads it as the pre-game quote it is.
+    observed_at = date.astimezone(pytz.utc).replace(tzinfo=None) if historical else None
     sports = _moneyline_sports(apikey, sport, key, historical, leagues)
     if sports is None:
         return archive
@@ -511,7 +517,7 @@ def get_moneylines(
             continue
         games = res.json()["data"] if historical else res.json()
         for game in tqdm(games, desc=f"Getting {league} Game Data", unit="game"):
-            _store_game_moneylines(archive, game, league, date, dayDelta)
+            _store_game_moneylines(archive, game, league, date, dayDelta, observed_at)
 
     return archive
 

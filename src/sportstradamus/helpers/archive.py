@@ -117,6 +117,10 @@ _BOOK_LINE_HISTORY_COLS = [
 TRAINING_LOOKBACK_HOURS: int = 8
 TRAINING_LOOKBACK = timedelta(hours=TRAINING_LOOKBACK_HOURS)
 
+# Game lines for a finished game are read as of 15:00 UTC on its game date: after the
+# morning confer poll (13:30 UTC, 14:30 in winter) and before any regular US start.
+GAME_LINE_TRAINING_CUTOFF = timedelta(hours=15)
+
 # Sharp books that anchor the movement-direction diagnostic in CLV.
 SHARP_BOOKS: tuple[str, ...] = ("pinnacle", "circa", "bookmaker")
 
@@ -766,18 +770,18 @@ class Archive:
         league: str,
         market: str,
         *,
+        cutoff: timedelta,
         dates: Iterable[str | datetime.date] | None = None,
-        at: datetime.datetime | None = None,
     ) -> dict[tuple[str, str], float]:
         """Bulk weighted-average EV map for one ``(league, market)`` across many entities.
 
         Returns ``{("YYYY-MM-DD", entity): ev}`` for every ``(date, entity)``
-        the archive holds for the league/market. ``dates`` restricts the
+        a book quoted by the cutoff for the league/market. ``dates`` restricts the
         scan to the slice the caller cares about (typical: the unique
         ``game_date`` values present in a freshly fetched gamelog). When
         ``dates`` is omitted, every date is scanned.
 
-        Missing keys mean "no book quoted that slot"; callers should pass
+        Missing keys mean "no book quoted that slot by the cutoff"; callers should pass
         a fallback to :py:meth:`dict.get` (e.g. ``0.5`` for moneyline,
         :attr:`default_totals` for totals) to preserve the per-row
         semantics of :meth:`get_moneyline` / :meth:`get_total` when
@@ -793,14 +797,17 @@ class Archive:
         Args:
             league: League code (e.g., 'NBA', 'NFL').
             market: Market name (e.g., 'Moneyline', 'Totals').
+            cutoff: Each book counts at its newest quote stamped at or before
+                ``game_date + cutoff``; a slot quoted only after that has no key.
+                An offset rather than an instant, since one instant cannot
+                stand for each row's own game date.
             dates: Restrict scan to these game dates. ``None`` scans all dates.
-            at: Observation cutoff; ``None`` means "latest available" per book.
 
         Returns:
             Dict mapping ``("YYYY-MM-DD", UPPER(entity))`` to weighted-average EV.
-            Keys absent from the dict mean no book quoted that slot.
+            Keys absent from the dict mean no book quoted that slot by the cutoff.
         """
-        params: list = [league, market]
+        params: list = [league, market, cutoff]
         sql = (
             "SELECT game_date, entity, book, ev, line FROM ("
             "  SELECT game_date, entity, book, ev, line, observed_at, "
@@ -809,7 +816,7 @@ class Archive:
             "             ORDER BY observed_at DESC"
             "         ) AS rn "
             "  FROM odds "
-            "  WHERE league=? AND market=?"
+            "  WHERE league=? AND market=? AND observed_at <= game_date + ?"
         )
         if dates is not None:
             normalized = sorted({_safe_date(d) for d in dates} - {None})
@@ -818,9 +825,6 @@ class Archive:
             placeholders = ",".join(["?"] * len(normalized))
             sql += f" AND game_date IN ({placeholders})"
             params.extend(normalized)
-        if at is not None:
-            sql += " AND observed_at <= ?"
-            params.append(at)
         sql += ") WHERE rn = 1"
 
         grouped: dict[tuple[str, str], list[tuple[str, float, float | None]]] = {}
@@ -1365,12 +1369,15 @@ class Archive:
         date: str | datetime.date,
         team: str,
         book_evs: dict[str, float],
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Append per-book EVs for a team-market entry (Moneyline / Totals / Spreads).
 
         With time-series storage every observation is preserved; the
         ``set_*`` name is retained for caller compatibility but semantics
         are append-only — the latest-per-book reader returns the freshest.
+        ``observed_at`` defaults to now; a historical fetch passes its
+        snapshot time.
         """
         d = _safe_date(date)
         if d is None:
@@ -1378,7 +1385,7 @@ class Archive:
         for book, ev in book_evs.items():
             if ev is None:
                 continue
-            self._stage_book_ev(league, market, d, team, book, ev)
+            self._stage_book_ev(league, market, d, team, book, ev, observed_at)
 
     def write(self, all=False):
         """Flush pending writes to disk.

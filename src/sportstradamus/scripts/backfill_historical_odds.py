@@ -339,7 +339,7 @@ def _backfill(
     "--layer",
     type=click.Choice(["feature", "close"]),
     default="feature",
-    help="feature: pre-read snapshot (observed_at 01:00, includes game lines). "
+    help="feature: pre-read snapshot (props observed_at 01:00; game lines at the snapshot hour). "
     "close: evaluation-only closing snapshot (observed_at 23:00, props only).",
 )
 @click.option(

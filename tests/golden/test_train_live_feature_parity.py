@@ -13,8 +13,9 @@ and is identical across the two paths -- except ``_game_context``, which branche
 * upcoming (serving) branch -- reads ``Home`` from ``self.upcoming_games`` and
   ``Moneyline`` / ``Total`` from ``archive.get_moneyline`` / ``archive.get_total``.
 
-The gamelog's ``moneyline`` / ``totals`` were themselves baked from that same archive
-at load time, so the invariant under test is *archive-baked-at-train ==
+The gamelog's ``moneyline`` / ``totals`` are baked from that same archive as of 15:00
+UTC on the game date, while serving reads the newest quote for today's game. With the
+two stubbed equal, the invariant under test is *archive-baked-at-train ==
 archive-read-at-serve*. This is the "edit both branches" risk that every game-context
 feature carries (``docs/handoffs/model_improvement_track.md`` §6.3.1, §7.2 step 2);
 the doc gates all later feature work behind this harness existing.

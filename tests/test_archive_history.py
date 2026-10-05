@@ -20,10 +20,17 @@ import datetime
 from datetime import date, timedelta
 from datetime import datetime as dt
 
+import pandas as pd
 import pytest
 
-from sportstradamus.helpers.archive import Archive, _resolve_market, archive_market
+from sportstradamus.helpers.archive import (
+    GAME_LINE_TRAINING_CUTOFF,
+    Archive,
+    _resolve_market,
+    archive_market,
+)
 from sportstradamus.helpers.config import stat_map
+from sportstradamus.stats import base
 
 
 @pytest.fixture
@@ -265,6 +272,55 @@ def test_reference_line_reads_the_log_for_a_sportsbook_row_archived_without_its_
     assert archive.get_reference_line(*_PTS_KEY) == 0.5
 
 
+def _seed_game_lines(archive):
+    """One book's MLB moneylines, each stamped on its own game date."""
+    for team, stamp, ev in [
+        ("NYY", dt(2026, 5, 8, 13, 30), 0.55),
+        ("NYY", dt(2026, 5, 8, 23, 40), 0.80),
+        ("BOS", dt(2026, 5, 8, 23, 40), 0.20),
+        ("CHC", dt(2026, 5, 8, 0, 0), 0.48),
+        ("NYY", dt(2026, 5, 9, 13, 30), 0.60),
+    ]:
+        _insert_odds(
+            archive,
+            league="MLB",
+            market="Moneyline",
+            d=stamp.date(),
+            entity=team,
+            book="pinnacle",
+            ev=ev,
+            observed_at=stamp,
+        )
+
+
+def test_team_market_map_stops_at_the_cutoff_on_each_game_date(archive):
+    """Each key reads its newest quote at or before 15:00 UTC on its own game date."""
+    _seed_game_lines(archive)
+
+    lines = archive.get_team_market_map("MLB", "Moneyline", cutoff=GAME_LINE_TRAINING_CUTOFF)
+
+    # BOS was quoted only during its game, so it gets no key. NYY's 23:40 quote on the
+    # 8th falls before the 9th's cutoff: one instant for the whole query would either
+    # admit it or drop the 9th's own 13:30 quote.
+    assert lines == pytest.approx(
+        {("2026-05-08", "NYY"): 0.55, ("2026-05-08", "CHC"): 0.48, ("2026-05-09", "NYY"): 0.60}
+    )
+
+
+def test_enrich_team_markets_writes_the_pre_game_line(archive, monkeypatch):
+    """A quote taken while the game was being played never reaches the gamelog."""
+    _seed_game_lines(archive)
+    monkeypatch.setattr(base, "archive", archive)
+    stats = base.Stats()
+    stats.league = "MLB"
+    games = pd.DataFrame({"gameDate": "2026-05-08", "team": ["NYY", "BOS", "CHC"]})
+
+    stats._enrich_team_markets(games, date_col="gameDate", team_col="team")
+
+    # NYY's 13:30 quote, the no-quote default for BOS, CHC's midnight placeholder.
+    assert games["moneyline"].tolist() == pytest.approx([0.55, 0.5, 0.48])
+
+
 # --------------------------------------------------------------------------
 # history APIs
 # --------------------------------------------------------------------------
@@ -442,6 +498,19 @@ def test_set_team_books_is_append_only(archive):
     history = archive.get_ev_history("MLB", "Moneyline", "2026-05-08", "NYY")
     assert len(history) == 2
     assert archive.get_moneyline("MLB", "2026-05-08", "NYY") == pytest.approx(0.65)
+
+
+def test_set_team_books_keeps_a_given_stamp(archive):
+    """A backfill's snapshot time survives the write, so the cutoff read sees the row."""
+    snapshot = dt(2025, 6, 1, 6, 0)
+    archive.set_team_books(
+        "MLB", "Moneyline", "2025-06-01", "NYY", {"pinnacle": 0.62}, observed_at=snapshot
+    )
+    archive.write()
+
+    assert archive._connection.execute("SELECT observed_at FROM odds").fetchall() == [(snapshot,)]
+    lines = archive.get_team_market_map("MLB", "Moneyline", cutoff=GAME_LINE_TRAINING_CUTOFF)
+    assert lines == pytest.approx({("2025-06-01", "NYY"): 0.62})
 
 
 def test_archive_auto_migrates_pre_observed_at_schema(tmp_path, monkeypatch):

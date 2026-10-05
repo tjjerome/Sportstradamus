@@ -9,6 +9,7 @@ non-historical request path, the per-game date-window + team-abbreviation
 resolution, and the h2h / totals / spreads book parse (including the
 totals+spread blend written to the ``Totals`` bucket), plus the plus-key
 routing on every request and the budget governor's ``leagues`` narrowing.
+A historical fetch is pinned only for the stamp its writes carry.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from http import HTTPStatus
 
+import pytest
 import pytz
 
 from sportstradamus import moneylines
@@ -103,9 +105,11 @@ def _fake_get_with_retry(calls):
 class _FakeArchive:
     def __init__(self):
         self.calls = []
+        self.stamps = []
 
-    def set_team_books(self, league, market, date, team, books):
+    def set_team_books(self, league, market, date, team, books, observed_at=None):
         self.calls.append((league, market, date, team, books))
+        self.stamps.append(observed_at)
 
 
 _EXPECTED = [
@@ -125,6 +129,8 @@ def test_get_moneylines_writes_team_books(monkeypatch) -> None:
 
     assert returned is archive
     assert archive.calls == _EXPECTED
+    # A live run passes no stamp, so the archive stamps each row with now.
+    assert archive.stamps == [None] * 4
     # The sports-index probe and every odds request spend from the plus key.
     # NHL rides the 5-league LEAGUES_OF_INTEREST even with an empty slate.
     assert [(url, params["apiKey"]) for url, params in calls] == [
@@ -148,3 +154,27 @@ def test_get_moneylines_leagues_filter(monkeypatch) -> None:
         moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"),
     ]
     assert archive.calls == _EXPECTED
+
+
+# The two shapes callers pass for one instant: backfill_historical_odds builds its
+# as-of in UTC, moneylines_hist.py in Chicago wall time.
+@pytest.mark.parametrize(
+    "as_of",
+    [pytz.utc.localize(datetime(2025, 6, 1, 6, 0)), _CHICAGO.localize(datetime(2025, 6, 1, 1, 0))],
+    ids=["utc", "chicago"],
+)
+def test_get_moneylines_stamps_a_historical_snapshot_with_its_as_of_time(
+    monkeypatch, as_of
+) -> None:
+    """A backfill run days after the game still stamps the time its quotes were taken."""
+    games = [{**_GAMES[0], "commence_time": "2025-06-02T00:00:00Z"}]
+    monkeypatch.setattr(
+        moneylines, "_get_with_retry", lambda url, params=None: _FakeResponse({"data": games})
+    )
+    archive = _FakeArchive()
+
+    moneylines.get_moneylines(
+        archive, {"odds_api_max": "km"}, date=as_of, sport="NBA", key="basketball_nba"
+    )
+
+    assert archive.stamps == [datetime(2025, 6, 1, 6, 0)] * 4
