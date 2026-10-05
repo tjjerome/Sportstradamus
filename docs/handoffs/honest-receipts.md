@@ -183,8 +183,8 @@ inside its group; §8 restates each open one as a plain question.
   rewrite in `parlay-dependence.md` §1 and the volatile assumption (text in the brief) plus
   `PARLAY_AUDIT.md` §1.3 / §2.4 / §4. **Struck:** I5b symmetric Σ, I5c `underdog_tax.py`.
   `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested value returns ≥ 1, so no
-  change is proposed (§8). I5's own acceptance = priced payout equals the quote on owner-captured slips (one Power, one
-  Flex, one stacked same-game pair) and the ledger settles at it.
+  change is proposed (§8). I5's own acceptance = priced payout equals the quote on owner-captured slips
+  (one Power, one Flex, one stacked same-game pair) and the ledger settles at it.
 - **I6 model information and train/serve alignment — R3's build order (§5); each item waits on the
   owner's read.** None pulls or demotes a model. `pipeline.py` is 5,109 lines: extract helpers,
   never grow it. Retrains go through `meditate` and the existing gates unchanged.
@@ -394,8 +394,8 @@ no setting tested returns $1 per $1 while the legs are over-read).
    - First, log what the model saw (I6e): at scoring time, save each leg's model inputs to a
      diagnostics file. Nothing can show today that the live model sees what training fed it; the same
      model at the same line differs by 3–6 pp (standard deviation) between the two paths, worst on NFL.
-     No retrain, no served number moves. Clock: late October, when NBA and NHL open; a leg served before the log exists can never be
-     checked.
+     No retrain, no served number moves. Clock: late October, when NBA and NHL open; a leg served
+     before the log exists can never be checked.
    - With it, keep the previous model files for 14 days after each retrain (I6g): MLB recommended legs
      are over-read by 5.6 pp in a model's first four days and 13.5 pp after, in all three post-fix
      retrains. Old files let both versions score the same legs; if the pattern holds, retrain every
