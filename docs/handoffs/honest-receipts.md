@@ -3,10 +3,10 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–3 landed on `devel` 2026-10-04, unpushed; all three briefs
-returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus
-sanity check found no profit in the sportsbook consensus at the platforms' real payouts (§7); the gated
-work (§6) waits on the owner's answers to §8.
+`docs/archive/` (§5). Status: OPEN — waves 1–3 landed on `devel` 2026-10-04 and are pushed; all three
+briefs returned the same day (R1 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the
+consensus sanity check found no profit in the sportsbook consensus at the platforms' real payouts (§7);
+the owner answered the asks the same day (§2, decisions 7–14) and the gated work (§6) is being built.
 
 ## 1. Mission & money logic
 
@@ -67,9 +67,27 @@ have (labelled I6, §6), judged on the recommended legs by the tail scorecard (l
    ([underdog_api.md](../underdog_api.md) P-32). The owner answered the ask to confirm that capture in
    the app with "Underdog payouts are confirmed correct"; it is read here as confirming the capture,
    which makes `underdog_payouts.json` (3 / 6 / 10 / 20 / 25) the stale one.
+7. **The session pushes `devel` for this lane's approved work** ("Go ahead and push yourself"), each
+   push after the refactoring-specialist and the three gates. A push deploys: production pulls `devel`
+   before every cron job.
+8. **A 1.00× Underdog pick is valued for the entries the owner plays**: 3-, 5- or 6-leg on Underdog
+   and 2-leg on Sleeper, "but not exclusively those". `UNDERDOG_BOOST_BASELINE` becomes 1.83, the
+   geometric mean of the 3-, 5- and 6-pick Power roots (1.866, 1.821, 1.809). A Sleeper leg keeps its
+   posted multiplier.
+9. **The three parlay fact fixes go**: the payout file, the pair bonuses above 1.0, the ledger
+   settlement (§6, I5).
+10. **A leg with no model keeps its recommended flag**: "Treat the consensus book as the model if the
+    model doesn't exist." No code change.
+11. **The consensus line is built from sportsbooks only** (decision 5 applied to `Archive.get_line`),
+    after every reader is traced.
+12. **A paper bettor takes Underdog 1.00× legs only**, in the sim ledger, beside the current ones.
+13. **The model-information work opens** in the §6 I6 order: the serve-time log and the 14-day
+    model-file retention now, the training-side cuts at the next retrain, NFL research after the log.
+14. **The temperature penalty is dropped only if** the models are better without it and every cell
+    that passes the gates today still passes.
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
-the three gates once per wave, the owner pushes, `stat_meta.json` never committed from a session.
+the three gates once per wave, `stat_meta.json` never committed from a session.
 
 ## 3. Verify before you trust
 
@@ -361,56 +379,11 @@ eras.
 
 ## 8. Owner asks (one each)
 
-Every ask is a yes/no or a pick, with the facts beside it. Settled and off this list: the live Underdog
-table (confirmed, §2); the DFS main line as a book leg (no, §2); the menu operating point (moot under
-R1's KILL). Not asked because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0;
-no setting tested returns $1 per $1 while the legs are over-read).
+The eight asks that stood here were answered on 2026-10-04 and are decisions 7–14 (§2). One remains,
+deferred by the owner until the rest is built. Not asked because no change is proposed: the parlay
+floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while the legs are over-read).
 
-1. **Push `devel`** after reading §4 and the PR body's before/after tables.
-2. **Value an Underdog pick at 1.871 instead of 1.78?** (I5a-1.) The code values a 1.00× Underdog pick
-   at 1.78× stake, the fourth root of the old 4-pick payout (10×). The confirmed table pays 3.5× on a
-   2-pick, so a pick is worth √3.5 = 1.871 (3-pick 1.866, 4-pick 1.861, 5-pick 1.821, 6-pick 1.809).
-   The change credits Underdog winners 5 % more (the same 3,055 post-fix recommended legs go from
-   −13.1 % to −8.7 %) and lowers the model read a 1.00× leg needs to be recommended from 59.0 % to
-   56.1 %, which recommends 3,105 more legs (they returned −3.9 %). A truth fix; it creates no edge.
-3. **Three factual fixes to parlay pricing, one go?** (I5a-2, I5a-3, I5d.) The payout file takes the
-   confirmed table (it still says 3 / 6 / 10 / 20 / 25, so a 2-pick is priced 14 % low and a 6-pick
-   29 % low). Pair bonuses above 1.0 in `banned_combos.json` become 1.0 (live Underdog never pays a
-   same-game pair above the table; 68 % of the parlays the builder selects carry such a bonus, mean
-   ×1.24). The sim ledger settles a winning parlay at table × each leg's multiplier (it leaves the leg
-   multipliers out today and underpays stored winners by a median 1.68×). No probability moves.
-4. **Keep the "recommended" flag on legs with no model?** A leg with no model is scored from the
-   sportsbook consensus alone (`book_fallback`) and can still be flagged: 4,463 such legs all-time
-   returned −9.9 %, 38 post-fix returned −26 %, and the consensus shows no edge at the platforms'
-   payouts (§7). Dropping the flag keeps the legs on the board and touches no model.
-5. **Make the consensus line sportsbook-only?** Decision 5 applied to the one place that breaks it
-   (§7). Step 1 traces every reader of `Archive.get_line`, so no training input shifts unseen; step 2
-   changes that one function to the median of sportsbook lines, with no consensus line where no
-   sportsbook posts one; the models pick it up at their next retrain.
-6. **Paper-trade "Underdog 1.00× legs only"?** A second paper bettor in the sim ledger that takes only
-   those legs, compared with the current one after four weeks. It is the one kind of leg where the
-   rule does not lose the platform's cut (§7). Nothing live changes.
-7. **Open the model-information work (I6) in this order?**
-   - First, log what the model saw (I6e): at scoring time, save each leg's model inputs to a
-     diagnostics file. Nothing can show today that the live model sees what training fed it; the same
-     model at the same line differs by 3–6 pp (standard deviation) between the two paths, worst on NFL.
-     No retrain, no served number moves. Clock: late October, when NBA and NHL open; a leg served
-     before the log exists can never be checked.
-   - With it, keep the previous model files for 14 days after each retrain (I6g): MLB recommended legs
-     are over-read by 5.6 pp in a model's first four days and 13.5 pp after, in all three post-fix
-     retrains. Old files let both versions score the same legs; if the pattern holds, retrain every
-     3–4 days.
-   - At the next retrain, cut training's game-line quotes at pre-game (I6f: late-season MLB rows carry
-     in-game quotes; the game-total quote correlates .57 with the team's runs where they leak in, .16
-     on pre-game quotes) and count a push as half an Over (I6a: a tie is an Over win today; ≤ 0.2 pp).
-   - After the log, NFL research (I6d): the NFL models add nothing measurable beyond the market on the
-     legs tested, and no method is guaranteed.
-8. **Drop the temperature penalty at the next retrain?** (I6c.) Each model has one number T that
-   flattens its probabilities toward 50 % when it is overconfident. Training holds T near 1 (no
-   flattening) with the penalty `0.01·(T−1)²`; in 12 of 48 cells the free T is more than 1.5× the
-   penalized one. Without it the over-read on recommended legs falls 1.0–1.2 pp (of 12.5), recommended
-   legs fall 27–31 %, and overall log-loss rises 0.001–0.002.
-9. **Optional: four pair quotes from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
+1. **Four pair quotes from the app** (fills I5a-3; ten minutes; NFL same-game pairs only).
    For each slip: put the legs on the dashboard slip, open Model Lab › Modifiers, build the same entry
    in the Underdog app, type the payout the app shows into "Actual quoted payout (x)", then "Save
    corrected modifiers" and "Confirm save". The slips: two opposing running backs' rush attempts, one
