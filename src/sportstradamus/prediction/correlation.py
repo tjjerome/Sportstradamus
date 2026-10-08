@@ -23,7 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, cell_market, stat_map
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
     GameArrays,
@@ -218,7 +218,7 @@ def _leg_opp_boost(game_df, platform):
 
 
 def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
-    """Per-leg Kelly shrinkage weight, cached by ``(league, canonical market)``.
+    """Per-leg Kelly shrinkage weight, cached by ``(league, cell market)``.
 
     ``shrinkage_cache`` is caller-owned and shared across every game in one
     league's processing loop — ``resolve_market_shrinkage`` hits training/CLV
@@ -231,14 +231,14 @@ def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
     """
     from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
 
-    canonical = game_df["Market"].map(stat_map.get(platform, {}))
     out = np.ones(len(game_df), dtype=float)
-    for i, market in enumerate(canonical):
-        if not isinstance(market, str):
+    for i, label in enumerate(game_df["Market"]):
+        cell = cell_market(league, platform, label)
+        if cell is None:
             continue
-        key = (league, market)
+        key = (league, cell)
         if key not in shrinkage_cache:
-            shrinkage_cache[key] = resolve_market_shrinkage(league, market)[0]
+            shrinkage_cache[key] = resolve_market_shrinkage(*key)[0]
         out[i] = shrinkage_cache[key]
     return out
 

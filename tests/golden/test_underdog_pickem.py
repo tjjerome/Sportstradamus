@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import datetime
+import importlib
 from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from sportstradamus import clv
 from sportstradamus.strategies._pickem_emit import emit_yaml, entries_to_frame
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
@@ -337,6 +339,51 @@ def test_parlay_shrinkage_sleeper_uses_sleeper_stat_map(monkeypatch):
     assert calls == ["REB"]
     # The same raw name under the Underdog map resolves to nothing -> fallback.
     assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (1.0, "fallback")
+
+
+def stub_cell_trust(monkeypatch, cells):
+    """Stand in for the two trust readers: each ``(league, market)`` cell in ``cells``
+    has that training skill, and no cell has a closing-line segment."""
+    # sportstradamus.training re-exports the report function over the submodule, so the
+    # module resolve_market_shrinkage's lazy from-import reads is reached by name.
+    report_mod = importlib.import_module("sportstradamus.training.report")
+    monkeypatch.setattr(
+        report_mod,
+        "get_market_calibration",
+        lambda league, market: {"brier_skill_score": cells.get((league, market), float("nan"))},
+    )
+    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (1.0, 0))
+
+
+def test_parlay_shrinkage_asks_a_cells_trust_under_the_leagues_own_market_name(monkeypatch):
+    """``stat_map`` names a market the same for every league and a cell goes by its
+    league's own name: Underdog's NBA Fantasy Points is the ``fantasy points
+    prizepicks`` cell, its NHL Assists the ``assists`` cell. Asked for under the
+    mapped name no cell answers, and the no-evidence rung sizes the parlay to nothing.
+    Goals is already the NHL's own name for its cell."""
+    from sportstradamus.strategies import underdog_pickem as up
+
+    stub_cell_trust(
+        monkeypatch,
+        {
+            ("NBA", "fantasy points prizepicks"): 0.163,
+            ("NHL", "assists"): 0.30,
+            ("NHL", "goals"): 0.45,
+        },
+    )
+
+    resolved = {
+        (league, market): up._parlay_shrinkage(
+            pd.Series(_parlay([("A. Player", market)], league=league)), league, "Underdog"
+        )
+        for league, market in [("NBA", "Fantasy Points"), ("NHL", "Assists"), ("NHL", "Goals")]
+    }
+
+    assert resolved == {
+        ("NBA", "Fantasy Points"): (0.163, "training"),
+        ("NHL", "Assists"): (0.30, "training"),
+        ("NHL", "Goals"): (0.45, "training"),
+    }
 
 
 # --- Sleeper platform threading ------------------------------------------------

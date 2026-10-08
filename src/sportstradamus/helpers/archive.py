@@ -45,7 +45,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
+from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist, stat_map
 from sportstradamus.helpers.distributions import (
     SN_MAX_MEAN_FACTOR,
     UNDERDOG_BOOST_BASELINE,
@@ -255,6 +255,18 @@ def archive_market(league: str, market: str) -> str:
     if league in ("NBA", "WNBA"):
         market = market.replace("underdog", "prizepicks")
     return market
+
+
+def cell_market(league: str, platform: str, label: str) -> str | None:
+    """The league's own cell key for a platform's market label; ``None`` when it has no cell.
+
+    A label the platform's ``stat_map`` lacks has no cell. The map names a market
+    the same for every league, while the model cell, the gamelog column and the
+    archive go by the league's own name: NHL ``AST`` is the ``assists`` cell.
+    ``label`` is the platform's raw label, not a name the map has already renamed.
+    """
+    mapped = stat_map[platform].get(label)
+    return None if mapped is None else archive_market(league, mapped)
 
 
 def _resolve_market(league: str, raw_market: str, key: dict) -> str:

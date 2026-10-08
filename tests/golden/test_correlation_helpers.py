@@ -47,9 +47,11 @@ from sportstradamus.prediction.correlation import (
     _build_game_corr_map,
     _collect_game_corr,
     _leg_pair_corr_boost,
+    _leg_shrinkage,
     _resolve_player_positions,
     find_correlation,
 )
+from tests.golden.test_underdog_pickem import stub_cell_trust
 
 
 def _has_corr_parquets(league: str) -> bool:
@@ -910,6 +912,37 @@ def test_build_correlation_matrices_honors_push_column() -> None:
         game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {}
     ).p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]
+
+
+@pytest.mark.parametrize(
+    ("league", "markets", "expected"),
+    [
+        ("NBA", ["Fantasy Points", "Rebounds", "H2H Points"], [0.163, 0.40, 1.0]),
+        ("NHL", ["Assists", "Goals"], [0.30, 0.45]),
+    ],
+)
+def test_leg_shrinkage_asks_a_cells_trust_under_the_leagues_own_market_name(
+    monkeypatch, league, markets, expected
+) -> None:
+    """``stat_map`` names a market the same for every league and a cell goes by its
+    league's own name: Underdog's NBA Fantasy Points is the ``fantasy points
+    prizepicks`` cell, its NHL Assists the ``assists`` cell. Asked for under the
+    mapped name no cell answers, and the no-evidence rung sizes every parlay holding
+    the leg to nothing. REB and goals are already their league's own names; a market
+    the platform map lacks is never asked for."""
+    stub_cell_trust(
+        monkeypatch,
+        {
+            ("NBA", "fantasy points prizepicks"): 0.163,
+            ("NBA", "REB"): 0.40,
+            ("NHL", "assists"): 0.30,
+            ("NHL", "goals"): 0.45,
+        },
+    )
+
+    shrinkage = _leg_shrinkage(pd.DataFrame({"Market": markets}), "Underdog", league, {})
+
+    assert shrinkage.tolist() == expected
 
 
 @_needs_nba_corr

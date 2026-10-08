@@ -28,6 +28,7 @@ from sportstradamus.helpers.archive import (
     Archive,
     _resolve_market,
     archive_market,
+    cell_market,
 )
 from sportstradamus.helpers.config import stat_map
 from sportstradamus.stats import base
@@ -103,6 +104,16 @@ def test_archive_market_applies_the_league_fixups_and_no_second_alias_pass():
     # so a label that has been through it once must not go through it again.
     assert _resolve_market("MLB", "bat_walks", stat_map["Sleeper"]) == "walks"
     assert _resolve_market("MLB", "walks", stat_map["Sleeper"]) == "walks allowed"
+
+
+def test_cell_market_gives_a_platform_label_its_leagues_own_key():
+    """A label the platform's map lacks has no cell."""
+    labels = [("NHL", "Assists"), ("NBA", "Fantasy Points"), ("NBA", "H2H Points")]
+    assert [cell_market(league, "Underdog", label) for league, label in labels] == [
+        "assists",
+        "fantasy points prizepicks",
+        None,
+    ]
 
 
 # --------------------------------------------------------------------------

@@ -27,7 +27,7 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers import archive_market, platform_payout, stat_map
+from sportstradamus.helpers import cell_market, platform_payout
 from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.payouts import (
     SLEEPER_FULL_REFUND_MAX_SIZE,
@@ -81,12 +81,10 @@ def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
     out = []
     for i, row in offers.reset_index(drop=True).iterrows():
         leg = build_leg(row)
-        cell_market = stat_map[platform].get(row["Market"])
-        if cell_market:
-            # stat_map names a market the same for every league, and the NHL gamelog
-            # and cells call AST assists. Settlement reads the gamelog by this key.
-            cell_market = archive_market(leg["league"], cell_market)
-            leg["stat"] = cell_market
+        cell = cell_market(leg["league"], platform, row["Market"])
+        if cell:
+            # Settlement reads the gamelog by this key.
+            leg["stat"] = cell
         out.append(
             _ScoredLeg(
                 idx=i,
@@ -99,7 +97,7 @@ def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
                 boost=leg["boost"],
                 display=leg_label(leg),
                 canonical_leg=leg,
-                cell_market=cell_market,
+                cell_market=cell,
             )
         )
     return out

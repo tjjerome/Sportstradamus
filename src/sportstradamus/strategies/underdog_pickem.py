@@ -19,7 +19,7 @@ from typing import Any
 import click
 import pandas as pd
 
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, odds_budget, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, cell_market, odds_budget
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
@@ -159,6 +159,12 @@ def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
     chain; the returned source label tells a caller which rung of that chain
     fired for this cell.
 
+    ``market`` is the league's own cell key (``helpers.cell_market`` resolves a
+    platform's label to it), and the training reader has a row under no other
+    name. The live reader matches history's ``Market``, which is that key except
+    for Underdog's NBA and WNBA fantasy points: history files those rows as
+    ``fantasy points underdog``, so their segment is not read under the cell key.
+
     Returns:
         ``(shrinkage, source)`` where ``source`` is one of ``"blended"``,
         ``"training"``, ``"clv_segment"``, or ``"fallback"``.
@@ -230,14 +236,14 @@ def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float
     A parlay cashes only if every leg hits, so it inherits the trust of its
     least-calibrated market — resolve per distinct leg market and keep the min.
     Leg ``market`` is the raw platform name (a ``stat_map[platform]`` key);
-    mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
+    ``cell_market`` gives the cell key (``REB``, ``BLST``, …) that
     ``resolve_market_shrinkage`` resolves against. Combo / H2H names with no
     mapping are skipped; a parlay with none left falls back to full trust.
     """
-    markets = {stat_map[platform].get(leg["market"]) for leg in row["legs"]} - {None}
-    if not markets:
+    cells = {cell_market(league, platform, leg["market"]) for leg in row["legs"]} - {None}
+    if not cells:
         return 1.0, "fallback"
-    return min((resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
+    return min((resolve_market_shrinkage(league, cell) for cell in cells), key=lambda r: r[0])
 
 
 def leg_player(leg: str) -> str:
