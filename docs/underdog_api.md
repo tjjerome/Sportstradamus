@@ -469,15 +469,17 @@ from different games **[P-32]**:
 |---|---|---|
 | 2 | 3.5 | not offered (needs 3) |
 | 3 | 6.5 | 0: 3.25 · 1: 1.09 |
-| 4 | 12.0 | 0: 7.2 · 1: 1.8 |
+| 4 | 12.0 | 0: 7.2 · 1: 1.4 (quoted 1.8 on 2026-09-10) |
 | 5 | 20.0 | 0: 10.0 · 1: 2.5 |
 | 6 | 35.0 | 0: 25.0 · 1: 2.6 · 2: 0.25 |
 | 7 | 65.0 | 0: 40.0 · 1: 2.75 · 2: 0.5 |
 | 8 | 120.0 | 0: 80.0 · 1: 3.0 · 2: 1.0 |
 
-The owner re-confirmed this table in the app in October 2026 **[OWNER]**, and the static
-`underdog_payouts.json` (`power`, `flex`) carries it. The quote, not the file, stays the
-settle-truth for a priced slip. Composition and rules seen **[P-32] [P-35]**:
+The owner read both tables in the app on 2026-10-08 with even picks from different games
+**[OWNER]**: every value as quoted except the 4-pick Flex one-loss tier, which the app pays at
+1.4. The static `underdog_payouts.json` (`power`, `flex`) carries the table as it stands above.
+The quote, not the file, stays the settle-truth for a priced slip. Composition and rules seen
+**[P-32] [P-35]**:
 
 - A 2.57× rung (James Cook 1.5+ TDs) with an even pick quoted 8.99 = 3.5 × 2.57: rung
   multipliers multiply into the table.
@@ -516,6 +518,22 @@ from another game; uncorrelated = 6.5 Power, 3.25 / 1.09 Flex) **[P-32] [P-35] [
 | QB pass yds + same-team RB rush yds | both higher | 6.5 | 3.25 / 1.09 |
 | WR rec yds + same-team WR rec yds | both higher | 6.5 | 3.25 / 1.09 |
 | RB rush yds + opposing RB rush yds | both higher | 6.5 | 3.25 / 1.09 |
+
+Four Power payouts the owner read in the app on 2026-10-08, Dallas at Tampa Bay **[OWNER]**.
+The app showed each pick's decimal price (§7.4), so `m` = payout ÷ the table ÷ the picks' own
+multipliers, each pick's multiplier being its shown price ÷ 1.87:
+
+| Pair (same game) | Sides | Prices shown | Payout shown | Untaxed | `m` |
+|---|---|---|---|---|---|
+| RB rush attempts + opposing RB rush attempts | higher + lower | 1.96, 1.97 | 2.89 | 3.86 | 0.748 |
+| RB rush yds + opposing RB rush yds | higher + lower | 1.87, 1.87 | 2.74 | 3.5 | 0.783 |
+| QB pass yds + same-team RB rush yds, with an even pick from another game | higher + lower | 1.87 × 3 | 6.5 | 6.5 | 1.0 |
+| QB pass TDs + same-team WR rush+rec TDs, with an even pick from another game | both higher | 2.21, 1.96, 1.87 | 6.39 | 8.04 | 0.794 |
+
+Opposing running backs on opposite sides are taxed 22 to 25 %, where that pair type on the same
+side came back untaxed in September; the passer and receiver touchdown pair is accepted and
+taxed 21 % (9 % on another pair in September). Each is one pair of players: Power's `m` is
+pair-specific (below), so these are samples of a pair type, not its value.
 
 How the number arises **[P-39] [P-40] [P-41]** (74 designed quotes on CIN, NYJ and
 IND pairs, every one deterministic on repeat):
@@ -772,8 +790,15 @@ or `Match` (both null: moneyline, spread, total and the `misc` game props);
 ### 7.4 Pricing fields
 
 `payout_multiplier` is what the scraper reads per side (`_ud_boosts` in
-[books/underdog.py](../src/sportstradamus/books/underdog.py)) and what the app shows;
-treat it as the settle value. The other fields are representations of the same price
+[books/underdog.py](../src/sportstradamus/books/underdog.py)); treat it as the settle value.
+Since October 2026 the app shows a pick's decimal price instead: an even pick reads 1.87× on
+both sides (√3.5, the two-pick Power root) and a priced pick about 1.87 times its multiplier
+**[OWNER]**, at a finer grain than the feed's two decimals: a shown 1.97 is no two-decimal
+multiplier times 1.87 **[INF]**. The feed still carried `payout_multiplier` 1.0 for an even
+pick on 2026-10-08 (323 of the 1,617 Underdog rows on production's board), and even picks
+still pay the tables of §6.8. If the feed's field ever follows the app, every Underdog payout
+here prices about 1.87 times too high, and an even pick stops reading exactly 1.0, the value
+every even-pick rule tests for. The other fields are representations of the same price
 whose exact relationship is **[INF]** until a settled entry confirms it:
 
 - In the capture 109 of the 234 two-sided lines carry unequal multipliers (Rush + Rec
@@ -1188,6 +1213,7 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 
 ## Changelog
 
+- 2026-10-08 owner app read: 4-pick Flex one-loss tier 1.4 (was 1.8); app shows decimal prices (even pick 1.87×), feed multiplier unchanged; four Power pair quotes (§6.8)
 - 2026-10-04 `underdog_payouts.json` set to the §6.8 quotes (owner re-confirmed in app); file-vs-quote column dropped
 - 2026-09-11 team and game markets for every modeled league from one `match_grouped_lines?market_categories[]=` read per sport (P45, §7.6): NFL pills dropped; markets keyed `team <slug>` / `match <slug>`; mass-option lines skipped
 - 2026-09-11 scraper rebuilt on this doc (`books/underdog.py`): feed + core + budgeted rungs (three workers, 120 s, empty-streak stop; the origin answers empty past ~36/s, §9.4); `/v1/teams` and `rival_lines` gone; team codes from lobby `teams` dicts (esports titles list the away side first, §7.3)

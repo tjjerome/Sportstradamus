@@ -96,7 +96,7 @@
                 ],
                 "QB.passing yards & RB.rushing yards": [
                     1.0,
-                    0.95
+                    1.0
                 ],
                 "QB.passing yards & RB.first downs": [
                     0.85,
@@ -395,7 +395,7 @@
                     0.0
                 ],
                 "QB.passing tds & WR.tds": [
-                    0.0,
+                    0.794,
                     0.0
                 ],
                 "QB.passing tds & TE.tds": [
@@ -458,7 +458,7 @@
                 ],
                 "RB.carries & RB.carries": [
                     1.0,
-                    0.86
+                    0.748
                 ],
                 "RB.carries & RB.rushing yards": [
                     1.0,
@@ -470,7 +470,7 @@
                 ],
                 "RB.rushing yards & RB.rushing yards": [
                     1.0,
-                    0.95
+                    0.783
                 ],
                 "RB.yards & RB.yards": [
                     1.0,
