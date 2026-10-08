@@ -1,7 +1,7 @@
 """Unit tests for ``training.scorecard`` — the offline ship-gate harness.
 
 Exercises the numeric path (decile binning, compression ratio, scorecard, the five
-offline ship gates, and their deterministic-1/0 oracle) on synthetic test-set frames
+offline ship gates, and their outcome-label oracle) on synthetic test-set frames
 so no trained model, network, or plotting backend is required.
 """
 
@@ -50,6 +50,8 @@ from sportstradamus.training.scorecard import (
     DEFAULT_PRED_COL,
     TARGET_NORM_NONE,
     _apply_pit_recal_by_row,
+    _brier_inputs,
+    _calibration_inputs,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
@@ -1195,6 +1197,21 @@ def test_gate_row_full_column_set_and_oracle_identities():
     assert row["g1_brier_diff_ci_hi_oracle"] < 0  # oracle beats the (imperfect) book
 
 
+def test_gate_labels_count_a_tie_as_half_an_over():
+    df = _priced_frame(n=400)
+    tie = np.arange(len(df)) % 5 == 0
+    df.loc[tie, "Result"] = df.loc[tie, "Line"]
+    expected = np.where(tie, 0.5, df["Result"] > df["Line"])
+
+    np.testing.assert_array_equal(_calibration_inputs(df)[1], expected)
+    np.testing.assert_array_equal(_brier_inputs(df)[2], expected)
+    # The oracle predicts the label itself, so a tie costs it nothing: its ECE stays zero
+    # and its Brier diff is minus the book's Brier (a 0.5 book is exact on the tied fifth).
+    row = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
+    assert row["g5_ece_oracle"] == pytest.approx(0.0)
+    assert row["g1_brier_diff_mean_oracle"] == pytest.approx(-0.25 * 0.8)
+
+
 def test_gate_row_no_book_columns_blanks_gates_1_and_5():
     """No P/Odds/Line at all → both book-touching gates blank, price-free gates still run."""
     df = _compressed_frame()
@@ -1611,6 +1628,14 @@ def test_paired_brier_ci_negative_when_baseline_beats_candidate():
     assert ci_hi < 0
 
 
+def test_paired_brier_scores_a_tie_as_half_an_over():
+    b_df, c_df = _supersede_pair(n=50)
+    for frame in (b_df, c_df):
+        frame["Result"] = frame["Line"]
+    _, mean, _, _ = _supersede_paired_brier_ci(b_df, c_df)
+    assert mean == pytest.approx(np.mean((b_df["P"] - 0.5) ** 2 - (c_df["P"] - 0.5) ** 2))
+
+
 def test_paired_brier_ci_returns_none_when_inputs_lack_p():
     df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0]})
     assert _supersede_paired_brier_ci(df, df) is None
@@ -1675,23 +1700,24 @@ def test_supersede_pairing_holds_on_ambiguous_duplicate_event_identity():
 
 
 def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
-    # EV > Line ⇒ bet over ⇒ Hit = (Result >= Line); payout = 1/(1-Odds).
+    # EV > Line ⇒ bet over ⇒ Hit = (Result > Line); payout = 1/(1-Odds).
     df = pd.DataFrame(
         {
-            "MeanYr": [10.0, 10.0],
-            "Result": [12.0, 8.0],
-            "EV": [11.0, 11.0],  # both EV > Line ⇒ both bet over
-            "Line": [10.0, 10.0],
-            "Odds": [0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
-            "P": [0.6, 0.6],
+            "MeanYr": [10.0, 10.0, 10.0],
+            "Result": [12.0, 8.0, 10.0],
+            "EV": [11.0, 11.0, 11.0],  # every EV > Line ⇒ every row bets over
+            "Line": [10.0, 10.0, 10.0],
+            "Odds": [0.4, 0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
+            "P": [0.6, 0.6, 0.6],
         }
     )
     bets = _test_set_to_bet_frame(df, "EV")
+    # Row 2 ties its line: a push returns the stake, so it is no bet row.
     assert len(bets) == 2
     assert (bets["Platform"] == "Sleeper").all()
     # Boost = decimal odds = 1 / book_over_prob = 1 / 0.6 ≈ 1.667
     assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.6)
-    # Hit: row 0 Result >= Line ⇒ True; row 1 ⇒ False.
+    # Hit: row 0 Result > Line ⇒ True; row 1 ⇒ False.
     assert bool(bets["Hit"].iloc[0]) is True
     assert bool(bets["Hit"].iloc[1]) is False
 

@@ -26,7 +26,6 @@ from scipy.special import expit, logit
 from scipy.stats import norm
 from sklearn.metrics import (
     accuracy_score,
-    brier_score_loss,
     log_loss,
     precision_score,
     roc_auc_score,
@@ -87,6 +86,7 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part impo
     pin_two_part_grouping,
 )
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
+from sportstradamus.training.labels import PUSH, over_label
 from sportstradamus.training.lineage import (
     MATRIX_TRIM_SEED,
     validate_matrix_manifest,
@@ -657,33 +657,35 @@ def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = 
 
 
 def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
-    """Raw classification metrics for binary over/under predictions."""
+    """Over/under metrics: a tie is half an Over in the means, no row in the hit-or-miss stats."""
     probs = np.clip(np.asarray(probs, dtype=float), _PROBA_CLIP, 1 - _PROBA_CLIP)
-    y = np.asarray(y).astype(int)
+    y = np.asarray(y, dtype=float)
     pred = (probs > 0.5).astype(int)
-    n_classes = len(np.unique(y))
-    over_n = int((pred == 1).sum())
-    under_n = int((pred == 0).sum())
+    settled = y != PUSH
+    hit, hit_probs, hit_pred = y[settled].astype(int), probs[settled], pred[settled]
+    n_classes = len(np.unique(hit))
+    over_n = int((hit_pred == 1).sum())
+    under_n = int((hit_pred == 0).sum())
     return {
-        "brier_score": float(brier_score_loss(y, probs)),
-        "log_loss": float(log_loss(y, probs, labels=[0, 1])),
-        "roc_auc": float(roc_auc_score(y, probs)) if n_classes > 1 else float("nan"),
+        "brier_score": float(np.mean((probs - y) ** 2)),
+        "log_loss": float(log_loss(hit, hit_probs, labels=[0, 1])),
+        "roc_auc": float(roc_auc_score(hit, hit_probs)) if n_classes > 1 else float("nan"),
         "expected_calibration_error": _expected_calibration_error(probs, y),
-        "accuracy": float(accuracy_score(y, pred)),
+        "accuracy": float(accuracy_score(hit, hit_pred)),
         "precision_over": (
-            float(precision_score(y, pred, pos_label=1, zero_division=0))
+            float(precision_score(hit, hit_pred, pos_label=1, zero_division=0))
             if over_n
             else float("nan")
         ),
         "precision_under": (
-            float(precision_score(y, pred, pos_label=0, zero_division=0))
+            float(precision_score(hit, hit_pred, pos_label=0, zero_division=0))
             if under_n
             else float("nan")
         ),
         "predicted_over_rate": float(pred.mean()),
         "empirical_over_rate": float(y.mean()),
         "prediction_std": float(probs.std()),
-        "nll": float(log_loss(y, probs, labels=[0, 1])),
+        "nll": float(log_loss(hit, hit_probs, labels=[0, 1])),
     }
 
 
@@ -2012,15 +2014,17 @@ def _step_compute_mode_stats(
     """Compute the legacy prec/acc/sharp/ll/over_pct/under_prec arrays (length-3).
 
     Index 0 = raw, 1 = no_filt (post-blend, pre-temp), 2 = filt (post-temp).
-    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``.
+    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``; tie rows are left out.
     """
+    settled = y_class != PUSH
+    y_class = y_class[settled].astype(int)
     prec = np.zeros(3)
     acc = np.zeros(3)
     sharp = np.zeros(3)
     ll = np.zeros(3)
     over_pct = np.zeros(3)
     under_prec = np.zeros(3)
-    for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
+    for i, y_proba in enumerate(p[settled] for p in (y_proba_raw, y_proba_no_filt, y_proba_filt)):
         y_pred = (y_proba > 0.5).astype(int)[:, 1]
         mask = np.max(y_proba, axis=1) > _MODE_CONFIDENCE_THRESHOLD
         prec[i] = precision_score(y_class[mask], y_pred[mask])
@@ -3209,7 +3213,7 @@ def _step_calibrate_temperature(
 ) -> tuple[float, np.ndarray, float]:
     """Fit temperature ``T_opt`` on validation, return calibrated val probs + model_calib."""
     B_validation = splits["B_validation"]
-    y_class_val = (splits["y_validation"]["Result"] >= B_validation["Line"]).astype(int).to_numpy()
+    y_class_val = over_label(splits["y_validation"]["Result"], B_validation["Line"])
 
     if dist == "SkewNormal":
         val_raw_under = get_odds(
@@ -4301,10 +4305,7 @@ def _structural_gate_inputs(
             "posthoc_blob": posthoc_blob,
             "test_calibrated_over": test_calibrated_over,
         }
-    y_class_val = (
-        splits["y_validation"]["Result"].to_numpy(dtype=float)
-        >= splits["B_validation"]["Line"].to_numpy(dtype=float)
-    ).astype(int)
+    y_class_val = over_label(splits["y_validation"]["Result"], splits["B_validation"]["Line"])
     model_calib = 1.0 - float(np.mean((val_calibrated - y_class_val) ** 2))
     return {
         "calibrated": calibrated,
@@ -5006,9 +5007,7 @@ def train_market(
         league,
         market,
     )
-    y_class = np.ravel(
-        (splits["y_test"]["Result"] >= splits["B_test"]["Line"]).astype(int).to_numpy()
-    )
+    y_class = over_label(splits["y_test"]["Result"], splits["B_test"]["Line"])
 
     mode_stats = _step_compute_mode_stats(y_proba_raw, y_proba_no_filt, y_proba_filt, y_class)
     served_weighted_mean = fused["weighted_mean"]

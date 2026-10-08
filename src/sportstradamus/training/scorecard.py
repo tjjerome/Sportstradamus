@@ -68,6 +68,7 @@ from sportstradamus.training.group_conditional_cdf import (
     ks_supremum,
     two_part_cdf_endpoints,
 )
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
@@ -524,7 +525,7 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     """Return ``(p_model, y)`` for the model-only calibration gate (Gate 5).
 
     Needs ``P`` (calibrated model over-probability), ``Line`` (the posted prop line)
-    and ``Result`` to derive ``y = Result >= Line``. Independent of the book's
+    and ``Result`` to derive ``y`` (1 over, 0 under, 0.5 at a tie). Independent of the book's
     ``Odds`` — Gate 5 only asks whether the MODEL's own probabilities are calibrated
     to outcomes; it does not compare against the book. Returns ``None`` when ``P`` or
     ``Line`` is missing or every row is non-finite.
@@ -535,7 +536,7 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     sub = df[["P", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
     if len(sub) == 0:
         return None
-    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    y = over_label(sub[ACTUAL_COL], sub["Line"])
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     return p_model, y
 
@@ -590,7 +591,7 @@ def _brier_inputs(
     sub = _priced_rows(df)
     if sub is None:
         return None
-    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    y = over_label(sub[ACTUAL_COL], sub["Line"])
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     p_book = np.clip(1.0 - sub["Odds"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     return p_model, p_book, y, sub.index
@@ -1647,7 +1648,7 @@ def _gate5_ece_equal_mass(p_model: np.ndarray, y: np.ndarray, n_bins: int = _ECE
     if total == 0:
         return float("nan")
     # duplicates="drop" collapses ties (e.g. a spike of identical probabilities, or
-    # the deterministic 0/1 oracle) into fewer bins rather than raising. A fully
+    # the oracle's 0 / 0.5 / 1 label) into fewer bins rather than raising. A fully
     # degenerate vector (all probabilities equal) leaves no valid edges -> qcut
     # returns all-NaN; fall back to a single bin over every row.
     bins = np.asarray(pd.qcut(p_model, n_bins, labels=False, duplicates="drop"), dtype=float)
@@ -1898,7 +1899,7 @@ def gate_row(
     """Compute the offline ship gates for one cell — a model row plus an oracle row.
 
     The oracle assumes the model predicted the true score exactly (``pred = Result``;
-    over-probability ``1 if Result>=Line else 0``), giving each gate's idealistic
+    over-probability = the outcome label, 0.5 at a tie), giving each gate's idealistic
     bound: Gate 1 diff = -book Brier, Gates 2/3 ``z = 0``, Gate 4 ratio ``1.0``, Gate 5
     ``ece = 0``. The σ / IQR_true denominators equal the model row, so the oracle
     columns size each gate's natural threshold. Measurement-only — no pass/fail. Gate
@@ -1908,6 +1909,7 @@ def gate_row(
     ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
     blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
     """
+    # style: allow-complexity — identity check, then one blank-input branch per gate block
     identity, _ = validate_strategy_frame(df)
     if identity is not None:
         same_league = not league or league == identity.league
@@ -1955,7 +1957,7 @@ def gate_row(
 
     # Gate 1 — paired Brier vs book. Needs Odds; blank ⇒ "no book to beat, model wins
     # by default" (the auto-pass convention is doc'd at the module-header and applied
-    # at verdict-wiring time). Oracle p_model = y (the deterministic 1/0 prediction).
+    # at verdict-wiring time). Oracle p_model = y (the label itself, 0.5 at a tie).
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
@@ -1994,8 +1996,8 @@ def gate_row(
         # raw equal-mass ECE falsely fails ~45% of perfectly calibrated
         # NFL-N≈240 cells; the debiased variant is the one apply_thresholds
         # actually checks. The model-row offset uses the model's own
-        # probabilities; the oracle row uses the deterministic 0/1 prediction
-        # ``p = y`` and so its null offset is structurally tiny.
+        # probabilities; the oracle row uses ``p = y``, deterministic off a tie,
+        # so its null offset is only the coin-flip noise of its tie rows.
         g5_ece_bias = _ece_debias_offset(p_model_c)
         g5_ece_db = (
             float(g5_ece - g5_ece_bias)
@@ -2444,9 +2446,7 @@ def _supersede_paired_brier_ci(
     c_aligned = c_aligned.loc[usable]
     p_b = np.clip(p_b[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
     p_c = np.clip(p_c[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
-    y = (
-        c_aligned["Result"].astype(float).to_numpy() >= c_aligned["Line"].astype(float).to_numpy()
-    ).astype(float)
+    y = over_label(c_aligned["Result"], c_aligned["Line"])
     brier_b = (p_b - y) ** 2
     brier_c = (p_c - y) ** 2
     d = brier_b - brier_c
@@ -2467,6 +2467,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     the fraction is unchanged) and settles winners at net, giving each event a
     well-defined Kelly stake and return. Synthetic monotonic dates make each event
     its own "day" so the resulting return series has per-event resolution.
+    A tie pushes and returns the stake, so tie rows are left out and ``Hit`` stays binary.
     Returns an empty frame when ``Odds`` / ``P`` / ``Line`` are absent.
     """
     if _calibration_inputs(df) is None or "Odds" not in df.columns:
@@ -2474,6 +2475,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     sub = (
         df[["P", "Odds", "Line", ACTUAL_COL, pred_col]].replace([np.inf, -np.inf], np.nan).dropna()
     )
+    sub = sub[sub[ACTUAL_COL] != sub["Line"]]
     if sub.empty:
         return pd.DataFrame()
     p_model_over = np.clip(sub["P"].to_numpy(dtype=float), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
@@ -2490,7 +2492,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     p_model = np.where(bet_over, p_model_over, 1.0 - p_model_over)
     p_book = np.where(bet_over, p_book_over, 1.0 - p_book_over)
     payout_decimal = 1.0 / p_book
-    hit_over = result >= line
+    hit_over = result > line
     hit = np.where(bet_over, hit_over, ~hit_over)
 
     n = len(sub)

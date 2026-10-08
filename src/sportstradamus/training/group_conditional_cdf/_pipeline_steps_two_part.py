@@ -29,6 +29,7 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part_support import (
     _two_part_nested_support_audit,
 )
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.scorecard import (
     _bootstrap_ratio_ci_clustered,
     _gate5_ece_debiased,
@@ -104,7 +105,7 @@ def _two_part_support_rows(splits: dict, context: dict, index: pd.Index) -> tupl
         raise ValueError("two-part candidate positions must be finite")
     return (
         result,
-        (result >= line).astype(float),
+        over_label(result, line),
         _two_part_authentic_mask(splits, "validation", index),
         _required_series(splits, "players_validation", index).astype(str).to_numpy(),
         context["routes"]["validation"].reindex(index).astype(str).to_numpy(),
@@ -396,7 +397,7 @@ def _step_apply_two_part_groupcdf_candidate(
 
     authentic_val = _two_part_authentic_mask(splits, "validation", index_val)
     authentic_test = _two_part_authentic_mask(splits, "test", index_test)
-    outcome = (result >= line_val).astype(float)
+    outcome = over_label(result, line_val)
     residual_positions = tuple(context["boundary_residual_positions"])
     support_audit = _two_part_nested_support_audit(
         result,

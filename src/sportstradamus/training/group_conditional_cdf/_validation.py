@@ -157,8 +157,6 @@ def two_part_fit_inputs(
     outcome = probability_vector(over_result, "over_result", n_rows)
     books = optional_book_vector(book_over, n_rows)
     authentic_rows = authentic_vector(authentic, n_rows)
-    if not np.isin(outcome, (0.0, 1.0)).all():
-        raise ValueError("over_result must contain only binary 0/1 values")
     if np.any(lower > upper + CDF_BRANCH_TOLERANCE):
         raise ValueError("result_cdf_lower cannot exceed result_cdf_upper")
     if np.any(low > high + CDF_BRANCH_TOLERANCE):

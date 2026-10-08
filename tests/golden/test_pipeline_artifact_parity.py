@@ -443,3 +443,27 @@ def test_missing_served_count_shape_fails_loudly(
             gate_blend_test=gate_blend_test,
             phi_test=phi_test,
         )
+
+
+def test_metrics_count_a_tie_as_half_in_the_means_and_no_row_in_the_hit_or_miss_stats():
+    over = np.array([0.9, 0.8, 0.3, 0.2, 0.7, 0.4])
+    label = np.array([1.0, 1.0, 0.0, 1.0, 0.5, 0.5])
+    metrics = pipe._compute_metrics(over, label)
+    settled = pipe._compute_metrics(over[:4], label[:4])
+
+    assert metrics["brier_score"] == pytest.approx(np.mean((over - label) ** 2))
+    assert metrics["empirical_over_rate"] == pytest.approx(4 / 6)
+    for key in ("log_loss", "nll", "roc_auc", "accuracy", "precision_over", "precision_under"):
+        assert metrics[key] == settled[key]
+    assert metrics["accuracy"] == 0.75
+    assert (metrics["precision_over"], metrics["precision_under"]) == (1.0, 0.5)
+
+
+def test_mode_stats_leave_tie_rows_out():
+    over = np.array([0.9, 0.8, 0.3, 0.2, 0.7, 0.4])
+    proba = np.column_stack([1 - over, over])
+    label = np.array([1.0, 1.0, 0.0, 1.0, 0.5, 0.5])
+    stats = pipe._step_compute_mode_stats(proba, proba, proba, label)
+    settled = pipe._step_compute_mode_stats(proba[:4], proba[:4], proba[:4], label[:4])
+    for key, values in stats.items():
+        np.testing.assert_array_equal(values, settled[key])

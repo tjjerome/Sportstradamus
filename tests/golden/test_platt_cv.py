@@ -8,7 +8,9 @@ degenerate inputs must degrade to the unpenalised map instead of raising.
 import math
 
 import numpy as np
+import pytest
 from scipy.special import expit, logit
+from sklearn.linear_model import LogisticRegression
 
 from sportstradamus.training import posthoc
 from sportstradamus.training.model_strategy import get_strategy
@@ -50,11 +52,46 @@ def test_small_n_base_rate_noise_selects_positive_penalty():
     assert selected <= baseline
 
 
+def test_tie_label_counts_as_half_of_each_side():
+    x, y = _synthetic(300, seed=0, offset=0.15)
+    tie = np.arange(len(y)) % 6 == 0
+    y[tie] = 0.5
+    blob = posthoc.fit_posthoc("prob_recal_platt_cv", x, y)
+    # The same fit spelled out: each tie as one Over row and one Under row, settled rows
+    # doubled to keep their weight, and the penalty doubled along with the loss.
+    feat = _feat(x)
+    spelled_feat = np.concatenate([feat[~tie], feat[~tie], feat[tie], feat[tie]])
+    spelled_y = np.concatenate([y[~tie], y[~tie], np.ones(tie.sum()), np.zeros(tie.sum())])
+    spelled = posthoc._platt_coeffs(spelled_feat, spelled_y, 2 * blob["lam"])
+    assert (blob["a"], blob["b"]) == pytest.approx(spelled, abs=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("n", "seed", "offset", "lam"),
+    [(600, 10, 0.0, 0.0), (300, 0, 0.15, 1.0), (250, 7, 0.0, math.inf)],
+)
+def test_binary_label_keeps_the_unweighted_fit(monkeypatch, n, seed, offset, lam):
+    x, y = _synthetic(n, seed=seed, offset=offset)
+    blob = posthoc.fit_posthoc("prob_recal_platt_cv", x, y)
+
+    def unweighted(feat, y, **kwargs):
+        return LogisticRegression(C=posthoc._PLATT_C, **kwargs).fit(feat.reshape(-1, 1), y)
+
+    monkeypatch.setattr(posthoc, "_logistic_fit", unweighted)
+    assert blob["lam"] == lam
+    # Bit for bit: an interior penalty's BFGS runs on a finite-difference gradient, which
+    # turns even a last-bit move in its unpenalised start into about 1e-7.
+    assert blob == posthoc.fit_posthoc("prob_recal_platt_cv", x, y)
+
+
 def test_single_class_returns_none():
     x = np.linspace(0.2, 0.8, 40)
     y = np.ones(40)
     assert posthoc._fit_platt_cv(x, y) is None
     assert posthoc.fit_posthoc("prob_recal_platt_cv", x, y) is None
+    # Those guards are what keep a constant label from sklearn's own refusal underneath.
+    with pytest.raises(ValueError, match="at least 2 classes"):
+        posthoc._platt_coeffs(_feat(x), y, 0.0)
 
 
 def test_tiny_n_degrades_to_unpenalised_fallback():

@@ -2,7 +2,7 @@
 
 The two variants fit a line-only Brier temperature with the same 0.01 anchor
 regularization but not by identical code: the two-part strategy validates that the
-outcome is binary and wraps the optimizer output through the temperature bounds
+outcome lies in [0, 1] and wraps the optimizer output through the temperature bounds
 validator; the affine strategy does neither. Both are kept behind ``pool_weight``'s
 sibling switch so each variant reproduces its exact result.
 """
@@ -42,8 +42,6 @@ def _optimize_temperature(logits: np.ndarray, outcome: np.ndarray, *, error: str
 def fit_temperature_two_part(probability: np.ndarray, outcome: np.ndarray) -> float:
     probabilities = probability_vector(probability, "temperature probability")
     outcomes = probability_vector(outcome, "temperature outcome", len(probabilities))
-    if not np.isin(outcomes, (0.0, 1.0)).all():
-        raise ValueError("temperature outcome must contain only binary 0/1 values")
     logits = logit(np.clip(probabilities, PROBABILITY_CLIP, 1.0 - PROBABILITY_CLIP))
     return temperature(
         _optimize_temperature(logits, outcomes, error="two-part temperature fit did not converge")

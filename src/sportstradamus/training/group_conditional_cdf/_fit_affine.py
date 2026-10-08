@@ -44,6 +44,7 @@ from sportstradamus.training.group_conditional_cdf.probability_pool import (
     fit_probability_pool,
     validate_probability_pool_weights,
 )
+from sportstradamus.training.labels import over_label
 
 
 def fit_affine(
@@ -81,7 +82,7 @@ def fit_affine(
     temperatures: list[float] = []
     rhos: list[float] = []
     fold_support: list[dict[str, object]] = []
-    over_result = (y >= lines).astype(float)
+    over_result = over_label(y, lines)
 
     splitter = GroupKFold(n_splits=PLAYER_CV_FOLDS)
     folds = tuple(splitter.split(np.zeros(n_rows), groups=players))

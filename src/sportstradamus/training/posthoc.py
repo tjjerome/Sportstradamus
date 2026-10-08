@@ -105,8 +105,8 @@ def fit_posthoc(
         slug: One of :data:`POSTHOC_SLUGS`.
         x: Validation predictions — over-probability for :data:`PROB_STAGE`,
             decoded mean for :data:`MEAN_STAGE`.
-        y: Validation outcomes — binary over/under for :data:`PROB_STAGE`,
-            raw result for :data:`MEAN_STAGE`.
+        y: Validation outcomes — the over/under label (0.5 at a tie) for
+            :data:`PROB_STAGE`, raw result for :data:`MEAN_STAGE`.
         clusters: Optional per-row group labels (player identity) aligned with ``x``.
             Only ``prob_recal_platt_cv`` reads them, to keep its CV folds group-disjoint.
         book: Per-row book over-probability aligned with ``x``, NaN where the row has no
@@ -380,10 +380,10 @@ def _platt_coeffs(feat: np.ndarray, y: np.ndarray, lam: float) -> tuple[float, f
     the intercept; an interior ``lam`` solves the penalised MLE from the unpenalised start.
     """
     if lam == 0.0:
-        lr = LogisticRegression(C=_PLATT_C).fit(feat.reshape(-1, 1), y)
+        lr = _logistic_fit(feat, y)
         return float(lr.coef_[0, 0]), float(lr.intercept_[0])
     if math.isinf(lam):
-        lr = LogisticRegression(C=_PLATT_C, fit_intercept=False).fit(feat.reshape(-1, 1), y)
+        lr = _logistic_fit(feat, y, fit_intercept=False)
         return float(lr.coef_[0, 0]), 0.0
 
     def objective(params: np.ndarray) -> float:
@@ -393,6 +393,23 @@ def _platt_coeffs(feat: np.ndarray, y: np.ndarray, lam: float) -> tuple[float, f
     if not res.success:
         res = minimize(objective, res.x, method="Nelder-Mead")
     return float(res.x[0]), float(res.x[1])
+
+
+def _logistic_fit(feat: np.ndarray, y: np.ndarray, **kwargs) -> LogisticRegression:
+    """Logistic MLE for a label in [0, 1].
+
+    Each row enters once as an Over weighted ``y`` and once as an Under weighted ``1 - y``, so
+    a tie's 0.5 counts as half of each. A 0/1 label takes the plain fit instead: the same MLE
+    but not the same floats, and a cell with no tie must keep the plain fit's map bit for bit.
+    """
+    lr = LogisticRegression(C=_PLATT_C, **kwargs)
+    if np.isin(y, (0.0, 1.0)).all():
+        return lr.fit(feat.reshape(-1, 1), y)
+    return lr.fit(
+        np.tile(feat, 2).reshape(-1, 1),
+        np.repeat([1, 0], len(feat)),
+        sample_weight=np.concatenate([y, 1 - y]),
+    )
 
 
 def _bernoulli_nll(logits: np.ndarray, y: np.ndarray) -> float:

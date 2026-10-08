@@ -218,30 +218,28 @@ def _two_part_temperature_support(
     top_partitions: list,
     outer: list,
 ) -> tuple[list, list]:
-    """Per-top class balance and per-outer-fold authentic-hold class balance."""
+    """Class balance per top partition and per outer authentic hold; a tie is in neither class."""
     temperature_support = []
     for name, index in top_partitions:
-        classes = np.bincount(outcome[index].astype(int), minlength=2)
         temperature_support.append(
             {
                 "partition": name,
                 "rows": len(index),
                 "players": len(np.unique(players[index])),
-                "class_0_rows": int(classes[0]),
-                "class_1_rows": int(classes[1]),
+                "class_0_rows": int((outcome[index] == 0.0).sum()),
+                "class_1_rows": int((outcome[index] == 1.0).sum()),
             }
         )
     authentic_holds = []
     for fold, (_, hold) in enumerate(outer, start=1):
         use = hold[authentic[hold]]
-        classes = np.bincount(outcome[use].astype(int), minlength=2)
         authentic_holds.append(
             {
                 "fold": fold,
                 "rows": len(use),
                 "players": len(np.unique(players[use])),
-                "class_0_rows": int(classes[0]),
-                "class_1_rows": int(classes[1]),
+                "class_0_rows": int((outcome[use] == 0.0).sum()),
+                "class_1_rows": int((outcome[use] == 1.0).sum()),
             }
         )
     return temperature_support, authentic_holds

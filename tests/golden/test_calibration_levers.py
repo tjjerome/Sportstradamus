@@ -407,3 +407,45 @@ def test_temperature_objective_is_the_brier_alone():
         lambda T: _brier_temperature_loss(T, logits, y), bounds=(1.0, 10.0), method="bounded"
     )
     assert fit.x == pytest.approx(3.0, abs=0.1)
+
+
+def test_temperature_fit_counts_a_tie_as_half_an_over():
+    """Integer lines tie often. With the true distribution as the model, the half label
+    leaves its probabilities nearly alone; counting a tie as an Over win would flatten them
+    severalfold to chase an over-rate the model never got wrong."""
+    import pandas as pd
+    from scipy.optimize import minimize_scalar
+    from scipy.special import logit
+
+    from sportstradamus.helpers import get_odds
+    from sportstradamus.training.pipeline import (
+        _brier_temperature_loss,
+        _step_calibrate_temperature,
+    )
+
+    rng = np.random.default_rng(0)
+    n, r = 2000, 4.0
+    mean = rng.uniform(2.0, 8.0, n)
+    result = rng.negative_binomial(r, r / (r + mean)).astype(float)
+    line = np.round(mean)
+    splits = {
+        "y_validation": pd.DataFrame({"Result": result}),
+        "B_validation": pd.DataFrame({"Line": line}),
+    }
+    calibrated = {"val_weighted_mean": mean, "r_blend_val": np.full(n, r)}
+    temperature, _, _, label = _step_calibrate_temperature(
+        {"gate_blend_val": None}, calibrated, splits, {}, "NegBin", 1
+    )
+
+    tie = result == line
+    assert tie.mean() > 0.1
+    np.testing.assert_array_equal(label, np.where(tie, 0.5, result > line))
+
+    logits = logit(1.0 - get_odds(line, mean, "NegBin", r=np.full(n, r)))
+    tie_as_over = minimize_scalar(
+        lambda T: _brier_temperature_loss(T, logits, (result >= line).astype(float)),
+        bounds=(1.0, 10.0),
+        method="bounded",
+    )
+    assert temperature < 1.5
+    assert tie_as_over.x > 2.0

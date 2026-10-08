@@ -9,6 +9,7 @@ import pytest
 from scipy.special import expit, logit
 
 from sportstradamus.training import group_conditional_cdf as receiving
+from sportstradamus.training.group_conditional_cdf._line_head import fit_temperature_two_part
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part_support import (
     _two_part_nested_support_audit,
 )
@@ -257,6 +258,36 @@ def test_nested_player_cv_fit_returns_finite_reusable_outputs():
     }
 
 
+def test_temperature_counts_a_tie_as_half_of_each_side():
+    rng = np.random.default_rng(0)
+    probability = rng.uniform(0.05, 0.95, 500)
+    outcome = (rng.uniform(size=500) < probability).astype(float)
+    tie = np.arange(500) % 5 == 0
+    half = np.where(tie, 0.5, outcome)
+    # The same fit spelled out: each tie as one Over row and one Under row, settled rows
+    # doubled to keep their weight.
+    spelled_probability = np.concatenate([probability[~tie]] * 2 + [probability[tie]] * 2)
+    spelled_outcome = np.concatenate([outcome[~tie]] * 2 + [np.ones(100), np.zeros(100)])
+
+    spelled = fit_temperature_two_part(spelled_probability, spelled_outcome)
+
+    assert fit_temperature_two_part(probability, half) == pytest.approx(spelled)
+    with pytest.raises(ValueError, match=r"temperature outcome must lie in \[0, 1\]"):
+        fit_temperature_two_part(probability, half + 1.0)
+
+
+def test_fit_takes_a_tie_label_and_rejects_one_outside_the_unit_interval():
+    inputs = list(_synthetic_validation())
+    inputs[6][::6] = 0.5
+    fit = receiving.fit_two_part_groupcdf(*inputs, residual_positions=(3,))
+    assert all(1.0 <= value <= 10.0 for value in fit.fold_temperatures)
+    assert np.isfinite(fit.oof_pooled_over).all()
+
+    inputs[6][0] = 1.5
+    with pytest.raises(ValueError, match=r"over_result must lie in \[0, 1\]"):
+        receiving.fit_two_part_groupcdf(*inputs, residual_positions=(3,))
+
+
 def test_blob_validation_rejects_malformed_map_and_policy_drift():
     blob = _manual_blob()
     blob["cdf"]["positive"]["high_pos4"]["x"] = [0.0, 1.0, 1.0]
@@ -390,6 +421,18 @@ def test_support_audit_keeps_position_grouping_when_it_clears():
     assert set(audit["positive_map_minimum_support"]) == {
         f"{role}_pos{code}" for role in receiving.ROLE_VALUES for code in (1, 2)
     }
+
+
+def test_support_audit_counts_a_tie_in_neither_class():
+    result, outcome, authentic, players, roles, positions = _support_audit_frame(n_positions=2)
+    outcome[::10] = 0.5
+    audit = _two_part_nested_support_audit(
+        result, outcome, authentic, players, roles, positions, ()
+    )
+    full = audit["temperature_support"][0]
+    assert full["class_0_rows"] == (outcome == 0.0).sum()
+    assert full["class_1_rows"] == (outcome == 1.0).sum()
+    assert full["class_0_rows"] + full["class_1_rows"] == full["rows"] - (outcome == 0.5).sum()
 
 
 def test_support_audit_still_kills_when_role_only_also_starves():
