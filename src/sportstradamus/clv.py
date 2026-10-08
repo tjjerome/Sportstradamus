@@ -1,12 +1,12 @@
 """Closing-line value (CLV) computation for resolved predictions.
 
 Reads the closing snapshot from the time-series archive — the latest
-observation per book at-or-before the row's nominal kickoff — and folds
+observation per book at-or-before the row's kickoff — and folds
 it into each offer row in ``history`` as ``Close Market Prob``, ``Market CLV``,
-and ``Model CLV``. The ``commence_time`` used as the ``at=`` cutoff is
-derived from the row date; until per-row kickoff timestamps are wired in
-the default sits at game-day evening UTC, which guarantees the cutoff is
-after every league's kickoff window.
+and ``Model CLV`` once that instant has passed. The kickoff is the row's
+``Commence``, borrowed from its team's other rows of the day where the row has
+none, and 20:00 UTC on the game date where there is none to borrow
+(:func:`commence_times`).
 
 ``Market Prob``, ``Win Prob``, and ``Close Market Prob`` are all already
 expressed on the bet side (``prediction/offer_records.py`` flips an Under
@@ -20,7 +20,7 @@ difference for either side, in no-vig probability units:
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -40,9 +40,10 @@ CLV_SEGMENT_MIN_N = 20
 # stale to credibly stand in for the closing line; warn once per segment.
 CLOSE_LOOKBACK_WARN_MINUTES = 90
 
-# Stand-in for true commence_time when the offer row carries only a date.
-# Evening UTC is comfortably past every league's typical kickoff window so
-# `at=commence_time` cuts off after every pre-game observation has landed.
+# Stand-in kickoff for a row with no `Commence` of its own and none to borrow: rows
+# scored before the column existed (2026-10-05), and a Sleeper offer with no Underdog
+# row of its team that day. 20:00 UTC is mid-afternoon US Eastern: after the early
+# starts, before the evening ones.
 _COMMENCE_DEFAULT_OFFSET = timedelta(hours=20)
 
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
@@ -149,16 +150,18 @@ def _close_prob_at_line(
     return get_odds(offer_line, close_ev, dist, cv=float(cv), gate=gate_val, step=step_val)
 
 
-def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
+def _fill_one_group(history: pd.DataFrame, archive, key, idx, commence_time) -> None:
     """Resolve one ``PREDICTION_KEY`` group's closing probability and write it in place.
 
     ``Dist``/``CV``/``Gate``/``Step`` are prediction-level columns (constant across the
     whole group), but ``Line`` is offer-level — different offer rows in the same group
     (different books, or an explicit Alt Line) can legitimately quote different lines.
     The archive fetch (:func:`_fetch_close_ev_or_composite`) is genuinely group-invariant
-    and runs once; the mean-to-probability conversion
-    (:func:`_close_prob_at_line`) depends on the line, so it re-runs once per distinct
-    ``Line`` in the group, each writing only its own matching subset of rows.
+    and runs once, as of ``commence_time``: the one instant :func:`commence_times` gives
+    every row of the group, the latest kickoff among them (NaT, a group with neither a
+    kickoff nor a parseable date, reads the latest quotes). The mean-to-probability
+    conversion (:func:`_close_prob_at_line`) depends on the line, so it re-runs once per
+    distinct ``Line`` in the group, each writing only its own matching subset of rows.
 
     No-op (leaves a row NaN) when the key isn't a real (league, market) pair, the
     archive lookup misses, or the resolved probability falls outside ``[0, 1]`` — the
@@ -176,7 +179,14 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
     gate = group["Gate"].iloc[0]
     step = group["Step"].iloc[0]
     fetched, is_composite = _fetch_close_ev_or_composite(
-        archive, league, market, date_str, player, at=_commence_time(date_str), dist=dist, cv=cv
+        archive,
+        league,
+        market,
+        date_str,
+        player,
+        at=None if pd.isna(commence_time) else commence_time,
+        dist=dist,
+        cv=cv,
     )
     if pd.isna(fetched):
         return
@@ -191,16 +201,53 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
         _fill_offer_rows(history, line_idx, close_under)
 
 
-def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
-    """Populate the closing trio on every offer row from ``archive``.
+def commence_times(history: pd.DataFrame) -> pd.Series:
+    """Each row's kickoff: the instant its close is gated on and read as of.
+
+    Naive UTC, the convention of the archive's ``observed_at``. A row's own ``Commence``
+    where it parses, else the latest kickoff among the rows of its (League, Date, Team),
+    since Sleeper posts none. The rows of one ``PREDICTION_KEY`` group then share the
+    latest kickoff any of them holds, so a group is read from the archive once, at one
+    instant, however its rows differ (a doubleheader, a row filed under another team).
+    A group with no kickoff at all, and every row of a frame without a ``Commence``
+    column, gets :data:`_COMMENCE_DEFAULT_OFFSET` past its game date: NaT where that
+    date does not parse.
+    """
+    stand_in = (
+        pd.to_datetime(history["Date"], format="%Y-%m-%d", errors="coerce")
+        + _COMMENCE_DEFAULT_OFFSET
+    )
+    if "Commence" not in history.columns:
+        return stand_in
+    kickoff = pd.to_datetime(
+        history["Commence"], format="ISO8601", utc=True, errors="coerce"
+    ).dt.tz_localize(None)
+    team_day = kickoff.groupby([history[col] for col in ("League", "Date", "Team")])
+    kickoff = kickoff.fillna(team_day.transform("max"))
+    prediction = kickoff.groupby([history[col] for col in PREDICTION_KEY], dropna=False)
+    return prediction.transform("max").fillna(stand_in)
+
+
+def fill_from_archive(
+    history: pd.DataFrame, archive, *, now: datetime | None = None
+) -> pd.DataFrame:
+    """Populate the closing trio on every offer row whose kickoff has passed.
 
     Groups rows whose ``Close Market Prob`` is still NaN by
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` and resolves each group's
     closing probability via :func:`_fill_one_group` (see :func:`_fetch_close_ev_or_composite`
-    and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Pinning
-    ``at=commence_time`` makes the closing read reproducible regardless of when ``reflect``
-    runs. Groups whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left
-    with NaN closing fields and excluded from CLV aggregates downstream.
+    and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Groups
+    whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left with NaN
+    closing fields and excluded from CLV aggregates downstream.
+
+    A row's kickoff (:func:`commence_times`) is both the ``at=`` cutoff of its closing
+    read and the instant it must be past to carry a close: the read is reproducible only
+    from then on, and before it returns the newest quote so far. So a row whose kickoff
+    is still ahead of ``now`` is left unfilled, and one that already carries a close
+    loses its closing trio: ``prediction.cli._upsert_history`` lets a closed row beat
+    every later scoring of the same offer, so a row closed early stops updating before
+    its game. A row with neither a kickoff nor a parseable date has nothing to wait for
+    and is filled whenever it is pending.
 
     Skips rows that already carry a non-NaN ``Close Market Prob`` so a re-run
     doesn't redundantly hit archive. ``Market CLV``/``Model CLV`` are then
@@ -213,6 +260,8 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     Args:
         history: Flat one-row-per-offer DataFrame.
         archive: A loaded ``Archive`` instance.
+        now: The instant each row's kickoff is compared against; defaults to the
+            current UTC time. tz-stripped, so pass UTC.
 
     Returns:
         The same DataFrame, mutated in place. Returned for chaining.
@@ -220,10 +269,14 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     if history.empty or "Close Market Prob" not in history.columns:
         return history
 
-    pending = history.loc[history["Close Market Prob"].isna()]
+    commence = commence_times(history)
+    ahead = commence > pd.Timestamp(now or datetime.now(UTC)).tz_localize(None)
+    history.loc[ahead, ["Close Market Prob", "Market CLV", "Model CLV"]] = np.nan
+
+    pending = history.loc[history["Close Market Prob"].isna() & ~ahead]
     if not pending.empty:
         for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
-            _fill_one_group(history, archive, key, idx)
+            _fill_one_group(history, archive, key, idx, commence.at[idx[0]])
 
     has_close = history["Close Market Prob"].notna()
     history.loc[has_close, "Market CLV"] = (
@@ -235,7 +288,7 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     return history
 
 
-def _row_movement(archive, league_val, market_val, date_val, player_val, movement_cache):
+def _row_movement(archive, league_val, market_val, date_val, player_val, until, movement_cache):
     if archive is None or not date_val or not isinstance(player_val, str):
         return None
     cache_key = (league_val, market_val, date_val, player_val)
@@ -246,7 +299,7 @@ def _row_movement(archive, league_val, market_val, date_val, player_val, movemen
                 market_val,
                 date_val,
                 player_val,
-                until=_commence_time(date_val),
+                until=None if pd.isna(until) else until,
             )
         except (KeyError, ValueError, TypeError):
             movement_cache[cache_key] = None
@@ -273,13 +326,15 @@ def _offer_to_leg(row, movement) -> dict | None:
 def _collect_clv_legs(history: pd.DataFrame, archive) -> list[dict]:
     legs: list[dict] = []
     movement_cache: dict = {}
-    for _, row in history.iterrows():
+    # A line's movement runs up to its close, so it ends at the instant the close is read at.
+    untils = commence_times(history) if archive is not None else [None] * len(history)
+    for (_, row), until in zip(history.iterrows(), untils, strict=True):
         league_val = row.get("League")
         market_val = row.get("Market")
         date_val = _normalize_date(row.get("Date"))
         player_val = row.get("Player")
         movement = _row_movement(
-            archive, league_val, market_val, date_val, player_val, movement_cache
+            archive, league_val, market_val, date_val, player_val, until, movement_cache
         )
         leg = _offer_to_leg(row, movement)
         if leg is not None:
@@ -461,22 +516,6 @@ def _normalize_date(date) -> str:
         return pd.to_datetime(date).strftime("%Y-%m-%d")
     except (ValueError, TypeError, AttributeError):
         return ""
-
-
-def _commence_time(date_str: str) -> datetime | None:
-    """Best-effort kickoff timestamp for ``date_str``.
-
-    Until offer rows carry an explicit kickoff timestamp this is the
-    midnight-of-game-date plus :data:`_COMMENCE_DEFAULT_OFFSET`, which
-    guarantees the resulting ``at=`` snapshot includes every pre-game
-    observation regardless of league.
-    """
-    if not date_str:
-        return None
-    try:
-        return datetime.strptime(date_str[:10], "%Y-%m-%d") + _COMMENCE_DEFAULT_OFFSET
-    except (ValueError, TypeError):
-        return None
 
 
 def _safe_get_ev(
