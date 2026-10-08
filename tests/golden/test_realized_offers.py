@@ -1,9 +1,10 @@
 """Realized-performance building blocks (``realized.settled_offers`` and its readers).
 
 Pins the per-offer frame every realized view prices from: posted, settled sides once per
-platform at the platform payout, the quote classes, an already-annotated frame taken as
-given; and the readers over it: the trailing window, ``by_split`` and ``cohort_summary``
-agreeing, the worst month on platform units, and the two-cohort reliability frame.
+platform at the platform payout, a prop whose line moved counted at the lines it was last
+scored at from the cutover, the quote classes, an already-annotated frame taken as given;
+and the readers over it: the trailing window, ``by_split`` and ``cohort_summary`` agreeing,
+the worst month on platform units, and the two-cohort reliability frame.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, platform_payout
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.realized import (
+    COUNT_ONCE_FROM,
     by_split,
     calibration_summary,
     cohort_summary,
@@ -26,6 +28,11 @@ from sportstradamus.realized import (
 )
 
 _NOW = datetime(2026, 10, 3, 12)
+# The first game date a moved prop counts once on, and the last that counts every line.
+_ONCE = f"{COUNT_ONCE_FROM:%Y-%m-%d}"
+_EVERY_LINE = f"{COUNT_ONCE_FROM - pd.Timedelta(days=1):%Y-%m-%d}"
+# Three prophecize runs, each stamping the rows it scored.
+_RUNS = pd.date_range("2026-10-08 13:50", periods=3, freq="6h")
 # The chosen Under at 20.5 hits on 18 and misses on 25.
 _HIT, _MISS = 18.0, 25.0
 # A settled Underdog Under that hit, posted at the flat payout (Boost 1.0 -> 1.83), with a
@@ -70,6 +77,91 @@ def test_only_settled_posted_sides_count_once_per_platform():
         ("Underdog", "A"),
     ]
     assert set(HISTORY_COLS) | _PRICED_COLS <= set(out.columns)
+
+
+@pytest.mark.parametrize(
+    ("date", "lines"),
+    [(_ONCE, [35.5]), (_EVERY_LINE, [33.5, 34.5, 35.5])],
+    ids=["from the cutover", "before the cutover"],
+)
+def test_a_moved_line_counts_once_from_the_cutover(date, lines):
+    # 33.5 -> 34.5 -> 35.5, the rows out of order so the stamp decides, not the position.
+    moved = _OFFER | {"Date": date}
+    out = settled_offers(
+        _frame(
+            moved | {"Line": 34.5, "Scored At": _RUNS[1]},
+            moved | {"Line": 35.5, "Scored At": _RUNS[2]},
+            moved | {"Line": 33.5, "Scored At": _RUNS[0]},
+        )
+    )
+    assert sorted(out["Line"]) == lines
+
+
+def test_rungs_scored_together_stay_separate_legs():
+    # A ladder goes both ways: the model takes the Over on the low rung.
+    last = _OFFER | {"Date": _ONCE, "Scored At": _RUNS[1]}
+    out = settled_offers(
+        _frame(
+            last | {"Line": 19.5, "Scored At": _RUNS[0]},
+            last | {"Line": 14.5, "Bet": "Over"},
+            last,
+        )
+    )
+    assert out["Line"].tolist() == [14.5, 20.5]
+
+
+def test_each_platform_keeps_its_own_last_scoring():
+    moved = _OFFER | {"Date": _ONCE}
+    out = settled_offers(
+        _frame(
+            moved | {"Scored At": _RUNS[0]},
+            moved | {"Line": 21.5, "Scored At": _RUNS[1]},
+            # Sleeper's one line was last scored before Underdog's moved: still a leg.
+            moved | {"Platform": "Sleeper", "Scored At": _RUNS[0]},
+        )
+    )
+    assert sorted(zip(out["Platform"], out["Line"], strict=True)) == [
+        ("Sleeper", 20.5),
+        ("Underdog", 21.5),
+    ]
+
+
+def test_an_unstamped_row_counts_only_in_a_prop_never_stamped():
+    stamped = _OFFER | {"Date": _ONCE}
+    never = stamped | {"Player": "B"}
+    out = settled_offers(
+        _frame(
+            stamped,  # written before rows carried a stamp, so an older line
+            stamped | {"Line": 21.5, "Scored At": _RUNS[0]},
+            never,
+            never | {"Line": 21.5},
+        )
+    )
+    assert list(zip(out["Player"], out["Line"], strict=True)) == [
+        ("A", 21.5),
+        ("B", 20.5),
+        ("B", 21.5),
+    ]
+
+
+def test_a_last_scoring_on_an_unposted_side_removes_the_older_line():
+    moved = _OFFER | {"Date": _ONCE}
+    out = settled_offers(
+        _frame(
+            moved | {"Scored At": _RUNS[0]},
+            # The line moved and the platform never posted the side the model took there.
+            moved | {"Line": 21.5, "Bet": "Over", "Boost": 0.0, "Scored At": _RUNS[1]},
+            moved | {"Player": "B", "Scored At": _RUNS[0]},
+        )
+    )
+    assert out["Player"].tolist() == ["B"]
+
+
+def test_a_frame_without_the_stamp_column_keeps_every_line():
+    # tail_scorecard replays test rows at each ladder rung; none was ever scored live.
+    rung = _OFFER | {"Date": _ONCE}
+    out = settled_offers(_frame(rung, rung | {"Line": 21.5}).drop(columns="Scored At"))
+    assert out["Line"].tolist() == [20.5, 21.5]
 
 
 def test_legs_price_at_the_platform_payout():

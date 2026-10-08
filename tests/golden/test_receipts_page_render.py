@@ -4,8 +4,9 @@ The page runs in place through ``app.py`` (``AppTest.from_file`` on its absolute
 ``st.Page``'s ``__file__``-relative paths resolving; see ``test_dashboard_render_smoke.py``),
 every snapshot it reads pointed at a temp file. The sidebar's default range (90 days back
 from the newest row) holds the same offers as the ledger's 90-day window, so the hero shows
-the recommended cohort the reconciliation test sums; the flat -110 grade appears nowhere;
-and the sport switch narrows the by-side panel to that league's keys.
+the recommended cohort the reconciliation test sums; the page says from which game date a
+moved prop counts once; the flat -110 grade appears nowhere; and the sport switch narrows
+the by-side panel to that league's keys.
 """
 
 from __future__ import annotations
@@ -19,7 +20,13 @@ import pyarrow as pa
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from sportstradamus.realized import calibration_summary, cohort_summary, settled_offers, window
+from sportstradamus.realized import (
+    COUNT_ONCE_FROM,
+    calibration_summary,
+    cohort_summary,
+    settled_offers,
+    window,
+)
 from tests.golden.test_receipts_reconciles_ledger import HISTORY, NOW
 
 _APP = Path(__file__).resolve().parents[2] / "src/sportstradamus/dashboard/app.py"
@@ -69,11 +76,19 @@ def test_hero_shows_the_reconciled_recommended_cohort(monkeypatch, tmp_path):
     posted = cohort_summary(offers)
 
     hero = _hero_text(at)
+    # B's line moved twice before its game and M was last scored on an unposted side. Every
+    # line counted would read 10 recommended legs, so the loader has to carry Scored At.
+    assert "across 7 recommended legs" in hero
     assert (
         f"{recommended['units']:+,.0f} units across {recommended['n']:,} recommended legs" in hero
     )
     assert f"{recommended['roi']:+.1%}" in hero
     assert f"All posted sides in the window: {posted['n']:,} legs" in hero
+    assert any(
+        "line moved counts once" in caption.value
+        and f"games from {COUNT_ONCE_FROM:%Y-%m-%d}" in caption.value
+        for caption in at.caption
+    )
 
     rendered = [
         *(m.body for m in at.markdown),

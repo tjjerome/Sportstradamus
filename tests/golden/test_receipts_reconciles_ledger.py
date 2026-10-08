@@ -3,8 +3,8 @@
 Receipts prices ``cohort_summary`` over the windowed posted frame and its recommended cohort;
 nightly persists ``compute_realized_by_side``. Over one hand-built history (both platforms,
 an unposted side, a push, an alt line, a payout past the cap, a ``book_fallback`` row, one prop
-on both platforms) the two agree for every ledger window and cohort. ``HISTORY`` and ``NOW``
-also feed the Receipts render tests.
+on both platforms, one whose line moved and one last scored on an unposted side) the two agree
+for every ledger window and cohort. ``HISTORY`` and ``NOW`` also feed the Receipts render tests.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import pytest
 
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.realized import (
+    COUNT_ONCE_FROM,
     REALIZED_WINDOWS,
     cohort_summary,
     compute_realized_by_side,
@@ -23,7 +24,10 @@ from sportstradamus.realized import (
     window,
 )
 
-NOW = datetime(2026, 10, 3, 12)
+NOW = datetime(2026, 10, 10, 12)
+# The first game date a moved prop counts once on, and three prophecize runs ahead of its games.
+_GAME = f"{COUNT_ONCE_FROM:%Y-%m-%d}"
+_RUNS = pd.date_range("2026-10-08 13:50", periods=3, freq="6h")
 # Every posted Underdog leg here loses and every Sleeper payout is a binary fraction, so
 # each Unit is exact in floating point and a sum of them is the same whatever the order —
 # the page sums a cohort in one pass, the ledger per side.
@@ -39,12 +43,19 @@ _COLS = [
     "Win Prob",
     "Market Prob",
     "Actual",
+    "Scored At",
 ]
 _ROWS = [
     # The same prop on both platforms: two offers.
     ("A", "NBA", "2026-09-30", "PTS", 20.5, "Over", "Underdog", 1.0, 0.62, 0.55, 18.0),
     ("A", "NBA", "2026-09-30", "PTS", 20.5, "Over", "Sleeper", 1.75, 0.62, 0.55, 18.0),
-    ("B", "NBA", "2026-09-28", "REB", 8.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0),
+    # B's line moved twice before its game, and M's moved onto a side the platform never
+    # posted. Their last value is the run that scored the line; no other row was stamped.
+    ("B", "NBA", _GAME, "REB", 10.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[0]),
+    ("B", "NBA", _GAME, "REB", 9.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[1]),
+    ("B", "NBA", _GAME, "REB", 8.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[2]),
+    ("M", "NBA", _GAME, "PTS", 20.5, "Over", "Sleeper", 1.75, 0.62, 0.55, 18.0, _RUNS[1]),
+    ("M", "NBA", _GAME, "PTS", 21.5, "Over", "Sleeper", 0.0, 0.62, 0.55, 18.0, _RUNS[2]),
     # C rides an alt line and D is book-priced (both stamped below).
     ("C", "NBA", "2026-09-20", "PTS", 30.5, "Under", "Underdog", 0.8, 0.8, 0.7, 33.0),
     ("D", "WNBA", "2026-09-15", "PTS", 18.5, "Over", "Underdog", 1.0, 0.61, 0.6, 15.0),
@@ -72,8 +83,9 @@ HISTORY = (
     .reindex(columns=HISTORY_COLS)
 )
 
-# Who each window and cohort holds: A twice (one offer per platform); G (unposted) and H
-# (push) never; E (payout 3.0) and F (edge 3%) bettable only; K past 90 days.
+# Who each window and cohort holds: A twice (one offer per platform); B once, at the last
+# of its three lines; G (unposted), H (push) and M (last scored on an unposted side) never;
+# E (payout 3.0) and F (edge 3%) bettable only; K past 90 days.
 _MEMBERS = {
     (30, "recommended"): ["A", "A", "B", "C", "D"],
     (30, "bettable"): ["A", "A", "B", "C", "D", "E", "F"],

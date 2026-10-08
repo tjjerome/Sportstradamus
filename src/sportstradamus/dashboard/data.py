@@ -151,9 +151,12 @@ def _load_history_cached(path: Path, mtime: float) -> pd.DataFrame:
     fresh cron write invalidates it. ``read_history()`` re-resolves the path
     itself, so ``path`` isn't touched in the body beyond keying the cache.
     """
-    # The decision-time columns are research inputs no page reads; dropping them keeps
-    # the cached frame flat (errors="ignore": parquets written before they existed).
-    history = read_history().drop(columns=DECISION_COLS, errors="ignore")
+    # The decision-time columns are research inputs no page reads, except Scored At, by
+    # which settled_offers counts a moved prop once; dropping the rest keeps the cached
+    # frame flat (errors="ignore": parquets written before they existed).
+    history = read_history().drop(
+        columns=[col for col in DECISION_COLS if col != "Scored At"], errors="ignore"
+    )
     if history.empty:
         return history
 

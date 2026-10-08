@@ -54,14 +54,17 @@ OFFER_LEVEL_COLS = [
     "Payout Under",
 ]
 
-# Decision-time context the research and trust-layer work reads back from history:
-# what the scorer saw when it chose the side. Offer-level, never backfilled, NaN on
-# rows written before the column existed.
+# Decision-time context: what the scorer saw when it chose the side. Research reads it
+# back from history; reporting reads only the columns whose comment names the reader.
+# Offer-level, never backfilled, NaN on rows written before the column existed.
 DECISION_COLS = [
     # One UTC stamp per prophecize run, so a row joins the archive state that run saw.
+    # realized.settled_offers counts a prop at the lines its last scoring still held.
     "Scored At",
     # The sportsbook consensus line, NaN when no sportsbook posts one.
     "Consensus Line",
+    # Kickoff: an ISO UTC string on Underdog rows, "" on Sleeper's. clv.commence_times
+    # resolves it to the instant a row's close waits for and is read as of.
     "Commence",
     "Opponent",
     "Home",

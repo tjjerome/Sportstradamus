@@ -4,10 +4,12 @@ The one place realized performance is priced, so Receipts, Lab Diagnostics, nigh
 the research briefs read the same numbers. ``settled_offers`` grades each settled offer
 at its platform payout (``helpers.platform_payout``), keeps only sides the platform
 posted (a ``Boost == 0`` side was never a bet), counts an offer once per platform (the
-same prop on Underdog and Sleeper is two bets) and flags ``Recommended`` by the one
-definition the story menu shares. ``window``, ``by_split``, ``cohort_summary``,
-``worst_month`` and ``calibration_summary`` slice and aggregate that frame; nightly
-persists ``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). Pure.
+same prop on Underdog and Sleeper is two bets), counts a prop whose line moved only at
+the lines still posted when it was last scored (games from ``COUNT_ONCE_FROM``; earlier
+games count every line posted) and flags ``Recommended`` by the one definition the story
+menu shares. ``window``, ``by_split``, ``cohort_summary``, ``worst_month`` and
+``calibration_summary`` slice and aggregate that frame; nightly persists
+``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). Pure.
 """
 
 from datetime import UTC, datetime
@@ -21,6 +23,8 @@ from sportstradamus.helpers import MAX_FAVORED_PAYOUT, platform_payout
 
 # 30 matches the graduation window; 90 gives the payout bands enough legs to read.
 REALIZED_WINDOWS: tuple[int, ...] = (30, 90)
+# From this game date an early closing stamp is released pre-game, so Scored At is the last scoring.
+COUNT_ONCE_FROM = pd.Timestamp("2026-10-09")
 # The owner-locked story / "why" edge floor. Pinned equal to menu._MENU_EDGE_FLOOR by test
 # rather than imported, since that constant is private to the story menu.
 RECOMMENDED_EDGE_MIN: float = 0.05
@@ -58,6 +62,8 @@ _PAYOUT_BAND_LABELS = [
 ]
 # One real offer per platform: the same prop posted on Underdog and Sleeper is two bets.
 _OFFER_KEY = ["Date", "Player", "Market", "Line", "Bet", "Platform"]
+# An offer without its line, or the side taken there: a moved line can flip the side.
+_PROP_KEY = ["Date", "Player", "Market", "Platform"]
 # The columns settled_offers adds, typed so an empty frame slices like a full one.
 _PRICED_DTYPES = {
     "Payout": "float64",
@@ -98,6 +104,14 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
     (``"fallback"`` on the book-priced path, else ``"quoted"`` with a servable sportsbook
     quote, else ``"unquoted"``). Empty input comes back empty with those columns.
 
+    A prop (``Date, Player, Market, Platform``) dated ``COUNT_ONCE_FROM`` or later counts
+    only at the lines still posted when it was last scored: the rows carrying the latest
+    ``Scored At`` among every row of the prop handed in, unposted and unsettled ones
+    included. Rungs posted side by side share that stamp and stay separate legs; a line
+    the platform moved off drops out, as does an unstamped row beside a stamped one. A
+    prop never stamped, a frame with no ``Scored At`` column and every earlier game keep
+    each posted line.
+
     Args:
         history: Flat prediction history (``history_schema.HISTORY_COLS``), ``Actual``
             filled by reflect. A frame already carrying ``Result`` (the dashboard's
@@ -108,12 +122,23 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
             **{col: pd.Series(dtype=dtype) for col, dtype in _PRICED_DTYPES.items()}
         )
     settled = history if "Result" in history.columns else annotate_offer_outcomes(history)
-    offers = settled[
+    keep = (
         settled["Result"].isin(("Over", "Under"))
         & settled["Bet"].notna()
         & settled["Win Prob"].notna()
         & (settled["Boost"] > 0)
-    ].drop_duplicates(subset=_OFFER_KEY)
+    )
+    # tail_scorecard's replayed test rows were never scored live and carry no stamp column.
+    if "Scored At" in settled.columns:
+        # Over every row, not only the posted and settled ones: when the last scoring is
+        # of a side the platform never posted, the older line is gone all the same.
+        last_scored = settled.groupby(_PROP_KEY)["Scored At"].transform("max")
+        keep &= (
+            (pd.to_datetime(settled["Date"]) < COUNT_ONCE_FROM)
+            | settled["Scored At"].eq(last_scored)
+            | last_scored.isna()
+        )
+    offers = settled[keep].drop_duplicates(subset=_OFFER_KEY)
     payout = platform_payout(offers["Boost"], offers["Platform"])
     # Derived, not annotate's Hit: that column is absent when no row resolved.
     hit = offers["Bet"] == offers["Result"]

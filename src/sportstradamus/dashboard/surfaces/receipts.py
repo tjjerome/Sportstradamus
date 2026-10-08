@@ -92,6 +92,11 @@ window = (
 df_windowed = window_offers(df, window, datetime.now(UTC))
 recommended = df_windowed[df_windowed["Recommended"]]
 render_receipts_hero(realized.cohort_summary(recommended), realized.cohort_summary(df_windowed))
+st.caption(
+    "A prop whose line moved counts once, at the lines still posted when it was last "
+    f"scored, for games from {realized.COUNT_ONCE_FROM:%Y-%m-%d}; earlier games count "
+    "every line posted."
+)
 
 wm = realized.worst_month(recommended)
 daily_profit = recommended.groupby("_date").agg(Profit=("Unit", "sum")).reset_index()
