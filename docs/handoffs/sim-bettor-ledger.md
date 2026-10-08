@@ -470,9 +470,7 @@ it. Replicate 0's morning draw is therefore whole, and every later draw
 (replicates 1–39, the afternoon run) keeps only the entries no bettor
 committed earlier that day: the store holds close to one replicate plus a
 de-duplicated union, not 40 independent ledgers. Keying the check on
-`(id, persona, replicate_id)` restores the ensemble and is a new policy
-version (§4); a same-slot retry then needs its own guard, because a
-second draw sees the first one's budget and draws differently.
+`(id, persona, replicate_id)` restores the ensemble: Policy v4, below.
 
 ### Policy v3
 
@@ -520,16 +518,16 @@ weeks before the bettor started the strongest reads hit no better than
 the rest (honest-receipts §7). (2) A slate needs recommended even
 picks in two games to give an entry and in six to give a six-pick, and a
 game that starts before the morning run (14:05 UTC) is missed. (3) The
-pool is scored at commit time, while Receipts grades the stored snapshot,
-which for half of a game-day board is an earlier one (honest-receipts §8
-ask 10): until that is fixed the two recommended sets differ. (4) The
-store scar above costs more on a small pool: from the 99 candidates the
-store kept 58 records where forty independent copies would hold about
-122, and ten copies held none.
+pool is scored at commit time, while Receipts grades the stored snapshot.
+For games before 2026-10-09 that was an earlier one for half of a
+game-day board, so the two recommended sets differ there (honest-receipts
+decision 15). (4) The store scar above cost more on a small pool: from
+the 99 candidates the store kept 58 records where forty independent
+copies hold 113 (Policy v4), and ten copies held none.
 
 **Cross-game leg keys.** A cross-game leg's `stat`, and the shared
 path's trust lookup, use the league's own market key
-(`helpers.archive_market`). An NHL Assists leg carries `assists`, the
+(`helpers.cell_market`). An NHL Assists leg carries `assists`, the
 gamelog's column; v1 and v2 wrote `AST`, which the gamelog lacks and
 settlement would have read as a push. NHL Points moves the same way
 (`PTS` to `points`), and NBA and WNBA Underdog fantasy points move to
@@ -549,12 +547,93 @@ NHL skater fantasy points .331). Training skill is above 0 in 40 of the
 70, and the live rung sets 24 of those to 0. That rung is
 `clip(2 × (share of closed legs that beat the close − .5))`; a line that
 did not move counts as not beaten (20 % of 498,882 closed rows, against
-39.5 % moved for the bet side and 40.1 % against), and the close it
-reads is stamped before the game on most rows (honest-receipts §8
-ask 10).
+39.5 % moved for the bet side and 40.1 % against), and on rows closed
+before 2026-10-09 the close it reads was stamped before the game
+(honest-receipts decision 15).
+
+### Policy v4
+
+Policy v3 with the store's forty copies made independent and the bankroll
+chain repaired; whatever v1 to v3 state and this section does not replace
+still holds. The commit path stamps every new record `policy_v4`.
+
+**Forty copies.** Within a slate date an entry is its candidate `id`
+plus the copy holding it (`_ledger_store.entry_key`: `id`, `persona`,
+`replicate_id`). The store refuses a record only when that copy already
+holds that candidate that day, on disk or earlier in the same batch. A
+candidate's `id` is the same whoever draws it, so two copies that draw
+one candidate each hold an entry of their own. This closes the store scar
+of v1 to v3.
+
+**Retry.** A commit run leaves alone a replicate that already holds a
+record from the slot (`_ledger_store.committed_replicates`). Drawn again,
+it would count its first draw against the daily budget and add other
+entries. On the same board a re-run adds nothing; after a crash it
+completes the replicates that had not written.
+
+**Settlement match.** A v4 record is matched to its settled row on the
+same key. Records of v1 to v3 keep the match on `id` alone
+(`_ledger_settlement._ID_KEYED_POLICIES`): production's `policy_v1` files
+of August 2026 carry empty leg labels, so every entry of one size shares
+an `id`, and 80 committed v1 records have no settled row because that id
+held them back. Matched by copy, 42 of them would settle now, two months
+late. On copies of production's tables the new code settles exactly the
+rows the old code settles, and the 301 settled rows and 165 bankroll rows
+already written are untouched.
+
+**Bankroll chain.** A trajectory continues from the last row written for
+it. The lookup used to take the first row at the trajectory's latest
+date, which loses a pass whenever one slate date settles in two (the
+entries of 2026-10-05 settled 42 one night and 61 the next, behind the
+Monday-night NFL game) or a late pass of an older date is written after a
+newer date's row. Rows written before the change keep their numbers:
+production holds 7 broken links, and 5 of its 74 trajectories end away
+from the seed plus their settled P&L (v1 safe, copy 0: $4,482.97 against
+$4,382.97). A late pass keeps its slate date, so the table is not in date
+order and a trajectory is read in row order.
+
+**Payout table.** The 4-pick Flex pays 1.4× with one miss, as the owner
+read it in the app on 2026-10-08; the file held 1.8×, a September
+capture. The 59 v3 four-pick Flex rows with one miss through 2026-10-07
+settled at 1.8, $590 above the true payout: the 456 v3 entries settled
+through that date returned $15,425 on $11,400 staked at the table then
+on file and $14,835 at the corrected tier, over three nights of shared
+legs, which is no evidence either way. A v3 entry of 2026-10-08 settles
+at 1.4.
+
+**Replay.** The commit path into a scratch store, on the two boards
+production saved on 2026-10-05. Afternoon board: 117 records against v3's
+104; all forty copies hold one and 12 hold the full five; 100 distinct
+candidates, 15 of them held by two or three copies, none twice by one
+copy; a second run adds none. Morning then afternoon in one store:
+113 + 58 = 171, with 25 copies at five and none above.
+
+**Scars.** (1) A candidate's `id` carries no platform, so an Underdog
+and a Sleeper entry with identical leg labels share one and a copy keeps
+only the first. (2) An afternoon draw that lands on an entry the copy
+already holds is refused, not redrawn. (3) A re-run still scrapes before
+it skips. (4) `nightly` writes the settled rows and then the bankroll
+rows; a crash between the two leaves P&L in the settled table that never
+reaches a trajectory. (5) At the corrected tier a four-pick entry reads
+higher as a 12× Power than as Flex once its legs read above .5385 a pick,
+which every four-pick entry of the replay does (modeled EV +0.61 as
+Flex, +0.83 as Power), while four to six picks are built as Flex
+(`payouts.POWER_MAX_SIZE` = 3). The two kinds break even within .0003 of
+each other; left as built (honest-receipts §8). (6) The shared bettors'
+same-game pool comes from the dashboard's parlay search, whose trust
+lookup now uses the league's own market key (honest-receipts decision
+23), so their pool gains NBA Underdog fantasy-points legs when the NBA
+opens.
 
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-10-08 · policy_v4 (`0c464fae`) · entry = id + copy, so each of the
+  forty copies keeps what it drew · per-replicate retry guard ·
+  settlement match by copy from v4, v1 to v3 on id · bankroll chains
+  from the last row written · 4-pick Flex one-miss tier 1.4 (owner's app
+  read; v3 rows through 10-07 settled at 1.8) · replay: 117 records
+  against 104 · detail §10 Policy v4 · next: first production run, the
+  morning slot of 2026-10-09
 - 2026-10-05 · policy_v3 (`6adcfae8`) · Even-picks rebuilt on the
   recommendation rule at the served read: game-day legs, entries dealt
   evenly, a game per leg · v2's pool sat behind the shared leg gate,

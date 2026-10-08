@@ -448,6 +448,11 @@ consult.
 - `model_weight` near 0 ⇒ bookmaker dominates; near 1 ⇒ model dominates.
 - `ship == True` ⇔ all six offline gates pass on the most recent
   test-set CSV; see `docs/ship_gate.md` for the threshold rationale.
+- A push is half an Over in training's label (`training/labels.over_label`):
+  the Brier, ECE, `empirical_over_rate` and Gate 1 / Gate 5 columns score it as
+  ½, while `log_loss_*`, `roc_auc`, `accuracy` and `precision_*` use settled
+  rows only. The ECE and gate columns follow the rule for every cell at once;
+  the columns copied from a model file follow it as that cell retrains.
 
 **Standalone A/B-test harness** for testing model updates without
 touching production:

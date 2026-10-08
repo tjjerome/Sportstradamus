@@ -55,6 +55,9 @@ anti-shrinkage legs** (recent-form, CITL-under, count over — below): the cell 
 if any leg fires. Only the recent-form leg is anchor-scoped (`corr(Mean10, Result)` with a
 hysteresis deadband); the CITL-under leg runs on every cell.
 
+The outcome label `y` in Gates 1 and 5 is `training/labels.over_label`: 1 when `Result` is over
+`Line`, 0 when under, ½ at a push, which is how the model's own probability counts a tie.
+
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
 | 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded); scored on sportsbook-priced rows (`QuoteAuthenticity == authentic`) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
@@ -200,7 +203,7 @@ as the reported `g4_iqr_ratio`.
   can't test; Gate 6 fails only when a leg fires on a positive signal.
 
 **Oracle columns.** Gates 1–5 each emit a sibling "oracle" value computed under the
-deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0`):
+oracle (`pred = Result`; over-prob `= y`, the outcome label, so ½ on a push row):
 - Gate 1 oracle `mean = −book Brier` (and CI sits below 0), exposing the book's own
   Brier so the achievable headroom is visible.
 - Gate 2/3 oracle `z = 0`.
