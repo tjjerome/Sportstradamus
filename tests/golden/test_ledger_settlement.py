@@ -4,7 +4,7 @@ shares with the pricers, how each policy version's records settle, CLV-join
 coverage, O(distinct legs) resolve cost, and entries-JSONL immutability.
 
 Every test monkeypatches ``_ledger_store.entries_path`` into ``tmp_path`` and
-``_ledger_bankroll.already_settled_ids`` to an empty set (the sibling module
+``_ledger_bankroll.read_settled_entries`` to an empty list (the sibling module
 this file's own settlement code imports isn't built yet in a parallel-track
 session -- these tests stub the one call it makes). No network, xdist-safe.
 """
@@ -132,7 +132,7 @@ def _redirect(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         _ledger_store, "entries_path", lambda date: tmp_path / f"{date.isoformat()}.jsonl"
     )
-    monkeypatch.setattr(_ledger_bankroll, "already_settled_ids", lambda date=None: set())
+    monkeypatch.setattr(_ledger_bankroll, "read_settled_entries", lambda date: [])
     monkeypatch.setattr(helpers_io, "read_history", pd.DataFrame)
     monkeypatch.setattr(_ledger_settlement, "read_history", pd.DataFrame)
 
@@ -320,6 +320,46 @@ def test_join_clv_calls_fill_from_archive_exactly_once(monkeypatch) -> None:
 
     assert len(calls) == 1
     assert calls[0] == 5
+
+
+class _AskedAtArchive(_NoopArchive):
+    """Records the instant each leg's close is read as of."""
+
+    def __init__(self) -> None:
+        self.asked_at: dict[str, datetime.datetime] = {}
+
+    def get_composite_under_prob(self, league, market, date, player, *, at=None):
+        self.asked_at[player] = at
+        return float("nan")
+
+
+def test_join_clv_reads_a_legs_close_at_the_kickoff_history_resolves(monkeypatch) -> None:
+    """Player B's only history row is Sleeper's, which posts no kickoff: it takes its
+    team's. Player C has no history row and falls back to the stand-in hour."""
+    model_cols = {"Dist": np.nan, "CV": np.nan, "Gate": np.nan, "Step": np.nan}
+    history = pd.DataFrame(
+        [
+            {"Player": "Player A", "Team": "BOS", "Commence": "2026-07-12T23:30:00Z"},
+            {"Player": "Player B", "Team": "BOS", "Commence": ""},
+        ]
+    ).assign(League="NBA", Date="2026-07-12", Market="PTS", **model_cols)
+    monkeypatch.setattr(_ledger_settlement, "read_history", lambda: history)
+    legs = {
+        (player, "PTS", 20.5, "Over", "NBA", "2026-07-12"): _leg(
+            player, "PTS", 20.5, "Over", "BOS/LAL"
+        )
+        for player in ("Player A", "Player B", "Player C")
+    }
+    archive = _AskedAtArchive()
+
+    _ledger_settlement.join_clv(legs, archive)
+
+    kickoff = datetime.datetime(2026, 7, 12, 23, 30)
+    assert archive.asked_at == {
+        "Player A": kickoff,
+        "Player B": kickoff,
+        "Player C": datetime.datetime(2026, 7, 12, 20),
+    }
 
 
 # --- 3. Distinct-leg dedup: shared leg across entries resolves once ------------
@@ -564,6 +604,17 @@ def test_policy_v2_flex_record_one_miss_pays_on_the_largest_multipliers() -> Non
     assert paid == pytest.approx(float(underdog_payouts["flex"][4][1]) * 0.87 * 1.30 * 1.16)
 
 
+def test_four_pick_flex_entry_pays_7_2x_with_no_miss_and_1_4x_with_one() -> None:
+    """Underdog's 4-pick Flex as the owner read it in the app on 2026-10-08. The one-miss
+    tier paid 1.8 when the table was captured on 2026-09-10."""
+
+    def paid(outcomes: list[int | None]) -> float:
+        return _settled_multiplier(outcomes, contest_variant="flex", pair_modifier=1.0)
+
+    assert paid([_HIT] * 4) == pytest.approx(7.2)
+    assert paid([_MISS] + [_HIT] * 3) == pytest.approx(1.4)
+
+
 def test_policy_v2_sleeper_record_pays_its_posted_multipliers_under_its_own_curve() -> None:
     sleeper_power = payout_curve_for("Sleeper", "power")[1]
     posted = [1.78, 1.62, 1.45]
@@ -674,9 +725,7 @@ def test_settleable_entries_excludes_already_settled(monkeypatch, tmp_path) -> N
     ]
     record = _record("already-settled", legs, contest_variant="power", stake="10")
     _ledger_store.append_entries(DATE, [record])
-    monkeypatch.setattr(
-        _ledger_bankroll, "already_settled_ids", lambda date=None: {"already-settled"}
-    )
+    monkeypatch.setattr(_ledger_bankroll, "read_settled_entries", lambda date: [record])
 
     result = _ledger_settlement.settleable_entries(DATE, stats)
 

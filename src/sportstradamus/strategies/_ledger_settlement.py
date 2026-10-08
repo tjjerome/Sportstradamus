@@ -23,6 +23,7 @@ import pandas as pd
 from sportstradamus import clv
 from sportstradamus.analysis import _gameday_rows_for, _resolve_leg
 from sportstradamus.helpers.io import read_history
+from sportstradamus.history_schema import PREDICTION_KEY
 from sportstradamus.prediction.payouts import (
     LEG_LOSS,
     LEG_PUSH,
@@ -33,11 +34,11 @@ from sportstradamus.prediction.payouts import (
 )
 from sportstradamus.strategies import _ledger_bankroll, _ledger_store
 
-# CLV frame columns fill_from_archive needs but LEG_FIELDS doesn't carry;
-# left-joined from history.parquet keyed on PREDICTION_KEY. A join miss
-# leaves these NaN, which fill_from_archive already treats as "no trained
-# model -- fall back to the composite-probability path", not an error.
-_CLV_JOIN_COLS = ["Player", "League", "Date", "Market", "Dist", "CV", "Gate", "Step"]
+# CLV frame columns fill_from_archive needs but LEG_FIELDS doesn't carry; join_clv
+# left-joins them from history.parquet. Commence is the kickoff clv.commence_times
+# resolves over all of history, so a leg's close is read at the instant its history
+# rows' is; Team is the column that function borrows a kickoff by.
+_CLV_JOIN_COLS = [*PREDICTION_KEY, "Dist", "CV", "Gate", "Step", "Team", "Commence"]
 
 # analysis._resolve_leg's verdict (0 hit, 1 miss, None push) as a payout-rule leg outcome.
 _LEG_OUTCOME = {0: LEG_WIN, 1: LEG_LOSS, None: LEG_PUSH}
@@ -46,6 +47,18 @@ _LEG_OUTCOME = {0: LEG_WIN, 1: LEG_LOSS, None: LEG_PUSH}
 # its cross-game legs carried raw multipliers. They settle on the bare table tier, as
 # they always have, so one version is scored by one rule for the life of the ledger.
 _BARE_TABLE_POLICY = "policy_v1"
+
+# Records of these versions match their settled row on the id alone, as they always have.
+# Production's policy_v1 files of August 2026 give every entry of one size the same id;
+# matched by copy, the records that id has held back since then would settle now.
+_ID_KEYED_POLICIES = frozenset({"policy_v1", "policy_v2", "policy_v3"})
+
+
+def _settlement_key(entry: dict) -> tuple[str | int, ...]:
+    """What matches a committed record to its settled row within one slate date."""
+    if entry["policy_version"] in _ID_KEYED_POLICIES:
+        return (entry["id"],)
+    return _ledger_store.entry_key(entry)
 
 
 def distinct_leg_key(leg: dict) -> tuple[str, str, float, str, str, str]:
@@ -94,11 +107,13 @@ def settleable_entries(
     leagues that finish at different times, so a partially-finished slate
     must not be settled early. "Landed" means
     :func:`~sportstradamus.analysis._gameday_rows_for` returns a non-empty
-    frame for that leg's (league, game, date). Already-settled entries (per
-    ``_ledger_bankroll.already_settled_ids``) are excluded up front.
+    frame for that leg's (league, game, date). Records the settled table
+    already holds a row for (per :func:`_settlement_key`) are excluded up front.
     """
-    settled_ids = _ledger_bankroll.already_settled_ids(date)
-    records = [rec for rec in _ledger_store.read_records(date) if rec["id"] not in settled_ids]
+    settled = {_settlement_key(row) for row in _ledger_bankroll.read_settled_entries(date)}
+    records = [
+        rec for rec in _ledger_store.read_records(date) if _settlement_key(rec) not in settled
+    ]
     if not records:
         return []
     cache = (
@@ -161,14 +176,16 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
     """CLV for every distinct leg, computed once over the whole slate.
 
     Builds one small frame over the distinct-leg set, left-joins
-    ``Dist``/``CV``/``Gate``/``Step`` from ``history.parquet`` keyed on
+    ``Dist``/``CV``/``Gate``/``Step`` and the leg's kickoff from
+    ``history.parquet`` keyed on
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` (every ledger leg
     traces back to the same day's ``process_offers`` scoring pass that
     populates that parquet under the same key), and calls
     ``clv.fill_from_archive`` exactly once -- the spec requirement of
     resolving the union of distinct legs once per day, not once per entry.
-    A join miss leaves those four columns NaN, which ``fill_from_archive``
-    already handles via its composite-probability fallback path.
+    A join miss leaves the four model columns NaN, which ``fill_from_archive``
+    already handles via its composite-probability fallback path, and reads
+    the leg's close at the stand-in hour.
 
     Returns ``{distinct_leg_key(leg): {"close_market_prob", "market_clv",
     "model_clv"}}``.
@@ -178,9 +195,10 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
     frame = _clv_input_frame(distinct_legs)
     history = read_history()
     if not history.empty:
+        history = history.assign(Commence=clv.commence_times(history))
         join_cols = [c for c in _CLV_JOIN_COLS if c in history.columns]
-        lookup = history[join_cols].drop_duplicates(subset=["Player", "League", "Date", "Market"])
-        frame = frame.merge(lookup, on=["Player", "League", "Date", "Market"], how="left")
+        lookup = history[join_cols].drop_duplicates(subset=PREDICTION_KEY)
+        frame = frame.merge(lookup, on=PREDICTION_KEY, how="left")
     else:
         for col in ("Dist", "CV", "Gate", "Step"):
             frame[col] = np.nan

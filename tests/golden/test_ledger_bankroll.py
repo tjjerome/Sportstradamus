@@ -67,23 +67,26 @@ def _settled_row(
     }
 
 
-def test_write_settled_entries_then_already_settled_ids_round_trip(monkeypatch, tmp_path) -> None:
+def test_write_settled_entries_then_read_settled_entries_round_trip(monkeypatch, tmp_path) -> None:
     _redirect(monkeypatch, tmp_path)
-    assert _ledger_bankroll.already_settled_ids() == set()
+    assert _ledger_bankroll.read_settled_entries(DATE) == []
 
-    rows = [_settled_row("id-1"), _settled_row("id-2")]
+    rows = [_settled_row("id-1"), _settled_row("id-2", persona="high_ev", replicate_id=7)]
     _ledger_bankroll.write_settled_entries(rows)
 
-    assert _ledger_bankroll.already_settled_ids() == {"id-1", "id-2"}
-    assert _ledger_bankroll.already_settled_ids(DATE) == {"id-1", "id-2"}
-    assert _ledger_bankroll.already_settled_ids(NEXT_DATE) == set()
+    read_back = _ledger_bankroll.read_settled_entries(DATE)
+    assert [(row["id"], row["persona"], row["replicate_id"]) for row in read_back] == [
+        ("id-1", "safe", 0),
+        ("id-2", "high_ev", 7),
+    ]
+    assert _ledger_bankroll.read_settled_entries(NEXT_DATE) == []
 
 
 def test_write_settled_entries_noop_on_empty_input(monkeypatch, tmp_path) -> None:
     _redirect(monkeypatch, tmp_path)
     _ledger_bankroll.write_settled_entries([])
     assert not (tmp_path / "settled_entries.parquet").exists()
-    assert _ledger_bankroll.already_settled_ids() == set()
+    assert _ledger_bankroll.read_settled_entries(DATE) == []
 
 
 def test_write_settled_entries_appends_across_calls(monkeypatch, tmp_path) -> None:
@@ -91,8 +94,7 @@ def test_write_settled_entries_appends_across_calls(monkeypatch, tmp_path) -> No
     _ledger_bankroll.write_settled_entries([_settled_row("id-1")])
     _ledger_bankroll.write_settled_entries([_settled_row("id-2")])
 
-    ids = _ledger_bankroll.already_settled_ids()
-    assert ids == {"id-1", "id-2"}
+    assert [row["id"] for row in _ledger_bankroll.read_settled_entries(DATE)] == ["id-1", "id-2"]
 
 
 def test_parquet_round_trip_preserves_money_float_precision(monkeypatch, tmp_path) -> None:
@@ -168,6 +170,100 @@ def test_update_bankroll_gap_day_carries_forward_from_most_recent_row(
     assert Decimal(str(day1_row["ending_bankroll"])) == Decimal("5100.00")
     assert Decimal(str(day3_row["starting_bankroll"])) == Decimal("5100.00")
     assert Decimal(str(day3_row["ending_bankroll"])) == Decimal("5125.00")
+
+
+def test_update_bankroll_date_settled_in_two_passes_carries_both_into_the_next_date(
+    monkeypatch, tmp_path
+) -> None:
+    """A slate date settles in two passes when one of its games ends a night after the
+    rest. The next date starts from the seed plus both passes' P&L."""
+    _redirect(monkeypatch, tmp_path)
+    _ledger_bankroll.update_bankroll(DATE, [_settled_row("first-pass", pnl="50.00")])
+    _ledger_bankroll.update_bankroll(DATE, [_settled_row("second-pass", pnl="-20.00")])
+    _ledger_bankroll.update_bankroll(
+        NEXT_DATE, [_settled_row("next-date", date=NEXT_DATE, pnl="10.00")]
+    )
+
+    df = _ledger_bankroll.read_parquet_safe(_ledger_bankroll.BANKROLL_PATH)
+    assert df["date"].tolist() == [DATE.isoformat(), DATE.isoformat(), NEXT_DATE.isoformat()]
+    assert [Decimal(str(start)) for start in df["starting_bankroll"]] == [
+        Decimal("5000"),
+        Decimal("5050"),
+        Decimal("5030"),
+    ]
+    assert Decimal(str(df["ending_bankroll"].iloc[-1])) == Decimal("5040")
+
+
+def test_update_bankroll_late_pass_of_an_older_date_is_carried_into_the_date_after(
+    monkeypatch, tmp_path
+) -> None:
+    """An older date's late pass is written after a newer date's row. It starts from that
+    row's ending bankroll, and the date after it starts from its own: nothing is lost."""
+    _redirect(monkeypatch, tmp_path)
+    _ledger_bankroll.update_bankroll(DATE, [_settled_row("older", pnl="100.00")])
+    _ledger_bankroll.update_bankroll(
+        NEXT_DATE, [_settled_row("newer", date=NEXT_DATE, pnl="-40.00")]
+    )
+    _ledger_bankroll.update_bankroll(DATE, [_settled_row("older-late", pnl="25.00")])
+    _ledger_bankroll.update_bankroll(
+        THIRD_DATE, [_settled_row("third", date=THIRD_DATE, pnl="5.00")]
+    )
+
+    df = _ledger_bankroll.read_parquet_safe(_ledger_bankroll.BANKROLL_PATH)
+    assert df["date"].tolist() == [
+        DATE.isoformat(),
+        NEXT_DATE.isoformat(),
+        DATE.isoformat(),
+        THIRD_DATE.isoformat(),
+    ]
+    assert [Decimal(str(start)) for start in df["starting_bankroll"]] == [
+        Decimal("5000"),
+        Decimal("5100"),
+        Decimal("5060"),
+        Decimal("5085"),
+    ]
+    assert Decimal(str(df["ending_bankroll"].iloc[-1])) == Decimal("5090")
+
+
+def test_update_bankroll_last_row_ends_at_the_seed_plus_all_settled_pnl(
+    monkeypatch, tmp_path
+) -> None:
+    """The invariant the chain exists to keep, over passes written in the orders the
+    nightly settle produces: a date in two passes, an older date's late pass, two copies
+    and two policy versions side by side."""
+    _redirect(monkeypatch, tmp_path)
+    passes = [
+        (DATE, [_settled_row("a", pnl="50.00"), _settled_row("b", replicate_id=1, pnl="-25.00")]),
+        (DATE, [_settled_row("c", pnl="-20.00")]),
+        (
+            NEXT_DATE,
+            [
+                _settled_row("d", date=NEXT_DATE, pnl="75.00"),
+                _settled_row("e", date=NEXT_DATE, replicate_id=1, pnl="30.00"),
+            ],
+        ),
+        (DATE, [_settled_row("f", replicate_id=1, pnl="12.50")]),
+        (
+            THIRD_DATE,
+            [
+                _settled_row("g", date=THIRD_DATE, pnl="-10.00"),
+                _settled_row("h", date=THIRD_DATE, replicate_id=1, pnl="40.00"),
+                _settled_row("i", date=THIRD_DATE, pnl="5.00", policy_version="policy_v2"),
+            ],
+        ),
+    ]
+    seed_plus_pnl: dict[tuple[str, str, int], Decimal] = {}
+    for date, rows in passes:
+        _ledger_bankroll.update_bankroll(date, rows)
+        for row in rows:
+            trajectory = (row["policy_version"], row["persona"], row["replicate_id"])
+            seed_plus_pnl[trajectory] = seed_plus_pnl.get(trajectory, Decimal("5000")) + row["pnl"]
+
+    df = _ledger_bankroll.read_parquet_safe(_ledger_bankroll.BANKROLL_PATH)
+    last_ending = df.groupby(["policy_version", "persona", "replicate_id"])[
+        "ending_bankroll"
+    ].last()
+    assert {key: Decimal(str(end)) for key, end in last_ending.items()} == seed_plus_pnl
 
 
 def test_update_bankroll_separates_persona_replicate_pairs(monkeypatch, tmp_path) -> None:

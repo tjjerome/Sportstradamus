@@ -155,6 +155,39 @@ def test_run_commit_repeat_call_appends_nothing_new(monkeypatch, tmp_path) -> No
     assert second == 0
 
 
+def test_every_copy_keeps_the_candidates_it_drew(monkeypatch, tmp_path) -> None:
+    """Copies draw from one pool, so many draw the same candidate, and each keeps its own.
+    Up to policy_v3 the store kept an id once per day and the later copies lost theirs."""
+    draws = _morning_draws(monkeypatch, tmp_path, _ledger_selection.PERSONAS)
+
+    drawn = sorted(
+        (cand_id, persona, replicate_id)
+        for replicate_id, by_persona in enumerate(draws)
+        for persona, cand_ids in by_persona.items()
+        for cand_id in cand_ids
+    )
+    assert sorted(map(_ledger_store.entry_key, _ledger_store.read_records(DATE))) == drawn
+    assert len({cand_id for cand_id, _, _ in drawn}) < len(drawn)
+
+
+def test_afternoon_run_adds_to_the_day_and_no_copy_holds_a_candidate_twice(
+    monkeypatch, tmp_path
+) -> None:
+    """The afternoon pool holds the morning's candidates again. A copy may draw one it
+    already holds and does not get it twice; a re-run of the afternoon adds nothing."""
+    _redirect_store(monkeypatch, tmp_path)
+    _patch_universe(monkeypatch, _small_universe())
+
+    morning = ledger.run_commit(DATE, "morning")
+    afternoon = ledger.run_commit(DATE, "afternoon")
+
+    records = _ledger_store.read_records(DATE)
+    assert afternoon > 0
+    assert len(records) == morning + afternoon
+    assert len({_ledger_store.entry_key(rec) for rec in records}) == len(records)
+    assert ledger.run_commit(DATE, "afternoon") == 0
+
+
 # --- _committed_record schema ---------------------------------------------------
 
 

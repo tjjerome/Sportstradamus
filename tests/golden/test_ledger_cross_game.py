@@ -234,10 +234,10 @@ def test_price_combo_underdog_two_leg_push_with_loss_still_busts() -> None:
 
 def test_price_combo_flex_loss_tier_pays_on_the_largest_remaining_multipliers() -> None:
     """Four coin-flip picks at 0.8x / 1.0x / 1.0x / 1.5x on Underdog's 4-pick Flex
-    (7.2 all hit, 1.8 with one miss). All four hit one time in 16 and pay
+    (7.2 all hit, 1.4 with one miss). All four hit one time in 16 and pay
     7.2 * 1.2 = 8.64. One miss comes four times in 16 and pays on the three largest
-    multipliers whichever pick missed: 1.8 * 1.5 = 2.7. One fused 1.2x on every tier
-    would pay 2.16 there and price the entry at 1.08."""
+    multipliers whichever pick missed: 1.4 * 1.5 = 2.1. One fused 1.2x on every tier
+    would pay 1.68 there and price the entry at 0.96."""
     legs = tuple(
         _scored_leg(idx, win_prob=0.5, boost=boost)
         for idx, boost in enumerate((0.8, 1.0, 1.0, 1.5))
@@ -246,7 +246,7 @@ def test_price_combo_flex_loss_tier_pays_on_the_largest_remaining_multipliers() 
 
     ev_payout = xg._price_combo(legs, rng, "Underdog")
 
-    assert ev_payout == pytest.approx(8.64 / 16 + 2.7 * 4 / 16, abs=0.05)
+    assert ev_payout == pytest.approx(8.64 / 16 + 2.1 * 4 / 16, abs=0.05)
 
 
 def test_candidate_is_sized_on_its_all_hit_payout_and_its_priced_ev(monkeypatch) -> None:

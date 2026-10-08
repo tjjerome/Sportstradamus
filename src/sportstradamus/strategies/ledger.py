@@ -30,7 +30,7 @@ from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_en
 
 _logger = get_logger("ledger-commit")
 
-POLICY_VERSION = "policy_v3"
+POLICY_VERSION = "policy_v4"
 
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
@@ -186,6 +186,9 @@ def _resize_kelly_growth(
 def run_commit(date: datetime.date, run_slot: str) -> int:
     """Build candidates, draw + size per persona/replicate, and append.
 
+    A replicate that already holds a record from ``run_slot`` has drawn in it
+    and is left alone, so a re-run of the slot adds nothing to it.
+
     Returns the count of newly-appended records (0 on an empty candidate
     universe or when a re-run finds nothing new to commit).
     """
@@ -203,8 +206,11 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
         return 0
 
     rngs = _ledger_selection.replicate_rngs(date, run_slot)
+    already_drew = _ledger_store.committed_replicates(date, run_slot)
     total = 0
     for replicate_id, rng in enumerate(rngs):
+        if replicate_id in already_drew:
+            continue
         records: list[dict] = []
         for persona in _ledger_selection.PERSONAS:
             remaining, seen = _ledger_selection.remaining_budget_and_seen_players(
@@ -219,13 +225,11 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
                 continue
             if persona == "kelly_growth":
                 drawn = _resize_kelly_growth(drawn, date, replicate_id)
-            already_ids = _ledger_store.already_committed_ids(date, run_slot, persona, replicate_id)
             records.extend(
                 _committed_record(
                     c, date=date, run_slot=run_slot, persona=persona, replicate_id=replicate_id
                 )
                 for c in drawn
-                if c.id not in already_ids
             )
         total += _ledger_store.append_entries(date, records)
     return total

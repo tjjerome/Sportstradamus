@@ -1,5 +1,5 @@
 {
-  "_comment": "Underdog payout multipliers for an entry of even-money picks (payout_multiplier 1.0) from different games. Keys are entry sizes (string-encoded ints). 'power' pays one multiplier when every pick hits. 'flex' lists the multiplier by number of losses, zero losses first; a tier Underdog does not offer is absent and pays nothing. A real slip pays the table entry times the picks' own multipliers times the same-game correlation modifier, which never exceeds 1; a Flex tier with k losses uses only the n - k largest pick multipliers. Confirmed by the owner in the app, October 2026, against the entry_slips/estimate quotes captured 2026-09-10 (docs/underdog_api.md section 6.8). Re-confirm each season and update in place.",
+  "_comment": "Underdog payout multipliers for an entry of even-money picks (payout_multiplier 1.0) from different games. Keys are entry sizes (string-encoded ints). 'power' pays one multiplier when every pick hits. 'flex' lists the multiplier by number of losses, zero losses first; a tier Underdog does not offer is absent and pays nothing. A real slip pays the table entry times the picks' own multipliers times the same-game correlation modifier, which never exceeds 1; a Flex tier with k losses uses only the n - k largest pick multipliers. Read in the app by the owner on 2026-10-08; the 4-pick Flex one-loss tier was 1.8 in the entry_slips/estimate quotes captured 2026-09-10 (docs/underdog_api.md section 6.8). Re-confirm each season and update in place.",
   "power": {
     "2": 3.5,
     "3": 6.5,
@@ -11,7 +11,7 @@
   },
   "flex": {
     "3": [3.25, 1.09],
-    "4": [7.2, 1.8],
+    "4": [7.2, 1.4],
     "5": [10.0, 2.5],
     "6": [25.0, 2.6, 0.25],
     "7": [40.0, 2.75, 0.5],

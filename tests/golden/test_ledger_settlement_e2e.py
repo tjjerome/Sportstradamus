@@ -5,7 +5,7 @@ module's contract in isolation (payout math, CLV coverage, dedup cost,
 compounding arithmetic). This file proves the three modules actually compose:
 ``nightly._resolve_ledger`` reading a real entries JSONL off disk, walking
 through the real (unmocked) ``_ledger_settlement.settle_day`` --
-``_ledger_bankroll.already_settled_ids`` idempotency check, and landing correct
+``_ledger_bankroll.read_settled_entries`` idempotency check, and landing correct
 rows in both ``settled_entries.parquet`` and ``bankroll.parquet``. No test here
 re-derives payout curves, CLV percentages, or bankroll compounding -- see the
 two files above for that coverage.
@@ -136,7 +136,7 @@ def _redirect(monkeypatch, tmp_path) -> None:
     """Point every path the full ``_resolve_ledger`` chain touches at ``tmp_path``.
 
     Distinct from ``test_ledger_settlement.py``'s ``_redirect``: this one does
-    NOT stub ``_ledger_bankroll.already_settled_ids`` -- the whole point of
+    NOT stub ``_ledger_bankroll.read_settled_entries`` -- the whole point of
     these tests is exercising the real dedup call, not a mock of it. Also
     redirects ``nightly._LEDGER_ENTRIES_DIR`` (a separate module-level constant
     from ``_ledger_store.entries_path``, but must resolve to the same
@@ -378,3 +378,116 @@ def test_resolve_ledger_settles_each_policy_version_by_its_own_rule(monkeypatch,
         5000 + 10 * table_tier - 10
     )
     assert bankroll.loc["policy_v2", "ending_bankroll"] == pytest.approx(5000 + 10 * paid - 10)
+
+
+# --- 8. An entry is its candidate id with the copy that holds it -------------------
+
+# What a record has carried since policy_v2, on top of ``_record``'s policy_v1 shape.
+_SINCE_V2 = {"platform": "Underdog", "pair_modifier": 1.0}
+
+_BOTH_HIT = [
+    _leg("Player A", "PTS", 20.5, "Over", "BOS/LAL"),  # 25 -> hit
+    _leg("Player B", "AST", 2.5, "Over", "BOS/LAL"),  # 4 -> hit
+]
+_ONE_MISS = [
+    _leg("Player A", "PTS", 20.5, "Over", "BOS/LAL"),  # 25 -> hit
+    _leg("Player C", "PTS", 25.5, "Over", "BOS/LAL"),  # 18 -> miss
+]
+
+
+def test_copies_holding_one_candidate_settle_as_their_own_rows_and_bankrolls(
+    monkeypatch, tmp_path
+) -> None:
+    """Three copies drew the same candidate. Each entry settles as its own row and moves
+    its own copy's bankroll from the seed, and a second pass settles nothing."""
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    stakes = {("safe", 0): "10", ("safe", 1): "25", ("high_ev", 0): "40"}
+    v4 = _SINCE_V2 | {"policy_version": "policy_v4"}
+    for (persona, replicate_id), stake in stakes.items():
+        record = _record(
+            "shared", _BOTH_HIT, persona=persona, replicate_id=replicate_id, stake=stake
+        )
+        _ledger_store.append_entries(DATE, [record | v4])
+
+    assert nightly._resolve_ledger(stats, history_only=False) == 3
+
+    settled = pd.read_parquet(tmp_path / "settled_entries.parquet")
+    bankroll = pd.read_parquet(tmp_path / "bankroll.parquet")
+    assert settled["id"].tolist() == ["shared"] * 3
+    assert len(bankroll) == 3
+    pnl_by_copy = settled.set_index(["persona", "replicate_id"])["pnl"]
+    bankroll_by_copy = bankroll.set_index(["persona", "replicate_id"])
+    win_per_dollar = Decimal(str(underdog_payouts["power"][2])) - 1
+    for copy, stake in stakes.items():
+        pnl = Decimal(stake) * win_per_dollar
+        assert Decimal(str(pnl_by_copy.loc[copy])) == pnl
+        assert Decimal(str(bankroll_by_copy.loc[copy, "starting_bankroll"])) == Decimal("5000")
+        assert Decimal(str(bankroll_by_copy.loc[copy, "ending_bankroll"])) == Decimal("5000") + pnl
+
+    assert nightly._resolve_ledger(stats, history_only=False) == 0
+    pd.testing.assert_frame_equal(pd.read_parquet(tmp_path / "settled_entries.parquet"), settled)
+    pd.testing.assert_frame_equal(pd.read_parquet(tmp_path / "bankroll.parquet"), bankroll)
+
+
+@pytest.mark.parametrize(
+    ("policy_version", "late_copy_settles"),
+    [("policy_v1", 0), ("policy_v3", 0), ("policy_v4", 1)],
+)
+def test_late_copy_of_a_settled_candidate_settles_only_since_policy_v4(
+    monkeypatch, tmp_path, policy_version, late_copy_settles
+) -> None:
+    """A copy commits a candidate after another copy's entry of it has settled. Since
+    policy_v4 the entry is the copy's own and settles on the next pass. Up to policy_v3 a
+    settled id held back every record sharing it, and still does: production's policy_v1
+    files give every entry of one size the same id, and matching those by copy would
+    settle now what the id has held back since August 2026."""
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    versioned = _SINCE_V2 | {"policy_version": policy_version}
+    _ledger_store.append_entries(DATE, [_record("shared", _BOTH_HIT, replicate_id=0) | versioned])
+    assert nightly._resolve_ledger(stats, history_only=False) == 1
+
+    late = _record("shared", _BOTH_HIT, replicate_id=1, run_slot="afternoon") | versioned
+    assert _ledger_store.append_entries(DATE, [late]) == 1
+
+    assert nightly._resolve_ledger(stats, history_only=False) == late_copy_settles
+    settled = pd.read_parquet(tmp_path / "settled_entries.parquet")
+    assert settled["replicate_id"].tolist() == [0, 1][: 1 + late_copy_settles]
+    assert nightly._resolve_ledger(stats, history_only=False) == 0
+
+
+@pytest.mark.parametrize("policy_version", ["policy_v1", "policy_v2", "policy_v3"])
+def test_day_file_of_an_older_policy_version_settles_as_before(
+    monkeypatch, tmp_path, policy_version
+) -> None:
+    """A day's file from an older policy version, each id on it once. Every record still
+    settles once, into the row and the bankroll it always did, and a second pass settles
+    nothing."""
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    versioned = _SINCE_V2 | {"policy_version": policy_version}
+    _ledger_store.append_entries(
+        DATE,
+        [
+            _record("hit", _BOTH_HIT, replicate_id=0) | versioned,
+            _record("miss", _ONE_MISS, replicate_id=1) | versioned,
+        ],
+    )
+
+    assert nightly._resolve_ledger(stats, history_only=False) == 2
+
+    win = Decimal("10") * Decimal(str(underdog_payouts["power"][2])) - Decimal("10")
+    settled = pd.read_parquet(tmp_path / "settled_entries.parquet")
+    assert settled[["id", "replicate_id", "misses", "policy_version"]].to_numpy().tolist() == [
+        ["hit", 0, 0, policy_version],
+        ["miss", 1, 1, policy_version],
+    ]
+    assert [Decimal(str(pnl)) for pnl in settled["pnl"]] == [win, Decimal("-10")]
+    bankroll = pd.read_parquet(tmp_path / "bankroll.parquet")
+    assert bankroll["policy_version"].tolist() == [policy_version] * 2
+    assert [Decimal(str(end)) for end in bankroll["ending_bankroll"]] == [
+        Decimal("5000") + win,
+        Decimal("4990"),
+    ]
+    assert nightly._resolve_ledger(stats, history_only=False) == 0
