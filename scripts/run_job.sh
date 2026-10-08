@@ -147,13 +147,19 @@ pull_devel() {
             exit 0
         fi
         git checkout -- "${MODIFIER_CONFIGS[@]}" >>"$LOG_FILE" 2>&1 || true
+        # What this pull moved, not the checkout's last move: HEAD@{1} still names
+        # the previous deploy on every later job, which restarted the dashboard
+        # at each one.
+        local before pulled
+        before=$(git rev-parse HEAD)
         if ! git pull --ff-only origin devel >>"$LOG_FILE" 2>&1; then
             log "PULL_WARN job=$JOB reason=pull_failed action=run_existing_checkout"
             exit 0
         fi
+        pulled=$(git diff --name-only "$before" HEAD)
         # A pull that moves the dependency set must sync the venv before the
         # job runs, or the checkout imports against stale packages.
-        if git diff --name-only 'HEAD@{1}..HEAD' 2>/dev/null | grep -qE '^(pyproject\.toml|poetry\.lock)$'; then
+        if grep -qE '^(pyproject\.toml|poetry\.lock)$' <<<"$pulled"; then
             if poetry install --no-interaction >>"$LOG_FILE" 2>&1; then
                 log "PULL_INSTALL job=$JOB ok"
             else
@@ -172,8 +178,7 @@ pull_devel() {
         # modules or a config it reads leaves it serving the sys.modules it
         # imported before the pull.
         if [[ -n "$DASHBOARD_UNIT" ]] \
-            && git diff --name-only 'HEAD@{1}..HEAD' 2>/dev/null \
-            | grep -qE '^src/sportstradamus/(dashboard/|data/config/)'; then
+            && grep -qE '^src/sportstradamus/(dashboard/|data/config/)' <<<"$pulled"; then
             if sudo systemctl restart "$DASHBOARD_UNIT" >>"$LOG_FILE" 2>&1; then
                 log "PULL_RESTART job=$JOB unit=$DASHBOARD_UNIT ok"
             else
