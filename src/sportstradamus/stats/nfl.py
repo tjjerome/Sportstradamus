@@ -723,15 +723,20 @@ class StatsNFL(Stats):
         stats["CanClinch"] = stats["Playoff"]
 
     def _assemble_gamelog_frame(self, nfl_data, sched, snaps):
+        # Spelled as _fetch_schedule spells them, ahead of the join on team below.
+        nfl_data.loc[nfl_data["team"] == "LA", "team"] = "LAR"
+        nfl_data.loc[nfl_data["team"] == "WSH", "team"] = "WAS"
+        nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
         # Attach each row's gameday from the schedule -- home and away side both map
-        # their team to recent_team so the merge reaches every player row.
+        # their team to `team` so the merge reaches every player row. Keys are named: a bare
+        # merge once fell back to week alone, so game lines were read under the week's first day.
         sched_long = pd.concat(
             [
-                sched.rename(columns={"home_team": "recent_team"}),
-                sched.rename(columns={"away_team": "recent_team"}),
+                sched.rename(columns={"home_team": "team"}),
+                sched.rename(columns={"away_team": "team"}),
             ]
-        )[["recent_team", "week", "gameday"]]
-        nfl_data = nfl_data.merge(sched_long, how="left")
+        )[["team", "week", "gameday"]]
+        nfl_data = nfl_data.merge(sched_long, on=["team", "week"], how="left")
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(["QB", "WR", "RB", "TE"])]
         snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
         snaps["player_display_name"] = snaps["player"].map(remove_accents)
@@ -794,16 +799,11 @@ class StatsNFL(Stats):
 
         nfl_data.rename(columns=lambda x: x.replace("_", " "), inplace=True)
         nfl_data.rename(columns={"position group": "position"}, inplace=True)
-        nfl_data.drop(columns=["recent team"], inplace=True)
         nfl_data[["target share", "air yards share", "wopr", "yards per target"]] = (
             nfl_data[["target share", "air yards share", "wopr", "yards per target"]]
             .fillna(0)
             .infer_objects(copy=False)
         )
-
-        nfl_data.loc[nfl_data["team"] == "LA", "team"] = "LAR"
-        nfl_data.loc[nfl_data["team"] == "WSH", "team"] = "WAS"
-        nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
         return nfl_data
 
     def _enrich_new_rows(self, nfl_data):
