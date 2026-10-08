@@ -2088,6 +2088,15 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-10-03 · **NFL ship-15 campaign closed — 19/20 at ship, passing yards withheld.** Seven
+  fresh-lane confirms at `--min-model-weight 0.2`: targets, yards, qb yards, sacks taken (the
+  incumbent recipe, g5 0.0696), qb tds (SkewNormal → ZINB hurdle), completions (w 0.68, g1 ci_hi
+  0.0041), fantasy points underdog. Ten cells are book-less under the `pickem` class. Passing
+  yards passes 6/6 only at w 0.05 → reverted on the floor; its model-heavy corner misses g1 at
+  ci_hi 0.0059; next lever = FantasyPoints features (owner). Flips uncommitted, the owner's diff.
+  Every verdict is stale since the 2026-10-08 game-line re-read moved all 20 NFL matrix hashes.
+  Brief [nfl-ship15-recovery.md](nfl-ship15-recovery.md); report
+  `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report_ship15.md`.
 - 2026-09-28 · **Matrix re-trim erosion fixed (`ae52fe12`); floor-20k NFL models synced to
   prod.** `trim_matrix` applies the Result band, the line clip and the push drop to appended rows
   only (`new_rows` from `_step_load_matrix`); re-trimming the caches with no new games now
@@ -2249,24 +2258,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   (9 unpinned ZINB cells). The lever's best cells (NBA TOV −0.067, NHL goalsAgainst −0.022) are
   Gate-1 walled; the g4-only cells don't respond (NBA PF board Δ exactly 0.0000). Knob stays a
   swept axis + opt-in pin; no code changed.
-- 2026-08-24 · **A ledger `ship=True` is evidence only against its own `strategy_matrix_hash`.**
-  NFL tds' shelf nominee (NegBin, `dl=nll`/`blending=nll`/`objective=pit_ks`/`posthoc=none`) passed
-  6/6 on 2026-08-03 — g4 0.0203, g1 ci_hi −0.0271, BSS +0.195 — on matrix `285d0daa` (n 2484).
-  Re-run at full HPO with byte-identical controls on the current `7918c1b8` (n 2466): g4 0.0743,
-  `g6_citl_ci_hi` 0.783, KILL; the `crps` twin KILLs identically, so the loss is the matrix. NBA
-  FGA and WNBA REB are stale the same way; MLB hitter fantasy points underdog is merely un-re-run.
-  Check the hash before spending a confirm on a shelf nominee.
-- 2026-08-24 · Exp-2 verdict: calibrated-everywhere default flip KILLED (1/4 improved, MLB g1
-  breach); v2 hinge gone — v3 IS the `calibrated` pin; retry machinery + two-attempt doctrine
-  stay. Two live failures on MLB hits allowed forced the final SN measure to max(blended OOF,
-  blended validation-ensemble): model-only Goodharts at low model_weight (g4 0.153), OOF-only
-  passes era-fragile trials (0.104). Final: MLB 0.0371 ≈ v2's 0.039, WNBA MIN ships 0.0464,
-  controls hold.
-- 2026-08-23 · Lever 1 v3 landed (worktree `g4-calibrated-v3`, brief
-  `/tmp/researcher_lever1_v3.md`): hinge deleted — raw CV loss + OOF PIT-KS as
-  `TPESampler(constraints_func=…)` feasibility (optuna 4.9.0), per-trial KS from the cv fold
-  boosters (`predict_cv_oof_params`, no refit, ~4.7× rows), 1-SE ε final pick; C2 joint `(c, s)`
-  closure fix; fidelity ladder killed blend/post-hoc threading (gaps ≤0.004). Board g4 discount
-  now conditioned on (family, 1/√n) in `sweep._ledger_gate_discounts`. Exp 4 read: R5
-  λ-shrinkage NULL (§6.1 Rung B). Pending: Exp 2 default flip + retry deletion, Exp 3
-  count-objective flip.

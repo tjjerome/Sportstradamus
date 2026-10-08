@@ -1,10 +1,17 @@
-# Lane brief — NFL back to 15+ shipped cells, yards family mandatory
+# Lane brief — NFL back to 15+ shipped cells, yards family and targets mandatory
 
 **Read first:** CLAUDE.md, [CONTRIBUTING.md](../../CONTRIBUTING.md),
 [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [model_improvement_track.md](model_improvement_track.md)
 §6–§8 and the §10 ledger, [docs/ship_gate.md](../ship_gate.md), and
 [docs/fantasypoints_expansion.md](../fantasypoints_expansion.md). This brief is self-contained but
-those documents are the contract it works under. Status: OPEN, written 2026-09-26 on the honest board of that evening.
+those documents are the contract it works under.
+
+Status: OPEN. The confirm campaign is done (19 of 20 cells at ship, section 3) and the count goal is
+met, but `passing yards` is withheld, so the definition of done (section 10) is not. What sits with
+the owner is section 6, decisions 3 and 6–10: the uncommitted `stat_meta.json` flips for seven cells,
+the retrain that re-rolls verdicts the 2026-10-08 game-line re-read made stale, the passing-yards
+feature lane, the relabel of the other four leagues' caches, the bulk combo pull, and one serve-side
+finding handed to the honest-receipts lane.
 
 ## 1. Mandate
 
@@ -49,12 +56,14 @@ Three boards exist for NFL in the last ten days. Only the last one is evidence.
    roster-filtered id map, so every departed player carried all-zero play-by-play stats on all
    past games — 30.6% of gamelog rows, 13–28% of matrix rows, and the *targets* of passing
    first downs and sacks taken (memory `nfl_pbp_stats_roster_gated_ids`; fixed in `4c8b4a91`).
-   Its artifacts are kept under `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/` with the
-   `_v5_zeroedpbp` tag (`report_v5_zeroedpbp.md`).
-3. **2026-09-26 honest retrain.** Gamelog recomputed (10,209 zeroed rows → 75 residual, all
-   nickname mismatches against `import_ids`), matrices rebuilt again, production retrain. Its
-   report is `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`. Section 3 below is
-   read from it.
+   Its artifacts are kept in the lane dir, `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/`
+   (`$B` below), with the `_v5_zeroedpbp` tag (`report_v5_zeroedpbp.md`).
+3. **2026-09-26 honest retrain, 11/20.** Gamelog recomputed (10,209 zeroed rows → 75 residual,
+   all nickname mismatches against `import_ids`), matrices rebuilt again, production retrain. Its
+   report, with the three-board comparison table, is
+   `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`. The trim-floor retrain the next
+   day took it to 12/20 (section 6, decision 2); that board is what the campaign in section 3
+   started from.
 
 Two serve-path fixes rode along and matter for anything you measure live: `NEP` → `NE` roster
 code (`abb82025`; an unmapped code made `_rescale_team_volume` raise and dropped every NFL market
@@ -63,55 +72,54 @@ for the run) and the within-team `Player depth` rank at serve time. Verify the s
 fake-mode integration suite no-ops `Stats` I/O and cannot see these breaks (memory
 `nfl_serve_path_parity_probe`).
 
-## 3. Where the numbers stand (honest board 2026-09-26; floor-20k update 2026-09-27 below)
+## 3. Where the numbers stand
 
-**11 of 20 ship** (baseline 11, the zeroed run 8). Mean BSS over the scored cells rose
-0.0515 → 0.0577; 0 of the 47 new columns are inert by |SHAP|; every production scorecard reads
-HOLD (S2/S3 cannot separate two models this close, in either direction). Two cells came in
-(fantasy points prizepicks, receptions), two went out (passing yards, sacks taken), passing
-first downs is back after training on real targets. Two more are knife-edges: sacks taken misses
-Gate 4 by 0.0002 and completions misses Gate 1 by 0.0001. Full report with the deterministic
-A/B tables and the SHAP list: `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report.md`;
-the board itself is `data/training/model_stats.parquet` (NFL rows, 2026-09-26 20:33).
+**19 of 20 cells ship** on `data/training/model_stats.parquet`; `passing yards` is the one withheld
+cell and has no pickle. Twelve shipped going in, and the confirm campaign (`ship sweep --confirm
+--confirm-fresh-only --min-model-weight 0.2`, one cell at a time) added the seven marked †. Their
+`shipped: "devel"` flips and recipes are in the working-tree `stat_meta.json` only — uncommitted, for
+the owner's review. Recipes before → after, all six gate values, the confirm-ledger rows and the walk
+logs are in `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report_ship15.md`.
 
-| cell | 09-19 baseline | 09-25 zeroed | **09-26 honest** | BSS | w | n (authentic) | g4 / cap | binding detail |
-|---|---|---|---|---|---|---|---|---|
-| attempts | SHIP | SHIP | **SHIP** | +0.016 | 0.13 | 430 (384) | 0.038 / 0.066 |  |
-| carries | SHIP | SHIP | **SHIP** | +0.037 | 0.85 | 1280 (1017) | 0.033 / 0.050 |  |
-| completions | KILL g4 | KILL g1 | **KILL g1** | +0.007 | 0.28 | 433 (387) | 0.056 / 0.065 | g1 ci_hi 0.0051 vs 0.005; already hpo_selection=calibrated |
-| fantasy points prizepicks | KILL g2 | KILL g2 | **SHIP** | — | 1.00 | 2144 (0) | 0.036 / 0.050 | g2 star z 0.50 (was failing); book-less |
-| fantasy points underdog | KILL g1 | KILL g1 | **KILL g1** | +0.039 | 0.74 | 2132 (131) | 0.018 / 0.050 | g1 ci_hi 0.056 on 131 authentic rows |
-| interceptions | SHIP | SHIP | **SHIP** | +0.267 | 0.90 | 446 (383) | 0.035 / 0.064 |  |
-| passing first downs | SHIP | KILL g2 g4 g6 | **SHIP** | — | 1.00 | 401 (0) | 0.055 / 0.068 | target was zeroed in the 09-25 run; ships again |
-| passing tds | SHIP | SHIP | **SHIP** | +0.215 | 0.90 | 433 (372) | 0.054 / 0.065 |  |
-| passing yards | SHIP | KILL g4 | **KILL g4** | -0.002 | 0.05 | 438 (388) | 0.070 / 0.065 | g4 only, 0.0056 over; g1 ci_hi 0.0010; cov50/80 0.50/0.81 |
-| qb tds | KILL g4 | KILL g5 | **KILL g5** | — | 1.00 | 448 (0) | 0.044 / 0.064 | g5 ECE 0.083 vs cap; book-less |
-| qb yards | KILL g1 | KILL g1 g4 | **KILL g1 g4** | +0.085 | 0.90 | 391 (29) | 0.081 / 0.069 | g1 mean +0.043, ci_hi 0.077 on 29 rows / 23 clusters; g4 0.0124 over |
-| receiving tds | SHIP | SHIP | **SHIP** | — | 1.00 | 3039 (0) | 0.035 / 0.050 |  |
-| receiving yards | KILL g4 | KILL g4 | **KILL g4** | +0.022 | 0.38 | 2379 (2304) | 0.058 / 0.050 | g4 only, 0.0076 over; tail KS = whole KS (over-tail); g1 ci_hi 0.0012 |
-| receptions | KILL g1 | KILL g1 | **SHIP** | +0.003 | 0.62 | 2576 (2451) | 0.024 / 0.050 | g1 ci_hi 0.0027 (was 0.0063) |
-| rushing tds | SHIP | SHIP | **SHIP** | — | 1.00 | 1278 (0) | 0.036 / 0.050 |  |
-| rushing yards | SHIP | SHIP | **SHIP** | +0.005 | 0.48 | 1326 (1104) | 0.043 / 0.050 | g1 ci_hi 0.0011; g4 tail 0.043 |
-| sacks taken | SHIP | KILL g4 g5 g6 | **KILL g4** | — | 1.00 | 434 (0) | 0.065 / 0.065 | g4 0.0002 over the cap; book-less (g1 blank) |
-| targets | KILL g1 | KILL g1 | **KILL g1** | -0.012 | 0.51 | 2176 (131) | 0.020 / 0.050 | g1 ci_hi 0.032 on 131 authentic rows / 101 clusters |
-| tds | SHIP | SHIP | **SHIP** | +0.167 | 0.90 | 3298 (3207) | 0.021 / 0.050 |  |
-| yards | KILL g1 g4 | KILL g1 | **KILL g1** | -0.042 | 0.50 | 2162 (73) | 0.047 / 0.050 | g1 mean −0.009 but ci_hi 0.027 on 73 rows / 59 clusters; g4 passes |
+| cell | dist | BSS | w | n (sportsbook) | g1 ci_hi / 0.005 | g4 / cap | g5 / 0.075 |
+|---|---|---|---|---|---|---|---|
+| attempts | SkewNormal | +0.012 | 0.34 | 441 (380) | 0.0024 | 0.0550 / 0.0647 | 0.007 |
+| carries | DPO | +0.040 | 0.82 | 1,303 (979) | −0.0004 | 0.0280 / 0.050 | 0.004 |
+| completions † | SkewNormal | +0.004 | 0.68 | 442 (385) | 0.0041 | 0.0449 / 0.0646 | −0.002 |
+| fantasy points prizepicks | SkewNormal | — | 1.00 | 2,851 (0) | — | 0.0349 / 0.050 | 0.007 |
+| fantasy points underdog † | SkewNormal | — | 1.00 | 2,983 (0) | — | 0.0213 / 0.050 | −0.003 |
+| interceptions | DPO | +0.248 | 0.90 | 455 (382) | −0.0656 | 0.0380 / 0.0637 | 0.064 |
+| passing first downs | SkewNormal | — | 1.00 | 407 (0) | — | 0.0521 / 0.0673 | 0.003 |
+| passing tds | NegBin | +0.211 | 0.90 | 447 (367) | −0.0260 | 0.0495 / 0.0642 | 0.032 |
+| passing yards | SkewNormal | — | — | withheld | — | — | — |
+| qb tds † | ZINB | — | 1.00 | 457 (0) | — | 0.0587 / 0.0635 | 0.015 |
+| qb yards † | SkewNormal | — | 1.00 | 401 (0) | — | 0.0655 / 0.0678 | 0.016 |
+| receiving tds | ZINB | — | 1.00 | 2,989 (0) | — | 0.0359 / 0.050 | 0.007 |
+| receiving yards | SkewNormal | +0.021 | 0.36 | 2,993 (2,452) | 0.0014 | 0.0427 / 0.050 | 0.004 |
+| receptions | SkewNormal | +0.012 | 0.80 | 2,936 (2,450) | 0.0030 | 0.0293 / 0.050 | 0.043 |
+| rushing tds | ZINB | — | 1.00 | 1,294 (0) | — | 0.0351 / 0.050 | 0.003 |
+| rushing yards | SkewNormal | +0.003 | 0.60 | 1,352 (1,092) | 0.0028 | 0.0426 / 0.050 | 0.030 |
+| sacks taken † | SkewNormal | — | 1.00 | 446 (0) | — | 0.0462 / 0.0643 | 0.070 |
+| targets † | SkewNormal | — | 1.00 | 2,783 (0) | — | 0.0316 / 0.050 | 0.000 |
+| tds | NegBin | +0.160 | 0.90 | 3,343 (3,222) | −0.0227 | 0.0206 / 0.050 | 0.006 |
+| yards † | SkewNormal | — | 1.00 | 2,900 (0) | — | 0.0374 / 0.050 | 0.015 |
 
-**Floor-20k retrain, 2026-09-27 — 12 of 20 ship.** With `_MATRIX_TRIM_FLOOR` at 20,000 (section 6,
-decision 2) the six cells the old floor was cutting were rebuilt and retrained; the table above
-keeps their 15k values. Receiving yards now passes 6/6 (g1 −0.0002 [−0.0024, +0.0020], g4 0.707,
-BSS +0.020, w 0.34; scorecard against the 15k test set HOLD — S2 −0.0007 n.s., S3 sharpe
-0.026 → 0.050, z +1.34) and is back to `shipped: "devel"` (`34fbdcb4`, 2026-09-27). Receptions
-stays in (BSS .0032 → .0078, w .62 → .68), fantasy prizepicks stays in. Targets (g1 ci_hi 0.0251,
-BSS −.012 → −.024), yards (g1 ci_hi 0.0380; BSS −.042 → −.012) and fantasy underdog (g1 ci_hi
-0.0490) still fail Gate 1 on their 131 / 73 / 131 authentic rows. Compare script
-`$B/compare_floor20k.py`, log `$B/logs/floor20k_compare.log`.
+Read the board with three facts in view.
 
-Two cohort facts to keep in view. Book-less cells (`n authentic = 0`: the fantasy cells, the
-first-down/sack/td cells) auto-pass Gate 1 and carry `w = 1.0`; their ship is Gates 2–6. Four
-cells grade Gate 1 on a **sliver of authentic quotes** — `yards` 73 rows, `qb yards` 29, `targets`
-131, `fantasy points underdog` 131 — so their Gate 1 verdicts move with every retrain and say
-little either way (section 5, the combos).
+- **The verdicts are stale against today's matrices.** The game-line re-read of
+  [honest-receipts.md](honest-receipts.md) §6 rewrote all 20 NFL matrices after the campaign closed,
+  so no board hash matches its file. The pickles load and serve (`serve_parity_probe.py` passes on
+  all 19); the gate values are evidence for the matrices the campaign trained on until the next
+  retrain, which also brings that lane's push-as-half-an-Over label and Brier-only temperature fit
+  to every cell.
+- **Ten cells are book-less** (blank g1 and BSS, `w = 1.0`): no sportsbook quote on their validation
+  rows, so Gate 1 auto-passes, no blend weight is fitted — 1.0 is the fallback, not an optimum — and
+  their ship is Gates 2–6. A pick'em-only cohort is the `pickem` provenance class and never counts as
+  book evidence ([docs/ship_gate.md](../ship_gate.md)). `yards` and `qb yards` will not stay
+  book-less (section 5).
+- **Four ships are thin**: completions (g1 ci_hi 0.0009 under its margin), qb yards (g4 0.0023 under
+  its cap, on the board's largest dispersion correction, 2.58), qb tds (g4 0.0048 under) and sacks
+  taken (g5 0.0054 under). Expect a retrain to flip some of them.
 
 ## 4. How a cell ships — the machinery you will drive
 
@@ -126,8 +134,8 @@ floor, has a blank Gate 1 that auto-passes (no book to beat) and carries `model_
 **Weekly `meditate`** trains each active cell exactly once from its `stat_meta.json` recipe,
 computes the gates, WARNS on served cells failing them (`SHIP-GATE WARNINGS`), and never writes
 `stat_meta` (memory `meditate_sweep_role_separation`). Serving is pickle-exists; `ship=False`
-cells keep serving until a human culls them (memory `project_serve_iff_ship`). So the 8/20 or
-whatever the honest count is describes the *gate* state, not what prod serves.
+cells keep serving until a human culls them (memory `project_serve_iff_ship`). So the ship count
+describes the *gate* state, not what prod serves.
 
 **`sportstradamus ship sweep`** is the search. One conditional-TPE study per cell over the
 strategy catalog (`training/model_strategy/specs.py`): for SkewNormal cells the axes are
@@ -138,10 +146,11 @@ prob_recal_isotonic, prob_recal_platt, prob_recal_book_citl, roe_mean, isotonic_
 cdf_recal_isotonic}; count families carry their own axes. Every corner trains holdout-blind and
 is scored on a cross-fit gate row, so the board's `ships` flag is optimistic (memory
 `crossfit_board_ships_optimistic`) and its `slack`/`discounted_slack` is the ranking signal.
-Board rows are matrix-scoped (`matrix_hash` column): the 634 NFL rows already in
-`data/research/strategy_research_board.csv` were earned on the old caches and are inadmissible
-for the rebuilt matrices, so budget every NFL cell as a cold sweep (`--max-trials` default 48
-trained corners; `-j` parallelizes cells, never corners).
+Board rows are matrix-scoped (`matrix_hash` column): every NFL row in
+`data/research/strategy_research_board.csv` was earned on a matrix that has since been rewritten
+and is inadmissible, so budget every NFL cell as a cold sweep (`--max-trials` default 48 trained
+corners; `-j` parallelizes cells, never corners). A corner that outruns the per-corner timeout
+(300 s at most) goes unscored — on the 19,000-row cells that drops part of the DPO family.
 
 **`--confirm`** turns a board into shipped cells. Two lanes, decided by the cell's current
 `shipped` value:
@@ -157,8 +166,12 @@ trained corners; `-j` parallelizes cells, never corners).
   itself fails the gates this is nearly unpassable on purpose: S2/S3 measure "better than", not
   "good enough". The one waiver is `--min-model-weight T`: a candidate at or above `T` may
   replace a book-riding incumbent below `T` on S1 alone (`ship_gate.md`, "supersede an
-  incumbent"). Passing yards' incumbent rides the book (`model_weight` 0.05), so this waiver is
-  available there and nowhere else in the yards family.
+  incumbent").
+
+`--min-model-weight T` also binds the fresh lane, and this lane runs every walk at 0.2 (section 6,
+decision 5): a board corner whose fitted weight is below `T` never nominates (when none is left
+the seeds and the incumbent still walk), and a confirmed retrain that lands below it reverts even
+at 6/6. A book-less cell, at the 1.0 fallback, is unaffected.
 
 Consequence for this lane: **a served cell that fails the gates is best recovered through the
 fresh lane**, which means flipping it to `shipped: "withheld"` first. That is a `stat_meta`
@@ -168,12 +181,17 @@ edit and therefore the owner's (section 6, decision 1). It also darkens the cell
 **Automatic g4 rescue.** When a nominee fails ship on Gate 4 alone and sits within 0.010 of its
 cap (`_G4_RETRY_MAX_EXCESS`), the walk pins `hpo_selection: "calibrated"` and reruns the
 identical `meditate` once (memory `calibration_hp_selection_lever`: CV-loss objective with an
-OOF PIT-KS feasibility constraint). Passing yards and receiving yards do not carry the pin yet;
-yards, qb yards, receptions and completions already do, so the retry cannot help them further.
+OOF PIT-KS feasibility constraint). Yards, qb yards, receptions and completions already carry the
+pin, so the retry cannot help them further; no other NFL cell does. Hurdle-ZINB, Mixture and
+structural corners get no retry: such a nominee that misses Gate 4 just reverts.
 
-**Costs measured on this box (2026-09-25/26).** Full-HPO `meditate` over all 20 NFL cells:
-1 h 58 (~6 min per cell). Cold matrix rebuild: c2 34 min, c3 2 h 35, c5 6 h 34 (~24 min per
-dependent cell). Confirm timeout per nominee: 4 h.
+**Costs measured on this box.** Full-HPO `meditate` over all 20 NFL cells: 1 h 58 (~6 min per
+cell). Cold matrix rebuild: c2 34 min, c3 2 h 35, c5 6 h 34 (~24 min per dependent cell). One
+cell's sweep: 14–29 min (1 h 49 on `yards`, where DPO corners ran to the timeout). One confirm
+nominee: 13 min on a 440-row cell with a short booster, about an hour otherwise, 85 s for a count
+family; timeout per nominee 4 h. A killed walk leaves its cell `shipped: "devel"` with the
+nominee's recipe and no pickle — copy the cell back from the walk's own
+`stat_meta.<timestamp>.bak.json` (memory `confirm_walk_killed_leaves_devel_flag`).
 
 **Single-axis experiments without touching production:** `meditate --league NFL --market M
 --frozen-matrix-dir DIR --artifact-output OUT [axis flags]` trains one cell on a pinned matrix
@@ -196,144 +214,132 @@ markers; expect ~10 h to the sanity gate. The gate's pbp check compares all-zero
 fixed population legitimately carries more zero rows (2021 charting data does not exist). Memory `nfl_cold_matrix_rebuild_blocked` holds the
 history of why the plain cold start crashes.
 
-## 5. Per-cell diagnosis and lever queue — the mandatory five
+## 5. Per-cell state and lever queue — the mandatory six
 
-Read each cell's honest gate row before choosing; the queue below is ordered by cost and by
-what the gate signature says, not by hope. Levers marked **research-gated** need a
-`research-analyst` brief first (§8.2 of the track; the hook enforces distribution-family
-edits, this brief covers the judgement calls).
+Five of the six ship; passing yards does not. Each subsection gives the recipe in `stat_meta.json`,
+the gate row it earned on the board of section 3, and what to reach for when a retrain flips it.
+Levers marked **research-gated** need a `research-analyst` brief first (§8.2 of the track; the hook
+enforces distribution-family edits, this brief covers the judgement calls).
 
-### passing yards
+### passing yards — withheld, the open cell
 
-Recipe: SkewNormal, `centered_additive_eb_meanyr_k10`, nll, direct, blending `crps_1se`,
-posthoc `prob_recal_book_citl` (the 2026-09-01 ship: the served probability leaned over the
-book and the book-anchored intercept fixed Gate 1 — memory `g1_citl_lean_book_anchored_posthoc`).
-`model_weight` 0.05: the fused leg rides the book, so Gate 1 is a tie by construction and the
-cell's fate is Gate 4. History: baseline g4 0.0625 under a 0.070 cap; zeroed run 0.0752 under
-0.065. Honest board: **KILL g4** — 0.0705 against 0.0649 (0.0056 over, inside the
-calibrated-retry window), over-tail KS 0.035, Gate 1 passes (ci_hi 0.0010), Gate 5 0.020,
-coverage 0.50/0.81 (nominal: shape-bound, not scale-bound), BSS −0.002, w 0.05.
+Recipe (the campaign left it unchanged): SkewNormal, `centered_additive_eb_meanyr_k10`, nll, direct,
+blending `crps_1se`, posthoc `prob_recal_book_citl`.
 
-1. If g4 is the only failure and within 0.010 of the cap, the confirm walk's calibrated retry
-   fires by itself — let the fresh lane run before touching anything.
-2. `sn_param: centered` (the shape-bound rung; NBA PTS and WNBA MIN ship with it).
-3. `cdf_recal_isotonic` — the one corrector Gate 4 rewards (memory
-   `slack_blind_to_g4_mechanism`). It occupies the same `posthoc` slot as
-   `prob_recal_book_citl` (memory `posthoc_slot_two_jobs_bind`); at `model_weight` 0.05 the
-   book carries the level, so losing the CITL intercept may cost nothing — the sweep will say.
-4. Normalization: `ratio_meanyr` was the pre-2026-09 recipe; the sweep tries all four.
-5. Do **not** chase Gate 1 here: the track's passing-yards brief
-   (`nfl-passing-yards-gate1-recovery.md`) documents why every outcome-fitted corrector learns
-   the fold's over-rate.
+At full HPO this recipe passes all six gates — g1 ci_hi 0.0008, g4 0.0543 / 0.0644, g5 −0.005 — but
+only at `model_weight` 0.05 with BSS −0.0002: the blend rides the book and the model adds nothing,
+so the confirm walk reverted it on the weight floor (section 6, decision 5). The sweep says the same
+of the model on its own. Of its 13 scored corners nine sit at exactly w 0.05; the two that stood
+above the floor, both at w 0.90, failed Gate 1 (ci_hi 0.0059 and 0.0217 against 0.005). The gap to
+close is about 0.001 of paired Brier against the sportsbook consensus, on 390 validation rows across
+63 players. Gate 4, the binding gate on the two boards before, passes now.
 
-### rushing yards
+1. **Feature design on the FantasyPoints suite — the owner's top priority, and the next lane.** The
+   cell is not starved: 13 FantasyPoints-derived columns sit in its top 50 by |SHAP|. What is
+   unbuilt, per [docs/fantasypoints_expansion.md](../fantasypoints_expansion.md): the matchup
+   interaction between a quarterback's per-context splits (`ps_*`) and the opposing defense's
+   coverage, blitz and pressure rates; the Tier 2 fan-outs (`qbPressured`, `playAction`,
+   `screenPass`, `down=3`, personnel); the defense-mirror asymmetry (12 FantasyPoints columns on the
+   defense profile against 33 on offense); and three Tier 1 endpoints never collected
+   (`recsep-roles`, `injury-reports`, `coach-records`). A feature bump costs the cold rebuild of
+   section 4 plus a retrain, and re-rolls every NFL verdict.
+2. Not a corrector. Every outcome-fitted probability corrector learns the fold's over-rate
+   ([nfl-passing-yards-gate1-recovery.md](nfl-passing-yards-gate1-recovery.md)); the book-anchored
+   intercept already in the recipe is the one that does not, and it is what makes Gate 1 a tie at
+   w 0.05.
+3. Not the weight floor. Below 0.20 the served probability is the book's, and the cell would ship
+   with nothing of its own to offer.
 
-Recipe: SkewNormal, `ratio_meanyr`, crps, centered, blending crps, posthoc
-`cdf_recal_isotonic`. Shipped on both prior boards (g4 0.047 / 0.042 under 0.05,
-BSS −0.008 → +0.002, weight 0.46 → 0.39). Honest board: **SHIP** — g4 0.0429 / 0.050, Gate 1 ci_hi 0.0011, BSS +0.005, w 0.48, n 1,326
-(1,104 authentic). The risk is a g4 coin-flip
-near the cap on future retrains; if it ever fails g4 alone the calibrated retry covers it.
-Otherwise leave it alone and do not sweep it under `--include-shipped` — S2/S3 against a
-passing incumbent costs confirms and rarely wins.
+### rushing yards — ships
 
-### receiving yards
+Recipe: SkewNormal, `ratio_meanyr`, crps, centered, blending crps, posthoc `cdf_recal_isotonic`.
+It has shipped on every board: g4 0.0426 / 0.050, Gate 1 ci_hi 0.0028, BSS +0.003, w 0.60, n 1,352
+(1,092 sportsbook). The risk is a g4 coin-flip near the cap on a retrain; if it ever fails g4 alone
+the calibrated retry covers it. Otherwise leave it alone and do not sweep it under
+`--include-shipped` — S2/S3 against a passing incumbent costs confirms and rarely wins.
 
-Recipe: SkewNormal, `ratio_meanyr`, crps, centered, blending crps, posthoc
-`prob_recal_isotonic`. Gate 4 has failed on every board (0.057 / 0.059 under 0.05) with
-central coverage slightly under nominal (cov50 0.48–0.49, cov80 0.77–0.79: mildly
-under-dispersed, i.e. scale-bound rather than shape-bound), while BSS improved with the bump
-(.016 → .021) and the weight doubled (0.17 → 0.36). Honest board: **KILL g4** — 0.0576 against 0.050 (0.0076 over,
-inside the retry window); the over-tail KS equals the whole KS, so the entire deviation is
-alt-over mispricing; Gate 1 passes (ci_hi 0.0012), Gate 5 0.005, coverage 0.48/0.79, BSS +0.022,
-w 0.38, n 2,379 (2,304 authentic).
+### receiving yards — ships
 
-1. Calibrated retry (within 0.010 of the cap on both prior boards) — automatic in the walk.
-2. `cdf_recal_isotonic` in the posthoc slot (replacing `prob_recal_isotonic`; the cell's Gate 1
-   passes without help, so the slot is free for the g4 job).
-3. `centered_additive_mean10` normalization — the transform that flipped `carries` from
-   below-book to beats-the-book at real HPO (memory `nfl_volume_cells_feature_mature`: the
-   volume-family deficit is target shape and capacity, not features).
-4. Training population: this cell hit the old 15,000 trim floor (`pipeline._MATRIX_TRIM_FLOOR`,
-   applied in `_step_persist_matrix`); the honest rebuild ended near 15,900 rows with about half
-   its unquoted rows balanced away while all 9,792 quoted keys survived. The floor is 20,000 since
-   2026-09-27 and the rebuilt matrix has 19,941 rows (section 6, decision 2).
+Recipe: SkewNormal, `ratio_meanyr`, crps, centered, blending crps, posthoc `prob_recal_isotonic`.
+It ships since the trim floor went to 20,000 (section 6, decision 2), after failing Gate 4 on every
+board before that: g4 0.0427 / 0.050, Gate 1 ci_hi 0.0014, BSS +0.021, w 0.36, n 2,993 (2,452
+sportsbook). Its g4 misses were scale-bound (central coverage slightly under nominal), so if a
+retrain fails it on Gate 4 alone:
 
-Outcome 2026-09-27: at the 20,000 floor the cell passes 6/6 (g4 0.707; g1 −0.0002
-[−0.0024, +0.0020]; BSS +0.020, w 0.34); flipped back to `devel` in `34fbdcb4`. Prod serves this pickle since the
-2026-09-28 sync (section 6, decision 4); before that it served the 09-17 one, which fails Gate 4.
-Levers 1–3 stay listed because every retrain re-rolls the verdict.
+1. Calibrated retry — automatic in the walk when the miss is within 0.010 of the cap.
+2. `cdf_recal_isotonic` in the posthoc slot (replacing `prob_recal_isotonic`; Gate 1 passes without
+   help, so the slot is free for the g4 job).
+3. `centered_additive_mean10` normalization — the transform that flipped `carries` from below-book
+   to beats-the-book at real HPO (memory `nfl_volume_cells_feature_mature`).
 
-### yards and qb yards (the combos)
+### yards and qb yards (the combos) — ship book-less, Gate 1 about to go live
 
-Recipes: both SkewNormal `centered_additive_eb_meanyr_k10`, crps, centered, blending nll,
-`hpo_selection: calibrated`; posthoc none (`yards`) / `isotonic_mean` (`qb yards`).
+Recipes: `yards` SkewNormal, `ratio_meanyr`, crps, direct, blending nll, posthoc `roe_mean`;
+`qb yards` SkewNormal, `ratio_meanyr`, crps, centered, blending crps, posthoc none; both
+`hpo_selection: calibrated`.
 
-The binding fact is the **quote history**, not the model. The archive stopped receiving the
-combo lines after the 2023 season while the components stayed healthy (memory
-`nfl_combo_archive_gaps`); Underdog's `rush_rec_yds` and `passing_and_rushing_yds` quotes
-are archived again from September 2026 (the test sets' first authentic combo rows). The test sets therefore hold **0 authentic quotes in 2024
-and 2025** and only the 2026 weeks: on the zeroed board `yards` graded Gate 1 on 73 authentic
-rows (59 clusters) with `model_weight` 0.52 and BSS −0.05, `qb yards` on 29 rows (23
-clusters) at weight 0.90 and BSS −0.02. Both sit just above the 10-cluster floor, so Gate 1 is
-live, fails, and will keep moving with every retrain as a few dozen authentic rows a week
-arrive for `yards` and about ten for `qb yards`. Honest board: `yards` **KILL g1** on 73 authentic rows (59 clusters) — the paired
-Brier mean is −0.009 *in the model's favour* but the CI high is 0.027 against a 0.005 bar: the
-sample fails it, not the sign; Gate 4 now passes (0.047 / 0.050); BSS −0.042; w 0.50. `qb yards`
-**KILL g1 g4** on 29 rows (23 clusters): mean +0.043, CI high 0.077, and g4 0.081 against 0.069;
-BSS +0.085; w 0.90.
+Both shipped with a blank Gate 1 because their validation rows held no sportsbook quote. `yards`:
+g4 0.0374 / 0.050, g5 0.015, n 2,900, on its third nominee — a DPO corner failed Gate 2 and a
+ZINB-hurdle corner missed Gate 4 by 0.0011. `qb yards`: g4 0.0655 / 0.0678 with `dispersion_cal`
+2.58, the thinnest margin on the board, n 401.
 
-1. **Find authentic 2024–2025 combo quotes first.** The dev archive never sees DFS polls
-   (memory `dev_archive_no_dfs_ladder_polls`); prod's `archive/archive.duckdb` runs `confer`
-   and may hold `yards` / `qb yards` odds rows for those seasons. Check it read-only on prod
-   (respect `run_job.sh`'s archive flock; the memory `archive_flock_self_deadlock` says never
-   wrap an archive CLI in your own flock), then `sportstradamus admin merge-archives --source
-   <prod copy> --target archive/archive.duckdb --dry-run` on the dev box before a real merge.
-   The Odds API is the other candidate source if it offers combined-yards player markets
-   (`player_rush_reception_yds` → `yards`, `player_pass_rush_yds` → `qb yards`, mapped in
-   `stat_map.json` on 2026-09-29; live `confer` polls them too). The designed path is
-   `python -m sportstradamus.scripts.backfill_historical_odds --league NFL --markets 'yards,qb yards'
-   --start … --end … --key-name odds_api_plus --dates-from Moneyline --props-only --max-dates 1
-   --dry-run` (the default `odds_api_max` key is dead, HTTP 401; the combos have no archived
-   2024–25 rows so the game-dates seed from `Moneyline`; the game lines already exist, so the
-   ~30-credit-per-date sport call is skipped): the dry run makes the paid calls and prints the cross-book `ev` spread
-   (zero spread = degenerate source, stop), then the real run writes game-day `01:00` rows the
-   point-in-time reads prefer. Credits come out of the governor
-   (memory `odds_api_budget_governor`); probe one date first (memory
-   `capture_stub_drift_live_probe`).
-2. With new quotes in the archive, repair the two matrices' odds block with
-   `python -m sportstradamus.scripts.inject_backfilled_odds` (calls the real resolver — memory
-   `inject_backfilled_odds_not_rebuild_equivalent`) or rebuild just those two cells through
-   `run_phase_c.sh`-style `--full-rebuild --matrix-only --market 'yards,qb yards'` (~25 min
-   each), then confirm.
-3. DFS-only quotes are the `pickem` provenance class since 2026-09-29 (owner decision): a real
-   line (memory `dfs_pickem_lines_are_real_quotes`) but not book evidence — Gate 1 and the
-   blend fit skip them, so a DFS-only cell is book-less and ships on gates 2–6
-   ([docs/ship_gate.md](../ship_gate.md)).
-4. If no history exists anywhere, say so and put the decision to the owner: wait for the 2026
-   cohort to grow (each retrain re-rolls the verdict) or accept these two as the last to cross.
-   The component sum is already unbiased for a `combo_props` spec (memory
-   `combo_book_mean_blend`), so do not add a book-mean blend to these cells.
+The binding fact is still the **quote history**. No sportsbook combo line reached the archive after
+the 2023 season, on dev or on prod, because `stat_map.json` did not map the two Odds API keys
+(memory `nfl_combo_archive_gaps`); the 2026 rows before October are Underdog pick'em quotes, which
+are not book evidence. With the keys mapped (`player_rush_reception_yds` → `yards`,
+`player_pass_rush_yds` → `qb yards`; live `confer` polls them) sportsbook quotes now arrive: 109
+for `yards` and 92 for `qb yards`, 21 players each from four or five books, over the first four
+game dates (from 2026-10-05). Once a validation frame holds ten distinct players, Gate 1 scores
+and a blend weight is fitted for the first time — on a sample thin enough to move with every
+retrain.
 
-### The other fifteen
+1. The deep evidence is two seasons of Odds API history, and it exists: a one-date probe of the 2024
+   opener returned both markets with real cross-book spread. The bulk pull is the owner's call
+   (section 6, decision 3). It is honest evidence, not a pass ticket: it can hold either cell
+   withheld.
+2. After a pull, repair the two matrices' odds block with
+   `python -m sportstradamus.scripts.inject_backfilled_odds --league NFL --markets 'yards,qb yards'`
+   (it calls the real resolver — memory `inject_backfilled_odds_not_rebuild_equivalent`), then sweep
+   and confirm each cell.
+3. Do not add a book-mean blend to these cells: the component sum is already unbiased for a
+   `combo_props` spec (memory `combo_book_mean_blend`).
 
-Eleven ship. Of the nine that do not, the cheapest recoveries are the two knife-edges: sacks
-taken (Gate 4 by 0.0002 — book-less, so the calibrated retry is the whole lever) and
-completions (Gate 1 by 0.0001 — already `calibrated`, so a sweep corner rather than a retry).
-qb tds fails Gate 5 alone (ECE 0.083; a `prob_recal_*` posthoc is the matching lever, memory
-`posthoc_slot_two_jobs_bind`). Targets and fantasy points underdog fail Gate 1 on 131 authentic
-rows each — the same sliver problem as the combos, from DFS-only quoting. Count cells
-(interceptions, passing tds, receiving tds, rushing tds, tds, carries) shipped on every board
-and need nothing. Interceptions is the owner's lowest-priority cell.
+### targets — ships book-less
+
+Recipe: SkewNormal, `centered_additive_mean10`, crps, centered, blending crps, posthoc
+`prob_recal_isotonic`. No sportsbook prices this market, so Gate 1 is blank by construction and the
+cell ships on Gates 2–6: g4 0.0316 / 0.050, g5 0.000, n 2,783. It is also one of the league's
+serve-time volume denominators (`VOLUME_STATS`), so its pickle is kept even while the cell is
+withheld. The number to watch at the retrain is Gate 5:
+[honest-receipts.md](honest-receipts.md)'s replay of this cell's test set under the
+push-as-half-an-Over label put its debiased ECE at 0.060, inside the 0.075 cap.
+
+### The other fourteen
+
+All fourteen ship. Four came in through the campaign and are the ones to watch:
+
+- **sacks taken** — its incumbent recipe, unchanged. Three alternatives failed Gate 5 and the
+  incumbent passed at 0.0696 against 0.075, on a recipe that had missed Gate 4 by 0.0002 one board
+  earlier, so this verdict is the most draw-dependent on the board.
+- **qb tds** — the sweep changed the family, SkewNormal → ZINB hurdle. That cured Gate 5 (0.083 →
+  0.015) and left Gate 4 at 0.0587 against 0.0635.
+- **completions** — the one campaign ship with a live Gate 1: ci_hi 0.0041 against 0.005 at w 0.68,
+  BSS +0.004. A tie with the book that the gate accepts.
+- **fantasy points underdog** — book-less, wide margins.
+
+The count cells (interceptions, passing tds, receiving tds, rushing tds, tds, carries) have shipped
+on every board and need nothing. Interceptions is the owner's lowest-priority cell.
 
 ## 6. Owner decisions this lane needs up front
 
 1. **Lane choice for failing served cells — decided 2026-09-27.** The nine cells with
-   `ship == False` on the honest board are `shipped: "withheld"` (`7d986d3c`, on prod since
+   `ship == False` on the 2026-09-26 board are `shipped: "withheld"` (`7d986d3c`, on prod since
    2026-09-27 06:09 CDT; receiving yards back to `devel` in `34fbdcb4` after the floor-20k
-   retrain), so `ship sweep --league NFL --confirm` runs the fresh lane on the remaining eight and
-   auto-ships them on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
-   still on disk the market yields no offers at all (not even the book fallback); the next dev
-   `meditate` prunes the eight pickles and `sync_to_prod.sh` mirrors `models/` with `--delete`.
+   retrain), which put the remaining eight on the fresh lane: `ship sweep --league NFL --confirm`
+   auto-ships a withheld cell on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
+   still on disk the market yields no offers at all (not even the book fallback); a dev
+   `meditate` prunes a withheld cell's pickle and `sync_to_prod.sh` mirrors `models/` with
+   `--delete`.
    The 2026-09-28 sync carried all 20 dev pickles, the withheld eight included (they were left
    in place by the `--bypass-withholding` retrain; serve-neutral, since the withheld check in
    `model_prob` precedes the pickle check, but each logs a `withheld but pickle on disk`
@@ -341,7 +347,9 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    withheld *and* one of the three NFL volume dependencies (`VOLUME_STATS` in `helpers/io.py`,
    read by `StatsNFL.volume_stats`); `prune_model_pickle` now keeps every denominator, so a
    plain `meditate` refreshes its matrix, prunes nothing, and the WR/TE cells keep their
-   targets projection while `model_prob` still serves nothing for the withheld cell.
+   targets projection while `model_prob` still serves nothing for the withheld cell. The kept
+   pickle is not retrained either: a withheld denominator ages until the cell ships or a
+   `--bypass-withholding` run refreshes it.
 2. **Trim floor — decided 2026-09-27.** `pipeline._MATRIX_TRIM_FLOOR` is 20,000 (`0a22c0a9`;
    was a literal 15,000). The floor is the row count below which `trim_matrix` never balances,
    so at 20,000 the six WR/RB/TE cells the old floor was cutting gained 2.4–5.8k rows: targets
@@ -352,8 +360,9 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    balancing barely touched) are unchanged. Global: every league's
    next persist keeps more unquoted rows too (NBA/WNBA caches all sat at the 15k floor). The six
    matrices were rebuilt cold on 2026-09-27 (`$B/run_floor20k.sh`, quarantine
-   `$B/quarantine_floor20k`, pre-change artifacts `$B/pre_floor20k`) and the cells retrained;
-   the outcome is in section 3. Separate finding, fixed 2026-09-28 (`ae52fe12`): every
+   `$B/quarantine_floor20k`, pre-change artifacts `$B/pre_floor20k`) and the cells retrained:
+   12 of 20 at ship, receiving yards passing 6/6 and back to `devel` (`34fbdcb4`; compare script
+   `$B/compare_floor20k.py`). Separate finding, fixed 2026-09-28 (`ae52fe12`): every
    `meditate` re-trimmed the whole cache, and the Result band, the line clip and the push drop
    ignored the floor, so a cache lost 0.5–6% of its unquoted rows on each persist even with no
    new games (targets 15,000 → 14,548 between the 09-26 promotion and the 09-26 retrain;
@@ -364,8 +373,19 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    floor-bounded balancing above 20,000, by design). Golden pin
    `tests/golden/test_trim_matrix_retrim.py`. The rows already lost return only with a rebuild;
    none was run.
-3. **Combo quote history.** Whether to pull prod's archive (or Odds API history) for
-   2024–2025 combo lines — the only lever that changes the combos' Gate 1 evidence base.
+3. **Combo quote history — decided 2026-09-29: probe now, bulk pull pending.** Prod's archive
+   has the same hole as dev's, so there is nothing to merge; the Odds API has the history. The
+   two combo keys are mapped for good in `stat_map.json` (`league_seed_costs.NFL` 165 → 198 in
+   `odds_api_budget.json`), and a 21-credit dry run on the 2024 opener returned both markets
+   with real cross-book spread. The bulk pull stays the owner's key-and-timing call — about
+   11,000 credits for 2024-09-05 to 2026-02-08:
+   `python -m sportstradamus.scripts.backfill_historical_odds --league NFL --markets 'yards,qb yards'
+   --start 2024-09-05 --end 2026-02-08 --key-name odds_api_plus --dates-from Moneyline --props-only`
+   (the default `odds_api_max` key answers HTTP 401; the game-dates seed from `Moneyline` because
+   the combos have no archived rows for those seasons; `--props-only` skips the ~30-credit game-line
+   call per date, whose rows already exist). Put `--max-dates 1 --dry-run` on it first: the dry run
+   makes the paid calls and prints the cross-book spread, and zero spread means a degenerate
+   source (memory `capture_stub_drift_live_probe`).
 4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip
    are on `origin/devel` (06:06 CDT) and on prod (`run_job.sh`'s self-deploy pull replicated by
    hand at 06:09 CDT under its pull lock, dashboard restarted). Prod's gamelog was recomputed
@@ -386,6 +406,47 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
    OK in 896 s, log window identical to the 15:50 run's (no NFL error), receiving yards served
    (130 offers in the 17:04 `current_offers` snapshot), the eight withheld cells absent, one
    `withheld but pickle on disk` warning per withheld cell per platform.
+5. **Gate 1 evidence and the weight floor — decided 2026-09-29.** Gate 1 and the blend-weight
+   fit count sportsbook quotes only, and a pick'em-only cohort is the `pickem` provenance class
+   ([docs/ship_gate.md](../ship_gate.md) holds the rule). Every confirm walk runs with
+   `--min-model-weight 0.20`, so a recipe that rides the book cannot ship. That floor is what
+   holds passing yards withheld.
+6. **The seven flips — pending.** The campaign's `shipped: "devel"` flips and recipes for
+   targets, yards, qb yards, sacks taken, qb tds, completions and fantasy points underdog are
+   uncommitted in the working-tree `stat_meta.json` (diff: `$B/stat_meta_ship15.diff`); accept or
+   reject per cell. Two cautions. Sync the pickles before pushing the flag: prod still holds
+   these cells' older pickles, which failed their gates, and serves whatever pickle is on disk
+   once a cell stops being withheld. And do not check the diff away before a retrain unless the
+   models are meant to go: a plain `meditate` prunes a withheld cell's pickle.
+7. **Which retrain re-rolls the stale verdicts — pending.** Recommended: let the
+   [honest-receipts.md](honest-receipts.md) lane's instrumented NFL retrain re-verdict all 19
+   cells on the patched matrices, then commit the flips of the cells that still ship, sync and
+   push once. The alternative is to ship the seven now on the campaign's evidence and let that
+   retrain's ship-gate warnings name any cell that falls.
+8. **Passing-yards feature lane — directed 2026-10-03, not started.** Section 5.
+9. **Relabel the other four leagues' caches — pending; recommended before their next retrain.**
+   Decision 5 reached the NFL caches only. All 73 non-NFL matrices carry the old label: no
+   `pickem` row, and 14,705 `authentic` rows on seven cells that no sportsbook prices — MLB
+   hitter fantasy points underdog 7,701, NHL hits 2,856, NHL skater fantasy points underdog
+   1,211, NHL goalie fantasy points underdog 987, WNBA fantasy points prizepicks 767, NBA fantasy
+   points prizepicks 626, MLB pitcher fantasy points underdog 557 — plus an uncounted number on
+   mixed cells (a matrix stores no book name). `meditate` resolves appended rows only, so the
+   first retrain of such a cell still scores Gate 1 and fits its blend weight on the old rows
+   while new rows arrive `pickem`: the evidence shrinks week by week and the verdict drifts with
+   no model change, and neither `meditate` nor the matrix audit detects it. The repair is
+   `python -m sportstradamus.scripts.inject_backfilled_odds --all-cached` (or one league's cells
+   with `--league L --markets '…'`), `--dry-run` first: it re-resolves the whole quote block, so
+   prices move with the labels and every hash moves. A full matrix rebuild relabels too, so the NHL and MLB rebuilds
+   [honest-receipts.md](honest-receipts.md) §8 asks about would cover those two leagues.
+10. **A pick'em composite hides its component sum at serve — recorded, no change proposed here.**
+    `prediction/book_quotes.py` anchors a combo's component sum on the composite's own direct
+    quote whenever one exists, a pick'em-only one included, and the anchored quote then fails
+    `_has_serving_support`. So once a platform's row for the composite is archived, the player
+    has no book leg although the sum was admitted. It predates this lane, costs nothing while a
+    combo cell blends at weight 1.0 (`yards`, `qb yards`, `qb tds`), and matches how training
+    scores the same rows (a `pickem` row is model-only). It starts to matter when a combo cell
+    gets a fitted weight, which the arriving sportsbook quotes make likely. Changing it alters
+    served output, so it belongs with the honest-receipts lane's book-leg rules.
 
 ## 7. Rules the lane runs under
 
@@ -393,18 +454,19 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
   owner's review. Commit by pathspec only (`git commit -- <paths>`); never `git add -A`,
   never `git stash`; never a HEAD-moving git command inside a subagent prompt (the checkout is
   shared).
-- One `meditate` at a time on the box (`pgrep -af "sportstradamus medi[t]ate|model.strategy"`
-  must print nothing first — the bracket keeps the pattern from matching its own shell), and
+- One `meditate` at a time on the box (`pgrep -af "sportstradamus medi[t]ate|model.strateg[y]"`
+  must print nothing first — the brackets keep the pattern from matching its own shell), and
   never the integration suite while one runs. The sweep's `-j` parallelism is the exception the
-  tool manages itself.
-- Never fetch a partial FantasyPoints week; 2026 week 3 becomes fetchable after its Monday
-  game, `fetch fp run --season 2026 --week 3 --refetch` (memory
-  `fp_column_map_applies_at_fetch_time`). Never sync a partial week.
+  tool manages itself. A confirm walk's retrain opens the DuckDB archive, so it also waits for
+  any archive job (`merge-archives`, `confer`).
+- Never fetch a partial FantasyPoints week. A week is complete only when a team-grain tool holds
+  all 32 teams — the morning after the Monday game it can still show 30. Probe one tool
+  (`fetch fp run --season YYYY --week N --only team_proe_report`), then
+  `fetch fp run --season YYYY --week N --refetch` (memory `fp_column_map_applies_at_fetch_time`).
+  Never sync a partial week.
 - Any `.py` touched: `refactoring-specialist` on every touched file, then the single gate run
   `poetry run ruff check src/sportstradamus/`, `poetry run pytest tests/golden/`,
-  `poetry run pytest -m integration -n0` (one pre-existing WNBA red,
-  `test_centered_sn_live_path_reemits_direct_frame`, is known — report it, do not touch the
-  marker).
+  `poetry run pytest -m integration -n0`.
 - Distribution-family or dispersion-mechanism changes and §8.2 levers: `research-analyst`
   brief first. Genuinely new families (skew-t, SHASH revisit, comp-PMF ladder) are dead prior
   art until a brief says otherwise (memory `research_verdicts_ledger`).
@@ -429,7 +491,10 @@ and need nothing. Interceptions is the owner's lowest-priority cell.
 | the integration suite restores runtime snapshots byte-for-byte but refreshes mtimes | `integration_clobbers_runtime_snapshots` |
 | history.parquet is keyed by game date; prophecize.log is cumulative and `\r`-joined | `prophecize_prod_artifact_read_traps` |
 | a walk and a second session racing on `stat_meta.json` | `git_add_races_running_walk` |
-| `targets` is withheld but a serve-time volume dependency; a plain `meditate` prunes its pickle and every WR/TE cell loses its projection | section 6, decision 1 |
+| a plain `meditate` prunes every withheld cell's pickle except the volume denominators (`VOLUME_STATS`); reverting a flip before a retrain deletes the model | section 6, decisions 1 and 6 |
+| a killed confirm walk leaves its cell `shipped: "devel"` with no pickle; restore the cell from the walk's `.bak.json` | `confirm_walk_killed_leaves_devel_flag` |
+| a `pgrep -af` wait loop matches its own wrapper and never exits; bracket the pattern or gate on an `EXIT=` marker | `pgrep_pattern_self_match` |
+| a detached `setsid nohup` driver does not survive a WSL restart; the campaign needs a relaunch script | section 4, costs |
 | every persist re-trimmed the whole cache (fixed 2026-09-28; rows already lost need a rebuild) | `matrix_persist_retrim_erosion` |
 
 ## 9. Prior art — dead, do not retry without new evidence
@@ -445,13 +510,19 @@ The full list with verdict dates is memory `research_verdicts_ledger` and
 ## 10. Definition of done and the report
 
 Done means: `poetry run python -c` reading `model_stats.parquet` shows ≥ 15 NFL rows with
-`ship == True` **including all five mandatory cells**, every one produced by a full-HPO
+`ship == True` **including all six mandatory cells**, every one produced by a full-HPO
 `meditate` on the promoted matrices, `serve_parity_probe.py` builds every `expected_columns`
-entry for every pickle, the three gates are green (WNBA red reported), the `stat_meta.json`
-diff is in front of the owner, nothing pushed. If the count stalls below 15, the report says
-which cells, which gate binds each, what was tried with its ledger rows, and what the owner
+entry for every pickle, the three gates are green, the `stat_meta.json` diff is in front of the
+owner, nothing pushed. If the count stalls below 15 or a mandatory cell stays out, the report
+says which cells, which gate binds each, what was tried with its ledger rows, and what the owner
 could decide to unblock it — scaling the goal down is the owner's call, not the lane's.
 
-The report (normal prose, in the lane dir and summarized in §10) carries per cell: recipe
-before → after, the six gate values with caps, BSS, `model_weight`, n and authentic n, the
-confirm ledger rows consulted, and the `matrix_hash` the verdict is bound to.
+Where that stands: the count is met (19), every ship came from a full-HPO confirm retrain, the
+parity probe passes on all 19 pickles, the gates are green and the diff is with the owner.
+`passing yards` is out, so the lane is not done; section 5 says what binds it and section 6 lists
+what the owner holds.
+
+The report is `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report_ship15.md` (normal prose).
+Per cell it carries: recipe before → after, the six gate values with caps, BSS, `model_weight`, n
+and sportsbook-priced n, the confirm ledger rows consulted, and the `matrix_hash` the verdict is
+bound to.

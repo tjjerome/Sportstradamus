@@ -34,7 +34,7 @@ whenever the queue changes; git holds the history.
 | NBA | 18/21 | 16 | **DONE** |
 | MLB | 15/19 | 15 | **DONE** |
 | NHL | 12/15 | 12 | **DONE** |
-| NFL | 12/20 | 15 | **REOPENED** — 11/20 on the 2026-09-26 honest board after the FantasyPoints bump + population fix, 12/20 after the 2026-09-27 trim-floor retrain (receiving yards passes, back to `devel`); lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
+| NFL | 12/20 | 15 | **REOPENED** — 19/20 confirmed at ship by the fresh-lane campaign, but its seven flips are uncommitted (the owner's diff), so the committed count stays 12; passing yards is the one withheld cell; lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
 
 ## In flight right now
 
