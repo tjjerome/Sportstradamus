@@ -616,8 +616,8 @@ class Stats:
         When the activity feed has observed the season's opening night
         (:func:`odds_budget.season_opener`) and it is newer than the
         hand-set constant, it is adopted before fetching — season-year API
-        params, ``DaysIntoSeason``, and the early-season scoring gate then
-        track the real calendar without an annual code edit.
+        params and ``DaysIntoSeason`` then track the real calendar without an
+        annual code edit.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):
             logger.info(f"{self.league} update skipped: outside season window")
@@ -1372,16 +1372,14 @@ class Stats:
         self.playerProfile.fillna(0.0, inplace=True)
 
     def _roster_player_df(self, season):
-        if self.league == "NBA":
-            season = "-".join([str(season), str(season - 1999)])
-
         if "NBA" in self.league:
             player_df = []
-            season_players = (
-                self.players.get(season)
-                if self.players.get(season)
-                else self.players.get(season - 1)
-            )
+            # A season's rosters arrive with its first update that finds players; until then
+            # last season's stand in. NBA keys a season "2025-26", WNBA by its year.
+            keys = [season, season - 1]
+            if self.league == "NBA":
+                keys = ["-".join([str(year), str(year - 1999)]) for year in keys]
+            season_players = self.players.get(keys[0]) or self.players[keys[1]]
             for team, roster in season_players.items():
                 roster = [
                     {self.log_strings["player"]: k, self.log_strings["team"]: team} | v
@@ -1397,6 +1395,17 @@ class Stats:
         else:
             player_df = self.players
         return player_df
+
+    def _merge_season_roster(self, season_key, fresh):
+        """Fold freshly fetched per-team rosters into the season's stored ones.
+
+        A team the season does not hold yet is added whole: a season's first update can
+        hold only the teams that have played.
+        """
+        stored = self.players.get(season_key, {})
+        self.players[season_key] = {
+            team: stored.get(team, {}) | fresh.get(team, {}) for team in stored | fresh
+        }
 
     def get_depth(self, offers, date=datetime.today().date()):
         players = list(offers.keys()) if isinstance(offers, dict) else [x["Player"] for x in offers]

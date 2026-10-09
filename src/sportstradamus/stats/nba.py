@@ -5,6 +5,7 @@ import json
 import warnings
 from datetime import date, datetime, timedelta
 from io import StringIO
+from pathlib import Path
 
 import line_profiler
 import nba_api.stats.endpoints as nba
@@ -45,6 +46,10 @@ _CATCHUP_THRESHOLD_DAYS: int = 150
 # Retention window: keep 4 seasons of logs to bound file growth
 _GAMELOG_RETENTION_DAYS: int = 1461
 
+# Cleaning the Glass publishes a season's player export only after games are played,
+# so a new season starts on the newest earlier file until the real one is dropped in.
+_ROSTER_SEED_DIR = Path(str(pkg_resources.files(data) / "player_data" / "NBA"))
+
 # Cleaning the Glass (NBA) dated-snapshot roots + join schema. The key/meta lists
 # are pinned from a real authenticated CTG capture (see docs/cleaningtheglass.md);
 # they stay empty until the endpoint catalog + a snapshot exist, which makes the
@@ -74,6 +79,16 @@ NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL
 # It graded PIT KS 0.0405 against legacy's 0.1489 when the cap was off, which makes
 # it a component-model-blend candidate rather than a book quote.
 NBA_ASSUMABLE_FANTASY_COMPONENTS = frozenset({"TOV", "BLK", "STL"})
+
+
+def _roster_seed_path(season: str) -> Path:
+    """The season's roster seed file, else the newest earlier season's."""
+    wanted = _ROSTER_SEED_DIR / f"nba_players_{season}.csv"
+    if wanted.is_file():
+        return wanted
+    newest = max(path for path in _ROSTER_SEED_DIR.glob("nba_players_*.csv") if path < wanted)
+    logger.warning(f"NBA roster seed {wanted.name} is missing; reading {newest.name}")
+    return newest
 
 
 class StatsNBA(Stats):
@@ -581,9 +596,7 @@ class StatsNBA(Stats):
         latest_date = self._latest_gamelog_date()
         today = datetime.today().date()
 
-        player_df = pd.read_csv(
-            pkg_resources.files(data) / f"player_data/NBA/nba_players_{self.season}.csv"
-        )
+        player_df = pd.read_csv(_roster_seed_path(self.season))
         player_df.Player = player_df.Player.apply(remove_accents)
         player_df.rename(
             columns={
@@ -822,9 +835,11 @@ class StatsNBA(Stats):
     def _build_player_profiles(self, player_df, playerBios, shotData, synergy):
         """Merge bios + shot/synergy data into per-team player profiles on self.players."""
         if playerBios.empty:
-            self.players[self.season] = self.players.get(
-                "-".join([str(int(x) - 1) for x in self.season.split("-")]), {}
-            )
+            # No bios before opening night or after a failed pull. The season keeps what it
+            # holds (nothing, at first, so the roster lookup stands on last season's):
+            # copying last season's pairs in would leave every player who has since moved
+            # on his old team for the whole season.
+            self.players.setdefault(self.season, {})
             return
 
         shotData = self._enrich_shot_data(shotData, synergy)
@@ -890,13 +905,7 @@ class StatsNBA(Stats):
         )
         player_df[numeric_cols] = player_df[numeric_cols].fillna(0)
         player_df = {level: player_df.xs(level).T.to_dict() for level in player_df.index.levels[0]}
-        if self.season in self.players:
-            self.players[self.season] = {
-                team: players | player_df.get(team, {})
-                for team, players in self.players[self.season].items()
-            }
-        else:
-            self.players[self.season] = player_df
+        self._merge_season_roster(self.season, player_df)
 
     def _fetch_game_logs(self, params, include_playin, include_playoffs):
         """Pull player/team game logs (base/advanced/usage/scoring) for the window.

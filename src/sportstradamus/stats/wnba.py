@@ -274,13 +274,7 @@ class StatsWNBA(StatsNBA):
             player_dict = {
                 level: player_dict.xs(level).T.to_dict() for level in player_dict.index.levels[0]
             }
-            if self.season_start.year in self.players:
-                self.players[self.season_start.year] = {
-                    team: players | player_dict.get(team, {})
-                    for team, players in self.players[self.season_start.year].items()
-                }
-            else:
-                self.players[self.season_start.year] = player_dict
+            self._merge_season_roster(self.season_start.year, player_dict)
         return player_df
 
     def _fetch_wnba_logs(self, latest_date, today):
