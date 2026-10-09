@@ -385,7 +385,12 @@ on every board and need nothing. Interceptions is the owner's lowest-priority ce
    the combos have no archived rows for those seasons; `--props-only` skips the ~30-credit game-line
    call per date, whose rows already exist). Put `--max-dates 1 --dry-run` on it first: the dry run
    makes the paid calls and prints the cross-book spread, and zero spread means a degenerate
-   source (memory `capture_stub_drift_live_probe`).
+   source (memory `capture_stub_drift_live_probe`). The key is the one live `confer` polls with,
+   and the governor paces on the live remaining-credits header, so a pull is paid for by
+   throttled live polling for the rest of the cycle: on 2026-10-08 the cycle held 16,381 of
+   20,000 credits with live use near 470 a day, which leaves about 5,600 spare by the reset on
+   the 1st — one season, not two. Size each run to the leftover with `--max-dates N` in a
+   cycle's last days; the script resumes from its progress file.
 4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip
    are on `origin/devel` (06:06 CDT) and on prod (`run_job.sh`'s self-deploy pull replicated by
    hand at 06:09 CDT under its pull lock, dashboard restarted). Prod's gamelog was recomputed
