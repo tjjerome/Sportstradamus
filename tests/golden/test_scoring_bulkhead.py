@@ -11,12 +11,21 @@ and one market's records.
 from __future__ import annotations
 
 import logging
+from datetime import date
+
+import pytest
 
 from sportstradamus.helpers import stat_map
 from sportstradamus.prediction import scoring
 
 _BOOK = "Underdog"
 _DATE = "2026-09-12"
+
+
+@pytest.fixture(autouse=True)
+def no_opening_night(monkeypatch):
+    """No opening night known unless a test sets one, whatever feed snapshot the box holds."""
+    monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: None)
 
 
 class _ArchiveRecorder:
@@ -46,8 +55,10 @@ class _StatsStub:
 
     def __init__(self, depth_error=None):
         self.depth_error = depth_error
+        self.depth_calls = 0
 
     def get_depth(self, offers):
+        self.depth_calls += 1
         if self.depth_error is not None:
             raise self.depth_error
 
@@ -116,3 +127,64 @@ def test_inactive_league_is_archived_but_not_scored(monkeypatch):
     assert scored == []
     assert recorder.markets == ["PTS", "REB"]
     assert pbar.count == 3
+
+
+def _score_every_offer(offers, league, market, book, stat_data):
+    return [{"Player": offer["Player"], "Market": market} for offer in offers]
+
+
+def test_preseason_offers_are_archived_but_never_scored(monkeypatch, caplog):
+    recorder = _ArchiveRecorder()
+    monkeypatch.setattr(scoring, "archive", recorder)
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 13))
+    pbar = _Pbar()
+    stats = {"NBA": _StatsStub()}
+
+    with caplog.at_level(logging.INFO, logger="log"):
+        scored = scoring._match_league_offers("NBA", _nba_markets(), stats, _BOOK, pbar)
+
+    assert scored == []
+    assert recorder.markets == ["PTS", "REB"]
+    assert pbar.count == 3
+    assert stats["NBA"].depth_calls == 0
+    assert "NBA: 3 offers before opening night 2026-09-13 not scored" in caplog.text
+
+
+def test_opening_night_offers_are_scored(monkeypatch):
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 12))
+
+    scored = scoring._match_league_offers(
+        "NBA", _nba_markets(), {"NBA": _StatsStub()}, _BOOK, _Pbar()
+    )
+
+    assert [record["Player"] for record in scored] == ["A", "B", "C"]
+
+
+def test_a_market_keeps_only_its_in_season_offers(monkeypatch):
+    recorder = _ArchiveRecorder()
+    monkeypatch.setattr(scoring, "archive", recorder)
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 12))
+    markets = _nba_markets()
+    markets["PTS"][0]["Date"] = "2026-09-11"
+    markets["REB"][0]["Date"] = "2026-09-11"
+
+    scored = scoring._match_league_offers("NBA", markets, {"NBA": _StatsStub()}, _BOOK, _Pbar())
+
+    assert scored == [{"Player": "C", "Market": "REB"}]
+    assert recorder.markets == ["PTS", "REB"]
+
+
+def test_an_offer_with_no_date_is_never_dropped_as_preseason(monkeypatch):
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 13))
+    markets = _nba_markets()
+    markets["PTS"][0]["Date"] = None
+
+    scored = scoring._match_league_offers("NBA", markets, {"NBA": _StatsStub()}, _BOOK, _Pbar())
+
+    assert scored == [{"Player": "A", "Market": "PTS"}]

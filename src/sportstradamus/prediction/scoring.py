@@ -23,7 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import LazyArchive, stat_map
+from sportstradamus.helpers import LazyArchive, odds_budget, stat_map
 from sportstradamus.prediction.correlation import find_correlation
 from sportstradamus.prediction.model_prob import book_fallback_prob, model_prob, normalize_market
 from sportstradamus.spiderLogger import logger
@@ -91,12 +91,15 @@ def _match_league_offers(league, markets, stats, book, pbar):
     scoring crash never costs a capture: a feature-prep failure costs the league
     its scoring and returns the empty sentinel, a scoring failure costs only that
     market's records. A league with no active ``Stats`` object is archived but
-    never scored.
+    never scored, and so is a game before the league's opening night.
     """
     for offers in markets.values():
         archive.add_dfs(offers, book, stat_map[book])
         pbar.update(len(offers))
     if league not in stats:
+        return []
+    markets = _in_season_markets(league, markets)
+    if not markets:
         return []
 
     stat_data = stats[league]
@@ -118,6 +121,27 @@ def _match_league_offers(league, markets, stats, book, pbar):
         except Exception:
             logger.exception(f"{league} {market} not scored")
     return scored
+
+
+def _in_season_markets(league, markets):
+    """Drop offers for games before the league's opening night: pre-season is never priced.
+
+    Opening night is the odds feed's (:func:`odds_budget.season_opener`). While the feed
+    holds none, and for an offer with no date, nothing is dropped.
+    """
+    opener = odds_budget.season_opener(league)
+    if opener is None:
+        return markets
+    # Both platforms stamp an offer's Date as YYYY-MM-DD text, which orders as dates do.
+    first_day = opener.isoformat()
+    kept = {
+        market: [offer for offer in offers if not offer["Date"] or offer["Date"] >= first_day]
+        for market, offers in markets.items()
+    }
+    dropped = sum(map(len, markets.values())) - sum(map(len, kept.values()))
+    if dropped:
+        logger.info(f"{league}: {dropped} offers before opening night {first_day} not scored")
+    return {market: offers for market, offers in kept.items() if offers}
 
 
 def _score_market(offers, league, market, book, stat_data):

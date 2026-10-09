@@ -21,6 +21,12 @@ need no manual edits. The hand-set `season_start` constants in the Stats classes
 are only fallback seeds. To force a gamelog update in the offseason, set
 `SPORTSTRADAMUS_FORCE_UPDATE=1`.
 
+Pre-season is never priced: a game dated before the feed's opening night for its
+league is archived and not scored (`_in_season_markets` in `prediction/scoring.py`).
+A new NBA season reads the newest earlier `player_data/NBA/nba_players_<season>.csv`
+seed, with a warning in the log, until that season's own Cleaning the Glass export
+is dropped in.
+
 ## Recommended Cron
 
 All jobs run through [`scripts/run_job.sh`](../scripts/run_job.sh), which adds a
@@ -178,8 +184,9 @@ Quick checks when collection or serving looks wrong:
   `league_is_live` then reports the league idle, so `prophecize` and
   `pickem-build` skip it while still archiving its DFS lines; `confer` and
   `close-lines` are unaffected. Clear it by removing the prefix — effective next
-  tick, nothing to deploy. The hold also suppresses the league's gamelog
-  `update()`, so a long hold wants one `SPORTSTRADAMUS_FORCE_UPDATE=1` run after.
+  tick, nothing to deploy. The hold also stops the league's gamelog `update()` in
+  those two jobs; the nightly `reflect` job still runs it, so the gamelog stays
+  current through a hold.
   Keep it off `meditate --league All` lines: that loop honors the same gate.
 
 ## Related runbooks
