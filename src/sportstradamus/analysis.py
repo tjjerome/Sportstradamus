@@ -19,7 +19,14 @@ from scipy.stats import nbinom
 from sklearn.metrics import brier_score_loss
 from tqdm import tqdm
 
-from sportstradamus.helpers import MAX_FAVORED_PAYOUT, dp_crps, get_odds, platform_payout
+from sportstradamus.helpers import (
+    MAX_FAVORED_PAYOUT,
+    cell_market,
+    dp_crps,
+    get_odds,
+    platform_payout,
+    stat_map,
+)
 from sportstradamus.helpers.distributions import _dp_mu_from_mean, _dp_ppf
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
@@ -40,14 +47,9 @@ TIMEFRAMES = [
 _CRPS_NEGBIN_SUM_CAP = 500
 
 
-def _leg_market_map(league, platform, stat_map):
-    """Per-platform market-name map plus the league-specific leg-name overrides."""
-    new_map = stat_map.get(platform, {}).copy()
-    if league == "NHL":
-        new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
-    if league in ("NBA", "WNBA"):
-        new_map.update({"Fantasy Points": "fantasy points prizepicks"})
-    return new_map
+def _leg_market_map(league, platform):
+    """Each of ``platform``'s market labels mapped to ``league``'s own cell key."""
+    return {label: cell_market(league, platform, label) for label in stat_map[platform]}
 
 
 def _bet_gameday_rows(gamelog, ls, bet):

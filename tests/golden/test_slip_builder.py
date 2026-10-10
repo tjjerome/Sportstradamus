@@ -8,6 +8,9 @@ whose ``seq`` is already applied is ignored. These call the private functions di
 against a bare ``st.session_state`` (Streamlit's own documented "bare mode" — a plain dict
 outside a running app), rather than standing up a full ``AppTest`` page render, since no
 component event needs simulating here.
+
+The last tests pin ``slip_state._legs_from_records``, which finds a story's or a saved
+slip's stored legs on the board again before they seed a builder.
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ from sportstradamus.dashboard.components.slip_builder import (
     _apply_constellation_action,
     _open_offer_detail,
 )
-from sportstradamus.dashboard.components.slip_state import _LEGS
+from sportstradamus.dashboard.components.slip_state import _LEGS, _legs_from_records
+from sportstradamus.leg_schema import build_leg
 
 
 def _offer(player, market, bet, line, game, team, platform, kelly):
@@ -187,3 +191,47 @@ def test_open_offer_detail_resolves_a_wider_dot_against_the_full_offers_frame():
     groups = [("MIA/ORL", [_offer("B", "AST", "Over", 6.5, "MIA/ORL", "MIA", "Underdog", 0.4)])]
     _open_offer_detail("B|AST|Over", offers, pool, groups)
     assert offers.loc[st.session_state.detail_stack[-1], "Player"] == "B"
+
+
+def _board_row(player: str, market: str, league: str, platform: str) -> dict:
+    return _offer(player, market, "Over", 0.5, "AAA/BBB", "AAA", platform, 0.1) | {"League": league}
+
+
+def _stored_leg(player: str, label: str, stat: str, league: str, platform: str) -> dict:
+    """A leg as a story or a saved slip stores it: the platform's label, the league's key."""
+    return build_leg(_board_row(player, label, league, platform) | {"Stat": stat})
+
+
+def test_stored_legs_find_their_board_row_under_the_leagues_own_market_name():
+    # The board names a market by its platform's map and a stored leg by its league's own
+    # key: NHL assists is AST on the board and assists on the leg, so matched name for name
+    # a story's leg was dropped as it seeded the slip.
+    board = _pool_df(
+        _board_row("Skater", "AST", "NHL", "Underdog"),
+        _board_row("Winger", "PTS", "NHL", "Sleeper"),
+        _board_row("Guard", "fantasy points underdog", "NBA", "Underdog"),
+    )
+    underdog = [
+        _stored_leg("Skater", "Assists", "assists", "NHL", "Underdog"),
+        _stored_leg("Guard", "Fantasy Points", "fantasy points prizepicks", "NBA", "Underdog"),
+        _stored_leg("Skater", "Goals", "goals", "NHL", "Underdog"),  # no such row on the board
+        _stored_leg("Winger", "Points", "points", "NHL", "Underdog"),  # Sleeper's row only
+    ]
+    sleeper = [_stored_leg("Winger", "points", "points", "NHL", "Sleeper")]
+
+    # Each leg comes back as the board's own row, under the board's name for the market.
+    assert [
+        (leg["player"], leg["market"]) for leg in _legs_from_records(underdog, "Underdog", board)
+    ] == [("Skater", "AST"), ("Guard", "fantasy points underdog")]
+    assert [
+        (leg["player"], leg["market"]) for leg in _legs_from_records(sleeper, "Sleeper", board)
+    ] == [("Winger", "PTS")]
+    # A saved slip's legs were snapshotted from the board, so they carry its names already.
+    saved = [build_leg(row) for row in board.to_dict("records") if row["Platform"] == "Underdog"]
+    assert _legs_from_records(saved, "Underdog", board) == saved
+
+
+def test_stored_legs_resolve_to_nothing_without_an_offers_snapshot():
+    # An absent snapshot loads as an empty frame with no League or Market column to read.
+    leg = _stored_leg("Skater", "Assists", "assists", "NHL", "Underdog")
+    assert _legs_from_records([leg], "Underdog", pd.DataFrame()) == []

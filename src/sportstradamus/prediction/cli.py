@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime
 import importlib.resources as pkg_resources
 import os
-from functools import partialmethod
+from functools import partial, partialmethod
 
 import click
 import line_profiler
@@ -416,9 +416,10 @@ def main(progress, contest_variant, log_level):
                 on=PREDICTION_KEY,
                 how="left",
             )
-        all_df.loc[(all_df["Market"] == "AST") & (all_df["League"] == "NHL"), "Market"] = "assists"
-        all_df.loc[(all_df["Market"] == "PTS") & (all_df["League"] == "NHL"), "Market"] = "points"
-        all_df.loc[(all_df["Market"] == "BLK") & (all_df["League"] == "NHL"), "Market"] = "blocked"
+        # History names a leg by its model cell except on NBA and WNBA, which keep the
+        # platform's "... underdog" markets: only the NHL names are folded here.
+        nhl = all_df["League"] == "NHL"
+        all_df.loc[nhl, "Market"] = all_df.loc[nhl, "Market"].map(partial(archive_market, "NHL"))
         all_df.dropna(subset="Market", inplace=True, ignore_index=True)
         if "Consensus Line" in all_df.columns:
             all_df = _stamp_alt_line(all_df)

@@ -586,7 +586,7 @@ def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
     """cMarket tokens must key the way the MLB corr parquets do: ``B{n}``/``P``."""
     resolved = _resolve_player_positions(_mlb_legs(), "MLB", _mlb_stats())
 
-    cmarket = _build_cmarket(resolved, "MLB", {})["cMarket"]
+    cmarket = _build_cmarket(resolved, "MLB", "Underdog")["cMarket"]
 
     assert list(cmarket) == [
         ["B3.hits"],
@@ -660,6 +660,45 @@ def test_find_correlation_mlb_position_stays_a_string_column() -> None:
     assert labels["Shota Imanaga"] == "P"
     assert labels["Kyle Tucker vs. Oneil Cruz"] == ""
     pa.Table.from_pandas(offer_df[["Position"]])  # the snapshot write, which a mix aborts
+
+
+# --- cMarket names (the league's own, not the platform map's) ---------------
+
+
+def _cmarket_tokens(league: str, platform: str, position: str, *labels: str) -> list[list[str]]:
+    legs = pd.DataFrame({"Player position": position, "Market": list(labels)})
+    return list(_build_cmarket(legs, league, platform)["cMarket"])
+
+
+@pytest.mark.parametrize(
+    ("league", "platform", "position", "label", "token"),
+    [
+        ("NHL", "Sleeper", "C1", "assists", "C1.assists"),
+        ("NHL", "Underdog", "C1", "Assists", "C1.assists"),
+        ("NBA", "Underdog", "P1", "Fantasy Points", "P1.fantasy points prizepicks"),
+    ],
+)
+def test_build_cmarket_names_a_market_the_way_its_leagues_matrices_do(
+    league, platform, position, label, token
+) -> None:
+    """A platform's map names a market the same for every league and the correlation
+    matrices go by the league's own name. Sleeper's ``assists`` is ``AST`` in the map and
+    ``assists`` in NHL's matrices: keyed ``C1.AST`` the leg read no correlation."""
+    assert _cmarket_tokens(league, platform, position, label) == [[token]]
+
+
+def test_build_cmarket_keeps_one_leagues_names_out_of_the_next() -> None:
+    """A platform's leagues are built one after the other and each names a market its own
+    way. One map shared by them all once carried NBA's ``fantasy points prizepicks`` into
+    every league built after it."""
+    assert _cmarket_tokens("NHL", "Underdog", "C1", "Points") == [["C1.points"]]
+    assert _cmarket_tokens("NBA", "Underdog", "P1", "Points", "Fantasy Points") == [
+        ["P1.PTS"],
+        ["P1.fantasy points prizepicks"],
+    ]
+    assert _cmarket_tokens("NFL", "Underdog", "QB1", "Fantasy Points") == [
+        ["QB1.fantasy points underdog"]
+    ]
 
 
 # --- corr-slice collector (dashboard rail / constellation) ------------------

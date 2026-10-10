@@ -329,7 +329,6 @@ def beam_search_parlays(
     info,
     team,
     opp,
-    stat_map,
     *,
     contest_variant: Literal["pooled", "power", "flex"] = "pooled",
     full_refund_below_size: int | None = None,
@@ -354,9 +353,6 @@ def beam_search_parlays(
         info: ``{Game, Date, League, Platform}`` metadata dict.
         team: Home team abbreviation.
         opp: Away team abbreviation.
-        stat_map: ``{platform: {display_market: gamelog_stat}}`` — resolved once
-            per game into the league-specific leg ``Stat`` lookup via
-            :func:`sportstradamus.analysis._leg_market_map`.
         contest_variant: Underdog contest variant. Affects payout curve
             interpretation in :func:`payouts.expected_payout_with_pushes`.
         full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
@@ -372,7 +368,7 @@ def beam_search_parlays(
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
     leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
-    new_map = _leg_market_map(info["League"], info["Platform"], stat_map)
+    new_map = _leg_market_map(info["League"], info["Platform"])
 
     candidates = [(i,) for i in leg_indices]
     all_results = []

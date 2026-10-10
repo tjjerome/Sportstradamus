@@ -35,7 +35,6 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.parlay import GameScoringContext
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
@@ -129,7 +128,7 @@ def _stories_for_game(
     require_both = (
         len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
     )
-    new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
+    new_map = _leg_market_map(sctx.league, sctx.platform)
     index = offer_index(offers)
     stars = {}
     for i in edge:

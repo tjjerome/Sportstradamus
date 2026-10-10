@@ -301,7 +301,6 @@ def _beam_inputs() -> dict:
         "info": {"Game": "A/B", "Date": "2026-01-01", "League": "NBA", "Platform": "Underdog"},
         "team": "A",
         "opp": "B",
-        "stat_map": {"Underdog": {}},
     }
 
 
@@ -813,7 +812,6 @@ def _sleeper_flex_beam_inputs(*, m_pair: float = 1.0, p_push_leg0: float = 0.0) 
         "info": {"Game": "A/B", "Date": "2026-01-01", "League": "NBA", "Platform": "Sleeper"},
         "team": "A",
         "opp": "B",
-        "stat_map": {"Sleeper": {}},
     }
 
 

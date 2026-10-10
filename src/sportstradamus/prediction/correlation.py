@@ -23,6 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, cell_market, stat_map
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
@@ -385,19 +386,14 @@ def _resolve_player_positions(league_df, league, stat_data):
     return league_df
 
 
-def _build_cmarket(league_df, league, new_map):
+def _build_cmarket(league_df, league, platform):
     """Add the ``cMarket`` (position.corr-name) display column.
 
-    Mutates the shared ``new_map`` with the league's correlation-name overrides
-    (accumulating across leagues, matching the legacy single-dict behavior), then
-    builds one ``position.market`` token per leg — a list, for multi-position
-    combo legs.
+    One ``position.market`` token per leg — a list, for multi-position combo
+    legs — with the market under the league's own name, the one its correlation
+    matrices are keyed by.
     """
-    if league == "NHL":
-        new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
-    if league in ("NBA", "WNBA"):
-        new_map.update({"Fantasy Points": "fantasy points prizepicks"})
-
+    new_map = _leg_market_map(league, platform)
     league_df["cMarket"] = league_df.apply(
         lambda x: (
             [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]
@@ -620,7 +616,6 @@ def _process_league_games(
     corr_sink,
     story_sink,
     market_map,
-    stat_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
@@ -707,7 +702,6 @@ def _process_league_games(
             info,
             team,
             opp,
-            stat_map,
             contest_variant=contest_variant,
             full_refund_below_size=full_refund_below_size,
         )
@@ -765,7 +759,6 @@ def find_correlation(
 
     logger.info("Finding Correlations")
 
-    new_map = stat_map[platform].copy()
     warnings.simplefilter("ignore")
 
     df = pd.DataFrame(offers)
@@ -845,7 +838,7 @@ def find_correlation(
         df.loc[league_df.index, "Position"] = league_df["Player position"].map(
             lambda p: p if isinstance(p, str) else ""
         )
-        league_df = _build_cmarket(league_df, league, new_map)
+        league_df = _build_cmarket(league_df, league, platform)
         parlay_df = _process_league_games(
             df,
             league_df,
@@ -862,7 +855,6 @@ def find_correlation(
             corr_sink,
             story_sink,
             stat_map[platform],
-            stat_map,
         )
 
     return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df
