@@ -76,8 +76,9 @@ def _legs_from_records(
     # ``stat`` (NHL ``assists``), and the board names a market by its platform's map
     # (``AST``): look up by ``stat``, with both sides under the league's key. A
     # dashboard-built leg has market == stat == the board's name, which folds the same way.
+    # A label its platform's map lacks reaches the board with no ``Market``: no leg matches it.
     league_keyed = offers.assign(
-        Market=list(map(archive_market, offers["League"], offers["Market"]))
+        Market=list(map(archive_market, offers["League"], offers["Market"].fillna("")))
     )
     out: list[dict] = []
     for record in records:

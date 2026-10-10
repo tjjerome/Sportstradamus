@@ -193,7 +193,7 @@ def test_open_offer_detail_resolves_a_wider_dot_against_the_full_offers_frame():
     assert offers.loc[st.session_state.detail_stack[-1], "Player"] == "B"
 
 
-def _board_row(player: str, market: str, league: str, platform: str) -> dict:
+def _board_row(player: str, market: str | None, league: str, platform: str) -> dict:
     return _offer(player, market, "Over", 0.5, "AAA/BBB", "AAA", platform, 0.1) | {"League": league}
 
 
@@ -229,6 +229,18 @@ def test_stored_legs_find_their_board_row_under_the_leagues_own_market_name():
     # A saved slip's legs were snapshotted from the board, so they carry its names already.
     saved = [build_leg(row) for row in board.to_dict("records") if row["Platform"] == "Underdog"]
     assert _legs_from_records(saved, "Underdog", board) == saved
+
+
+def test_a_board_row_with_no_market_name_matches_no_leg_and_breaks_none():
+    # The board maps a platform's label through its stat_map, so a label the map lacks
+    # arrives with no Market: a row with no key to match under.
+    board = _pool_df(
+        _board_row("Guard", "fantasy points underdog", "NBA", "Underdog"),
+        _board_row("Center", None, "NBA", "Underdog"),
+    )
+    leg = _stored_leg("Guard", "Fantasy Points", "fantasy points prizepicks", "NBA", "Underdog")
+
+    assert [found["player"] for found in _legs_from_records([leg], "Underdog", board)] == ["Guard"]
 
 
 def test_stored_legs_resolve_to_nothing_without_an_offers_snapshot():
