@@ -362,6 +362,60 @@ def test_join_clv_reads_a_legs_close_at_the_kickoff_history_resolves(monkeypatch
     }
 
 
+def _fantasy_points_leg(stat: str) -> dict[tuple, dict]:
+    """Player A's WNBA fantasy-points leg, as a record that stored it under ``stat``."""
+    return {
+        ("Player A", stat, 30.5, "Over", "WNBA", "2026-07-12"): _leg(
+            "Player A", stat, 30.5, "Over", "BOS/LAL", league="WNBA"
+        )
+    }
+
+
+def _fantasy_points_history(*rows: tuple[str, str, str, str]) -> pd.DataFrame:
+    """WNBA history rows with no model columns, one per ``(player, market, team, kickoff)``."""
+    model_cols = {"Dist": np.nan, "CV": np.nan, "Gate": np.nan, "Step": np.nan}
+    return pd.DataFrame(rows, columns=["Player", "Market", "Team", "Commence"]).assign(
+        League="WNBA", Date="2026-07-12", **model_cols
+    )
+
+
+@pytest.mark.parametrize(
+    "stat", ["fantasy points prizepicks", "fantasy points underdog"], ids=["cell", "platform"]
+)
+def test_join_clv_joins_a_leg_stored_under_either_market_name(monkeypatch, stat: str) -> None:
+    """Underdog's history row carries the platform's name for the market, a leg that
+    name or the league's cell name; unjoined, its close is read at the stand-in hour."""
+    history = _fantasy_points_history(
+        ("Player A", "fantasy points underdog", "BOS", "2026-07-12T23:30:00Z")
+    )
+    monkeypatch.setattr(_ledger_settlement, "read_history", lambda: history)
+    archive = _AskedAtArchive()
+
+    _ledger_settlement.join_clv(_fantasy_points_leg(stat), archive)
+
+    assert archive.asked_at == {"Player A": datetime.datetime(2026, 7, 12, 23, 30)}
+
+
+def test_join_clv_history_rows_folding_onto_one_key_give_one_result_per_leg(monkeypatch) -> None:
+    """Underdog's row and Sleeper's are two predictions in history and one key under the
+    league's name: left duplicated, that key would fan the join out past the legs. Their
+    kickoffs are still resolved as history's two predictions, so Sleeper's row, filed
+    under a team that plays later, does not move the instant of the row the leg joins."""
+    history = _fantasy_points_history(
+        ("Player A", "fantasy points underdog", "BOS", "2026-07-12T17:00:00Z"),
+        ("Player A", "fantasy points prizepicks", "NYK", ""),
+        ("Player B", "fantasy points underdog", "NYK", "2026-07-12T23:30:00Z"),
+    )
+    monkeypatch.setattr(_ledger_settlement, "read_history", lambda: history)
+    legs = _fantasy_points_leg("fantasy points prizepicks")
+    archive = _AskedAtArchive()
+
+    result = _ledger_settlement.join_clv(legs, archive)
+
+    assert list(result) == list(legs)
+    assert archive.asked_at == {"Player A": datetime.datetime(2026, 7, 12, 17)}
+
+
 # --- 3. Distinct-leg dedup: shared leg across entries resolves once ------------
 
 

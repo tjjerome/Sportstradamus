@@ -22,6 +22,7 @@ import pandas as pd
 
 from sportstradamus import clv
 from sportstradamus.analysis import _gameday_rows_for, _resolve_leg
+from sportstradamus.helpers.archive import archive_market
 from sportstradamus.helpers.io import read_history
 from sportstradamus.history_schema import PREDICTION_KEY
 from sportstradamus.prediction.payouts import (
@@ -158,7 +159,7 @@ def _clv_input_frame(distinct_legs: dict[tuple, dict]) -> pd.DataFrame:
             "Player": leg["player"],
             "League": leg["league"],
             "Date": leg["date"],
-            "Market": leg["stat"],
+            "Market": archive_market(leg["league"], leg["stat"]),
             "Line": leg["line"],
             "Bet": leg["bet"],
             "Win Prob": leg["win_prob"],
@@ -180,9 +181,12 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
     ``history.parquet`` keyed on
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` (every ledger leg
     traces back to the same day's ``process_offers`` scoring pass that
-    populates that parquet under the same key), and calls
+    populates that parquet), and calls
     ``clv.fill_from_archive`` exactly once -- the spec requirement of
     resolving the union of distinct legs once per day, not once per entry.
+    The key's ``Market`` is matched under the league's own name on both sides
+    (:func:`~sportstradamus.helpers.archive.archive_market`), since a leg or a
+    history row may carry the one its platform's ``stat_map`` gave it instead.
     A join miss leaves the four model columns NaN, which ``fill_from_archive``
     already handles via its composite-probability fallback path, and reads
     the leg's close at the stand-in hour.
@@ -197,7 +201,14 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
     if not history.empty:
         history = history.assign(Commence=clv.commence_times(history))
         join_cols = [c for c in _CLV_JOIN_COLS if c in history.columns]
-        lookup = history[join_cols].drop_duplicates(subset=PREDICTION_KEY)
+        # Folded only once commence_times has grouped kickoffs by history's own names, and
+        # before the dedupe: an Underdog row and a Sleeper row of one player and date can
+        # land on one key, and a key duplicated here would fan the merge out.
+        lookup = (
+            history[join_cols]
+            .assign(Market=list(map(archive_market, history["League"], history["Market"])))
+            .drop_duplicates(subset=PREDICTION_KEY)
+        )
         frame = frame.merge(lookup, on=PREDICTION_KEY, how="left")
     else:
         for col in ("Dist", "CV", "Gate", "Step"):

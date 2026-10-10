@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.archive import archive_market
 from sportstradamus.helpers.config import book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_odds
 from sportstradamus.helpers.logging import get_logger
@@ -172,6 +173,9 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx, commence_time) -> 
     player, league, date, market = key
     if not (isinstance(league, str) and isinstance(market, str)):
         return
+    # The archive and the cell's fitted book shape go by the league's own market name,
+    # not the one the platform's stat_map gave history's rows.
+    market = archive_market(league, market)
     date_str = _normalize_date(date)
     group = history.loc[idx]
     dist = group["Dist"].iloc[0]
@@ -296,7 +300,7 @@ def _row_movement(archive, league_val, market_val, date_val, player_val, until, 
         try:
             movement_cache[cache_key] = archive.get_movement(
                 league_val,
-                market_val,
+                archive_market(league_val, market_val),
                 date_val,
                 player_val,
                 until=None if pd.isna(until) else until,

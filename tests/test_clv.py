@@ -19,9 +19,9 @@ class _StubArchive:
     ``get_ev`` returns a book stat-mean keyed by ``ev_table``; ``get_composite_under_prob``
     returns a devigged under-probability keyed by ``under_table``, used only by the
     NaN-Dist/CV fallback path. ``asked`` records every lookup key, so a test can assert
-    a group was never read; ``asked_at`` and ``movement_until`` record the player and
-    time-series cutoff of each closing and movement read. The cutoff does not change
-    what the stub answers.
+    a group was never read, and ``movement_asked`` the key of every movement read;
+    ``asked_at`` and ``movement_until`` record the player and time-series cutoff of each
+    closing and movement read. The cutoff does not change what the stub answers.
     """
 
     def __init__(self, ev_table, under_table=None):
@@ -29,6 +29,7 @@ class _StubArchive:
         self._under_table = under_table or {}
         self.asked = []
         self.asked_at = []
+        self.movement_asked = []
         self.movement_until = []
 
     def get_ev(self, league, market, date, player, *, at=None):
@@ -42,7 +43,7 @@ class _StubArchive:
         return self._under_table.get((league, market, date, player), float("nan"))
 
     def get_movement(self, league, market, date, player, *, until=None):
-        del league, market, date
+        self.movement_asked.append((league, market, date, player))
         self.movement_until.append((player, until))
 
 
@@ -621,6 +622,70 @@ def test_summarize_reads_line_movement_up_to_the_instant_the_close_was_read_at()
     clv.summarize(df, archive=archive)
 
     assert archive.movement_until == [("Player A", _EVENING_KICKOFF)]
+
+
+def _history_filed_as(league, market):
+    """Player A's resolvable offer under the market name its platform's map gives it."""
+    return _build_history().iloc[[0]].assign(League=league, Market=market)
+
+
+@pytest.mark.parametrize(
+    ("league", "history_name", "archive_name"),
+    [
+        ("WNBA", "fantasy points underdog", "fantasy points prizepicks"),
+        ("NHL", "AST", "assists"),
+    ],
+    ids=["wnba_fantasy_points", "nhl_assists"],
+)
+def test_fill_from_archive_asks_for_the_close_under_the_leagues_market_name(
+    league, history_name, archive_name
+):
+    """The archive files a market under the league's own name (``archive_market``);
+    history keeps the name it was scored under."""
+    archive_key = (league, archive_name, "2026-05-04", "Player A")
+    archive = _StubArchive({archive_key: _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(_history_filed_as(league, history_name), archive)
+
+    assert archive.asked == [archive_key]
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(_player_a_expected_close_p())
+    assert df["Market"].tolist() == [history_name]
+
+
+def test_fill_from_archive_inverts_the_close_through_the_leagues_cell_shape(monkeypatch):
+    """The fitted book shape is filed under the league's market name too: looked up under
+    history's, the close would fall back to the symmetric constant-CV shape."""
+    from sportstradamus.helpers import config
+
+    league, cell = "WNBA", "fantasy points prizepicks"
+    coeffs = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.01, "n_bins": 9}
+    monkeypatch.setitem(config.stat_meta, league, {cell: {"book_shape": coeffs}})
+    history = _history_filed_as(league, "fantasy points underdog").assign(Dist="SkewNormal")
+    archive = _StubArchive({(league, cell, "2026-05-04", "Player A"): _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(history, archive)
+
+    sigma, skew = config.book_skewnormal_shape(league, cell, _PLAYER_A_CLOSE_EV, _PLAYER_A_CV)
+    fitted_under = get_odds(
+        10.5,
+        _PLAYER_A_CLOSE_EV,
+        "SkewNormal",
+        cv=_PLAYER_A_CV,
+        step=0.5,
+        sigma=float(sigma),
+        skew_alpha=float(skew),
+    )
+    symmetric_under = get_odds(10.5, _PLAYER_A_CLOSE_EV, "SkewNormal", cv=_PLAYER_A_CV, step=0.5)
+    assert fitted_under != pytest.approx(symmetric_under)
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(1.0 - fitted_under)
+
+
+def test_summarize_asks_for_line_movement_under_the_leagues_market_name():
+    history = _history_filed_as("WNBA", "fantasy points underdog")
+    archive = _StubArchive({})
+    clv.summarize(history, archive=archive)
+
+    assert archive.movement_asked == [
+        ("WNBA", "fantasy points prizepicks", "2026-05-04", "Player A")
+    ]
 
 
 def test_summarize_drops_unresolved_legs():
