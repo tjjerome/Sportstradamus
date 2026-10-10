@@ -1067,6 +1067,9 @@ class Stats:
             return
 
         self.profile_latest_date = date
+        # The frames rebuilt below hold no market's columns, so the market profiled last must
+        # be profiled again, also when a caller other than profile_market moved the date.
+        self.profiled_market = ""
 
         self.playerProfile = pd.DataFrame(
             columns=[
