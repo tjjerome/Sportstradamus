@@ -98,7 +98,7 @@ def build_game_stories(
     ``context``/``corr`` are the already-built ``current_game_context`` frame and
     ``current_game_corr`` slices, reused to headline each story via the P2
     thesis engine. Headlines dedupe across each (platform, date) slate, and
-    ``assign_leads`` walks each date's games by tip: the first non-empty
+    ``assign_leads`` breaks its star ties by tip: the first non-empty
     ``Commence`` on any context of the game, since Sleeper rows carry none.
     """
     ctxs = ctxs_from_frame(context, corr)

@@ -342,12 +342,12 @@ def test_same_team_led_cluster_borrows_an_other_team_leg():
         assert {team_of[p] for p in _row_players(legs)} == {"AAA", "BBB"}
 
 
-def test_one_lead_per_menu_alternates_sides_in_tip_order():
-    # 2026-10-03 is an even ordinal, so Over is wanted first. ZZZ/YYY tips before
-    # AAA/BBB although it sorts after it and is handed over second.
+def test_one_lead_per_menu_and_the_brighter_over_lead_takes_the_over():
+    # Two games leave one Over lead. AAA/BBB's Over lead is the brighter, so the game
+    # takes it although ZZZ/YYY tips first.
     corr = _block_diag_corr([2, 2], 0.4)
 
-    def game(name, commence):
+    def game(name, commence, stars=None):
         return _ctx(
             [0.66, 0.65, 0.66, 0.65],
             corr,
@@ -355,12 +355,13 @@ def test_one_lead_per_menu_alternates_sides_in_tip_order():
             teams=[name[:3], name[-3:]] * 2,
             players=[f"{name}{i}" for i in range(4)],
             bets=["Over", "Over", "Under", "Under"],
+            stars=stars,
             date="2026-10-03",
             commence=commence,
         )
 
     early, offers_early = game("ZZZ/YYY", "2026-10-03T17:00:00Z")
-    late, offers_late = game("AAA/BBB", "2026-10-03T20:00:00Z")
+    late, offers_late = game("AAA/BBB", "2026-10-03T20:00:00Z", stars=[2.0, 0.0, 0.0, 0.0])
     offers = pd.concat([offers_early, offers_late], ignore_index=True)
     out = build_game_stories([late, early], offers, pd.DataFrame(), None)
     assert out["lead"].dtype == bool
@@ -368,7 +369,7 @@ def test_one_lead_per_menu_alternates_sides_in_tip_order():
     assert menus["story_id"].nunique().eq(1).all()
     assert menus["objective"].nunique().eq(2).all()  # both rows of the one story
     sides = out[out["lead"]].drop_duplicates("story_id").set_index("Game")["lead_side"]
-    assert sides.to_dict() == {"ZZZ/YYY": "Over", "AAA/BBB": "Under"}
+    assert sides.to_dict() == {"AAA/BBB": "Over", "ZZZ/YYY": "Under"}
 
 
 def test_commence_by_game_takes_the_first_non_empty_commence(monkeypatch):

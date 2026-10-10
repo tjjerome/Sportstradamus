@@ -3,23 +3,25 @@
 Pins the owner's 2026-10-03 decisions: ``Star`` comes from existing offer
 columns only (rank-1 depth, median-line percentile, market breadth; no MLB depth
 term), each side's lead seed is its most prominent strong leg, and the slate
-pass flags exactly one story per menu, alternating Over and Under in tip order
-from a date-parity start.
+pass flags exactly one story per menu. Over leads fill toward half of each
+date's games, rounded up, the games with the brightest Over-led story first.
 """
 
 from __future__ import annotations
+
+import json
 
 import pandas as pd
 import pytest
 
 from sportstradamus.prediction.stories.lead import (
-    LEAD_SIDES,
+    _pick_sides,
     assign_leads,
     attach_prominence,
     lead_seeds,
 )
 
-EVEN, ODD = "2026-10-03", "2026-10-04"
+DAY, NEXT_DAY = "2026-10-03", "2026-10-04"
 
 
 def _offers(*rows):
@@ -186,7 +188,7 @@ def test_lead_seeds_omits_a_side_with_no_strong_leg():
 
 
 def _stories(*stories):
-    """``(platform, game, date, rank, lead_side, moon_ev)`` per story -> its builder + moon rows.
+    """``(platform, game, date, rank, lead_side, moon_ev, star)`` per story -> builder + moon rows.
 
     Builder rows sit at breakeven, so only the moon EV can rank stories.
     """
@@ -201,17 +203,21 @@ def _stories(*stories):
                 "model_ev": ev,
                 "Date": date,
                 "lead_side": lead_side,
+                "star": star,
                 "lead": False,
             }
-            for platform, game, date, rank, lead_side, moon_ev in stories
+            for platform, game, date, rank, lead_side, moon_ev, star in stories
             for objective, ev in (("builder", 1.0), ("moon", moon_ev))
         ]
     )
 
 
-def _two_sided(platform, game, date):
+def _two_sided(platform, game, date, over_star=1.0):
     """An Over-led (rank 0) and an Under-led (rank 1) story for one menu."""
-    return [(platform, game, date, rank, side, 2.0) for rank, side in enumerate(LEAD_SIDES)]
+    return [
+        (platform, game, date, 0, "Over", 2.0, over_star),
+        (platform, game, date, 1, "Under", 2.0, 1.0),
+    ]
 
 
 def _flagged(stories, column):
@@ -222,126 +228,179 @@ def _flagged(stories, column):
     return dict(zip(keys, led[column], strict=True))
 
 
-def test_sides_alternate_in_tip_order_from_the_date_parity():
-    assert pd.Timestamp(EVEN).toordinal() % 2 == 0
-    assert pd.Timestamp(ODD).toordinal() % 2 == 1
-    # A series posts both Games on both dates and the tip order flips overnight, so
-    # each date walks its own tips. On EVEN the later key tips first, so a walk by
-    # key would flip that date's flags too.
+@pytest.mark.parametrize(("n_games", "n_over"), [(1, 1), (2, 1), (3, 2)])
+def test_two_sided_games_take_over_up_to_half_the_dates_games_rounded_up(n_games, n_over):
+    # Stars tie, so the earliest tips take the Overs. A lone game leads Over: half
+    # rounded down would leave it on Under every time.
+    games = [f"G{i}" for i in range(n_games)]
+    tips = {(DAY, game): f"2026-10-03T{17 + i}:00:00Z" for i, game in enumerate(games)}
+    stories = _stories(*(s for game in games for s in _two_sided("Underdog", game, DAY)))
+    assert _flagged(assign_leads(stories, tips), "lead_side") == {
+        ("Underdog", game, DAY): "Over" if i < n_over else "Under" for i, game in enumerate(games)
+    }
+
+
+def test_each_date_fills_from_its_own_games_by_its_own_tips():
+    # A series posts both Games on both dates and the tip order flips overnight. Each
+    # date has one Over to give, to its own earlier tip. On DAY that is the later
+    # key, so an order by key would flip that date's flags.
     tips = {
-        (EVEN, "AAA/BBB"): "2026-10-03T20:25:00Z",
-        (EVEN, "ZZZ/YYY"): "2026-10-03T17:00:00Z",
-        (ODD, "AAA/BBB"): "2026-10-04T17:00:00Z",
-        (ODD, "ZZZ/YYY"): "2026-10-04T20:25:00Z",
+        (DAY, "AAA/BBB"): "2026-10-03T20:25:00Z",
+        (DAY, "ZZZ/YYY"): "2026-10-03T17:00:00Z",
+        (NEXT_DAY, "AAA/BBB"): "2026-10-04T17:00:00Z",
+        (NEXT_DAY, "ZZZ/YYY"): "2026-10-04T20:25:00Z",
     }
     stories = _stories(*(s for date, game in tips for s in _two_sided("Underdog", game, date)))
     assert _flagged(assign_leads(stories, tips), "lead_side") == {
-        ("Underdog", "ZZZ/YYY", EVEN): "Over",
-        ("Underdog", "AAA/BBB", EVEN): "Under",
-        ("Underdog", "AAA/BBB", ODD): "Under",
-        ("Underdog", "ZZZ/YYY", ODD): "Over",
+        ("Underdog", "ZZZ/YYY", DAY): "Over",
+        ("Underdog", "AAA/BBB", DAY): "Under",
+        ("Underdog", "AAA/BBB", NEXT_DAY): "Over",
+        ("Underdog", "ZZZ/YYY", NEXT_DAY): "Under",
     }
 
 
-def test_one_sided_and_unled_games_leave_the_turn():
+def test_the_brightest_over_lead_takes_the_over_first():
+    tips = {(DAY, "AAA/BBB"): "2026-10-03T17:00:00Z", (DAY, "ZZZ/YYY"): "2026-10-03T20:00:00Z"}
+    stories = _stories(
+        # AAA/BBB tips first and holds the slate's brightest story, but that story is
+        # Under-led. Its Over lead scores 2.0, under the 2.5 of ZZZ/YYY's Over lead on
+        # Sleeper, which counts although Underdog's scores 1.0.
+        ("Underdog", "AAA/BBB", DAY, 0, "Over", 2.0, 2.0),
+        ("Underdog", "AAA/BBB", DAY, 1, "Under", 2.0, 3.0),
+        *_two_sided("Underdog", "ZZZ/YYY", DAY, over_star=1.0),
+        *_two_sided("Sleeper", "ZZZ/YYY", DAY, over_star=2.5),
+    )
+    assert _flagged(assign_leads(stories, tips), "lead_side") == {
+        ("Underdog", "AAA/BBB", DAY): "Under",
+        ("Underdog", "ZZZ/YYY", DAY): "Over",
+        ("Sleeper", "ZZZ/YYY", DAY): "Over",
+    }
+
+
+def test_untimed_games_go_after_timed_ones_by_key():
+    # Three games leave two Overs. "" sorts before every timestamp, so a plain string
+    # sort would hand both to the untimed games.
     tips = {
-        (EVEN, "G1"): "2026-10-03T17:00:00Z",
-        (EVEN, "G2"): "2026-10-03T18:00:00Z",
-        (EVEN, "G3"): "2026-10-03T19:00:00Z",
-        (EVEN, "G4"): "2026-10-03T20:00:00Z",
+        (DAY, "MMM/NNN"): "",
+        (DAY, "AAA/BBB"): "",
+        (DAY, "ZZZ/YYY"): "2026-10-03T23:00:00Z",
     }
     stories = _stories(
-        ("Underdog", "G1", EVEN, 0, "Under", 2.0),
-        *_two_sided("Underdog", "G2", EVEN),
-        ("Underdog", "G3", EVEN, 0, "", 2.0),
-        *_two_sided("Underdog", "G4", EVEN),
+        *_two_sided("Underdog", "ZZZ/YYY", DAY),
+        *_two_sided("Sleeper", "MMM/NNN", DAY),
+        *_two_sided("Sleeper", "AAA/BBB", DAY),
     )
-    # Over is wanted first. G1 can only show Under, so G2 still owes the Over; G3 has
-    # nothing led, so G4 still owes the Under.
     assert _flagged(assign_leads(stories, tips), "lead_side") == {
-        ("Underdog", "G1", EVEN): "Under",
-        ("Underdog", "G2", EVEN): "Over",
-        ("Underdog", "G3", EVEN): "",
-        ("Underdog", "G4", EVEN): "Under",
+        ("Underdog", "ZZZ/YYY", DAY): "Over",
+        ("Sleeper", "AAA/BBB", DAY): "Over",
+        ("Sleeper", "MMM/NNN", DAY): "Under",
     }
+
+
+def test_one_sided_and_unled_games_keep_their_side_and_count_in_the_slate():
+    tips = {(DAY, f"G{i}"): f"2026-10-03T{16 + i}:00:00Z" for i in range(1, 6)}
+    stories = _stories(
+        ("Underdog", "G1", DAY, 0, "Under", 2.0, 1.0),
+        *_two_sided("Underdog", "G2", DAY),
+        ("Underdog", "G3", DAY, 0, "", 2.0, 1.0),
+        *_two_sided("Underdog", "G4", DAY),
+        *_two_sided("Underdog", "G5", DAY),
+    )
+    # G1 can only show Under and G3 has nothing led, yet each counts among the date's
+    # five games. Half is three, so all three two-sided games lead Over: without
+    # either one it would be two, and G5 would lead Under.
+    assert _flagged(assign_leads(stories, tips), "lead_side") == {
+        ("Underdog", "G1", DAY): "Under",
+        ("Underdog", "G2", DAY): "Over",
+        ("Underdog", "G3", DAY): "",
+        ("Underdog", "G4", DAY): "Over",
+        ("Underdog", "G5", DAY): "Over",
+    }
+
+
+@pytest.mark.parametrize(
+    ("n_over_only", "two_sided_sides"),
+    [
+        # Half of three games is two, and the Over-only game holds one of them.
+        pytest.param(1, ["Over", "Under"], id="one-over-left"),
+        # Half of six games is three, and the Over-only games already pass it.
+        pytest.param(4, ["Under", "Under"], id="half-already-passed"),
+    ],
+)
+def test_over_only_games_count_toward_the_half(n_over_only, two_sided_sides):
+    over_only = [f"O{i}" for i in range(n_over_only)]
+    games = [*over_only, "T0", "T1"]
+    tips = {(DAY, game): f"2026-10-03T{17 + i}:00:00Z" for i, game in enumerate(games)}
+    stories = _stories(
+        *(("Underdog", game, DAY, 0, "Over", 2.0, 1.0) for game in over_only),
+        *_two_sided("Underdog", "T0", DAY),
+        *_two_sided("Underdog", "T1", DAY),
+    )
+    sides = _flagged(assign_leads(stories, tips), "lead_side")
+    assert [sides["Underdog", game, DAY] for game in games] == [
+        *["Over"] * n_over_only,
+        *two_sided_sides,
+    ]
 
 
 def test_unled_game_flags_its_best_moon_story():
     stories = _stories(
-        ("Underdog", "G1", EVEN, 0, "", 1.6),
-        ("Underdog", "G1", EVEN, 1, "", 2.4),
-        ("Underdog", "G1", EVEN, 2, "", 1.9),
+        ("Underdog", "G1", DAY, 0, "", 1.6, 1.0),
+        ("Underdog", "G1", DAY, 1, "", 2.4, 1.0),
+        ("Underdog", "G1", DAY, 2, "", 1.9, 1.0),
     )
-    flagged = _flagged(assign_leads(stories, {(EVEN, "G1"): ""}), "story_id")
-    assert flagged == {("Underdog", "G1", EVEN): "G1#1"}
+    flagged = _flagged(assign_leads(stories, {(DAY, "G1"): ""}), "story_id")
+    assert flagged == {("Underdog", "G1", DAY): "G1#1"}
 
 
 def test_led_story_outranks_a_richer_unled_one():
     stories = _stories(
-        ("Underdog", "G1", EVEN, 0, "", 3.0),
-        ("Underdog", "G1", EVEN, 1, "Under", 1.2),
+        ("Underdog", "G1", DAY, 0, "", 3.0, 1.0),
+        ("Underdog", "G1", DAY, 1, "Under", 1.2, 1.0),
     )
-    flagged = _flagged(assign_leads(stories, {(EVEN, "G1"): ""}), "story_id")
-    assert flagged == {("Underdog", "G1", EVEN): "G1#1"}
+    flagged = _flagged(assign_leads(stories, {(DAY, "G1"): ""}), "story_id")
+    assert flagged == {("Underdog", "G1", DAY): "G1#1"}
 
 
 def test_platforms_show_the_same_side_whenever_both_offer_it():
+    # G1 and G3 tip first and take the two Overs three games allow, so G2 leads Under.
     tips = {
-        (EVEN, "G1"): "2026-10-03T17:00:00Z",
-        (EVEN, "G2"): "2026-10-03T20:00:00Z",
-        (EVEN, "G3"): "2026-10-03T21:00:00Z",
+        (DAY, "G1"): "2026-10-03T17:00:00Z",
+        (DAY, "G2"): "2026-10-03T21:00:00Z",
+        (DAY, "G3"): "2026-10-03T20:00:00Z",
     }
     stories = _stories(
-        # Only Underdog leads G1, and its richer Under still yields to the wanted Over.
-        # The turn passes for both platforms, so Sleeper's first led game opens on Under.
-        ("Underdog", "G1", EVEN, 0, "Over", 2.0),
-        ("Underdog", "G1", EVEN, 1, "Under", 2.5),
-        ("Sleeper", "G1", EVEN, 0, "", 1.8),
-        *_two_sided("Underdog", "G2", EVEN),
-        ("Sleeper", "G2", EVEN, 0, "Under", 2.0),
-        ("Sleeper", "G2", EVEN, 1, "Over", 2.5),
+        # Only Underdog leads G1, and its richer Under still yields to the game's Over.
+        ("Underdog", "G1", DAY, 0, "Over", 2.0, 1.0),
+        ("Underdog", "G1", DAY, 1, "Under", 2.5, 1.0),
+        ("Sleeper", "G1", DAY, 0, "", 1.8, 1.0),
+        # Sleeper's richer Over yields to the game's Under just the same.
+        *_two_sided("Underdog", "G2", DAY),
+        ("Sleeper", "G2", DAY, 0, "Under", 2.0, 1.0),
+        ("Sleeper", "G2", DAY, 1, "Over", 2.5, 1.0),
         # Sleeper has no Over-led G3 story: its Under one beats a richer unled story.
-        *_two_sided("Underdog", "G3", EVEN),
-        ("Sleeper", "G3", EVEN, 0, "", 3.0),
-        ("Sleeper", "G3", EVEN, 1, "Under", 2.0),
+        *_two_sided("Underdog", "G3", DAY),
+        ("Sleeper", "G3", DAY, 0, "", 3.0, 1.0),
+        ("Sleeper", "G3", DAY, 1, "Under", 2.0, 1.0),
     )
     assert _flagged(assign_leads(stories, tips), "lead_side") == {
-        ("Underdog", "G1", EVEN): "Over",
-        ("Sleeper", "G1", EVEN): "",
-        ("Underdog", "G2", EVEN): "Under",
-        ("Sleeper", "G2", EVEN): "Under",
-        ("Underdog", "G3", EVEN): "Over",
-        ("Sleeper", "G3", EVEN): "Under",
-    }
-
-
-def test_untimed_games_walk_after_timed_ones_by_key():
-    # "" sorts before every timestamp, so a plain string sort would walk both untimed games first.
-    tips = {
-        (EVEN, "MMM/NNN"): "",
-        (EVEN, "AAA/BBB"): "",
-        (EVEN, "ZZZ/YYY"): "2026-10-03T23:00:00Z",
-    }
-    stories = _stories(
-        *_two_sided("Underdog", "ZZZ/YYY", EVEN),
-        *_two_sided("Sleeper", "MMM/NNN", EVEN),
-        *_two_sided("Sleeper", "AAA/BBB", EVEN),
-    )
-    assert _flagged(assign_leads(stories, tips), "lead_side") == {
-        ("Underdog", "ZZZ/YYY", EVEN): "Over",
-        ("Sleeper", "AAA/BBB", EVEN): "Under",
-        ("Sleeper", "MMM/NNN", EVEN): "Over",
+        ("Underdog", "G1", DAY): "Over",
+        ("Sleeper", "G1", DAY): "",
+        ("Underdog", "G2", DAY): "Under",
+        ("Sleeper", "G2", DAY): "Under",
+        ("Underdog", "G3", DAY): "Over",
+        ("Sleeper", "G3", DAY): "Under",
     }
 
 
 def test_one_story_per_menu_on_both_rows_and_a_rerun_changes_nothing():
-    tips = {(EVEN, "G1"): "2026-10-03T17:00:00Z", (EVEN, "G2"): ""}
+    tips = {(DAY, "G1"): "2026-10-03T17:00:00Z", (DAY, "G2"): ""}
     stories = _stories(
-        *_two_sided("Underdog", "G1", EVEN),
-        *_two_sided("Sleeper", "G1", EVEN),
-        ("Underdog", "G1", EVEN, 2, "", 3.0),
-        ("Sleeper", "G2", EVEN, 0, "", 1.5),
-        ("Sleeper", "G2", EVEN, 1, "", 1.8),
+        *_two_sided("Underdog", "G1", DAY),
+        *_two_sided("Sleeper", "G1", DAY),
+        ("Underdog", "G1", DAY, 2, "", 3.0, 1.0),
+        ("Sleeper", "G2", DAY, 0, "", 1.5, 1.0),
+        ("Sleeper", "G2", DAY, 1, "", 1.8, 1.0),
     )
     first = assign_leads(stories, tips)["lead"].copy()
     menu = ["platform", "Game", "Date"]
@@ -353,9 +412,32 @@ def test_one_story_per_menu_on_both_rows_and_a_rerun_changes_nothing():
     assert assign_leads(stories, tips)["lead"].equals(first)
 
 
+def test_replay_of_a_production_slate_leads_over_in_14_of_29_games(fixtures_dir):
+    """The rule on production's story menus of 2026-10-08 22:05 UTC, both platforms.
+
+    ``story_leads_2026-10-08.json`` is the moon rows of that run's
+    ``current_game_stories.parquet``. ``commence`` is each game's tip as
+    ``build_game_stories`` takes it, the first non-empty ``Commence`` on the game,
+    read off the same run's ``current_offers.parquet``: every game carried one
+    tip, on its Underdog rows.
+    """
+    moon = pd.DataFrame(json.loads((fixtures_dir / "story_leads_2026-10-08.json").read_text()))
+    tips = dict(zip(zip(moon["Date"], moon["Game"], strict=True), moon["commence"], strict=True))
+    over = (pd.Series(_pick_sides(moon, tips)) == "Over").groupby(level=0)
+    # Over leads of games per date, 14 of 29 in all.
+    assert over.agg(["sum", "size"]).to_numpy().tolist() == [[6, 12], [1, 2], [7, 14], [0, 1]]
+    stories = assign_leads(moon.assign(objective="moon"), tips)
+    assert stories[stories["lead"]].groupby(["platform", "lead_side"]).size().to_dict() == {
+        ("Sleeper", "Over"): 11,
+        ("Sleeper", "Under"): 15,
+        ("Underdog", "Over"): 11,
+        ("Underdog", "Under"): 18,
+    }
+
+
 def test_empty_story_frame_gains_a_bool_lead():
     # build_game_stories hands over an empty frame when no game yields a story.
-    columns = ["platform", "Game", "story_id", "objective", "model_ev", "Date", "lead_side"]
+    columns = ["platform", "Game", "story_id", "objective", "model_ev", "Date", "lead_side", "star"]
     out = assign_leads(pd.DataFrame(columns=columns), {})
     assert out.empty
     assert out["lead"].dtype == bool

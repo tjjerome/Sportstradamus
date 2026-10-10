@@ -5,8 +5,8 @@ which on DFS x.5 lines is usually a role player's Under. These pure pieces
 re-anchor it on the game's stars from snapshot columns alone, no new data:
 ``attach_prominence`` scores every offer's player, ``lead_seeds`` picks the leg
 an Over-led and an Under-led story grow from, and ``assign_leads`` flags the one
-story per ``(platform, Game, Date)`` the Games and Tonight tabs headline,
-alternating Over and Under down each date's slate.
+story per ``(platform, Game, Date)`` the Games and Tonight tabs headline, with
+Over leads filling toward half of each date's games.
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ STAR_RANK_ONE: dict[str, frozenset[str]] = {
     "NHL": frozenset({"C1", "W1", "D1", "G1"}),
 }
 
-# assign_leads indexes this by date-ordinal parity, so an even date opens on Over.
+# Over first: menu._cluster_strong_legs grows the led clusters in this order, so the
+# Over-led one claims its legs before the Under-led one.
 LEAD_SIDES: tuple[str, str] = ("Over", "Under")
 
 
@@ -82,37 +83,20 @@ def lead_seeds(
 def assign_leads(
     stories: pd.DataFrame, commence_by_game: Mapping[tuple[str, str], str]
 ) -> pd.DataFrame:
-    """Flag ``lead`` on one story per ``(platform, Game, Date)``, alternating sides.
+    """Flag ``lead`` on one story per ``(platform, Game, Date)``.
 
-    Each date walks its games in tip order from ``commence_by_game``, keyed
-    ``(Date, Game)`` so a series posting one Game on two dates orders each date
-    by its own tip; untimed games (``""``) walk after the timed ones, by key.
-    Over is wanted first on an even date ordinal and Under on an odd one. A game
-    takes the wanted side when either platform has a story led on it, and only
-    then does the turn pass; a game led on one side only takes that side and
-    leaves the turn. Each platform flags its story led on the game's side, else
-    its story led on the other side, else its best Shoot-the-Moon EV story, on
-    both objective rows. Flags read only snapshot keys, the date and which sides
-    exist, so reruns reproduce them and both platforms agree whenever both offer
-    the side. The frame is mutated in place and returned.
+    ``_pick_sides`` gives each ``(Date, Game)`` one side for both platforms,
+    with Over leads filling toward half of each date's games. Each platform
+    flags its story led on that side, else its story led on the other side,
+    else its best Shoot-the-Moon EV story, on both objective rows, so both
+    platforms agree whenever both offer the side. ``commence_by_game`` is each
+    game's tip keyed ``(Date, Game)``, ``""`` when untimed, so a series posting
+    one Game on two dates reads each date's own tip. Flags read only the frame
+    and those tips, so reruns reproduce them. The frame is mutated in place and
+    returned.
     """
     moon = stories[stories["objective"] == "moon"]
-    picks: dict[tuple[str, str], str | None] = {}
-    for date, day in moon.groupby("Date"):
-        sides_by_game = day.groupby("Game")["lead_side"].agg(set)
-        turn = pd.Timestamp(date).toordinal()
-        for game in sorted(
-            sides_by_game.index,
-            key=lambda g: (commence_by_game[date, g] == "", commence_by_game[date, g], g),
-        ):
-            sides = sides_by_game[game] - {""}
-            want = LEAD_SIDES[turn % 2]
-            if want in sides:
-                picks[date, game] = want
-                turn += 1
-            else:
-                # The wanted side is missing, so at most the other one is led here.
-                picks[date, game] = next(iter(sides), None)
+    picks = _pick_sides(moon, commence_by_game)
     on_pick = [
         side == picks[date, game]
         for side, date, game in zip(moon["lead_side"], moon["Date"], moon["Game"], strict=True)
@@ -129,3 +113,42 @@ def assign_leads(
         pd.MultiIndex.from_frame(top[story_key])
     )
     return stories
+
+
+def _pick_sides(
+    moon: pd.DataFrame, commence_by_game: Mapping[tuple[str, str], str]
+) -> dict[tuple[str, str], str | None]:
+    """The side each ``(Date, Game)`` leads on: Over leads fill toward half of each date's games.
+
+    ``moon`` is the Shoot-the-Moon row of every story, and a game is led on a
+    side when either platform has a story led on it. A game led on one side
+    keeps that side, and a game led on neither maps to ``None``. Games led on
+    both take Over until the date's Over leads reach half of its games, and the
+    rest take Under. Half counts every game the date has a story for and rounds
+    up, and the Over-only games count toward it. Rounded down, a date's lone
+    two-sided game (a Thursday or Monday night NFL game) would lead on Under
+    every time. The games with the highest ``star`` on an Over-led story take
+    Over first, ties by tip from ``commence_by_game`` (untimed ``""`` last),
+    then by game key.
+    """
+    picks: dict[tuple[str, str], str | None] = {}
+    for date, day in moon.groupby("Date"):
+        sides_by_game = day.groupby("Game")["lead_side"].agg(set).map(lambda sides: sides - {""})
+        over_star = day[day["lead_side"] == "Over"].groupby("Game")["star"].max()
+        two_sided = sorted(
+            (game for game, sides in sides_by_game.items() if len(sides) == 2),
+            key=lambda game: (
+                -over_star[game],
+                commence_by_game[date, game] == "",
+                commence_by_game[date, game],
+                game,
+            ),
+        )
+        half = (len(sides_by_game) + 1) // 2
+        over_only = sum(sides == {"Over"} for sides in sides_by_game)
+        for game, sides in sides_by_game.items():
+            if len(sides) < 2:
+                picks[date, game] = next(iter(sides), None)
+        for overs_taken, game in enumerate(two_sided, start=over_only):
+            picks[date, game] = "Over" if overs_taken < half else "Under"
+    return picks
