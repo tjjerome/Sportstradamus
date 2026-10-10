@@ -75,7 +75,8 @@ name would collide with the sportsbook team markets in the archive and the bare 
 becomes a 0.5 line. The frozen contract is
 [tests/golden/test_books_get_ud.py](../tests/golden/test_books_get_ud.py). An empty
 feed logs at WARNING and returns nothing: a 426 from a retired path is the signature
-to watch (§12). `/v1/teams` and `beta/v3/rival_lines` are no longer requested.
+to watch (§12). A full feed with no even pick raises (§7.4). `/v1/teams` and
+`beta/v3/rival_lines` are no longer requested.
 
 The web app's own bundle still knows this feed: the `entry.app` chunk maps
 `regular` → `/v1/over_under_lines` and `live` → `/beta/v2/live_over_under_lines`
@@ -795,10 +796,16 @@ Since October 2026 the app shows a pick's decimal price instead: an even pick re
 both sides (√3.5, the two-pick Power root) and a priced pick about 1.87 times its multiplier
 **[OWNER]**, at a finer grain than the feed's two decimals: a shown 1.97 is no two-decimal
 multiplier times 1.87 **[INF]**. The feed still carried `payout_multiplier` 1.0 for an even
-pick on 2026-10-08 (323 of the 1,617 Underdog rows on production's board), and even picks
+pick on 2026-10-10 (268 of the 2,609 Underdog rows on production's board), and even picks
 still pay the tables of §6.8. If the feed's field ever follows the app, every Underdog payout
-here prices about 1.87 times too high, and an even pick stops reading exactly 1.0, the value
-every even-pick rule tests for. The other fields are representations of the same price
+here prices about 1.87 times too high, and an even pick stops reading exactly 1.0
+(`UNDERDOG_EVEN_PICK_MULTIPLIER`), the value every even-pick rule tests for. `get_ud` checks
+for it on every scrape: a feed of `UD_EVEN_PICK_MIN_LINES` lines or more with no side at
+exactly 1.0 raises instead of returning offers. The board run then scores Sleeper alone and
+exits 1, and the ledger build for Underdog stops on the same error. The check misses the
+change on a board where some heavily favored side's new price happens to read exactly 1.0; a
+side that close (a 0.53 or 0.54 multiplier today) was on the board on 17 of the 71 days since
+2026-08-01. The other fields are representations of the same price
 whose exact relationship is **[INF]** until a settled entry confirms it:
 
 - In the capture 109 of the 234 two-sided lines carry unequal multipliers (Rush + Rec
@@ -1213,10 +1220,10 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 
 ## Changelog
 
+- 2026-10-10 `get_ud` raises on a full feed with no even pick (§7.4)
 - 2026-10-08 owner app read: 4-pick Flex one-loss tier 1.4 (was 1.8); app shows decimal prices (even pick 1.87×), feed multiplier unchanged; four Power pair quotes (§6.8)
 - 2026-10-04 `underdog_payouts.json` set to the §6.8 quotes (owner re-confirmed in app); file-vs-quote column dropped
 - 2026-09-11 team and game markets for every modeled league from one `match_grouped_lines?market_categories[]=` read per sport (P45, §7.6): NFL pills dropped; markets keyed `team <slug>` / `match <slug>`; mass-option lines skipped
 - 2026-09-11 scraper rebuilt on this doc (`books/underdog.py`): feed + core + budgeted rungs (three workers, 120 s, empty-streak stop; the origin answers empty past ~36/s, §9.4); `/v1/teams` and `rival_lines` gone; team codes from lobby `teams` dicts (esports titles list the away side first, §7.3)
 - 2026-09-10 modifier mapped: slip = table × Π picks × m; Flex m = Gaussian copula, ρ 0.48 per pair type; Power m pair-specific + asymmetric; untaxed pairs = free correlation. Rivals retired, Ladders replaced them (owner)
 - 2026-09-10 authed batch: `entry_slips/estimate` quotes payout tables (2–8 picks) + which pairs are taxed; scaffolds/sections public, `market_filters` needs token; `state_configs` needs lat/long; ladders not on web
-- 2026-09-10 alternates path found (`v3/over_unders/<id>/alternate_projections`); team/game markets catalogued (5 categories, 29-pill sweep); feed filters by `over_under_ids`; `limit` needs a pill

@@ -130,7 +130,7 @@ Sportstradamus/
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads the per-league correlation parquets, assembles Σ, scores parlay legs (calls `parlay.beam_search_parlays`) |
-| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `resolve_leg_stat` |
+| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `leg_market_map` (a platform's market labels under the league's own cell keys), `resolve_leg_stat` |
 | `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves |
 | `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam |
 | `stories/` | Narrative generation for the dashboard: game context, offer "why" text, parlay theses, offer details |

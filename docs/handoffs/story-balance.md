@@ -4,8 +4,8 @@
 [docs/story_voice.md](../story_voice.md), [docs/dashboard_ux_redesign.md](../dashboard_ux_redesign.md)
 (Tonight and Games rows), [docs/ship_gate.md](../ship_gate.md) (Gate 2), and the research brief
 [docs/archive/researcher_selection_shrink.md](../archive/researcher_selection_shrink.md).
-Status: OPEN — every workstream landed on `devel` 2026-10-03, unpushed; the first live read waits on
-the next `prophecize` and `reflect` after the push (§7).
+Status: OPEN — every workstream is live on `devel`; the lead rule of §5 and the Tonight card without
+its side arrow landed 2026-10-10. The live read is §7.
 
 ## 1. Mission & money logic
 
@@ -45,9 +45,12 @@ the Overs are better than they are.
 ## 2. Locked decisions (owner)
 
 - Model scope: diagnostic + guardrails now; the selection lever research-gated (it was, and it died).
-- Balance: slate-level Over/Under alternation of the lead story at the unchanged `_MENU_EDGE_FLOOR`
-  (0.05); the top-EV story stays in the menu, often behind the led ones (median cost ≈ 0.05 EV on the
-  first slate; accepted).
+- Balance: Over leads fill toward half of each date's games (§5), at the unchanged
+  `_MENU_EDGE_FLOOR` (0.05); the top-EV story stays in the menu, often behind the led ones (median
+  cost ≈ 0.05 EV on the first slate; accepted). The rule chooses which story leads a game. It does
+  not change the legs inside stories: that pool is the models', and no balanced leg mix is promised.
+- Tonight shows the lead story's headline with no side mark. Where the two platforms lead a game on
+  different sides, the card takes the higher-EV lead.
 - Star: computed prominence from the snapshot alone (`Star` = rank-1 depth label + line percentile +
   market breadth, in [0, 3]); no new data; **no MLB depth term** (B1..B9 is the batting slot, not
   usage), so MLB stars top out at 2.0 on line percentile + breadth.
@@ -91,7 +94,8 @@ rendering on the old snapshots. A `KeyError` on `Star` in Tonight means the load
 | `cc2f8942` | Receipts panel "Realized by side — platform payouts" (`components/by_side.py`) | Receipts, after Skeptic checks |
 | `6a4b7dc9`, `c9c303a8` | `stories/lead.py`: `attach_prominence` (`Star`), `lead_seeds`, `assign_leads`; `prophecize` scores and persists `Star` | `current_offers.Star`, story `lead*` columns |
 | `d37ef588`, `db6e834c`, `0806d11a` | engine takes a `lead`; the menu grows an Over-led and an Under-led story per game (`Kelly > 0` and edge ≥ 0.05 required of every leg, lead in both presets, led stories first, slate-wide headline dedup); pricing helpers moved to `stories/pricing.py` | `current_game_stories` |
-| `a3ca2684`, `c12b90af`, `624a45a8` | `game_headline` prefers the lead story; Tonight sorts `(urgent, −star, −favored, minutes)` behind the lead side's arrow; Games opens on the lead story with "Over-led · " / "Under-led · " labels | Tonight, Games |
+| `a3ca2684`, `c12b90af`, `624a45a8`, `d35a8aa3` | `game_headline` prefers the lead story; Tonight sorts `(urgent, −star, −favored, minutes)` and shows the headline with no side mark; Games opens on the lead story with "Over-led · " / "Under-led · " labels | Tonight, Games |
+| `0212ca65` | `lead._pick_sides`: Over leads fill toward half of each date's games (§5) | story `lead` flags, Tonight, Games |
 | `31a70732` | why/dek clauses read the defense (`gives`/`takes`) and the bet (`above_for` … `below_against`); `bank_cell` resolves `mistakes` before any `production` fallback | offer Why text, story deks |
 | `6fc2dbd4` … `c1354dfe`, `0450274f` | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
 
@@ -108,10 +112,13 @@ or join a story). `lead_seeds` picks, per side, the strong leg with the highest 
 The Over-led cluster grows first, then the Under-led one, then the old greedy clusters; a lead whose
 cluster prices nothing borrows one leg and is priced once more. `_best_subsets` only enumerates
 subsets containing the lead, so Builder and Moon stay true argmaxes with the lead inside. Led stories
-rank first. `assign_leads` then walks each date's games in tip order and alternates the wanted side
-(Over first on an even date ordinal), taking the other side only when the wanted one has no led
-story; both platforms show the same side whenever both offer it. The Tonight arrow and the Games
-default story read that `lead` flag.
+rank first. `assign_leads` then gives each game one side for both platforms (`_pick_sides`). A game
+led on one side keeps it. Games led on both take Over until the date's Over leads reach half of its
+games, and the rest take Under. Half counts every game the date has a story for, on either platform,
+and rounds up; an Over-only game counts toward it. The games with the brightest Over-led story
+(`star`) take Over first, ties by tip, then by game key. A platform with no story led on the game's
+side shows its other one, so both platforms show the same side whenever both offer it. Tonight's
+headline and the Games default story read that `lead` flag.
 
 ## 6. Research verdict: the selection-shrink lever is KILLED
 
@@ -157,10 +164,9 @@ R = "src/sportstradamus/data/runtime/"
 o = pd.read_parquet(R + "current_offers.parquet")
 s = pd.read_parquet(R + "current_game_stories.parquet")
 led = s[s["lead"] & (s["objective"] == "moon")]
-both = s[s["lead_side"] != ""].groupby(["platform", "Date", "Game"])["lead_side"].nunique()
-menus_with_both = both[both == 2].index
-over_share = led.set_index(["platform", "Date", "Game"]).loc[led.set_index(["platform", "Date", "Game"]).index.isin(menus_with_both), "lead_side"].eq("Over").mean()
-print(f"Over share of lead headlines where both sides exist: {over_share:.2f}  (want 0.40–0.60)")
+leads = led.groupby(["Date", "platform"])["lead_side"].agg(over=lambda side: int((side == "Over").sum()), menus="size").unstack("platform")
+leads.insert(0, "games", s.groupby("Date")["Game"].nunique())
+print(leads.to_string())
 legs = pd.DataFrame([dict(l, story=r.story_id) for r in s.itertuples() for l in r.legs])
 print("story legs below the floor or with Kelly <= 0:", int(((legs["Model EV"] - 1 < 0.05) | (legs["Kelly"] <= 0)).sum()), "(want 0)")
 print("-EV offers with Kelly > 0:", int(((o["Model EV"] < 1) & (o["Kelly"] > 0)).sum()), "| payout > 2.5 with Kelly > 0:",
@@ -173,8 +179,17 @@ print("Under rows whose Market CLV == close − open:", f"{((u['Market CLV'] - (
 EOF
 ```
 
-Then eyeball Tonight: at least one Over arrow whenever an Over-led story exists, star games above
-non-star games within a tier, and the Games tab opening on the led story.
+The first table is each date's games beside each platform's Over leads (`over`) and story menus
+(`menus`). The rule fills Over toward half of a date's games, counted across both platforms, so a
+platform's `over` reaches half only where the pool allows: a date falls short when too few of its
+games have an Over-led story at all, and a platform falls short when it has no Over-led story for a
+game the rule gave to Over. On the slate of 2026-10-08 the rule gave Over 14 of 29 games (by date 6
+of 12, 1 of 2, 7 of 14, 0 of 1); Underdog led Over in 11 of 29 menus and Sleeper in 11 of 26, up
+from 8 and 10 under the strict alternation it replaced. The other lines carry their targets in
+parentheses.
+
+Then eyeball Tonight: star games above non-star games within a tier, and the Games tab opening on
+the led story.
 
 ## 8. Behaviour changes you will see (read before pushing)
 

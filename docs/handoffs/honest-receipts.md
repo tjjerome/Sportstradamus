@@ -3,12 +3,13 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–7 are on `devel` (§4); all three briefs returned (R1
+`docs/archive/` (§5). Status: OPEN — waves 1–9 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
-profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–25 (§2)
-are built (§6), and the stored game lines of four leagues are re-read on the training box (§6,
-I6f). No retrain has run since, so no served probability has moved with the training-side
-changes. What waits on the owner is §8.
+profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–28
+and 32–35 (§2) are built (§4, §6), and the stored game lines of four leagues are re-read on the
+training box (§6, I6f). Approved and not yet run: the MLB rebuild and retrain behind decision 29's
+fix, the NHL rebuild (30) and production's re-read (31). No retrain has run since the re-read, so
+no served probability has moved with the training-side changes. What waits on the owner is §8.
 
 ## 1. Mission & money logic
 
@@ -52,7 +53,10 @@ have (labelled I6, §6), judged on the recommended legs by the tail scorecard (l
 ## 2. Locked decisions (owner)
 
 Decisions 1 to 14 are of 2026-10-04. Decisions 15 to 25 are the owner's answers of 2026-10-08 to
-the asks that then stood in §8, each named here by what it decides.
+the asks that then stood in §8, each named here by what it decides. Decision 26 is of 2026-10-09.
+Decisions 27 to 35 are the owner's go of 2026-10-08 on the story page and on the asks that
+building 15 to 25 raised ("Take all of your recommendations except waiting on the MLB offseason.
+Let's fix it now"), in the order they stood in §8.
 
 1. **Hero cohort = recommended**: edge ≥ 5 % at the platform payout, payout in (1, 2.5], with all
    posted sides as the context row. The ledger's `recommended` definition carries the same cap
@@ -117,6 +121,26 @@ the asks that then stood in §8, each named here by what it decides.
     the rule is off while the feed holds no opening night (silent over three days). A new NBA or
     WNBA season stands on last season's rosters until its own players arrive, and a new NBA
     season reads the newest earlier roster seed file until its own is dropped in.
+27. **The Tonight card shows no side arrow, and a date's Over leads fill toward half of its
+    games.** The rule picks which story leads a game. The legs inside a story are the models',
+    so no balanced leg mix is promised. Where the platforms lead a game on different sides the
+    card keeps the higher-EV lead ([story-balance.md](story-balance.md) §2, §5).
+28. **49ers and 76ers games get their game lines again**: a team name is matched under one
+    spelling on both sides, in every league. Past games stay at the default line (§8).
+29. **The MLB profile defect is fixed now, not in the off-season**: the fix, then a cold rebuild
+    of the MLB matrices and a retrain. Nothing is synced to production before the owner has
+    seen the gate table.
+30. **The NHL matrices are rebuilt before the season's first NHL retrain**, for the four slope
+    features (§7).
+31. **Production's gamelog gets the same game-line re-read** when the first retrained models
+    are synced.
+32. **NBA and WNBA Underdog fantasy-points rows get a closing price**: a close is read under
+    the league's own market name, and history keeps its own.
+33. **The Underdog scrape fails loud the day a full feed holds no even pick**
+    ([underdog_api.md](../underdog_api.md) §7.4).
+34. **A 4-pick Underdog entry stays Flex** (§7, the entry-kind record).
+35. **Sleeper NHL assists, points and blocks legs go by the league's own market key**, in the
+    parlay search, the stories and a slip seeded from a story.
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, `stat_meta.json` never committed from a session.
@@ -124,7 +148,7 @@ the three gates once per wave, `stat_meta.json` never committed from a session.
 ## 3. Verify before you trust
 
 ```bash
-git log --oneline devel -37                       # the wave commits (§4)
+git log --oneline 3685161b^..devel                # the wave commits (§4) among the others since
 poetry run pytest tests/golden/test_realized_offers.py tests/golden/test_realized_by_side.py \
     tests/golden/test_receipts_reconciles_ledger.py tests/golden/test_receipts_page_render.py -n0 -q
 poetry run python - <<'PY'
@@ -158,10 +182,10 @@ nowhere on the page.
 - An even Underdog pick is a `Boost` of exactly 1.0 in the feed, and every even-pick rule in the
   code tests for that value (the per-pick valuation above, the payout tables' base case, the
   `even_picks` paper bettor). The app stopped showing that number in October 2026: it prints the
-  pick's decimal price, so an even pick reads 1.87× (√3.5). The feed still sent 1.0 on 2026-10-08
-  (323 of 1,617 Underdog rows on production's board, no value with a third decimal). Nothing
-  guards the day the feed follows the app; every Underdog payout would then price about 1.87
-  times too high with no error ([underdog_api.md](../underdog_api.md) §7.4; §8).
+  pick's decimal price, so an even pick reads 1.87× (√3.5). The feed still sends 1.0. The day it
+  follows the app every Underdog payout would price about 1.87 times too high, so the scrape
+  raises when a full feed holds no even pick (decision 33; the check, its blind spot and the
+  last count are in [underdog_api.md](../underdog_api.md) §7.4).
 - `underdog_payouts.json` is the owner's app read of 2026-10-08 (decision 25). One value moved
   with it: the 4-pick Flex pays 1.4× with one miss, not the 1.8× captured in September. Anything
   that priced or settled a 4-pick Flex before that date used 1.8 (§7, the entry-kind record).
@@ -204,6 +228,13 @@ nowhere on the page.
 | 7 | `33ce9b28` | A push is half an Over in training (decision 19, I6a): `training/labels.over_label` at the eleven label sites, the ship gates' label included |
 | 8 | `cf0f374e` | A new NBA or WNBA season starts on last season's rosters (decision 26): `Stats._roster_player_df` falls back while the season holds nobody, `nba._roster_seed_path` reads the newest earlier seed file, and one `_merge_season_roster` adds a team the season lacks (production's WNBA 2026 roster held 6 of 15 teams) |
 | 8 | `f3713b95` | A pre-season game is never priced (decision 26): `prediction/scoring._in_season_markets` drops an offer dated before the feed's opening night, after it is archived |
+| 9 | `d35a8aa3` | The Tonight card shows the lead story's headline with no side arrow (decision 27); `narrative.game_lead_side` retired to `src/deprecated/` |
+| 9 | `0212ca65` | Over leads fill toward half of each date's games (decision 27): `stories/lead._pick_sides` ([story-balance.md](story-balance.md) §5) |
+| 9 | `0039f100` | 49ers and 76ers games get their game lines (decision 28): `moneylines._TEAM_ABBR` folds the config's team names the way the odds feed's are folded |
+| 9 | `d19a597b` | A close is read under the league's own market name (decision 32): `clv._fill_one_group`, `clv._row_movement` and the ledger's `join_clv` fold through `helpers.archive_market`; history's `Market` is unchanged |
+| 9 | `439bbd34` | The Underdog scrape raises when a full feed holds no even pick (decision 33): `UD_EVEN_PICK_MIN_LINES`, `UNDERDOG_EVEN_PICK_MULTIPLIER` |
+| 9 | `b2f3274c`, `0c4fc099`, `09f64934` | Parlay and story legs name a market by the league's own key (decision 35): `parlay.leg_market_map` builds on `helpers.cell_market`, and a slip seeded from a story finds its board rows under that key |
+| 9 | `67309a51` | A rebuilt base profile forgets the market it held (decision 29): `Stats.base_profile` clears `profiled_market`, so an MLB matrix build profiles the market on every game day |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
@@ -318,8 +349,8 @@ inside its group; §8 restates each open one as a plain question.
      total's correlation with the runs then scored fell from .58 to .18. What the re-read leaves:
      the four slope features keep their cached values until a matrix is rebuilt (§7); every
      patched matrix has a new hash, so a stored model-selection verdict is no longer evidence for
-     its cell; production's own gamelog is untouched (§8); and a model changes only at its next
-     retrain. The scripts, their output and the pre-run copies are in
+     its cell; production's own gamelog is untouched (decision 31, not yet run); and a model
+     changes only at its next retrain. The scripts, their output and the pre-run copies are in
      `~/backups/sportstradamus/2026-10-08-gameline-reread/`. The NFL enrichment miss is fixed
      (decision 21): since the player column was renamed in September 2025 the schedule joined new
      rows on the week alone, so a new row was looked up under its week's first game day and 84 of
@@ -559,7 +590,9 @@ eras.
   points [−2.3, +3.5]). Decision 8's 1.83 is the mean of the Power roots at the owner's sizes,
   while `payouts.py` builds 4- to 6-pick Underdog entries as Flex (`POWER_MAX_SIZE` = 3) and the
   paper ledger plays Power at 2–3 picks and Flex at 4–6; at the corrected tier a 4-pick entry
-  whose legs read above .5385 prices higher as a 12× Power (§8). By side, each prop once:
+  whose legs read above .5385 prices higher as a 12× Power; it stays Flex (decision 34), since
+  both kinds break even at the same .537 and the read that would choose Power is the one that
+  runs 8 points high. By side, each prop once:
   recommended Unders hit .541 (1,074 props; .553 [.520, .592] per posted line) and recommended
   Overs .493 (410 props; .496 [.405, .560] per posted line). One window, cut after the fact, and
   4,142 of the 9,811 settled even-pick legs found no game in the training box's gamelogs, so
@@ -588,18 +621,22 @@ eras.
   bettor deals its entries evenly over the day's recommended legs instead of keeping the entries
   with the highest joint read.
 
-- MLB training skips a hitter's own market profile. In the twelve hitter matrices and pitches
-  thrown, `Player z`, `Player home`, `Player moneyline gain` and `Player totals gain` are non-zero
-  on 0.1 % to 5.6 % of rows (5 to 9 of the 122 to 368 dates), against 92 % to 99 % in the six
-  other pitcher matrices. The cause is a guard meant to save work: `StatsMLB.get_depth` calls
-  `base_profile(date)`, which moves the profile date and empties the player profile, and
-  `profile_market` then sees the same market on the same date and returns early
-  (`Stats._begin_profile_market`). Only the first date of a build runs it. Serving does run it.
-  In the serve-time log the four columns are filled on every row of the cells whose model kept
-  them (batter strikeouts, where training saw them on 5.5 % of rows), and the ten other hitter
-  models carry no such feature at all. So those models have never learned from the player's
-  standardized level or home split in the market they price. Found while checking the re-read's
-  dry run; §8.
+- MLB training skipped a market's profile on every game day of a matrix build but the first. In
+  the twelve hitter matrices and pitches thrown, `Player z`, `Player home`, `Player moneyline
+  gain` and `Player totals gain` are non-zero on 0.1 % to 5.6 % of rows (5 to 9 of the 122 to
+  368 dates), against 92 % to 99 % in the six other pitcher matrices; the same skip left the
+  team-defense columns at zero and kept the pitcher profile of the build's first game day. The
+  cause was a guard meant to save work: `StatsMLB.get_depth` calls `base_profile(date)`, which
+  moved the profile date and emptied the profile frames, and `profile_market` then saw the same
+  market on the same date and returned early (`Stats._begin_profile_market`). Serving did run
+  it. In the serve-time log the four columns are filled on every row of the cells whose model
+  kept them (batter strikeouts, where training saw them on 5.5 % of rows), and the ten other
+  hitter models carry no such feature at all. So those models have never learned from the
+  player's standardized level or home split in the market they price. `base_profile` now
+  forgets the market it held when it rebuilds (decision 29): walked in the matrix builder's
+  order over the training box's last two game days, the share of a game's hitters with a
+  `Player z` was .89 then 0 before the fix and about .9 on both after. The cached matrices,
+  and every model trained on them, keep the gap until the rebuild and retrain.
 - The four slope features after the re-read (`Player` and `Defense` `moneyline gain` and
   `totals gain`: a stat regressed on the stored game lines of the trailing 300 days). The matrix
   patch leaves them at their cached values. Recomputed from the re-read gamelog on sampled dates
@@ -607,66 +644,88 @@ eras.
   receiving yards (30 dates; .77 to .93 on the 2026 rows alone), .96 to .99 for WNBA points,
   .48 to .69 for NHL shots and .16 to .23 for MLB pitcher strikeouts, where the cached value is
   zero on 60 % of the rows that would now hold one. A patch is enough for NFL and WNBA; MLB and
-  NHL need a matrix rebuild to see the re-read lines in these four columns. They carry a median
+  NHL need a matrix rebuild to see the re-read lines in these four columns (decisions 29 and
+  30). They carry a median
   1.4 % of a cell's stored importance in MLB, 1.7 % in NHL, 0.6 % in NFL and 0.8 % in WNBA.
-- No game line is stored for a 49ers or a 76ers game. `helpers.text.remove_accents` title-cases
-  a team name, "San Francisco 49ers" becomes "San Francisco 49Ers", the abbreviation lookup
-  misses, and `moneylines._store_game_moneylines` then stores neither side of the game. The
-  archive's newest 49ers Moneyline row is for 2024-02-11 and the 76ers' for 2024-05-02. In
-  training, 78 NFL team-games sit at the default (34, 38 and 6 in 2024 to 2026). In serving,
-  every player of both teams in such a game is scored at a 0.5 win chance and the league-average
-  team total: 22 players in the serve-time log for the Seattle game of 2026-10-11. §8.
-- A WNBA fantasy-points row on Underdog never gets a closing price: 0 of the 1,062 in history.
+- No game line was stored for a 49ers or a 76ers game from 2024-05-07 until decision 28.
+  `helpers.text.remove_accents` title-cases a team name, "San Francisco 49ers" became "San
+  Francisco 49Ers", the abbreviation lookup missed, and `moneylines._store_game_moneylines`
+  then stored neither side of the game. The archive's newest 49ers Moneyline row was for
+  2024-02-11 and the 76ers' for 2024-05-02. The lookup now folds the config's names the same
+  way (`moneylines._TEAM_ABBR`). No other lookup changes in the five polled leagues; in the two
+  college lists, which no job polls, 159 more names resolve and two (Augustana (IL) and (SD))
+  fold to one key. What the fix does not reach: 39 49ers games (78 NFL team-games: 34, 38 and 6
+  in 2024 to 2026) and 176 76ers games sit at the default in training (§8), and in serving
+  every player of both teams in such a game was scored at a 0.5 win chance and the
+  league-average team total (22 players in the serve-time log for the Seattle game of
+  2026-10-11) until an odds poll on the fixed code stores the game.
+- A WNBA fantasy-points row on Underdog never got a closing price: 0 of the 1,062 in history.
   History files the market as `fantasy points underdog` and the archive as
   `fantasy points prizepicks` (`helpers.archive_market` renames it for NBA and WNBA), and the
-  close read passes history's name through. NBA rows will do the same when its season opens.
-  They carry no closing-line value and add nothing to their cell's trust figure. §8.
+  close read passed history's name through, as NBA's rows would have from opening night. Both
+  close readers fold the name now (decision 32) and history keeps its own. Replayed on
+  production's rows against the training box's archive, all 1,062 take a close; 776 older rows
+  of the two leagues hold no line to read one at. The close is Underdog's own last quote, the
+  archive's only book for that market as for NFL's: an evaluation reference (decision 5).
+- Sleeper NHL assists, points and blocks legs read no correlation and could not settle until
+  decision 35. Two hand-kept maps renamed a market to the league's key for Underdog's
+  capitalized labels only, so the parlay search keyed a Sleeper leg `C1.AST` against matrices
+  that hold `assists`, and a same-game parlay stored a `stat` the NHL gamelog has no column
+  for: at settlement the leg would have counted as a push. These legs are 58 % of Sleeper's NHL
+  rows since 2026-09-20 (2,641 of 4,578); the training box holds no Sleeper NHL parlay yet. One
+  rule (`helpers.cell_market`) builds the map now, and all 23 NHL labels of the two platforms
+  resolve to a market in the stored correlation matrices and to a gamelog column, where four
+  did not (Sleeper's assists, points and blocks, Underdog's Blocks). The board itself still
+  names NHL assists and points `AST` and `PTS`, and NBA and WNBA Underdog fantasy points by the
+  platform's name, so a slip seeded from a story folds both sides to the league's key.
 
 ## 8. Owner asks (one each)
 
-The eleven asks that stood here were answered on 2026-10-08 and are decisions 15–25 (§2). The
-ones below came out of building them. None is built, and each record is in §7 or the section it
-names. Not asked because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0;
-no setting tested returns $1 per $1 while the legs are over-read).
+The nine asks that stood here were answered by the owner's go of 2026-10-08 and are decisions
+28–35 (§2), all but the pairs to read in the app (2 below). The rest came out of building them
+and decision 26. None is built, and each record is in §7 or the section it names. Not asked
+because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting
+tested returns $1 per $1 while the legs are over-read).
 
-1. **Store game lines for 49ers and 76ers games again?** (yes / no; recommended yes.) Today every
-   player in a 49ers game, on both teams, is scored as if the game were a coin flip with an
-   average total, and the same will hold for 76ers games when the NBA opens (§7). The fix is a
-   few lines where the team name is matched. Past games stay at the default unless their lines
-   are fetched again, which costs Odds API credits: a second question for after the first.
-2. **Fix the MLB training bug that leaves a hitter's own profile out of thirteen models?** (yes /
-   no; recommended yes, during the off-season.) The fix is small (§7). It reaches a model only
-   through a full rebuild of those thirteen matrices and a retrain, and MLB's season ends this
-   month, so nothing is lost by doing it before the 2027 season.
-3. **Rebuild the NHL matrices before the season's first NHL retrain?** (yes / no; recommended
-   yes.) The re-read refreshed six game-line columns in place; four slope features built from
-   stored game lines keep their old values until a matrix is rebuilt, and in NHL the old values
-   are far from the new ones (§7). MLB's rebuild is ask 2's. NFL and WNBA do not need one.
-4. **Give production's gamelog the same re-read when the first retrained models are synced?**
-   (yes / no; recommended yes.) Serving computes the slope features from production's own stored
-   game lines, which still hold the old reads. Left alone, a model retrained on the re-read
-   lines is served features built from the old ones.
-5. **Give NBA and WNBA Underdog fantasy-points rows a closing price?** (yes / no; recommended
-   yes, before the NBA opens.) One rename at the close read (§7).
-6. **Add a loud check for the day Underdog's feed follows its app?** (yes / no; recommended yes.)
-   The app now shows an even pick as 1.87×; the feed still sends 1.0, and every even-pick rule
-   tests for exactly 1.0 (§3). If the feed changes, every Underdog payout prices about 1.87
-   times too high with no error. The check would stop the scrape and say why.
-7. **Build a 4-pick Underdog entry as Power when its legs read high?** (leave as Flex / Power
-   above a .5385 read; recommended leave.) At the app's 1.4× one-miss tier a 4-pick entry prices
-   higher as a 12× Power once its legs read above .5385 (§7). Both kinds break even at the same
-   .537 hit rate, and the read that would choose Power is the one that runs 8 points high.
-8. **Read the nine other banned touchdown pairs in the app?** (ten minutes; no automated
-   probing.) The one banned pair checked, a quarterback's pass TDs with his own receiver's TDs,
+1. **Buy the past game lines of 49ers and 76ers games?** (yes / no; recommended no for now.)
+   About 6,450 Odds API credits: 39 49ers dates and 176 76ers dates since 2024-05-07 at 30
+   credits a date (§7). A bought line reaches a model only through a matrix rebuild, NBA's
+   stored game lines are not re-read at all (decision 20), and a cycle's leftover credits,
+   about 1,000, are spoken for by the monthly NFL combo-history job.
+2. **Read the nine other banned touchdown pairs in the app** (ten minutes; no automated
+   probing). The one banned pair checked, a quarterback's pass TDs with his own receiver's TDs,
    is allowed at 0.794 (§6, I5). The nine other keys of that family, and every sub-1 value
-   without a quote, are guesses until a payout read in the app backs them.
-9. **Let Sleeper NHL assists and points legs read their correlation and settle?** (yes / no;
-   recommended yes.) Two places still rename a market to the league's key for Underdog's
-   capitalized labels only. The parlay search builds a Sleeper leg's correlation key as `AST` or
-   `PTS` (`correlation._build_cmarket`), and the NHL correlation matrices hold `assists` and
-   `points` and neither of the other two, so every pair with such a leg reads as uncorrelated.
-   A same-game parlay stores the leg's stat as `AST` or `PTS` too (`analysis._leg_market_map`),
-   a column the NHL gamelog lacks, so when the parlay settles that leg counts as a push. Both
-   checked by running the two builders against the stored matrices and the gamelog. These legs
-   are 58 % of Sleeper's NHL rows since 2026-09-20 (2,641 of 4,578); the training box holds no
-   Sleeper NHL parlay yet. The fix is a few lines at each.
+   without a quote, are guesses until a payout read in the app backs them. From a payout, the
+   pair's modifier is the payout over the table value over the product of each pick's shown
+   price divided by 1.8708. In `banned_combos.json` a pair's first slot is the same side and
+   its second the opposite; the read is recorded in [underdog_api.md](../underdog_api.md) §6.8.
+3. **Give NHL's roster lookup the fall-back to last season that NBA and WNBA now have?** (yes /
+   no; recommended yes, before the 2027 rollover.) `Stats._roster_player_df` reads the new
+   season's key and raises when the season holds no roster yet. Production's board log shows
+   NHL "features unavailable" on every day from 2026-09-19 to 09-30, a `KeyError: 2026` among
+   the errors, and NHL's opening night of 09-29 went unscored. Nothing stops the same at the
+   next rollover.
+4. **Guard each league's gamelog update in the board and ledger runs?** (yes / no; recommended
+   yes.) Both runs update every live league before they score anything, with no guard, so one
+   league's failed update costs every league its board; the nightly job has a guard. On
+   2026-10-10 the NBA update failed on its missing seed file and production's board runs of
+   19:50 and 20:50 UTC and its 20:05 ledger run each ended in five seconds, until decision 26's
+   fix was pulled at 21:10.
+5. **Let last season's roster row stand in for a player the new season has not seen yet?**
+   (yes / no; recommended no.) A season's roster learns a player at his first game, so his
+   first game of a season, and each team's opener, is priced by the book alone. A stand-in
+   would price them from the model, with a player who changed teams read on his old team for
+   that one game.
+6. **Drop the season's Cleaning the Glass export on both boxes** when it is published
+   (`player_data/NBA/nba_players_2026-27.csv`). Until then the NBA reads last season's file: ages
+   and positions are a year old (decision 26).
+7. **Fix the deep dive's pairing lookup?** (yes / no; recommended yes.) A board row stores its
+   correlation partners under the platform's label ("Receiving Yards") and the deep dive looks
+   each one up under the board's mapped name, so the pairing cards come up empty. On
+   production's board of 2026-10-08, 0 of the 1,204 partners stored on Underdog rows and 70 of
+   the 123 on Sleeper rows name a market the board holds (`correlation._corr_partners`,
+   `deep_dive_tabs._lift_survivors`; since `13d01613`, 2026-07-03).
+8. **Give Portland's WNBA players their roster?** (yes / no; recommended yes, before May 2027.)
+   The gamelog names the team `PDX` and the player index `POR`, so production's 2026 roster
+   holds 14 of the 15 teams after the merge fix (6 before it) and Portland's players would be
+   priced by the book alone, as the players of every team the roster lacked were.
