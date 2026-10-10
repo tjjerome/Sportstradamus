@@ -20,9 +20,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.analysis import _leg_market_map
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
-from sportstradamus.prediction.parlay import GameArrays, GameScoringContext
+from sportstradamus.prediction.parlay import GameArrays, GameScoringContext, leg_market_map
 from sportstradamus.prediction.payouts import payout_curve_for
 from sportstradamus.prediction.stories import menu as menu_mod
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
@@ -410,7 +409,7 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     # oracle must too — otherwise a single-team or lead-less subset could pose
     # as the "expected" argmax.
     assert (builder["lead_side"], builder["lead_player"]) == ("Over", "Player0")
-    new_map = _leg_market_map(sctx.league, sctx.platform)
+    new_map = leg_market_map(sctx.league, sctx.platform)
     all_scores = [
         score_subset(c, sctx, new_map)
         for size in range(2, min(len(sctx.leg_indices), sctx.max_size) + 1)
@@ -470,7 +469,7 @@ def test_model_ev_is_the_real_copula_scorer():
     corr = _block_diag_corr([2], 0.4)
     sctx, _ = _ctx([0.66, 0.64], corr)
     bet_id = (0, 1)
-    new_map = _leg_market_map(sctx.league, sctx.platform)
+    new_map = leg_market_map(sctx.league, sctx.platform)
     scored = score_subset(bet_id, sctx, new_map)
     g = sctx.g
     arr = np.asarray(bet_id)
@@ -498,7 +497,7 @@ def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier()
     sctx, _ = _ctx([1.0, 1.0, 0.0, 1.0], np.eye(4))
     sctx.g.boosts[:] = [0.9, 1.1, 1.2, 0.8]  # the loser holds the largest multiplier
     sctx.g.M[0, 1] = sctx.g.M[1, 0] = 0.85
-    new_map = _leg_market_map(sctx.league, sctx.platform)
+    new_map = leg_market_map(sctx.league, sctx.platform)
 
     scored = score_subset((0, 1, 2, 3), sctx, new_map)
 

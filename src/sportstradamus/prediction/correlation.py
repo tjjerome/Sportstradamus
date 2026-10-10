@@ -23,13 +23,13 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, cell_market, stat_map
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
     beam_search_parlays,
+    leg_market_map,
     resolve_leg_stat,
 )
 from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
@@ -393,7 +393,7 @@ def _build_cmarket(league_df, league, platform):
     legs — with the market under the league's own name, the one its correlation
     matrices are keyed by.
     """
-    new_map = _leg_market_map(league, platform)
+    new_map = leg_market_map(league, platform)
     league_df["cMarket"] = league_df.apply(
         lambda x: (
             [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]

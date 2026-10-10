@@ -16,8 +16,8 @@ from itertools import combinations
 import pandas as pd
 import pytest
 
-from sportstradamus.analysis import _leg_market_map
 from sportstradamus.prediction.correlation import _LEAGUE_POSITIONS
+from sportstradamus.prediction.parlay import leg_market_map
 from sportstradamus.prediction.stories import engine
 from sportstradamus.prediction.stories.context import GameCtx, Leg
 from sportstradamus.prediction.stories.engine import (
@@ -85,7 +85,7 @@ def test_enrich_legs_reads_the_slug_when_the_offer_join_misses():
     ``narrative_side`` hands the bank silently inverted. ``lower_leg`` carries the
     resolved slug, so both spellings of the same leg read the same.
     """
-    new_map = _leg_market_map("NFL", "Underdog")
+    new_map = leg_market_map("NFL", "Underdog")
     rows = [
         {"Player": "Pocket Passer", "Bet": "Under", "Line": 0.5, "Market": name}
         for name in ("INTs Thrown", "interceptions")

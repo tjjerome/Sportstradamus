@@ -21,11 +21,9 @@ from tqdm import tqdm
 
 from sportstradamus.helpers import (
     MAX_FAVORED_PAYOUT,
-    cell_market,
     dp_crps,
     get_odds,
     platform_payout,
-    stat_map,
 )
 from sportstradamus.helpers.distributions import _dp_mu_from_mean, _dp_ppf
 from sportstradamus.strategies.profit_sim import (
@@ -45,11 +43,6 @@ TIMEFRAMES = [
 # Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
 # well before this, so the cap only guards pathological (huge-EV) inputs.
 _CRPS_NEGBIN_SUM_CAP = 500
-
-
-def _leg_market_map(league, platform):
-    """Each of ``platform``'s market labels mapped to ``league``'s own cell key."""
-    return {label: cell_market(league, platform, label) for label in stat_map[platform]}
 
 
 def _bet_gameday_rows(gamelog, ls, bet):

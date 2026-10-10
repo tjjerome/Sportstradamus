@@ -156,7 +156,7 @@ def narrative_side(leg: Leg) -> str:
 def lower_leg(row: Mapping, new_map: dict) -> dict:
     """Map a canonical uppercase-keyed leg row to the lowercase keys ``enrich_legs`` wants.
 
-    ``new_map`` is the platform's display-name → slug map (``analysis._leg_market_map``);
+    ``new_map`` is the platform's display-name → slug map (``parlay.leg_market_map``);
     ``stat`` is the slug behind the display ``Market``, resolved the same way the
     persisted leg's ``Stat`` field is so a leg that misses the offers join still
     categorizes off the slug. Pass ``{}`` where only the display fields are read.

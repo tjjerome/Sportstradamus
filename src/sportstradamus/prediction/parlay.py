@@ -9,8 +9,14 @@ from typing import Literal
 import numpy as np
 from tqdm import tqdm
 
-from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import no_vig_odds, sleeper_payouts, stat_cv, stat_std
+from sportstradamus.helpers import (
+    cell_market,
+    no_vig_odds,
+    sleeper_payouts,
+    stat_cv,
+    stat_map,
+    stat_std,
+)
 from sportstradamus.leg_schema import build_leg
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.payouts import (
@@ -148,6 +154,11 @@ def _parlay_fun(bet, league):
             if (leg["Bet"] == "Over") or ("H2H" in leg["Market"])
         ]
     )
+
+
+def leg_market_map(league: str, platform: str) -> dict[str, str]:
+    """Each of ``platform``'s market labels mapped to ``league``'s own cell key."""
+    return {label: cell_market(league, platform, label) for label in stat_map[platform]}
 
 
 def resolve_leg_stat(market: str, new_map: dict) -> str:
@@ -368,7 +379,7 @@ def beam_search_parlays(
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
     leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
-    new_map = _leg_market_map(info["League"], info["Platform"])
+    new_map = leg_market_map(info["League"], info["Platform"])
 
     candidates = [(i,) for i in leg_indices]
     all_results = []
