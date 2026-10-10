@@ -21,10 +21,8 @@ from sportstradamus.dashboard.data import (
 from sportstradamus.dashboard.narrative import (
     SHAPE_CAPTION,
     SHAPE_DISPLAY,
-    bet_arrow,
     context_strip,
     game_headline,
-    game_lead_side,
     home_away,
     storyless_prophecy,
 )
@@ -164,7 +162,6 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             "offer_count": len(group),
             "top_edge": top_edge,
             "headline": game_headline(stories, parlays, game=game, date=date_raw),
-            "side": game_lead_side(stories, game=game, date=date_raw),
             "shape": strip["shape"] if strip else "",
             "minutes": minutes,
             "urgent": 0 < minutes < _URGENT_MINUTES,
@@ -191,11 +188,8 @@ for c in cards:
         if has_edge
         else '<span class="tc-badge tc-gray">no edge</span>'
     )
-    # The lead side's arrow is narrative's own SVG markup, so it rides in unescaped ahead
-    # of the escaped headline.
-    arrow = f"{bet_arrow(c['side'])} " if c["side"] else ""
     prophecy = (
-        f'<div class="tc-prophecy">{arrow}“{html.escape(c["headline"])}”</div>'
+        f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]
         else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(favored)}</div>'
     )

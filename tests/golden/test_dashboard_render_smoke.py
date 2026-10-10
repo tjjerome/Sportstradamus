@@ -205,8 +205,8 @@ def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
 
     Two NBA games on one date, neither urgent (no ``Commence``): A carries two
     model-liked legs at Star 1.0, B one at Star 2.8, so B's card renders first. B's
-    lead story (``lead``, ``lead_side == "Over"``) prefixes its prophecy with the Over
-    arrow.
+    lead story (``lead``, ``lead_side == "Over"``) reads as its quoted headline alone:
+    the card carries no side arrow.
     """
     rows = [
         {**_OFFER_ROWS[0], "Kelly": 0.03, "Star": 1.0},
@@ -252,7 +252,9 @@ def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
     cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
     matchups = [re.search(r'class="tc-matchup">(\w+)', c).group(1) for c in cards]
     assert matchups == ["BOS", "NYK"]
-    assert f"{bet_arrow('Over')} “Tatum takes over”" in cards[0]
+    assert "“Tatum takes over”" in cards[0]
+    assert bet_arrow("Over") not in cards[0]
+    assert bet_arrow("Under") not in cards[0]
 
 
 def test_board_renders_condensed_grid(monkeypatch, tmp_path):

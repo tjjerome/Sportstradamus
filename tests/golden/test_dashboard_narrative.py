@@ -16,7 +16,6 @@ from sportstradamus.dashboard.narrative import (
     bet_arrow,
     context_strip,
     game_headline,
-    game_lead_side,
     home_away,
     match_label,
     storyless_prophecy,
@@ -235,49 +234,17 @@ def test_game_headline_scopes_platform_when_given():
     )
 
 
-def test_game_lead_side_blank_without_stories():
+def test_game_headline_takes_the_higher_ev_lead_when_the_platforms_split():
+    """Tonight reads across platforms: a game they lead on different sides shows the
+    higher-EV lead, and never a higher-EV story that is not a lead."""
+    row = {"Game": "NYK/SAS", "Date": "2026-06-13", "lead": True}
     stories = pd.DataFrame(
         [
+            {**row, "platform": "underdog", "headline": "a", "model_ev": 1.0, "lead_side": "Over"},
+            {**row, "platform": "sleeper", "headline": "b", "model_ev": 2.5, "lead_side": "Under"},
             {
-                "platform": "underdog",
-                "Game": "BOS/PHI",
-                "Date": "2026-06-13",
-                "headline": "x",
-                "model_ev": 1.0,
-                "lead": True,
-                "lead_side": "Over",
-            }
-        ]
-    )
-    assert game_lead_side(stories, game="NYK/SAS", date="2026-06-13") == ""
-    assert game_lead_side(pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == ""
-
-
-def test_game_lead_side_reads_the_lead_row():
-    stories = pd.DataFrame(
-        [
-            {
-                "platform": "underdog",
-                "Game": "NYK/SAS",
-                "Date": "2026-06-13",
-                "headline": "a",
-                "model_ev": 1.0,
-                "lead": True,
-                "lead_side": "Over",
-            },
-            {
+                **row,
                 "platform": "sleeper",
-                "Game": "NYK/SAS",
-                "Date": "2026-06-13",
-                "headline": "b",
-                "model_ev": 2.5,
-                "lead": True,
-                "lead_side": "Under",
-            },
-            {
-                "platform": "sleeper",
-                "Game": "NYK/SAS",
-                "Date": "2026-06-13",
                 "headline": "c",
                 "model_ev": 9.0,
                 "lead": False,
@@ -285,7 +252,7 @@ def test_game_lead_side_reads_the_lead_row():
             },
         ]
     )
-    assert game_lead_side(stories, game="NYK/SAS", date="2026-06-13") == "Under"
+    assert game_headline(stories, pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == "b"
 
 
 def test_context_strip_returns_fields():
