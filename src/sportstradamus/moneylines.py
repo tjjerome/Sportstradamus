@@ -82,6 +82,14 @@ CLOSING_LEAD_MAX = 25
 # on a given broad run, so an expensive slate throttles itself.
 LEAGUES_OF_INTEREST = ("NBA", "NFL", "WNBA", "MLB", "NHL")
 
+# Odds API team names pass through remove_accents (it folds "Montréal"), which also
+# title-cases the letter after a digit ("49Ers"); the config's keys are folded the
+# same way so both spellings meet.
+_TEAM_ABBR = {
+    league: {remove_accents(name): abbr for name, abbr in teams.items()}
+    for league, teams in abbreviations.items()
+}
+
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_SPORTS_URL = f"{_ODDS_API_BASE}/sports/"
 ODDS_API_EVENTS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/events"
@@ -457,8 +465,8 @@ def _store_game_moneylines(archive, game, league, date, dayDelta, observed_at):
         return
     gameDate = gameDate.strftime("%Y-%m-%d")
 
-    homeTeam = abbreviations[league].get(remove_accents(game["home_team"]))
-    awayTeam = abbreviations[league].get(remove_accents(game["away_team"]))
+    homeTeam = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
+    awayTeam = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
     if homeTeam is None or awayTeam is None:
         return
 
@@ -864,8 +872,8 @@ def _event_spread_book(market, book, game, spread_home, spread_away):
 
 def _write_event_totals(archive, game, league, gameDate, totals, spread_home, spread_away):
     """Write the totals team buckets, blending in the parsed spreads."""
-    home_team = abbreviations[league].get(remove_accents(game["home_team"]))
-    away_team = abbreviations[league].get(remove_accents(game["away_team"]))
+    home_team = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
+    away_team = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
     if home_team is None or away_team is None:
         return
     for market in totals:

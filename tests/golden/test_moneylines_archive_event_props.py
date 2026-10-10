@@ -18,6 +18,9 @@ It also pins a latent property preserved by the CC-21 decomposition: the
 totals/spreads bucket blend looks up ``spread_*`` (keyed by the parsed
 spread-name) with a *book* key, so the spread adjustment always resolves to 0
 and the written value is simply ``total / 2``.
+
+The last test pins the totals write for a team whose name carries a digit (49ers,
+76ers), which the name normalization respells.
 """
 
 from __future__ import annotations
@@ -184,3 +187,28 @@ def test_archive_event_props_captures_full_ladder() -> None:
     assert [r[0] for r in davis] == [20.5, 22.5]
     assert davis[0][1] == pytest.approx(0.625, abs=1e-6)
     assert davis[1][1] == pytest.approx(0.5, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("league", "home", "away", "home_abbr", "away_abbr"),
+    [
+        ("NFL", "San Francisco 49ers", "Seattle Seahawks", "SF", "SEA"),
+        ("NBA", "Boston Celtics", "Philadelphia 76ers", "BOS", "PHI"),
+    ],
+    ids=["49ers-home", "76ers-away"],
+)
+def test_write_event_totals_writes_both_sides_when_a_team_name_has_a_digit(
+    league, home, away, home_abbr, away_abbr
+) -> None:
+    """``remove_accents`` respells "49ers" as "49Ers"; one team the lookup misses drops both."""
+    archive = _FakeArchive()
+    game = {"home_team": home, "away_team": away}
+
+    moneylines._write_event_totals(
+        archive, game, league, "2026-06-04", {"": {"draftkings": 220.5}}, {}, {}
+    )
+
+    assert archive.team_books == [
+        (league, "", "2026-06-04", home_abbr, {"draftkings": 110.25}),
+        (league, "", "2026-06-04", away_abbr, {"draftkings": 110.25}),
+    ]

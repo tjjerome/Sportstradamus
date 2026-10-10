@@ -9,7 +9,9 @@ non-historical request path, the per-game date-window + team-abbreviation
 resolution, and the h2h / totals / spreads book parse (including the
 totals+spread blend written to the ``Totals`` bucket), plus the plus-key
 routing on every request and the budget governor's ``leagues`` narrowing.
-A historical fetch is pinned only for the stamp its writes carry.
+A historical fetch is pinned only for the stamp its writes carry. The last two
+tests pin the team-name fold: every config name keeps its own abbreviation once
+folded, and a game with a digit in a team's name (49ers, 76ers) is written.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import pytest
 import pytz
 
 from sportstradamus import moneylines
+from sportstradamus.helpers import abbreviations, remove_accents
 
 _CHICAGO = pytz.timezone("America/Chicago")
 
@@ -41,11 +44,12 @@ _SPORTS = [
     {"key": "basketball_wnba", "title": "WNBA", "active": True},
 ]
 
-_GAMES = [
-    {
+
+def _game(home, away):
+    return {
         "commence_time": _COMMENCE,
-        "home_team": "Los Angeles Lakers",
-        "away_team": "Boston Celtics",
+        "home_team": home,
+        "away_team": away,
         "bookmakers": [
             {
                 "key": "draftkings",
@@ -53,8 +57,8 @@ _GAMES = [
                     {
                         "key": "h2h",
                         "outcomes": [
-                            {"name": "Los Angeles Lakers", "price": -150},
-                            {"name": "Boston Celtics", "price": 130},
+                            {"name": home, "price": -150},
+                            {"name": away, "price": 130},
                         ],
                     },
                     {
@@ -67,15 +71,17 @@ _GAMES = [
                     {
                         "key": "spreads",
                         "outcomes": [
-                            {"name": "Los Angeles Lakers", "point": -3.5, "price": -110},
-                            {"name": "Boston Celtics", "point": 3.5, "price": -110},
+                            {"name": home, "point": -3.5, "price": -110},
+                            {"name": away, "point": 3.5, "price": -110},
                         ],
                     },
                 ],
             },
         ],
-    },
-]
+    }
+
+
+_GAMES = [_game("Los Angeles Lakers", "Boston Celtics")]
 
 
 class _FakeResponse:
@@ -178,3 +184,37 @@ def test_get_moneylines_stamps_a_historical_snapshot_with_its_as_of_time(
     )
 
     assert archive.stamps == [datetime(2025, 6, 1, 6, 0)] * 4
+
+
+@pytest.mark.parametrize("league", moneylines.LEAGUES_OF_INTEREST)
+def test_every_config_team_name_folds_to_its_own_abbreviation(league) -> None:
+    """A fold clash would file one team's games under another team's abbreviation."""
+    for name, abbr in abbreviations[league].items():
+        assert moneylines._TEAM_ABBR[league][remove_accents(name)] == abbr, name
+
+
+@pytest.mark.parametrize(
+    ("sport_key", "league", "home", "away", "home_abbr", "away_abbr"),
+    [
+        ("americanfootball_nfl", "NFL", "San Francisco 49ers", "Seattle Seahawks", "SF", "SEA"),
+        ("basketball_nba", "NBA", "Boston Celtics", "Philadelphia 76ers", "BOS", "PHI"),
+    ],
+    ids=["49ers-home", "76ers-away"],
+)
+def test_get_moneylines_writes_both_sides_when_a_team_name_has_a_digit(
+    monkeypatch, sport_key, league, home, away, home_abbr, away_abbr
+) -> None:
+    """``remove_accents`` respells "49ers" as "49Ers"; one team the lookup misses drops both."""
+    monkeypatch.setattr(
+        moneylines, "_get_with_retry", lambda url, params=None: _FakeResponse([_game(home, away)])
+    )
+    archive = _FakeArchive()
+
+    moneylines.get_moneylines(archive, _KEYS, date=_DATE, sport=league, key=sport_key)
+
+    assert [(market, team) for _, market, _, team, _ in archive.calls] == [
+        ("Moneyline", away_abbr),
+        ("Moneyline", home_abbr),
+        ("Totals", away_abbr),
+        ("Totals", home_abbr),
+    ]
