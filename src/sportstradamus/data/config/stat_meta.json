@@ -191,11 +191,11 @@
         },
         "completions": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_projvol",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "prob_recal_platt",
-            "dist_training_loss": "crps",
-            "sn_param": "centered",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
             "blending": "nll",
             "hpo_selection": "calibrated"
         },
@@ -208,12 +208,12 @@
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "prob_recal_isotonic",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "cdf_recal_isotonic",
             "blending": "nll",
             "dist_training_loss": "crps",
-            "sn_param": "centered"
+            "sn_param": "direct"
         },
         "interceptions": {
             "dist": "DPO",
@@ -249,22 +249,24 @@
             "blending": "crps_1se"
         },
         "qb tds": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "cdf_recal_isotonic",
+            "dist": "ZINB",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_platt",
             "dist_training_loss": "nll",
             "sn_param": "direct",
-            "blending": "nll"
+            "blending": "crps",
+            "count_dispersion_objective": "pit_ks",
+            "zinb_mode": "hurdle"
         },
         "qb yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_eb_meanyr_k10",
-            "posthoc": "isotonic_mean",
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "nll",
+            "blending": "crps",
             "hpo_selection": "calibrated"
         },
         "receiving tds": {
@@ -312,19 +314,21 @@
         },
         "sacks taken": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
-            "blending": "crps"
+            "blending": "crps",
+            "dist_training_loss": "crps",
+            "sn_param": "direct"
         },
         "targets": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "prob_recal_platt",
-            "dist_training_loss": "nll",
-            "sn_param": "direct",
-            "blending": "nll"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "prob_recal_isotonic",
+            "dist_training_loss": "crps",
+            "sn_param": "centered",
+            "blending": "crps"
         },
         "tds": {
             "dist": "NegBin",
@@ -337,11 +341,11 @@
         },
         "yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_eb_meanyr_k10",
-            "posthoc": "none",
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "roe_mean",
             "dist_training_loss": "crps",
-            "sn_param": "centered",
+            "sn_param": "direct",
             "blending": "nll",
             "hpo_selection": "calibrated"
         }

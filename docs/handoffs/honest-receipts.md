@@ -112,6 +112,11 @@ the asks that then stood in §8, each named here by what it decides.
     picks pays 3.5 / 6.5 / 12 / 20 / 35; Flex pays 3.25 and 1.09 at three picks, 7.2 and 1.4 at
     four, 10 and 2.5 at five, 25, 2.6 and 0.25 at six. Four NFL same-game Power payouts read the
     same day set four pair values (§6, I5).
+26. **A pre-season game is never priced, in any league**, and no cron line is held for it. An
+    offer dated before the odds feed's opening night for its league is archived and not scored;
+    the rule is off while the feed holds no opening night (silent over three days). A new NBA or
+    WNBA season stands on last season's rosters until its own players arrive, and a new NBA
+    season reads the newest earlier roster seed file until its own is dropped in.
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, `stat_meta.json` never committed from a session.
@@ -197,6 +202,8 @@ nowhere on the page.
 | 7 | `e339e047` | The dashboard's parlay search looks a leg's trust up under the league's own market key (decision 23) |
 | 7 | `21e00ebd` | A new NFL row takes the game line of its own game day (decision 21): the schedule joins on team and week |
 | 7 | `33ce9b28` | A push is half an Over in training (decision 19, I6a): `training/labels.over_label` at the eleven label sites, the ship gates' label included |
+| 8 | `cf0f374e` | A new NBA or WNBA season starts on last season's rosters (decision 26): `Stats._roster_player_df` falls back while the season holds nobody, `nba._roster_seed_path` reads the newest earlier seed file, and one `_merge_season_roster` adds a team the season lacks (production's WNBA 2026 roster held 6 of 15 teams) |
+| 8 | `f3713b95` | A pre-season game is never priced (decision 26): `prediction/scoring._in_season_markets` drops an offer dated before the feed's opening night, after it is archived |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
