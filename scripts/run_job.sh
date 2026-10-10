@@ -17,6 +17,8 @@
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
 #   headshots          fetch headshots (monthly: refresh the player-headshot cache)
 #   ledger-commit      bet ledger-commit --run-slot {morning,afternoon}
+#   odds-backfill      scripts.backfill_historical_odds on the live polling key, in
+#                      leftover-only mode; the cron line names the pull
 #
 # Environment (optional):
 #   HEALTHCHECK_URL_<JOB>   per-job healthchecks.io URL (e.g. HEALTHCHECK_URL_PROPHECIZE)
@@ -54,7 +56,7 @@ LOCK_DIR="${LOCK_DIR:-/tmp}"
 DASHBOARD_UNIT="${DASHBOARD_UNIT:-sportstradamus-dashboard.service}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit|odds-backfill> [args...]" >&2
     exit 64
 fi
 
@@ -77,6 +79,13 @@ case "$JOB" in
     savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
     headshots)    CMD=("${UMBRELLA[@]}" fetch headshots) ;;
     ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
+    # The paying key and the leftover-only flags live here, not on the cron line: the
+    # same pull without --surplus-only buys its whole range at once on the key live
+    # polling spends.
+    odds-backfill)
+        CMD=(poetry run python -m sportstradamus.scripts.backfill_historical_odds
+            --key-name odds_api_plus --props-only --newest-first --surplus-only)
+        ;;
     *)
         echo "unknown job: $JOB" >&2
         exit 64

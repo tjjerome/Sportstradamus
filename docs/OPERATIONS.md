@@ -55,6 +55,7 @@ stays invisible.
 0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
 0 5 1 * *              <repo-dir>/scripts/run_job.sh headshots
+15 4 28-31 * *         <repo-dir>/scripts/run_job.sh odds-backfill --league NFL --markets 'yards,qb yards' --start 2024-09-05 --end 2026-10-04 --dates-from 'Moneyline,rushing yards'
 ```
 
 | Job | Cadence | Purpose |
@@ -68,6 +69,7 @@ stays invisible.
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
 | `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
+| `odds-backfill` | 4:15am, days 28–31 | buy odds history with the credit cycle's leftover: acts on the cycle's last day only, newest date first, and makes no API call once its range is held; needs `HEALTHCHECK_URL_ODDS_BACKFILL` |
 
 Couplings to keep in sync:
 
@@ -87,6 +89,27 @@ Couplings to keep in sync:
   `COLLECTOR_RELS` — don't "fix" that omission by adding it.
 - Season starts/ends never require cron edits: idle leagues cost one free
   events call per broad run, and `prophecize`/`meditate` skip them.
+- `odds-backfill` pays from the key `confer` and `close-lines` poll with. The
+  governor hands every spendable credit to props by the reset, so no credit is
+  idle on its books and the job takes only what
+  `helpers/odds_budget.py:backfill_allowance` grants: on the cycle's last day,
+  the balance above the governor's reserve and above a whole day of broad runs
+  at their last-week rate (padded by `floor_safety_factor`). Cron cannot name a
+  month's last day, so the line fires on days 28–31 and each earlier morning
+  costs one free quota probe. It sits at 4:15am to clear `reflect`.
+  `run_job.sh` holds the paying key and the leftover-only flags, because the
+  same pull without `--surplus-only` buys its whole range at once; the cron line
+  only names the pull. The job walks back from `--end`, so what is held is one
+  unbroken block. `--dates-from` names two markets because a 49ers game leaves
+  no `Moneyline` rows ([handoffs/honest-receipts.md](handoffs/honest-receipts.md)):
+  the second market seeds the dates that team played alone, and every date is
+  priced one game above the archive's count. A bought run therefore leaves
+  credits over, and the job plans again on the live balance until the next date
+  no longer fits. Why this pull and what follows it are in
+  [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) §6. Its
+  resume file, `archive/backfill_progress.json`, is per box: the same pull run
+  by hand on another box buys the dates twice. The rows reach the dev box by the
+  usual archive pull ([merge_archives.md](merge_archives.md)).
 
 `export-line-movement` is **not** in the crontab either, because `prophecize`
 already writes `current_line_movement.parquet` on every run — the Board's move
@@ -166,6 +189,14 @@ Quick checks when collection or serving looks wrong:
   starvation escape isn't firing — check its ledger cost vs `per_slot × slots`.
 - **Last paid props run per league** (from the ledger):
   `jq -r 'select(.kind=="broad" and .endpoint=="event_odds" and .cost>0) | [.league,.ts] | @tsv' src/sportstradamus/data/runtime/odds_api_usage.jsonl | sort -k2 | awk '{last[$1]=$2} END {for (l in last) print l, last[l]}'`
+- **What the backfill bought**:
+  `grep -hE "surplus:|credits spent|STOP|call failed" logs/odds-backfill.log | tail` — one
+  `surplus:` line per plan (credits remaining, the leftover granted, the dates
+  it covers and the most they can cost), then the credits the job spent. A date
+  with a failed Odds API call fails the job and stays unbought, so the next
+  cycle starts there. One that fails every cycle blocks the walk and pays for
+  its earlier calls each time: read the log for the call that fails, and to give
+  the date up, add it to `archive/backfill_progress.json` under the job's key.
 - **Poisoned odds rows**: `sportstradamus admin sweep-runaway-odds`
   (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
   `fit_book_weights` refits off the cleaned archive.

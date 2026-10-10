@@ -287,6 +287,11 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   Key coupling: the number of confer slots must match `broad_slots_per_day`
   in `data/config/odds_api_budget.json`.
 
+  The `odds-backfill` job fires on days 28–31 and acts on the credit
+  cycle's last morning: it buys historical odds on the live polling key with
+  only what `odds_budget.backfill_allowance` calls leftover, newest date
+  first. The flags on its cron line name the pull.
+
   The `fp-fetch` job runs weekly during NFL season: it walks the
   Fantasy Points Data Suite endpoint catalog
   (`src/sportstradamus/data/config/fantasypoints_endpoints.json`) and

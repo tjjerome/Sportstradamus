@@ -6,12 +6,15 @@ plus the alternate-market / close-layer modes."""
 import datetime
 import importlib.resources as pkg_resources
 import json
+from types import SimpleNamespace
 
+import duckdb
 import pytest
 from click.testing import CliRunner
 
 from sportstradamus import data
 from sportstradamus.moneylines import (
+    OddsAPIAuthError,
     _archive_event_props,
     _historical_observed_at,
 )
@@ -20,6 +23,11 @@ from sportstradamus.scripts import backfill_historical_odds as bho
 FAKE_KEYS = {bho.HISTORICAL_KEY_NAME: "key-string", "odds_api": "other-key"}
 PROPS = {"NFL": {"player_pass_yds": "passing yards"}}
 DATES = [datetime.datetime(2023, 10, 29)]
+# Opening week of 2024: a one-game Thursday, a fourteen-game Sunday, a one-game Monday.
+THURSDAY, SUNDAY, MONDAY = (datetime.date(2024, 9, day) for day in (5, 8, 9))
+WEEK_ONE = [THURSDAY, SUNDAY, MONDAY]
+# Monday's game was the 49ers', and the archive holds no Moneyline rows for their games.
+ARCHIVED_GAMES = {THURSDAY: 1, SUNDAY: 14}
 
 
 class _FakeArchive:
@@ -178,7 +186,7 @@ def test_job_sig_props_only_is_its_own_resume_key():
     assert bho._job_sig("NFL", PROPS, props_only=True) == "NFL|passing yards|propsonly"
 
 
-def _invoke_main(monkeypatch, fake_fetches, args):
+def _invoke_main(monkeypatch, fake_fetches, args, dates=DATES):
     prop_calls, moneyline_calls = fake_fetches
     seeds = []
     keys = {**FAKE_KEYS, "odds_api_alt": "alt-key-string"}
@@ -186,7 +194,7 @@ def _invoke_main(monkeypatch, fake_fetches, args):
         bho, "_load_keys_and_props", lambda league, markets, alt_mode: (dict(keys), PROPS)
     )
     monkeypatch.setattr(
-        bho, "_game_dates", lambda league, markets, start, end: seeds.append(list(markets)) or DATES
+        bho, "_game_dates", lambda league, markets, start, end: seeds.append(list(markets)) or dates
     )
     result = CliRunner().invoke(bho.main, ["--start", "2024-09-05", "--end", "2024-09-05", *args])
     props_keys = [apikey for apikey, _ in prop_calls]
@@ -221,9 +229,14 @@ def test_main_key_name_funds_the_game_line_call_too(monkeypatch, fake_fetches):
         (["--props-only", "--game-lines-only"], "opposites"),
         (["--props-only", "--layer", "close", "--snapshot-hour", "23"], "already props-only"),
         (["--dates-from", "Moneyline", "--check-all"], "walks the calendar"),
+        (["--surplus-only", "--props-only", "--dry-run"], "sizes a real run"),
+        (["--surplus-only"], "pass --props-only"),
+        (["--surplus-only", "--props-only", "--check-all"], "prices archived game-dates"),
     ],
 )
 def test_main_rejects_contradictory_fetch_flags(monkeypatch, fake_fetches, args, message):
+    # A flag set that slips past its guard must fail here, not reach the quota probe.
+    _stub_surplus(monkeypatch, 0)
     result, *_ = _invoke_main(monkeypatch, fake_fetches, args)
     assert result.exit_code != 0
     assert message in result.output
@@ -234,3 +247,166 @@ def test_combo_keys_are_mapped_for_nfl():
         nfl = json.load(f)["Odds API"]["NFL"]
     assert nfl["player_rush_reception_yds"] == "yards"
     assert nfl["player_pass_rush_yds"] == "qb yards"
+
+
+def _fetched_dates(fake_fetches):
+    prop_calls, _ = fake_fetches
+    return [kwargs["date"].date() for _, kwargs in prop_calls]
+
+
+def test_main_newest_first_fetches_the_latest_dates_first(monkeypatch, fake_fetches):
+    """A pull that stops early leaves one unbroken block ending at ``--end``."""
+    result, *_ = _invoke_main(
+        monkeypatch, fake_fetches, ["--newest-first", "--max-dates", "2"], dates=WEEK_ONE
+    )
+    assert result.exit_code == 0, result.output
+    assert _fetched_dates(fake_fetches) == [MONDAY, SUNDAY]
+
+
+def _stub_surplus(monkeypatch, *allowances):
+    """Stub the free quota probe, the archived slate sizes and the governor's allowance:
+    one value per plan, in order."""
+    probes, asked = [], []
+    granted = iter(allowances)
+    quota = SimpleNamespace(headers={"X-Requests-Remaining": "5000"})
+    monkeypatch.setattr(
+        bho, "_get_with_retry", lambda url, params=None: probes.append(params) or quota
+    )
+    monkeypatch.setattr(
+        bho.odds_budget,
+        "backfill_allowance",
+        lambda now, remaining, cfg: asked.append(remaining) or next(granted),
+    )
+    monkeypatch.setattr(bho, "_games_per_date", lambda league, dates: dict(ARCHIVED_GAMES))
+    return probes, asked
+
+
+@pytest.mark.parametrize(
+    ("allowances", "bought"),
+    [
+        # 11 + 151, and Thursday's 21 does not fit what that run left.
+        ((162, 20), [MONDAY, SUNDAY]),
+        # A date is priced a game high, so a run leaves credits over; the next plan spends them.
+        ((162, 21), [MONDAY, SUNDAY, THURSDAY]),
+        # Sunday does not fit, and Thursday is not bought around it: no holes.
+        ((161, 150), [MONDAY]),
+        ((0,), []),
+    ],
+)
+def test_main_surplus_only_buys_the_newest_runs_the_leftover_covers(
+    monkeypatch, fake_fetches, allowances, bought
+):
+    """One market: a date is priced at 1 for the events call plus 10 a game, for one
+    game more than the archive shows. That covers Monday, which it shows none for."""
+    probes, asked = _stub_surplus(monkeypatch, *allowances)
+    result, *_ = _invoke_main(
+        monkeypatch,
+        fake_fetches,
+        ["--surplus-only", "--props-only", "--newest-first", "--key-name", "odds_api_alt"],
+        dates=WEEK_ONE,
+    )
+    assert result.exit_code == 0, result.output
+    assert _fetched_dates(fake_fetches) == bought
+    # Each plan reads the leftover off the key that pays, from its live remaining-credits header.
+    assert probes == [{"apiKey": "alt-key-string"}] * len(allowances)
+    assert asked == [5000] * len(allowances)
+
+
+def test_main_surplus_only_resumes_past_the_dates_already_held(monkeypatch, fake_fetches, tmp_path):
+    _stub_surplus(monkeypatch, 172)
+    (tmp_path / "progress.json").write_text(
+        json.dumps({"NFL|passing yards|propsonly": ["2024-09-09"]})
+    )
+    result, *_ = _invoke_main(
+        monkeypatch,
+        fake_fetches,
+        ["--surplus-only", "--props-only", "--newest-first"],
+        dates=WEEK_ONE,
+    )
+    assert result.exit_code == 0, result.output
+    assert _fetched_dates(fake_fetches) == [SUNDAY, THURSDAY]
+
+
+def test_main_surplus_only_finished_history_never_touches_the_api(
+    monkeypatch, fake_fetches, tmp_path
+):
+    probes, _ = _stub_surplus(monkeypatch, 10_000)
+    held = [d.isoformat() for d in WEEK_ONE]
+    (tmp_path / "progress.json").write_text(json.dumps({"NFL|passing yards|propsonly": held}))
+    result, *_ = _invoke_main(
+        monkeypatch,
+        fake_fetches,
+        ["--surplus-only", "--props-only", "--newest-first"],
+        dates=WEEK_ONE,
+    )
+    assert result.exit_code == 0, result.output
+    assert _fetched_dates(fake_fetches) == []
+    assert probes == []
+
+
+def test_main_surplus_only_stops_at_a_date_with_a_failed_call(monkeypatch, fake_fetches, tmp_path):
+    """The fetch swallows a failed call; marking its date done would leave a hole."""
+    _stub_surplus(monkeypatch, 10_000)
+    prop_calls, _ = fake_fetches
+    monkeypatch.setitem(bho.odds_budget._run, "failed", 0)
+
+    def one_sunday_call_fails(archive, apikey, *args, **kwargs):
+        prop_calls.append((apikey, kwargs))
+        if kwargs["date"].date() == SUNDAY:
+            bho.odds_budget._run["failed"] += 1
+
+    monkeypatch.setattr(bho, "get_props", one_sunday_call_fails)
+    result, *_ = _invoke_main(
+        monkeypatch,
+        fake_fetches,
+        ["--surplus-only", "--props-only", "--newest-first"],
+        dates=WEEK_ONE,
+    )
+    assert result.exit_code != 0
+    assert "2024-09-08: an Odds API call failed" in result.output
+    # Thursday sits behind the failed Sunday and is never bought around it.
+    assert _fetched_dates(fake_fetches) == [MONDAY, SUNDAY]
+    assert json.loads((tmp_path / "progress.json").read_text()) == {
+        "NFL|passing yards|propsonly": ["2024-09-09"]
+    }
+
+
+def test_main_out_of_credits_exits_nonzero_with_the_bought_dates_saved(
+    monkeypatch, fake_fetches, tmp_path
+):
+    """An unattended run that drains or loses its key must not report success."""
+    prop_calls, _ = fake_fetches
+
+    def key_dies_on_sunday(archive, apikey, *args, **kwargs):
+        if kwargs["date"].date() == SUNDAY:
+            raise OddsAPIAuthError("out of credits")
+        prop_calls.append((apikey, kwargs))
+
+    monkeypatch.setattr(bho, "get_props", key_dies_on_sunday)
+    result, *_ = _invoke_main(
+        monkeypatch, fake_fetches, ["--props-only", "--newest-first"], dates=WEEK_ONE
+    )
+    assert result.exit_code != 0
+    assert "STOP (401) at 2024-09-08" in result.output
+    assert _fetched_dates(fake_fetches) == [MONDAY]
+    assert json.loads((tmp_path / "progress.json").read_text()) == {
+        "NFL|passing yards|propsonly": ["2024-09-09"]
+    }
+
+
+def test_games_per_date_counts_two_moneyline_teams_a_game(monkeypatch, tmp_path):
+    db = tmp_path / "archive.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("CREATE TABLE odds (league TEXT, market TEXT, game_date DATE, entity TEXT)")
+    con.executemany(
+        "INSERT INTO odds VALUES (?, ?, ?, ?)",
+        [
+            *[("NFL", "Moneyline", SUNDAY, team) for team in ("Bal", "Kc", "Phi", "Gb", "Bal")],
+            ("NFL", "Moneyline", MONDAY, "Sf"),  # one side of the game never archived
+            ("NFL", "passing yards", SUNDAY, "Some Quarterback"),
+            ("NBA", "Moneyline", SUNDAY, "Bos"),
+        ],
+    )
+    con.close()
+    monkeypatch.setattr(bho, "ARCHIVE_DB", db)
+    assert bho._games_per_date("NFL", [SUNDAY, MONDAY]) == {SUNDAY: 2, MONDAY: 1}

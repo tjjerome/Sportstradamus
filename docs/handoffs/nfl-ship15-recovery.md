@@ -10,8 +10,10 @@ Status: OPEN. The confirm campaign is done (19 of 20 cells at ship, section 3) a
 met, but `passing yards` is withheld, so the definition of done (section 10) is not. What sits with
 the owner is section 6, decisions 3 and 6–10: the uncommitted `stat_meta.json` flips for seven cells,
 the retrain that re-rolls verdicts the 2026-10-08 game-line re-read made stale, the passing-yards
-feature lane, the relabel of the other four leagues' caches, the bulk combo pull, and one serve-side
-finding handed to the honest-receipts lane.
+feature lane, the relabel of the other four leagues' caches, switching on the combo history job
+(built and committed; it starts with a push, its crontab line on prod and a Healthchecks check of
+its own, since a shared check hides a failing job), and one serve-side finding handed to the
+honest-receipts lane.
 
 ## 1. Mandate
 
@@ -294,10 +296,12 @@ and a blend weight is fitted for the first time — on a sample thin enough to m
 retrain.
 
 1. The deep evidence is two seasons of Odds API history, and it exists: a one-date probe of the 2024
-   opener returned both markets with real cross-book spread. The bulk pull is the owner's call
-   (section 6, decision 3). It is honest evidence, not a pass ticket: it can hold either cell
-   withheld.
-2. After a pull, repair the two matrices' odds block with
+   opener returned both markets with real cross-book spread. The `odds-backfill` job buys it from
+   each credit cycle's leftover, newest date first (section 6, decision 3). It is honest evidence,
+   not a pass ticket: it can hold either cell withheld.
+2. The job writes prod's archive. Before a retrain that should see the new quotes, pull prod's
+   archive into dev ([docs/merge_archives.md](../merge_archives.md)), then repair the two matrices'
+   odds block with
    `python -m sportstradamus.scripts.inject_backfilled_odds --league NFL --markets 'yards,qb yards'`
    (it calls the real resolver — memory `inject_backfilled_odds_not_rebuild_equivalent`), then sweep
    and confirm each cell.
@@ -373,24 +377,36 @@ on every board and need nothing. Interceptions is the owner's lowest-priority ce
    floor-bounded balancing above 20,000, by design). Golden pin
    `tests/golden/test_trim_matrix_retrim.py`. The rows already lost return only with a rebuild;
    none was run.
-3. **Combo quote history — decided 2026-09-29: probe now, bulk pull pending.** Prod's archive
-   has the same hole as dev's, so there is nothing to merge; the Odds API has the history. The
-   two combo keys are mapped for good in `stat_map.json` (`league_seed_costs.NFL` 165 → 198 in
-   `odds_api_budget.json`), and a 21-credit dry run on the 2024 opener returned both markets
-   with real cross-book spread. The bulk pull stays the owner's key-and-timing call — about
-   11,000 credits for 2024-09-05 to 2026-02-08:
-   `python -m sportstradamus.scripts.backfill_historical_odds --league NFL --markets 'yards,qb yards'
-   --start 2024-09-05 --end 2026-02-08 --key-name odds_api_plus --dates-from Moneyline --props-only`
-   (the default `odds_api_max` key answers HTTP 401; the game-dates seed from `Moneyline` because
-   the combos have no archived rows for those seasons; `--props-only` skips the ~30-credit game-line
-   call per date, whose rows already exist). Put `--max-dates 1 --dry-run` on it first: the dry run
+3. **Combo quote history — a monthly job buys it from each credit cycle's leftover.** Owner's call
+   of 2026-10-09. The hole is the same on dev and on prod: sportsbook quotes for the two combos
+   stop at 2024-02-11 and resume at game date 2026-10-05, when live `confer` began polling the
+   mapped keys (`league_seed_costs.NFL` 165 → 198 in `odds_api_budget.json`). The Odds API has the
+   history: a 21-credit dry run on the 2024 opener returned both markets with real cross-book
+   spread. Filling 2024-09-05 to 2026-10-04 — the 2024 and 2025 seasons and the first four weeks
+   of 2026 — is about 140 game dates and about 12,700 credits (one events call plus 20 a game).
+
+   The `odds-backfill` cron job (schedule, flags and couplings:
+   [docs/OPERATIONS.md](../OPERATIONS.md)) runs `backfill_historical_odds` on prod, newest date
+   first and in leftover-only mode. It pays with `odds_api_plus` because the default
+   `odds_api_max` key answers HTTP 401, seeds its dates from other markets because the combos
+   have no archived rows in the range, and skips the game-line call because the range's game
+   lines are already held. It runs on prod because the usage ledger and the league-activity
+   snapshot that price the leftover live there.
+
+   The key is the one live polling spends, and the governor leaves little of it: 1,305 credits were
+   unspent at the 2026-09-01 reset and 872 at the 10-01 reset. Replayed on the real ledger, the
+   job's rule (`odds_budget.backfill_allowance`) grants 1,045 and 887 on those two last
+   mornings: about two weeks of 2026 in the first cycle, and 14 to 17 cycles for the whole
+   range at that size. The rule leaves live polling a full day of its usual broad runs for the
+   cycle's last 15 hours and takes only what is above that, so a cycle the governor throttles
+   all month (several leagues live at once) grants little or nothing. `BACKFILL_WINDOW_DAYS` is
+   the dial. At three days it would have granted 2,522 in the August cycle, taken out of the
+   governor's end-of-cycle ramp of props polling.
+
+   The rows land in prod's archive; the steps that follow a pull are in section 5 (yards and
+   qb yards). For a pull by hand, put `--max-dates 1 --dry-run` on the command first: the dry run
    makes the paid calls and prints the cross-book spread, and zero spread means a degenerate
-   source (memory `capture_stub_drift_live_probe`). The key is the one live `confer` polls with,
-   and the governor paces on the live remaining-credits header, so a pull is paid for by
-   throttled live polling for the rest of the cycle: on 2026-10-08 the cycle held 16,381 of
-   20,000 credits with live use near 470 a day, which leaves about 5,600 spare by the reset on
-   the 1st — one season, not two. Size each run to the leftover with `--max-dates N` in a
-   cycle's last days; the script resumes from its progress file.
+   source (memory `capture_stub_drift_live_probe`).
 4. **Push and sync — done 2026-09-27.** `abb82025`, `4c8b4a91`, the docs and the withheld flip
    are on `origin/devel` (06:06 CDT) and on prod (`run_job.sh`'s self-deploy pull replicated by
    hand at 06:09 CDT under its pull lock, dashboard restarted). Prod's gamelog was recomputed

@@ -6,6 +6,10 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Added
+- `odds-backfill` cron job: buys odds history with the credit cycle's leftover, newest
+  date first. `odds_budget.backfill_allowance` grants it on the cycle's last day only
+  (balance above the governor's reserve and a day of broad runs);
+  `backfill_historical_odds` gains `--surplus-only` / `--newest-first`.
 - `backfill_historical_odds` `--key-name` / `--dates-from` / `--props-only`: fund the paid
   calls from a named creds entry, seed game-dates from an archived market, skip the
   sport-level game-line call; the NFL combo markets (`yards`, `qb yards`) are mapped for

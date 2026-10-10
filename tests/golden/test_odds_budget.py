@@ -539,6 +539,23 @@ def test_record_response_skips_response_without_quota_headers(monkeypatch, tmp_p
     assert (summary["calls"], summary["cost"]) == (0, 0)
 
 
+def test_record_response_counts_a_failed_call_with_or_without_quota_headers(
+    monkeypatch, tmp_path
+) -> None:
+    _governed(monkeypatch, tmp_path)
+    url = moneylines.ODDS_API_EVENT_ODDS_URL.format(sport="basketball_nba", eventId="ev1")
+    for response in (
+        _FakeResponse(_QUOTA_HEADERS, status_code=404),
+        _FakeResponse({}, status_code=503),
+        _FakeResponse(_QUOTA_HEADERS),
+    ):
+        odds_budget.record_response(url, {"apiKey": "fake-plus"}, response)
+    summary = odds_budget.run_summary()
+    assert (summary["calls"], summary["failed"]) == (2, 2)
+    odds_budget.set_run_context("broad")
+    assert odds_budget.run_summary()["failed"] == 0
+
+
 def test_record_response_accumulates_run_totals(monkeypatch, tmp_path) -> None:
     ledger = _governed(monkeypatch, tmp_path, kind="close_lines")
     url = moneylines.ODDS_API_EVENT_ODDS_URL.format(sport="basketball_nba", eventId="ev1")
@@ -671,6 +688,74 @@ def test_estimate_costs_prunes_stale_records(monkeypatch, tmp_path) -> None:
     ledger.write_text(_ledger_line(50, "close_lines", 999) + recent)
     odds_budget.estimate_costs(_NOW, _ESTIMATE_CFG)
     assert ledger.read_text() == recent
+
+
+def _backfill_cfg(reset_day: int) -> dict:
+    return _allowance_cfg(
+        cycle_reset_day=reset_day,
+        floor_safety_factor=2.0,
+        estimate_window_days=7,
+        floor_min_per_day=10,
+    )
+
+
+def _two_live_leagues_and_a_week_of_spend(monkeypatch, tmp_path) -> None:
+    """Close-lines at 20/day and broad runs at 100/day, on a fresh two-league slate."""
+    _write_activity(
+        monkeypatch,
+        tmp_path,
+        {
+            "updated": datetime.now(UTC).isoformat(),
+            "leagues": {"NBA": {"tier": "live"}, "MLB": {"tier": "live"}, "NHL": {"tier": "idle"}},
+        },
+    )
+    _governed(monkeypatch, tmp_path).write_text(
+        _ledger_line(1, "close_lines", 140)
+        + _ledger_line(1, "broad", 400, run="r1", league="NBA")
+        + _ledger_line(2, "broad", 280, run="r2", league="MLB")
+        + _ledger_line(2, "broad", 20, run="r2", league="MLB", endpoint="odds")
+        + _ledger_line(1, "unknown", 5000, league="NFL")  # a backfill's own spend
+        + _ledger_line(8, "broad", 7000, run="r0", league="NBA")  # outside the window
+        + _ledger_line(1, "broad", 7000, run="r1", league="NBA", key="odds_api")  # margin key
+    )
+
+
+def test_backfill_allowance_keeps_the_reserve_and_a_whole_day_of_broad_runs(
+    monkeypatch, tmp_path
+) -> None:
+    """A backfill may take only what live polling would leave unspent at the reset.
+
+    Half a day from the reset: the governor's reserve is 20 (close floor 20/day,
+    doubled) plus 6 of game lines (3 x 2 leagues x 2 slots a day). Broad runs have been
+    spending 100/day, and the slots still ahead are held back as one whole day of them,
+    doubled: 200, not the 100 the half day on the clock would give.
+    """
+    _two_live_leagues_and_a_week_of_spend(monkeypatch, tmp_path)
+    assert odds_budget.backfill_allowance(_NOW, 1000, _backfill_cfg(reset_day=11)) == 774.0
+
+
+def test_backfill_allowance_opens_only_on_the_last_day_of_the_cycle(monkeypatch, tmp_path) -> None:
+    """A day and a half out, what looks spare is the ramp the governor hands to props."""
+    _two_live_leagues_and_a_week_of_spend(monkeypatch, tmp_path)
+    assert odds_budget.backfill_allowance(_NOW, 20000, _backfill_cfg(reset_day=1)) == 0.0
+    assert odds_budget.backfill_allowance(_NOW, 20000, _backfill_cfg(reset_day=12)) == 0.0
+    assert odds_budget.backfill_allowance(_NOW, 20000, _backfill_cfg(reset_day=11)) > 0.0
+
+
+def test_backfill_allowance_never_goes_negative(monkeypatch, tmp_path) -> None:
+    _two_live_leagues_and_a_week_of_spend(monkeypatch, tmp_path)
+    assert odds_budget.backfill_allowance(_NOW, 100, _backfill_cfg(reset_day=11)) == 0.0
+
+
+def test_backfill_allowance_is_zero_on_a_stale_activity_snapshot(monkeypatch, tmp_path) -> None:
+    """Confer down means the pace is unknown, so nothing is called leftover."""
+    _two_live_leagues_and_a_week_of_spend(monkeypatch, tmp_path)
+    stale = {
+        "updated": (datetime.now(UTC) - timedelta(days=4)).isoformat(),
+        "leagues": {"NBA": {"tier": "live"}},
+    }
+    _write_activity(monkeypatch, tmp_path, stale)
+    assert odds_budget.backfill_allowance(_NOW, 20000, _backfill_cfg(reset_day=11)) == 0.0
 
 
 def _fake_governed_probe(monkeypatch, remaining, floor_per_day, league_costs) -> dict:

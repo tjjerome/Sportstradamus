@@ -28,6 +28,11 @@ aging live league take a whole day's share. Config lives in
 ``data/config/odds_api_budget.json`` — loaded eagerly here, not by
 ``helpers.config``.
 
+That split leaves no credit idle, so a historical backfill on the same key
+has no leftover to find on the governor's books. :func:`backfill_allowance`
+prices it against the pace instead: on the cycle's last day it grants what
+remains above the reserve and a whole day of broad runs at their recent rate.
+
 League activity is derived from the free Odds API events feed instead of
 hand-maintained season-start constants. Each broad run tiers every league
 of interest by days to its next scheduled game (:func:`classify_tier`):
@@ -54,6 +59,7 @@ import json
 import os
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlsplit
@@ -108,6 +114,16 @@ GAME_LINE_RUN_COST = 3
 # forever (the 2026-07/08 MLB incident). The window doubles as the cadence limiter.
 STARVED_PROPS_AFTER_DAYS = 1.0
 
+# Leftover only exists against a pace, and a pace only predicts the reset from close
+# by: any earlier, what looks spare is the end-of-cycle ramp the governor is about to
+# hand to props (2,522 credits three days out in August 2026, 1,305 really unspent).
+BACKFILL_WINDOW_DAYS = 1.0
+
+# The last day's broad slots sit ahead of the reset and each buys the whole slate, so
+# the clock understates what is still to come: 1,028 credits in the final 0.61 day of
+# September 2026 against 651 a day that week.
+BACKFILL_PACE_FLOOR_DAYS = 1.0
+
 # "unknown" so backfill scripts that import moneylines still record ledger
 # lines without tagging a run kind.
 _run = {
@@ -115,16 +131,17 @@ _run = {
     "run_id": datetime.now(UTC).isoformat(),
     "calls": 0,
     "cost": 0,
+    "failed": 0,
 }
 
 
 def set_run_context(kind: str) -> None:
     """Stamp the run context ("broad" or "close_lines") and zero the totals."""
-    _run.update(kind=kind, run_id=datetime.now(UTC).isoformat(), calls=0, cost=0)
+    _run.update(kind=kind, run_id=datetime.now(UTC).isoformat(), calls=0, cost=0, failed=0)
 
 
 def run_summary() -> dict:
-    """Return ``{kind, run_id, calls, cost}`` for the end-of-run log line."""
+    """Return ``{kind, run_id, calls, cost, failed}`` for the end-of-run log line."""
     return dict(_run)
 
 
@@ -153,9 +170,12 @@ def _sport_key(path: str) -> str | None:
 def record_response(url: str, params: dict | None, res) -> None:
     """Append one ledger line for an Odds API ``requests.Response``.
 
-    No-op when ``X-Requests-Remaining`` is absent — error/malformed responses
-    carry no quota headers, so there is nothing to account.
+    No ledger line when ``X-Requests-Remaining`` is absent — error/malformed
+    responses carry no quota headers, so there is nothing to account. A non-200
+    response still adds to the run's ``failed`` count, headers or not.
     """
+    if res.status_code != HTTPStatus.OK:
+        _run["failed"] += 1
     remaining = res.headers.get("X-Requests-Remaining")
     if remaining is None:
         return
@@ -259,6 +279,12 @@ def _league_props_history(recent: list[dict]) -> tuple[dict[str, float], dict[st
     return means, last_paid
 
 
+def _plus_window(entries: list[tuple[datetime, str, dict]], now: datetime, cfg: dict) -> list[dict]:
+    """``odds_api_plus`` records inside the estimate window: the basis of every spend rate."""
+    window_start = now - timedelta(days=cfg["estimate_window_days"])
+    return [r for ts, _, r in entries if ts >= window_start and r["key"] == "odds_api_plus"]
+
+
 def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float], dict[str, datetime]]:
     """Estimate spend rates from the usage ledger.
 
@@ -273,8 +299,7 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float], d
     ledger = Path(str(ODDS_USAGE_LEDGER_PATH))
     entries = _read_ledger(ledger)
 
-    window_start = now - timedelta(days=cfg["estimate_window_days"])
-    recent = [r for ts, _, r in entries if ts >= window_start and r["key"] == "odds_api_plus"]
+    recent = _plus_window(entries, now, cfg)
     close_total = sum(r["cost"] for r in recent if r["kind"] == "close_lines")
     floor_per_day = max(close_total / cfg["estimate_window_days"], cfg["floor_min_per_day"])
     means, last_paid = _league_props_history(recent)
@@ -473,3 +498,29 @@ def broad_run_allowance(
     else:
         reason = "no_fit"
     return BudgetDecision(tuple(allowed), gameline_leagues, reason, reserve, per_slot, spendable)
+
+
+def backfill_allowance(now: datetime, remaining: int, cfg: dict) -> float:
+    """Credits a historical backfill may spend now, out of what live polling would leave.
+
+    The governor's spendable balance (``remaining`` less its close-lines and
+    game-line reserve) less the broad runs still to come: their spend per day over
+    ``estimate_window_days``, padded by ``floor_safety_factor``, for the days left
+    and never fewer than ``BACKFILL_PACE_FLOOR_DAYS``. Zero until the cycle's last
+    ``BACKFILL_WINDOW_DAYS``, and on a stale activity snapshot or an all-idle slate,
+    where the governor reports nothing spendable.
+    """
+    _, cycle_end = cycle_bounds(now, cfg["cycle_reset_day"])
+    days_left = (cycle_end - now).total_seconds() / 86400
+    if days_left > BACKFILL_WINDOW_DAYS:
+        return 0.0
+    tiers = {league: record["tier"] for league, record in (_fresh_leagues() or {}).items()}
+    floor_per_day, league_costs, last_paid = estimate_costs(now, cfg)
+    spendable = broad_run_allowance(
+        now, remaining, tiers, floor_per_day, league_costs, last_paid, cfg
+    ).spendable
+    recent = _plus_window(_read_ledger(Path(str(ODDS_USAGE_LEDGER_PATH))), now, cfg)
+    broad_spend = sum(r["cost"] for r in recent if r["kind"] == "broad")
+    days_held = max(days_left, BACKFILL_PACE_FLOOR_DAYS)
+    pace = broad_spend / cfg["estimate_window_days"] * days_held * cfg["floor_safety_factor"]
+    return max(spendable - pace, 0.0)

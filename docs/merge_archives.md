@@ -1,8 +1,9 @@
 # Merging two odds archives
 
 The odds archive (`archive/archive.duckdb`) lives on two machines — the production
-server (continuously appending today's odds via `confer`) and a dev machine (where
-historical backfills run). They drift apart: each holds observations the other lacks.
+server (continuously appending today's odds via `confer`, and history through the
+`odds-backfill` job) and a dev machine (where by-hand historical backfills run). They
+drift apart: each holds observations the other lacks.
 
 `merge-archives` reconciles them losslessly. The archive is append-only time-series
 (the same observation key recurs with different `observed_at` timestamps), so the merge
