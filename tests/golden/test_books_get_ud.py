@@ -11,7 +11,9 @@ live line and a mass-option line. One lobby read per modeled league in the feed
 asks for all four team and game categories; only the NBA player line qualifies
 for an alternate-line fetch. The feed's NBA game title is listed away-first so
 the lobby ``teams`` dict, not the title, must set the sides; the MLB lobby
-answers empty so its sides come from the title.
+answers empty so its sides come from the title. A copy of the feed with every
+side at the app's decimal price drives the even-pick check, its line floor
+patched down to the feed's four priced lines.
 """
 
 from __future__ import annotations
@@ -122,6 +124,19 @@ _FEED = {
         _line("f7", "a6", "aces", "Aces", "8.5", _EVEN, alternates=True),
     ],
 }
+
+# The feed had ``payout_multiplier`` moved to the decimal price the app shows
+# (docs/underdog_api.md §7.4): every side at an even pick's 1.87, none left at 1.0.
+_DECIMAL_FEED = {
+    **_FEED,
+    "over_under_lines": [
+        {**line, "options": [{**option, "payout_multiplier": "1.87"} for option in line["options"]]}
+        for line in _FEED["over_under_lines"]
+    ],
+}
+# f1, f2, f6 and f7, the feed lines ``get_ud`` prices: the combo, season-future and
+# suspended lines are dropped, and the lobby's five lines are not the feed's.
+_FEED_LINES = 4
 
 _NBA_LOBBY = {
     "teams": {"t1": {"id": "t1", "abbr": "LAL"}, "t2": {"id": "t2", "abbr": "BOS"}},
@@ -359,6 +374,58 @@ def test_get_ud_empty_feed_stops(monkeypatch: pytest.MonkeyPatch, offline) -> No
     assert underdog.get_ud() == {}
     assert scraper.calls == [underdog.UD_LINES_URL]
     assert _FakeSession.calls == []
+
+
+def _scrape(monkeypatch: pytest.MonkeyPatch, feed: dict, min_lines: int) -> dict:
+    """``get_ud`` on ``feed`` with the even-pick check's line floor at ``min_lines``."""
+    scraper = _FakeScraper(
+        {underdog.UD_LINES_URL: feed, _core_url("MLB"): {}, _core_url("NBA"): _NBA_LOBBY}
+    )
+    monkeypatch.setattr(underdog, "_get_scraper", lambda: scraper)
+    monkeypatch.setattr(underdog, "UD_EVEN_PICK_MIN_LINES", min_lines)
+    return underdog.get_ud()
+
+
+def test_get_ud_raises_on_a_full_feed_with_no_even_pick(
+    monkeypatch: pytest.MonkeyPatch, offline
+) -> None:
+    """The feed at the app's decimal price stops the scrape before any alternate-line request.
+
+    The lobby's team total keeps a side at 1.0: only the feed's own lines are read.
+    """
+    with pytest.raises(RuntimeError, match=r"docs/underdog_api\.md §7\.4"):
+        _scrape(monkeypatch, _DECIMAL_FEED, _FEED_LINES)
+    assert _FakeSession.calls == []
+
+
+def test_get_ud_reads_a_thin_feed_with_no_even_pick(
+    monkeypatch: pytest.MonkeyPatch, offline
+) -> None:
+    """One line short of the floor is a thin slate, not a price change: the scrape runs on."""
+    _scrape(monkeypatch, _DECIMAL_FEED, _FEED_LINES + 1)
+
+    assert _FakeSession.calls == [_ALT_F1_URL]
+
+
+def test_get_ud_reads_a_full_feed_with_even_picks(monkeypatch: pytest.MonkeyPatch, offline) -> None:
+    assert _scrape(monkeypatch, _FEED, _FEED_LINES) == _EXPECTED
+
+
+@pytest.mark.parametrize("choice", ["higher", "lower"])
+def test_get_ud_counts_a_line_even_on_either_side(
+    monkeypatch: pytest.MonkeyPatch, offline, choice: str
+) -> None:
+    """A line that prices one side off the even price still shows it on the other."""
+    first, *rest = _DECIMAL_FEED["over_under_lines"]
+    options = [
+        {**option, "payout_multiplier": "1.0"} if option["choice"] == choice else option
+        for option in first["options"]
+    ]
+    feed = {**_DECIMAL_FEED, "over_under_lines": [{**first, "options": options}, *rest]}
+
+    _scrape(monkeypatch, feed, _FEED_LINES)
+
+    assert _FakeSession.calls == [_ALT_F1_URL]
 
 
 def test_alt_lines_stop_on_empty_streak(monkeypatch: pytest.MonkeyPatch) -> None:

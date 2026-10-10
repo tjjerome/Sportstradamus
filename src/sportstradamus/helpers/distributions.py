@@ -163,6 +163,10 @@ def no_vig_odds(over, under=None, method="proportional"):
 # already archived (``tail_scorecard.side_boosts`` decodes them by era).
 UNDERDOG_BOOST_BASELINE: float = 1.83
 
+# Underdog's raw multiplier on a pick it neither discounts nor boosts: an even pick
+# (docs/underdog_api.md §6.8). The app shows the same pick at its decimal price, 1.87 (§7.4).
+UNDERDOG_EVEN_PICK_MULTIPLIER: float = 1.0
+
 # Full decimal payout above which Kelly is zeroed instead of computed. The realized
 # ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%
 # against a ~60% model read, so the edge claim isn't trusted past here. The cap moves

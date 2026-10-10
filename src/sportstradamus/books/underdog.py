@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from sportstradamus.helpers import (
     ABBR_MAP,
+    UNDERDOG_EVEN_PICK_MULTIPLIER,
     Scrape,
     get_mlb_pitchers,
     nhl_goalies,
@@ -61,6 +62,10 @@ UD_ALT_LINES_TIMEOUT_S = 10
 # Markets answering without rungs in a row before the pass stops: a game about to
 # lock answers empty one market at a time, a rate limit answers empty for all.
 UD_ALT_LINES_EMPTY_STREAK = 25
+
+# Feed lines it takes for "no even pick" to mean a price change, not a thin slate.
+# Production's leanest board since 2026-08-01 still had 4.9 % of its lines even.
+UD_EVEN_PICK_MIN_LINES = 300
 
 # Moneylines and yes/no markets carry no stat_value; "over 0.5 occurrences" keeps
 # them on the two-sided offer shape (add_dfs skips a 0 line).
@@ -383,6 +388,11 @@ def get_ud():
             alternate lines are extra offers on the same market with their own
             ``Line``. ``{}`` when the feed answers nothing.
 
+    Raises:
+        RuntimeError: The feed holds ``UD_EVEN_PICK_MIN_LINES`` lines or more and none has
+            a side priced at ``UNDERDOG_EVEN_PICK_MULTIPLIER``: its prices may have moved
+            to the decimal price the app shows (docs/underdog_api.md §7.4).
+
     Requests per run: the feed, one lobby read per modeled league with games in
     it (all of its team and game categories), then one alternate-line read per
     modeled, mapped player prop until the budget runs out.
@@ -397,7 +407,18 @@ def get_ud():
         return {}
     sports = {_ud_league(game["sport_id"]) for game in feed["games"]}
     team_offers, team_abbr = _ud_team_offers(scraper, sports)
-    priced = _ud_offers(feed, team_abbr) + team_offers
+    feed_offers = _ud_offers(feed, team_abbr)
+    if len(feed_offers) >= UD_EVEN_PICK_MIN_LINES and not any(
+        UNDERDOG_EVEN_PICK_MULTIPLIER in (offer["Boost_Over"], offer["Boost_Under"])
+        for offer, _ in feed_offers
+    ):
+        raise RuntimeError(
+            f"Underdog's feed holds {len(feed_offers)} lines and none is priced at "
+            f"{UNDERDOG_EVEN_PICK_MULTIPLIER}. The feed may have moved to the decimal price "
+            "Underdog's app shows; every Underdog pick would then be priced about 1.87 times "
+            "too high. See docs/underdog_api.md §7.4."
+        )
+    priced = feed_offers + team_offers
     candidates = [
         (offer, line["over_under_id"])
         for offer, line in priced

@@ -27,7 +27,7 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers import cell_market, platform_payout
+from sportstradamus.helpers import UNDERDOG_EVEN_PICK_MULTIPLIER, cell_market, platform_payout
 from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.payouts import (
     SLEEPER_FULL_REFUND_MAX_SIZE,
@@ -49,9 +49,6 @@ from sportstradamus.strategies.underdog_pickem import (
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
-# Underdog's raw multiplier on a pick it neither discounts nor boosts: an even pick
-# (docs/underdog_api.md §6.8). The even_picks persona takes entries of these alone.
-_EVEN_PICK_MULTIPLIER: float = 1.0
 # Deals tried per entry size: a small slate has fewer than _CROSS_GAME_BEAM_WIDTH entries to deal.
 _EVEN_PICK_DEALS_PER_SIZE: int = 4000
 
@@ -290,7 +287,7 @@ def build_even_pick_candidates(
     """Build the ``even_picks`` pool: cross-game entries of Underdog's recommended even picks.
 
     A leg is a row of Underdog's ``offers_df`` (``Boost`` = the raw pick multiplier)
-    at exactly ``_EVEN_PICK_MULTIPLIER``, for a game on ``date``, whose side Receipts'
+    at exactly ``UNDERDOG_EVEN_PICK_MULTIPLIER``, for a game on ``date``, whose side Receipts'
     rule recommends (:func:`sportstradamus.realized.recommended`). It is priced, sized
     and recorded at its served ``Win Prob``, through neither the pick'em leg gate nor
     the cell's trust: the bettor tests the recommendation as the dashboard shows it.
@@ -303,7 +300,7 @@ def build_even_pick_candidates(
     """
     payout = platform_payout(offers_df["Boost"], "Underdog")
     picks = offers_df[
-        (offers_df["Boost"] == _EVEN_PICK_MULTIPLIER)
+        (offers_df["Boost"] == UNDERDOG_EVEN_PICK_MULTIPLIER)
         & recommended(offers_df["Win Prob"], payout)
         # A leg gets one day, on its game-day read, and its entry settles at the next reflect.
         & (offers_df["Date"].astype(str).str[:10] == date.isoformat())
