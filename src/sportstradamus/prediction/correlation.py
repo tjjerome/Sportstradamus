@@ -665,6 +665,7 @@ def _process_league_games(
         )
         _annotate_correlation_columns(df, game_df, g, market_map)
 
+        game = "/".join(sorted([team, opp]))
         if corr_sink is not None:
             corr_sink.extend(
                 _collect_game_corr(
@@ -673,7 +674,7 @@ def _process_league_games(
                     g.M,
                     platform,
                     league,
-                    "/".join(sorted([team, opp])),
+                    game,
                     market_map,
                 )
             )
@@ -681,7 +682,7 @@ def _process_league_games(
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
             continue
         info = {
-            "Game": "/".join(sorted([team, opp])),
+            "Game": game,
             "Date": date,
             "League": league,
             "Platform": platform,
@@ -692,7 +693,7 @@ def _process_league_games(
             story_sink,
             platform,
             league,
-            info["Game"],
+            game,
             date,
             g,
             bet_df,

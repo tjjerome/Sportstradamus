@@ -370,7 +370,6 @@ def beam_search_parlays(
     Returns:
         list[dict]: Parlay candidate dicts ready for DataFrame construction.
     """
-    K = _BEAM_WIDTH
     max_bet_size = len(payouts) + 1
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
@@ -378,17 +377,17 @@ def beam_search_parlays(
     stat_by_label = leg_market_map(info["League"], info["Platform"])
 
     candidates = [(i,) for i in leg_indices]
-    all_results = []
+    parlay_rows = []
 
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
         top_candidates = _expand_candidates(
-            candidates, leg_indices, leg_players, g.EV, target_size, K
+            candidates, leg_indices, leg_players, g.EV, target_size, _BEAM_WIDTH
         )
         payout_base = payouts[target_size - 2]
         for parlay in top_candidates:
-            result = _evaluate_parlay(
+            row = _evaluate_parlay(
                 parlay,
                 target_size,
                 payout_base,
@@ -403,8 +402,8 @@ def beam_search_parlays(
                 stat_by_label,
                 full_refund_below_size,
             )
-            if result is not None:
-                all_results.append(result)
+            if row is not None:
+                parlay_rows.append(row)
         candidates = top_candidates
 
-    return all_results
+    return parlay_rows
