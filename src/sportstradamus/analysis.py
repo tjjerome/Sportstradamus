@@ -97,7 +97,7 @@ def _resolve_leg(game, ls, leg: Mapping):
     return 1 if missed else 0
 
 
-def check_bet(bet, stats, stat_map):
+def check_bet(bet, stats):
     """Resolve a single parlay bet against actual game logs.
 
     Returns (legs, misses) where legs is valid legs count

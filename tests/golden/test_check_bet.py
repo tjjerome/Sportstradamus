@@ -22,7 +22,6 @@ class _FakeStats:
 
 
 _LS = {"date": "GAME_DATE", "player": "PLAYER_NAME", "team": "TEAM_ABBREVIATION"}
-_STAT_MAP = {"PrizePicks": {"Points": "points", "Assists": "assists"}}
 
 
 def _nba_stats() -> dict[str, _FakeStats]:
@@ -58,7 +57,7 @@ def test_grades_over_under_hit_miss_and_skips_push():
         {"player": "Stephen Curry", "bet": "Under", "line": 4.5, "stat": "assists"},  # 5>4.5 miss
         {"player": "LeBron James", "bet": "Over", "line": 30, "stat": "points"},  # 30==30 push
     ]
-    assert check_bet(_bet(legs), _nba_stats(), _STAT_MAP) == (4, 2)
+    assert check_bet(_bet(legs), _nba_stats()) == (4, 2)
 
 
 def test_plus_combo_leg_sums_both_players():
@@ -70,7 +69,7 @@ def test_plus_combo_leg_sums_both_players():
             "stat": "points",
         }  # 30+10=40 > 35.5
     ]
-    assert check_bet(_bet(legs), _nba_stats(), _STAT_MAP) == (1, 0)
+    assert check_bet(_bet(legs), _nba_stats()) == (1, 0)
 
 
 def test_versus_combo_leg_sums_both_players():
@@ -82,12 +81,12 @@ def test_versus_combo_leg_sums_both_players():
             "stat": "points",
         }  # 30+28=58 > 55.5
     ]
-    assert check_bet(_bet(legs), _nba_stats(), _STAT_MAP) == (1, 0)
+    assert check_bet(_bet(legs), _nba_stats()) == (1, 0)
 
 
 def test_league_absent_returns_nan_not_a_loss():
     bet = _bet([{"player": "X", "bet": "Over", "line": 1.5, "stat": "points"}], League="MLB")
-    legs, misses = check_bet(bet, _nba_stats(), _STAT_MAP)
+    legs, misses = check_bet(bet, _nba_stats())
     assert pd.isna(legs) and pd.isna(misses)
 
 
@@ -96,5 +95,5 @@ def test_no_gameday_rows_returns_nan_not_a_loss():
         [{"player": "LeBron James", "bet": "Over", "line": 1.5, "stat": "points"}],
         Date="2025-02-01",
     )
-    legs, misses = check_bet(bet, _nba_stats(), _STAT_MAP)
+    legs, misses = check_bet(bet, _nba_stats())
     assert pd.isna(legs) and pd.isna(misses)

@@ -544,12 +544,9 @@ def _resolve_parlays(stats, history_only):
         return 0
 
     parlays = read_parlay_hist(days=unresolved_days)
-    stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
     unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
     tqdm.pandas(desc="Resolving parlays")
-    results = unresolved.progress_apply(
-        lambda bet: check_bet(bet, stats, stat_map), axis=1
-    ).tolist()
+    results = unresolved.progress_apply(lambda bet: check_bet(bet, stats), axis=1).tolist()
     parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
     # Whole partitions were loaded, so this rewrites their resolved rows too.
     write_parlay_hist(parlays, days=unresolved_days)
