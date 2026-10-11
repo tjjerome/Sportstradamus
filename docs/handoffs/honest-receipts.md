@@ -760,13 +760,85 @@ eras.
   it every player reads as away and an MLB hitter faces no pitcher, on a board that would look
   like any other. What the guard does not reach: a constructor or a first load that raises
   (§8), and the ledger build, which logs a failed update and raises no alarm of its own.
+- An MLB row scored near first pitch, or for a game of a later date, is scored without the
+  day's schedule, and history keeps that scoring for about nine rows in ten. The schedule map
+  (`upcoming_games`) is the only source of an upcoming row's `Home` flag, opposing starter and
+  posted batting order. `_build_mlb_upcoming_games` kept a game only while the feed called it
+  `Pre-Game` or `Scheduled`; the feed moves a game to `Warmup` before first pitch (a delayed
+  one to `Delayed Start: Rain`), and the board run of :50 is the last before a game listed on
+  the hour. The map also stops at the server's today, so an offer for tomorrow has no entry.
+  A row with no entry reads every player as away, the opposing team's average in place of its
+  starter, no head-to-head, a batting slot guessed from recent games and, in October, a
+  regular-season game. History keeps a line's newest scoring: of the 4,863 MLB rows for the
+  games of 2026-10-05 to 10-10, about 595 (12.2 %) keep one made with the entry (the run ten
+  minutes before the start had it for one game of nine, and no run of the day before had it).
+  Against the matrix row of the same player and date, a row served without the entry differs
+  on 22 of 109 features, the opposing starter's by about one standard deviation, and those
+  features carry 9 to 20 % of |SHAP| in the MLB cells. In history's own pairs of one line
+  scored both ways the projection moves by 4.4 % on average and by more than 10 % for one pair
+  in eight, where two runs that both had the entry differ by 0.08 %. Training is untouched: a
+  matrix row reads the game as it was played. So MLB's live record (Receipts, the live gates,
+  the closing-line comparisons) is mostly of readings the holdout never scored. Not measured:
+  the regular season, and the cost in hit rate. The same status test decides who starts today
+  in `helpers/text.get_mlb_pitchers`, which the Underdog scrape uses to tell a pitcher's
+  fantasy-points offer from a hitter's (§8, asks 7 and 8).
+- A Sleeper offer for a home team whose code is remapped read that team as its own opponent.
+  `_sleeper_games_map` passes a game's two team codes through `ABBR_MAP` (`WSH` to `WAS`), and
+  `_sleeper_prop_offers` took as opponent the first of the two that differs from the player's
+  raw code: for a home `WSH` player, `WAS`. Every Washington Capitals home date since
+  2026-10-07 is affected, 207 history rows (42 of the 171 Sleeper NHL rows on the board of
+  2026-10-11), and no row before, in any league. Such a row is scored against Washington's
+  own defense and sits in a game of its own (`WAS/WAS`) for stories and parlays. On the 32
+  Washington rows both platforms offer at one line the projection differs on all 32 (0.018 on
+  average, up to 0.12), where the platforms agree to 0.0007 or better for the other home
+  teams. The map holds three NBA codes (`GS`, `PHO`, `NOP`), and the NBA opens on 2026-10-20
+  (§8, ask 9).
+- Production's MLB comp tables are from March. MLB comps are read from two Baseball Savant
+  match-score files under `player_data/MLB/` that only `meditate` refreshes; production runs
+  no `meditate`, and the sync's file list never held them. Production's are dated 2026-03-06,
+  the training box's 2026-10-10. Of the hitters with comps on both boxes the two lists share
+  22 % of their members on average (pitchers 31 %), and 112 hitters have comps only on the
+  training box and stand as their own comp on production. `Player comps z` and `Defense comp
+  n` differ between a served row and the matrix row of the same player and date on 94 to 97 %
+  of rows, by 0.7 to 0.8 standard deviations; they carry 2 to 5.6 % of |SHAP| in the hitter
+  cells (§8, ask 10).
+- A rain-shortened MLB game never reaches the gamelog. `_mlb_final_game_ids` takes a game
+  whose state is exactly `Final`, and the feed ends a called game as `Completed Early` for
+  good. Five games in 2025 and two in 2026, none of the seven in the gamelog (0.14 % of
+  games): each of their players lacks one game in the rolling features, and the game gives no
+  training row. The 58 postponed listings are all in, because a made-up game keeps its id and
+  ends `Final` (§8, ask 11).
+- The sync to production mirrors every league, and seven NFL flags reached production before
+  their model files. `scripts/sync_to_prod.sh` has no league switch: it mirrors the model
+  folder with delete and sends the book weights, the calibration file and the stats table
+  whole, and each of those holds every league. The 19 NFL model files of the ship-15 campaign
+  (2026-09-29 and 10-03) were never sent, and `8dfbe48c` (2026-10-10) moved seven NFL cells
+  from `withheld` to `devel`. A withheld cell is not served even with a file on disk, and a
+  cell that stops being withheld is served by whatever file is there: from the board run of
+  21:50 UTC that day production scored five of the seven (yards, targets, completions, qb
+  yards, fantasy points underdog; the other two had no offers) on its files of 09-27. Six of
+  the seven cells hold another recipe there than the campaign confirmed, and blend weights
+  fitted before only sportsbook quotes counted: on the rows that carry a sportsbook quote
+  the book's share is 47 % for yards, 10 % for qb yards and 72 % for completions, where the
+  campaign's files give it none, none and 32 %. Production's stats table marks those files
+  `ship` False, but four of the five fail only a Gate 1 scored on rows since classed as
+  DFS-only; under the rule in force qb yards alone fails a gate (Gate 4). By the 14:02 UTC
+  board of 10-11 that was 1,328 history rows for the games of 10-11 and 10-12, and 566 of the
+  board's 2,668 NFL rows. It was found by counting, league by
+  league, what a sync meant for MLB would send, which is a step before any sync now. The
+  owner was told at 14:59 UTC that day; the send is the owner's to run. A one-league send
+  (`~/backups/sportstradamus/2026-10-11-league-only-send/`) takes production's own three
+  shared files, replaces one league's entries, and sends them with that league's model and
+  correlation files; it deletes nothing and keeps every file it replaces on production. It
+  was rehearsed on a copy of production's own files, undo included (§8, ask 12).
 
 ## 8. Owner asks (one each)
 
 The six asks that stood here, and two put to the owner with them (the opening-night pin and a
 cleanup pass), were answered on 2026-10-11 and are decisions 36–42 (§2). The two items that
-are the owner's own to do stay (1 and 2 below). The rest came out of building those
-decisions. None is built, and each record is in §7 or the section it names. Not asked because no
+are the owner's own to do stay (1 and 2 below). Asks 3 to 6 came out of building those
+decisions, and 7 to 12 out of checking them on production. Each record is in §7 or the
+section it names. None is on `devel`; where a fix is already written the ask says so. Not asked because no
 change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns
 $1 per $1 while the legs are over-read).
 
@@ -801,3 +873,29 @@ $1 per $1 while the legs are over-read).
    name, the History tab, the form sparks and the story detail stats find no gamelog column
    for it, and a slip built from it on the dashboard stores a market that settlement cannot
    read.
+7. **Keep an MLB game on the schedule map until the game is over?** (yes / no; recommended
+   yes.) Today a game leaves the map when the feed stops calling it `Pre-Game`, minutes before
+   first pitch, and the last board run before most games scores it with no starter and every
+   player away (§7). The fix is written and tested: one rule, `helpers/text.mlb_game_is_over`,
+   read by the schedule map and by the probable-pitcher table. With it, 683 of the 701 rows
+   history kept for the games of 2026-10-10 would have been scored with the entry. Its cost: a
+   doubleheader's second game is stored under a key the lookup never reads, so its offers read
+   game one's entry until game one is over, where today they read it until game one begins.
+8. **Score a later date's MLB offers with that date's schedule?** (yes / no; recommended yes,
+   after 7.) The map holds one game a team and the schedule is asked only up to today: all
+   308 rows for 2026-10-12 on the board of 10-11 read every player as away. Such a row is
+   scored again on game day (decision 15), so the change is to the board a bettor reads the
+   day before. Keying the map by date and team reaches about ten call sites. Not written.
+9. **Give a Sleeper home team its real opponent?** (yes / no; recommended yes.) Washington's
+   home rows have read `WAS` against `WAS` since 2026-10-07 (§7). The fix is written and
+   tested: the opponent is picked against the remapped code. To check on the first Sleeper
+   NBA board, 2026-10-20: no row where the team is its own opponent.
+10. **Send MLB's two comp tables with the models?** (yes / no; recommended yes.) Production's
+    are from March (§7). Two lines in the sync's file list, written; the one-league send has a
+    flag for them.
+11. **Take a rain-shortened MLB game into the gamelog?** (yes / no; recommended yes.) One more
+    state in `_mlb_final_game_ids`, and a one-off refill of the seven games of 2025 and 2026 on
+    both boxes; the owner runs production's (§7). Not written.
+12. **Give `scripts/sync_to_prod.sh` a `--league` switch?** (yes / no; recommended yes.) The
+    one-league send lives in a backup folder (§7). The switch would bring its merge, its
+    proof and its backup of every replaced file into the script.
