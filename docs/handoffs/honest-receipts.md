@@ -831,8 +831,8 @@ eras.
 - A Sleeper offer for a home team whose code is remapped read that team as its own opponent.
   `_sleeper_games_map` passes a game's two team codes through `ABBR_MAP` (`WSH` to `WAS`), and
   `_sleeper_prop_offers` took as opponent the first of the two that differs from the player's
-  raw code: for a home `WSH` player, `WAS`. The comparison is as old as the Sleeper scraper
-  (`b836c0fc`, 2024-06-08). History holds 8,841 such rows among its 308,644 Sleeper rows,
+  raw code: for a home `WSH` player, `WAS`. It dates from `93748aac` (2024-09-29), when the
+  game's codes began to be remapped and the player's was not. History holds 8,841 such rows among its 308,644 Sleeper rows,
   every home date of five teams for as long as it goes back (July 2026): MLB Arizona 4,241
   and Washington 3,626, WNBA Phoenix 389 and Portland 377, NHL Washington 208 (42 of the 171
   Sleeper NHL rows on the board of 2026-10-11). History's own `Opponent` column is blank
