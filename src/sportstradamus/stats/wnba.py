@@ -21,7 +21,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import archive, clean_data, fetch_upcoming_games
+from sportstradamus.stats.base import SEASON_MAX_DAYS, archive, clean_data, fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
@@ -42,8 +42,6 @@ def _remap_abbr(series: pd.Series) -> pd.Series:
     return series.map(lambda x: _WNBA_TEAM_ABBR_MAP.get(x, x))
 
 
-# Days since season start before triggering a full gamelog re-enrichment pass.
-_STALE_SEASON_DAYS = 300
 # Calendar month (inclusive) at which playoff logs are fetched in addition to regular season.
 _PLAYOFF_MONTH = 9
 # Days between latest_date and today that also triggers a playoff-log fetch mid-season.
@@ -150,7 +148,7 @@ class StatsWNBA(StatsNBA):
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
         if (
-            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
+            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
             or clean_data
         ):
             self._enrich_team_markets(

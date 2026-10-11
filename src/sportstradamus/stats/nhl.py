@@ -32,6 +32,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
+    SEASON_MAX_DAYS,
     ComboSpec,
     Stats,
     archive,
@@ -43,8 +44,6 @@ from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
 
 # Days of gamelog history to retain (~4 NHL seasons); older rows pruned on each update.
 _GAMELOG_RETENTION_DAYS = 1431
-# Days since season start before triggering a full gamelog re-enrichment pass.
-_STALE_SEASON_DAYS = 300
 
 # DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
 # are carried as separate shots/blocked components because those are distinct book
@@ -532,7 +531,7 @@ class StatsNHL(Stats):
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
         if (
-            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
+            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
             or clean_data
         ):
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)

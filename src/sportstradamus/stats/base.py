@@ -120,8 +120,9 @@ _MIN_PARTICIPATION_RATE: float = 0.1
 _SEASON_ROLLOVER_MONTH: int = 8
 
 # No league's season, playoffs included, runs this long: a feed opener further than this past
-# the season start a class holds opens a new season, a nearer one is a mid-season capture.
-_SEASON_MAX_DAYS: int = 300
+# the season start a class holds opens a new season, a nearer one is a mid-season capture, and
+# a season start further than this behind today belongs to a season that is over.
+SEASON_MAX_DAYS: int = 300
 
 # Days ahead (including today) that fetch_upcoming_games scrapes. Three days
 # covers today + tomorrow + day-after so late-night runs don't miss next-day
@@ -178,6 +179,10 @@ _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanC
 # (~1 season NBA). min(ROWS, usable) self-clamps on shallow gamelogs.
 _TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
 _TRAINING_WINDOW_ROWS_DEFAULT = 21_500
+
+# Days of logs before a date that its profile and rolling features read; trim_gamelog cuts
+# the gamelog this many days before the first training day so that day keeps its window.
+_SHORT_LOG_WINDOW_DAYS: int = 300
 
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
@@ -618,7 +623,7 @@ class Stats:
         ``season_start``, so replay tools keep manual control.
 
         When the activity feed has observed an opening night
-        (:func:`odds_budget.season_opener`) more than ``_SEASON_MAX_DAYS``
+        (:func:`odds_budget.season_opener`) more than ``SEASON_MAX_DAYS``
         after the season start held, it opens a new season and is adopted
         before fetching — season-year API params and ``DaysIntoSeason`` then
         track the real calendar without an annual code edit. A nearer one
@@ -630,7 +635,7 @@ class Stats:
             return
         if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
             opener = odds_budget.season_opener(self.league)
-            if opener is not None and (opener - self.season_start).days > _SEASON_MAX_DAYS:
+            if opener is not None and (opener - self.season_start).days > SEASON_MAX_DAYS:
                 self._set_season_start(opener)
         self._update()
 
@@ -1051,17 +1056,17 @@ class Stats:
         The cheap prefix of ``base_profile``: quote resolution and the combo-market
         fallbacks need only this window, not the profile frames built from it.
         """
-        one_year_ago = pd.Timestamp(date - timedelta(days=300))
+        window_start = pd.Timestamp(date - timedelta(days=_SHORT_LOG_WINDOW_DAYS))
         target_date = pd.Timestamp(date)
 
         gameDates = self._gamelog_dates()
-        short_mask = (one_year_ago <= gameDates) & (gameDates < target_date)
+        short_mask = (window_start <= gameDates) & (gameDates < target_date)
         self.short_gamelog = self.gamelog[short_mask].copy()
         _pc = self.log_strings["player"]
         self.short_gamelog[_pc] = self._normalized_gamelog_players().loc[short_mask].to_numpy()
         gameDates = self._teamlog_dates()
         self.short_teamlog = self.teamlog[
-            (one_year_ago <= gameDates) & (gameDates < target_date)
+            (window_start <= gameDates) & (gameDates < target_date)
         ].copy()
 
     def base_profile(self, date=datetime.today().date()):
@@ -2481,7 +2486,7 @@ class Stats:
         last_training_day = pd.to_datetime(
             usable_gamelog.iloc[-ROWS][self.log_strings["date"]]
         ).date()
-        cutoff_date = last_training_day - timedelta(days=300)
+        cutoff_date = last_training_day - timedelta(days=_SHORT_LOG_WINDOW_DAYS)
         self.gamelog = self.gamelog.loc[
             pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date > cutoff_date
         ].copy()

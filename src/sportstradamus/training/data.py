@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.training_quotes import SYNTHETIC
+from sportstradamus.stats.base import SEASON_MAX_DAYS
 
 # Quantile cutoff for counting non-archived rows: players below the 25th
 # percentile of usage on each game day are excluded (marginal players rarely
@@ -28,10 +29,6 @@ _LINE_CLIP_HIGH: float = 0.95
 # restrict thin markets).
 _MIN_ARCHIVED_FOR_CLIP: int = 50
 _MIN_ARCHIVED_FRACTION_FOR_CLIP: float = 0.10
-
-# Above this many days, DaysIntoSeason has wrapped past a season boundary and is
-# rebased back into range.
-_SEASON_DAY_WRAP_CEILING: int = 300
 
 # Minimum archived rows required before an archived-derived line target is trusted
 # over the full-data fallback: overall median, over/under balancing, per-position
@@ -125,13 +122,13 @@ def _histogram_weights(
 
 
 def _rebase_days_into_season(M: pd.DataFrame) -> pd.DataFrame:
-    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING):
+    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > SEASON_MAX_DAYS):
         M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
             M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
         )
-        M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"] = (
-            M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"]
-            - M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"].min()
+        M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"] = (
+            M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"]
+            - M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"].min()
         )
     return M
 

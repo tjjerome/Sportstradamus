@@ -1,7 +1,7 @@
 """Stats package: per-league player statistics and feature engineering.
 
-Public API re-exports for back-compat with any code that imported from
-``sportstradamus.stats`` directly.
+``sportstradamus.stats`` is the canonical import path for the ``Stats`` classes
+and ``load_live_leagues``, re-exported here from the submodules that define them.
 """
 
 from sportstradamus.stats.base import Stats

@@ -28,7 +28,13 @@ from sportstradamus.stats import (
     nfl_fp_team_weekly_aggregate,
     nfl_fp_weekly_aggregate,
 )
-from sportstradamus.stats.base import ComboSpec, Stats, apply_volume_budget, clean_data
+from sportstradamus.stats.base import (
+    SEASON_MAX_DAYS,
+    ComboSpec,
+    Stats,
+    apply_volume_budget,
+    clean_data,
+)
 
 # Phase-1.5 lookback rule:
 #   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
@@ -554,7 +560,10 @@ class StatsNFL(Stats):
         self._load_player_ids()
         teamDataList = self._backfill_missing_rows(sched)
         self._finalize_logs(teamDataList)
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+        if (
+            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
+            or clean_data
+        ):
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(
                 remove_accents
             )
