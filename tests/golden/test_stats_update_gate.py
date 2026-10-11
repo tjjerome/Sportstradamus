@@ -18,8 +18,7 @@ from datetime import date, timedelta
 import pytest
 
 from sportstradamus.helpers import odds_budget
-from sportstradamus.stats import StatsNBA, StatsWNBA
-from sportstradamus.stats import base as stats_base
+from sportstradamus.stats import StatsNBA, StatsWNBA, base
 from sportstradamus.stats.base import SEASON_MAX_DAYS, Stats
 
 _CONSTANT_START = date(2025, 10, 1)
@@ -98,11 +97,12 @@ def test_update_keeps_constant_when_opener_older_or_absent(gates) -> None:
 @pytest.mark.parametrize(
     ("days_since_start", "forced", "due"),
     [(SEASON_MAX_DAYS + 5, False, True), (SEASON_MAX_DAYS - 5, False, False), (30, True, True)],
+    ids=["season over", "season live", "forced"],
 )
 def test_full_clean_is_due_once_the_season_held_is_over_or_when_forced(
     monkeypatch, days_since_start, forced, due
 ) -> None:
-    monkeypatch.setattr(stats_base, "clean_data", forced)
+    monkeypatch.setattr(base, "clean_data", forced)
     s = _FakeLeague()
     s.season_start = date.today() - timedelta(days=days_since_start)
     assert s._full_clean_due() is due

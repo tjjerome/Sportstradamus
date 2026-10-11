@@ -28,11 +28,7 @@ from sportstradamus.stats import (
     nfl_fp_team_weekly_aggregate,
     nfl_fp_weekly_aggregate,
 )
-from sportstradamus.stats.base import (
-    ComboSpec,
-    Stats,
-    apply_volume_budget,
-)
+from sportstradamus.stats.base import ComboSpec, Stats, apply_volume_budget
 
 # Phase-1.5 lookback rule:
 #   - Post-week-4 (target_week >= 5) of the target's season: comp pool is

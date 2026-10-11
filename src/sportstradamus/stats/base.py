@@ -645,8 +645,8 @@ class Stats:
     def _full_clean_due(self) -> bool:
         """Whether an update runs the league's clean pass over its whole gamelog.
 
-        Due once the season held is over (it began more than ``SEASON_MAX_DAYS`` ago)
-        and while ``clean_data`` is set.
+        Due once the season held is over (it began more than ``SEASON_MAX_DAYS`` ago),
+        or at any time while ``clean_data`` is set.
         """
         oldest_live_start = datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
         return self.season_start < oldest_live_start or clean_data
