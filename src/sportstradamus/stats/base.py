@@ -1473,10 +1473,14 @@ class Stats:
         self.profile_market(self.usage_stat, date=date)
         usage = pd.DataFrame(self.playerProfile[[self.usage_stat + " short", self.tiebreaker_stat]])
         player_df = player_df.join(usage, how="left").fillna(0).infer_objects(copy=False)
+        # One column is ranked, not the frame: a roster's text attribute holds a filled-in 0
+        # for a player with no roster row, and ranking it would compare text with a number.
         ranks = (
             player_df.sort_values(self.tiebreaker_stat, ascending=False)
-            .groupby([self.log_strings["team"], self.log_strings["position"]])
-            .rank(ascending=False, method="first")[self.usage_stat + " short"]
+            .groupby([self.log_strings["team"], self.log_strings["position"]])[
+                self.usage_stat + " short"
+            ]
+            .rank(ascending=False, method="first")
             .astype(int)
         )
 

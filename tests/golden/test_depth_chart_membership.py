@@ -11,13 +11,17 @@ Two neighbours of the same roster table are pinned alongside: the NFL loader mus
 team codes through (``Series.map`` with a dict turns them into NaN), and the NFL fantasy spec
 must read the position ``get_depth`` wrote to ``playerProfile`` -- the gamelog's on a past date,
 the roster's on an upcoming one -- rather than the roster alone.
+
+The NHL's roster rows carry a text attribute (``shootsCatches``). A player who played without a
+roster row has none, and the rank must still come out: ranking every column at once compared
+that text with the filled-in zero and raised on 486 of the 570 game days since 2024-02-10.
 """
 
 from datetime import date, datetime
 
 import pandas as pd
 
-from sportstradamus.stats import StatsNFL
+from sportstradamus.stats import StatsNFL, StatsNHL
 from sportstradamus.stats import nfl as nfl_module
 from sportstradamus.stats.nfl import NFL_FANTASY_COMPONENTS, NFL_FANTASY_RECEPTION_POINTS
 from sportstradamus.training.component_cells import _fantasy_weights
@@ -61,6 +65,40 @@ def test_historical_gameday_ranks_every_player_who_played():
     assert profile.loc[UNROSTERED, "team"] == "DAL"
     assert profile.loc[ROSTERED, "depth"] == 1
     assert profile.loc[ROSTERED, "position"] == stats.positions.index("RB") + 1
+
+
+def test_historical_gameday_ranks_a_player_whose_roster_row_lacks_a_text_attribute():
+    stats = StatsNHL()
+    stats.gamelog = pd.DataFrame(
+        {
+            "playerName": ["Rostered Center", "Unrostered Center"],
+            "team": ["BOS", "BOS"],
+            "position": ["C", "C"],
+            "gameDate": ["2024-02-10", "2024-02-10"],
+        }
+    )
+    stats.players = {
+        2023: {
+            "8470001": {
+                "playerName": "Rostered Center",
+                "team": "BOS",
+                "position": "C",
+                "shootsCatches": "L",
+                "age": 28.0,
+            }
+        }
+    }
+    stats.playerProfile = pd.DataFrame(
+        {"TimeShare short": [0.30, 0.25], "Fenwick short": [0.55, 0.50]},
+        index=["Rostered Center", "Unrostered Center"],
+    )
+    stats.profile_market = lambda market, date=None: None
+
+    stats.get_depth(
+        [{"Player": "Rostered Center"}, {"Player": "Unrostered Center"}], date(2024, 2, 10)
+    )
+
+    assert stats.playerProfile["depth"].to_dict() == {"Rostered Center": 1, "Unrostered Center": 2}
 
 
 def test_upcoming_gameday_still_needs_the_roster():
