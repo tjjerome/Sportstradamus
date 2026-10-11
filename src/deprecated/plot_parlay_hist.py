@@ -1,3 +1,19 @@
+# ARCHIVED 2026-10-11 from src/sportstradamus/scripts/plot_parlay_hist.py
+# Reason: A hand-run parlay-history plot that no entry point reaches and nothing imports; it
+#         kept its own copies of the payout tables, the market override map and check_bet.
+# Last live SHA: b4378f0c
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import json
+#   import numpy as np
+#   import pandas as pd
+#   import seaborn as sns
+#   from matplotlib import pyplot as plt
+#   from tqdm import tqdm
+#   from sportstradamus import data
+#   from sportstradamus.helpers.io import read_parlay_hist, write_parlay_hist
+#   from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL
+
 import importlib.resources as pkg_resources
 import json
 
