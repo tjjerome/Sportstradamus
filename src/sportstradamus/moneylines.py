@@ -184,7 +184,7 @@ def _is_opening_night(tier: str, last_game: str | None, next_game: datetime) -> 
         return False
     if last_game is None:
         return True
-    return next_game - odds_budget.feed_ts(last_game) > timedelta(days=_OFF_SEASON_GAP_DAYS)
+    return next_game - datetime.fromisoformat(last_game) > timedelta(days=_OFF_SEASON_GAP_DAYS)
 
 
 def _league_activity_record(prev, commences, now):
@@ -203,11 +203,11 @@ def _league_activity_record(prev, commences, now):
     """
     past = [c for c in (prev.get("next_game"), prev.get("last_game")) if c is not None]
     past += commences
-    past = [c for c in past if odds_budget.feed_ts(c) <= now]
+    past = [c for c in past if datetime.fromisoformat(c) <= now]
     last_game = max(past, default=None)
     days_to_next = None
     if commences:
-        next_game = odds_budget.feed_ts(commences[0])
+        next_game = datetime.fromisoformat(commences[0])
         days_to_next = (next_game - now).total_seconds() / 86400
     tier = odds_budget.classify_tier(days_to_next, prev.get("tier"), odds_budget.BUDGET_CFG)
     opener = prev.get("opener")
@@ -481,36 +481,36 @@ def _parse_market_books(game):
     return moneyline_home, moneyline_away, totals, spread_home, spread_away
 
 
-def _store_game_moneylines(archive, game, league, date, dayDelta, observed_at):
+def _store_game_moneylines(archive, game, league, date, day_delta, observed_at):
     """Resolve one game's date + teams and write its moneyline/totals books."""
-    gameDate = datetime.fromisoformat(game["commence_time"]).astimezone(
+    game_date = datetime.fromisoformat(game["commence_time"]).astimezone(
         pytz.timezone("America/Chicago")
     )
-    if gameDate > date + timedelta(days=dayDelta):
+    if game_date > date + timedelta(days=day_delta):
         return
-    gameDate = gameDate.strftime("%Y-%m-%d")
+    game_date = game_date.strftime("%Y-%m-%d")
 
-    homeTeam = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
-    awayTeam = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
-    if homeTeam is None or awayTeam is None:
+    home_team = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
+    away_team = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
+    if home_team is None or away_team is None:
         return
 
     moneyline_home, moneyline_away, totals, spread_home, spread_away = _parse_market_books(game)
-    archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away, observed_at)
-    archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home, observed_at)
+    archive.set_team_books(league, "Moneyline", game_date, away_team, moneyline_away, observed_at)
+    archive.set_team_books(league, "Moneyline", game_date, home_team, moneyline_home, observed_at)
     archive.set_team_books(
         league,
         "Totals",
-        gameDate,
-        awayTeam,
+        game_date,
+        away_team,
         {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()},
         observed_at,
     )
     archive.set_team_books(
         league,
         "Totals",
-        gameDate,
-        homeTeam,
+        game_date,
+        home_team,
         {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()},
         observed_at,
     )
@@ -542,7 +542,7 @@ def get_moneylines(
     if sports is None:
         return archive
 
-    url_template, dayDelta, params = _moneyline_request(apikey, date, historical)
+    url_template, day_delta, params = _moneyline_request(apikey, date, historical)
     for sport, league in sports:
         res = _get_with_retry(url_template.format(sport=sport), params=params)
         if res.status_code != HTTPStatus.OK:
@@ -550,7 +550,7 @@ def get_moneylines(
             continue
         games = res.json()["data"] if historical else res.json()
         for game in tqdm(games, desc=f"Getting {league} Game Data", unit="game"):
-            _store_game_moneylines(archive, game, league, date, dayDelta, observed_at)
+            _store_game_moneylines(archive, game, league, date, day_delta, observed_at)
 
     return archive
 
@@ -664,10 +664,10 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
         return True
 
     for event in events.json()["data"] if req.historical else events.json():
-        gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
+        game_date = datetime.fromisoformat(event["commence_time"]).astimezone(
             pytz.timezone("America/Chicago")
         )
-        if gameDate > date + timedelta(days=req.day_delta):
+        if game_date > date + timedelta(days=req.day_delta):
             continue
         payload = _fetch_event_odds(req, sport, event["id"], region_markets)
         if payload is False:
@@ -675,13 +675,13 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
         if payload is None:
             continue
 
-        observed_at = _historical_observed_at(req.historical, gameDate, observed_at_hour)
+        observed_at = _historical_observed_at(req.historical, game_date, observed_at_hour)
         _archive_event_props(
             archive,
             payload,
             league,
             props,
-            gameDate.strftime("%Y-%m-%d"),
+            game_date.strftime("%Y-%m-%d"),
             observed_at,
         )
         if not req.historical:
@@ -752,7 +752,7 @@ def get_props(
     return archive
 
 
-def _historical_observed_at(historical, gameDate, hour=None):
+def _historical_observed_at(historical, game_date, hour=None):
     """Snapshot stamp for backfilled rows, or ``None`` for live runs.
 
     Live writes default to ``utcnow()``. Backfilled rows stamp game-day
@@ -763,7 +763,7 @@ def _historical_observed_at(historical, gameDate, hour=None):
     """
     if not historical:
         return None
-    return datetime(gameDate.year, gameDate.month, gameDate.day, hour or 1, 0, 0)
+    return datetime(game_date.year, game_date.month, game_date.day, hour or 1, 0, 0)
 
 
 _PROP_SIDE_RENAME = {"Yes": "Over", "No": "Under"}
@@ -895,7 +895,7 @@ def _event_spread_book(market, book, game, spread_home, spread_away):
         spread_away[spread_name][book["key"]] = spread
 
 
-def _write_event_totals(archive, game, league, gameDate, totals, spread_home, spread_away):
+def _write_event_totals(archive, game, league, game_date, totals, spread_home, spread_away):
     """Write the totals team buckets, blending in the parsed spreads."""
     home_team = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
     away_team = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
@@ -908,20 +908,20 @@ def _write_event_totals(archive, game, league, gameDate, totals, spread_home, sp
         archive.set_team_books(
             league,
             market,
-            gameDate,
+            game_date,
             home_team,
             {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()},
         )
         archive.set_team_books(
             league,
             market,
-            gameDate,
+            game_date,
             away_team,
             {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()},
         )
 
 
-def _archive_event_props(archive, game, league, props, gameDate, observed_at=None):
+def _archive_event_props(archive, game, league, props, game_date, observed_at=None):
     """Parse one Odds API event response and write its odds into ``archive``.
 
     Splits markets into player props (per-player EV and consensus lines),
@@ -951,7 +951,7 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
                 archive.merge_player_books(
                     league,
                     market,
-                    gameDate,
+                    game_date,
                     player,
                     entry["EV"],
                     [line],
@@ -960,10 +960,10 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
                 )
             for book, rungs in entry["Ladder"].items():
                 archive.add_ladder(
-                    league, market, gameDate, player, book, rungs, observed_at=observed_at
+                    league, market, game_date, player, book, rungs, observed_at=observed_at
                 )
 
-    _write_event_totals(archive, game, league, gameDate, totals, spread_home, spread_away)
+    _write_event_totals(archive, game, league, game_date, totals, spread_home, spread_away)
 
 
 def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
@@ -1004,12 +1004,12 @@ def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
             events = json.load(infile)
 
         for event in events:
-            gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
+            game_date = datetime.fromisoformat(event["commence_time"]).astimezone(
                 pytz.timezone("America/Chicago")
             )
-            if gameDate > date + timedelta(days=_LIVE_DAY_WINDOW):
+            if game_date > date + timedelta(days=_LIVE_DAY_WINDOW):
                 continue
-            gameDate_str = gameDate.strftime("%Y-%m-%d")
+            game_date_str = game_date.strftime("%Y-%m-%d")
 
             odds_path = fixture_dir / f"odds_{sport}_{event['id']}.json"
             if not odds_path.is_file():
@@ -1017,7 +1017,7 @@ def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
             with open(odds_path) as infile:
                 game = json.load(infile)
 
-            _archive_event_props(archive, game, league, props, gameDate_str)
+            _archive_event_props(archive, game, league, props, game_date_str)
             ledger[(sport, event["id"])] = {
                 "sport_key": sport,
                 "event_id": event["id"],
@@ -1113,12 +1113,12 @@ def _close_lines_pass(keys, props):
             logger.warning(f"close-lines: {league} {event_id} returned status {res.status_code}")
             continue
         game = res.json()
-        gameDate = (
+        game_date = (
             datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
             .astimezone(pytz.timezone("America/Chicago"))
             .strftime("%Y-%m-%d")
         )
-        _archive_event_props(archive, game, league, props, gameDate)
+        _archive_event_props(archive, game, league, props, game_date)
         e["close_fetched"] = now.isoformat()
 
     archive.write()

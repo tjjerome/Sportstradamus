@@ -349,7 +349,7 @@ def _fresh_leagues() -> dict | None:
     return activity["leagues"]
 
 
-def league_is_live(league: str, season_start) -> bool:
+def league_is_live(league: str, season_start: date) -> bool:
     """Gate for the per-league offer loops (prophecize, meditate, pickem-build).
 
     A league is live when the feed-derived activity snapshot tiers it
@@ -366,11 +366,6 @@ def league_is_live(league: str, season_start) -> bool:
     if leagues is not None:
         return leagues.get(league, {}).get("tier") in ("live", "preseason")
     return datetime.now(UTC).date() > season_start - timedelta(days=_SEASON_START_LEAD_DAYS)
-
-
-def feed_ts(commence: str) -> datetime:
-    """Parse an Odds API commence time (ISO 8601, ``Z``-suffixed UTC) to an aware datetime."""
-    return datetime.fromisoformat(commence.replace("Z", "+00:00"))
 
 
 def season_opener(league: str) -> date | None:
@@ -391,10 +386,10 @@ def season_opener(league: str) -> date | None:
     opener = leagues.get(league, {}).get("opener")
     if opener is None:
         return None
-    return feed_ts(opener).astimezone(pytz.timezone("America/Chicago")).date()
+    return datetime.fromisoformat(opener).astimezone(pytz.timezone("America/Chicago")).date()
 
 
-def update_window_open(league: str, season_start) -> bool:
+def update_window_open(league: str, season_start: date) -> bool:
     """Season gate consulted by ``Stats.update`` before hitting league APIs.
 
     Open within ``_UPDATE_WINDOW_DAYS`` of a scheduled game on either side:
@@ -414,10 +409,10 @@ def update_window_open(league: str, season_start) -> bool:
     window = timedelta(days=_UPDATE_WINDOW_DAYS)
     now = datetime.now(UTC)
     next_game = record.get("next_game")
-    if next_game is not None and feed_ts(next_game) - now <= window:
+    if next_game is not None and datetime.fromisoformat(next_game) - now <= window:
         return True
     last_game = record.get("last_game")
-    return last_game is not None and now - feed_ts(last_game) <= window
+    return last_game is not None and now - datetime.fromisoformat(last_game) <= window
 
 
 class BudgetDecision(NamedTuple):
