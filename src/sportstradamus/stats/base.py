@@ -1374,25 +1374,30 @@ class Stats:
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
 
-    def _roster_player_df(self, season):
-        if "NBA" in self.league:
-            player_df = []
-            # A season's rosters arrive with its first update that finds players; until then
-            # last season's stand in. NBA keys a season "2025-26", WNBA by its year.
-            keys = [season, season - 1]
-            if self.league == "NBA":
-                keys = ["-".join([str(year), str(year - 1999)]) for year in keys]
-            season_players = self.players.get(keys[0]) or self.players[keys[1]]
-            for team, roster in season_players.items():
-                roster = [
-                    {self.log_strings["player"]: k, self.log_strings["team"]: team} | v
-                    for k, v in roster.items()
-                ]
-                player_df.extend(roster)
+    def _season_roster_rows(self, season):
+        """The rows of a stored season's roster; none for a season the store does not hold."""
+        if self.league == "NHL":
+            return list(self.players.get(season, {}).values())
+        # NBA keys a season "2025-26", WNBA by its year.
+        key = f"{season}-{season - 1999}" if self.league == "NBA" else season
+        return [
+            {self.log_strings["player"]: name, self.log_strings["team"]: team} | attrs
+            for team, roster in self.players.get(key, {}).items()
+            for name, attrs in roster.items()
+        ]
 
-            player_df = pd.DataFrame(player_df)
-        elif self.league == "NHL":
-            player_df = pd.DataFrame(self.players[season].values())
+    def _roster_player_df(self, season):
+        if self.league in ("NBA", "WNBA", "NHL"):
+            # A season's roster can lack a player until that player's first game in it. Last
+            # season's row then stands in, so the game is priced from the model and not by the
+            # book alone; a player who changed teams reads on the old team for it.
+            player_col = self.log_strings["player"]
+            rows = self._season_roster_rows(season)
+            held = {row[player_col] for row in rows}
+            stand_ins = [
+                row for row in self._season_roster_rows(season - 1) if row[player_col] not in held
+            ]
+            player_df = pd.DataFrame(rows + stand_ins)
         elif self.league == "NFL":
             player_df = self.players.reset_index().rename(columns={"name": "player display name"})
         else:
