@@ -903,6 +903,16 @@ eras.
   no shortcut: on two weeks of one quoted market it gave the same 3,039 rows cell for cell,
   at 9.7 seconds a game day against 11.2 (§8, asks 5 and 6). Record:
   `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/nhl_crash/README.md`.
+- The WNBA gamelog keeps the infinities its ratio stats divide into.
+  `StatsWNBA._assemble_wnba_player_rows` and `_assemble_wnba_team_rows` clean the frame of
+  them and drop the result, where the NBA's builders guard each division. The training box's
+  WNBA gamelog holds 4,948 infinite cells in 27,098 rows (`BLK_PCT` 4,780, `FTR` 168) and its
+  team log 156 (`BLK_RATIO`, `OPP_BLK_RATIO`); the NBA's hold none. A window that holds one
+  such game averages to infinity and the feature is zeroed: `Team BLK_RATIO`,
+  `Team OPP_BLK_RATIO`, `Defense BLK_RATIO` and `Defense OPP_BLK_RATIO` read 0 on 21 to 23 %
+  of the WNBA points matrix's rows, never in the NBA's, and `Player FTR` on 8 % against
+  0.4 %. Training and serving read the same values, so a fix changes the features and counts
+  only with a WNBA rebuild and retrain (§8, ask 22).
 - The parlay search's `Fun` score reads no calibration on Underdog. A game keeps its top
   parlays under three sort keys, model EV, recommended stake and `Fun`
   (`correlation._append_parlay_rows`), and `parlay._parlay_fun` scores an Over leg by its line
@@ -999,7 +1009,10 @@ over-read).
     after 9.) The map holds one game a team and the schedule is asked only up to today: all
     308 rows for 2026-10-12 on the board of 10-11 read every player as away. Such a row is
     scored again on game day (decision 15), so the change is to the board a bettor reads the
-    day before. Keying the map by date and team reaches about ten call sites. Not written.
+    day before. Keying the map by date and team reaches about ten call sites. The NBA's and
+    the WNBA's map has the same shape (today and two days on, one game a team): the 17
+    opening-night NBA rows on production's board of 2026-10-11 read a pre-season game's home
+    flag or none. Not written.
 12. **Take a rain-shortened MLB game into the gamelog?** (yes / no; recommended yes.) One more
     state in `_mlb_final_game_ids`, and a one-off refill of the seven games of 2025 and 2026 on
     both boxes; the owner runs production's (§7). Not written.
@@ -1040,6 +1053,19 @@ over-read).
     `underdog_pickem.build_entries_from_scored`, which has no other caller, and corrects the
     docs that say the dashboard reads the file (§7). The `bet pickem` command and the ledger
     build do not use them. Not written.
+21. **Keep four years of NHL gamelog, as MLB and the NBA do?** (yes / no; recommended yes.)
+    The NHL's retention is 1,431 days where theirs is 1,461; the number dates from 2023 and
+    reads as a slip of one digit. One constant. Not written.
+22. **Stop the WNBA gamelog from keeping infinities?** (yes / no; recommended yes, with the
+    WNBA retrain of ask 7.) The clean step's result is kept instead of dropped and the stored
+    rows are cleaned once (§7). Four block-ratio features then stop reading 0 on a fifth of
+    the rows, which a model sees only after a WNBA matrix rebuild and retrain. Not written.
+23. **Run a second cleanup pass on the older style debt the review listed?** (yes / no;
+    recommended yes, after the asks above.) Nothing computed differently: imports no module
+    reads (the lint rule for them is off), `training.data.count_training_rows` and
+    `clv.check_close_sample_freshness`, which no code calls, to `src/deprecated/`, and
+    docstrings that no longer match their code. The four reports hold the list
+    (`~/backups/sportstradamus/2026-10-11-push4-cleanup/reports/`). Not written.
 
 The owner's own, no answer needed:
 
