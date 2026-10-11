@@ -26,7 +26,7 @@ from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
 # stats.wnba.com abbreviations differ from our canonical set; remapped wherever a
-# team code enters (player index, player logs, team logs).
+# team code enters (player index, shot locations, player logs, team logs).
 _WNBA_TEAM_ABBR_MAP = {
     "CONN": "CON",
     "NY": "NYL",
@@ -230,7 +230,7 @@ class StatsWNBA(StatsNBA):
                 if fga > 0:
                     record = {
                         "PLAYER_NAME": remove_accents(row[1]),
-                        "TEAM_ABBREVIATION": row[3],
+                        "TEAM_ABBREVIATION": _WNBA_TEAM_ABBR_MAP.get(row[3], row[3]),
                         "RA_PCT": (row[7] if row[7] else 0) / fga,
                         "ITP_PCT": (row[10] if row[10] else 0) / fga,
                         "MR_PCT": (row[13] if row[13] else 0) / fga,
