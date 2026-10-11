@@ -127,7 +127,7 @@ def _stories_for_game(
     require_both = (
         len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
     )
-    new_map = leg_market_map(sctx.league, sctx.platform)
+    stat_by_label = leg_market_map(sctx.league, sctx.platform)
     index = offer_index(offers)
     stars = {}
     for i in edge:
@@ -138,7 +138,14 @@ def _stories_for_game(
     scored = []
     for cluster, side, lead in _cluster_strong_legs(order, sctx, seeds):
         priced = _price_cluster(
-            cluster, side, lead, seeds.get(side), order, sctx, new_map, require_both=require_both
+            cluster,
+            side,
+            lead,
+            seeds.get(side),
+            order,
+            sctx,
+            stat_by_label,
+            require_both=require_both,
         )
         if priced is not None:
             scored.append(priced)
@@ -148,7 +155,9 @@ def _stories_for_game(
     )
     rows: list[dict] = []
     for rank, (_cluster, builder, moon, side, lead) in enumerate(scored[:_MAX_STORIES]):
-        headline, dek = _story_prose(builder, moon, sctx, offers, index, ctxs, new_map, seen, lead)
+        headline, dek = _story_prose(
+            builder, moon, sctx, offers, index, ctxs, stat_by_label, seen, lead
+        )
         story = {
             "story_id": f"{sctx.game}#{rank}",
             "headline": headline,
@@ -263,7 +272,7 @@ def _grow_cluster(
 def _best_subsets(
     cluster: Sequence[int],
     sctx: GameScoringContext,
-    new_map: dict,
+    stat_by_label: dict,
     *,
     require_both_teams: bool = True,
     must_include: int | None = None,
@@ -291,7 +300,7 @@ def _best_subsets(
     ]
     if not proxies:
         return None, None
-    scored = [score_subset(bet_id, sctx, new_map) for bet_id in shortlist(proxies)]
+    scored = [score_subset(bet_id, sctx, stat_by_label) for bet_id in shortlist(proxies)]
     builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], s["bet_id"]))
     moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], s["bet_id"]))
     if moon["model_ev"] <= _MENU_MIN_MOON_EV:
@@ -306,7 +315,7 @@ def _price_cluster(
     seed: int | None,
     order: Sequence[int],
     sctx: GameScoringContext,
-    new_map: dict,
+    stat_by_label: dict,
     *,
     require_both: bool,
 ) -> tuple[list[int], dict, dict, str, str] | None:
@@ -316,14 +325,14 @@ def _price_cluster(
     two-team game) borrows a leg from ``order`` and is priced once more.
     """
     builder, moon = _best_subsets(
-        cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
+        cluster, sctx, stat_by_label, require_both_teams=require_both, must_include=seed
     )
     if builder is None and seed is not None:
         partner = _lead_partner(seed, cluster, order, sctx, require_both)
         if partner is not None:
             cluster = [*cluster, partner]
             builder, moon = _best_subsets(
-                cluster, sctx, new_map, require_both_teams=require_both, must_include=seed
+                cluster, sctx, stat_by_label, require_both_teams=require_both, must_include=seed
             )
     if builder is None:
         return None
@@ -354,7 +363,7 @@ def _story_prose(
     offers: pd.DataFrame,
     index: Mapping[tuple, Mapping],
     ctxs: Mapping[str, GameCtx],
-    new_map: dict,
+    stat_by_label: dict,
     seen: set[str],
     lead_player: str,
 ) -> tuple[str, str]:
@@ -368,10 +377,14 @@ def _story_prose(
     headlines across the (platform, date) slate.
     """
     per_sub = [
-        [lower_leg(sctx.bet_df[i], new_map) for i in sub["bet_id"]] for sub in (builder, moon)
+        [lower_leg(sctx.bet_df[i], stat_by_label) for i in sub["bet_id"]] for sub in (builder, moon)
     ]
     core = sorted(set(builder["bet_id"]) & set(moon["bet_id"]))
-    parsed = [lower_leg(sctx.bet_df[i], new_map) for i in core] if core else per_sub[0] + per_sub[1]
+    parsed = (
+        [lower_leg(sctx.bet_df[i], stat_by_label) for i in core]
+        if core
+        else per_sub[0] + per_sub[1]
+    )
     variants, vi, subject = thesis_variants(
         enrich_legs(parsed, offers), ctxs, lead=lead_player or None
     )

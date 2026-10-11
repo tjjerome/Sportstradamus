@@ -305,16 +305,16 @@ def _beam_inputs() -> dict:
 
 
 def test_resolve_leg_stat_uses_market_map_when_present() -> None:
-    """A remapped market resolves through ``new_map``; an unmapped one falls back."""
-    new_map = {"Fantasy Points": "fantasy points prizepicks"}
-    assert resolve_leg_stat("Fantasy Points", new_map) == "fantasy points prizepicks"
-    assert resolve_leg_stat("PTS", new_map) == "PTS"
+    """A remapped market resolves through ``stat_by_label``; an unmapped one falls back."""
+    stat_by_label = {"Fantasy Points": "fantasy points prizepicks"}
+    assert resolve_leg_stat("Fantasy Points", stat_by_label) == "fantasy points prizepicks"
+    assert resolve_leg_stat("PTS", stat_by_label) == "PTS"
 
 
 def test_resolve_leg_stat_strips_h2h_prefix_before_lookup() -> None:
     """``"H2H "`` is stripped before the map lookup, mirroring the cMarket idiom."""
-    new_map = {"Points": "points"}
-    assert resolve_leg_stat("H2H Points", new_map) == "points"
+    stat_by_label = {"Points": "points"}
+    assert resolve_leg_stat("H2H Points", stat_by_label) == "points"
 
 
 def test_beam_search_characterization() -> None:

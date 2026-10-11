@@ -393,12 +393,14 @@ def _build_cmarket(league_df, league, platform):
     legs — with the market under the league's own name, the one its correlation
     matrices are keyed by.
     """
-    new_map = leg_market_map(league, platform)
+    stat_by_label = leg_market_map(league, platform)
     league_df["cMarket"] = league_df.apply(
         lambda x: (
-            [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]
+            [x["Player position"] + "." + resolve_leg_stat(x["Market"], stat_by_label)]
             if isinstance(x["Player position"], str)
-            else [p + "." + resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
+            else [
+                p + "." + resolve_leg_stat(x["Market"], stat_by_label) for p in x["Player position"]
+            ]
         ),
         axis=1,
     )
@@ -619,7 +621,6 @@ def _process_league_games(
     search_payouts,
     full_payouts,
     parlay_df,
-    contest_variant,
     corr_sink,
     story_sink,
     market_map,
@@ -709,7 +710,6 @@ def _process_league_games(
             info,
             team,
             opp,
-            contest_variant=contest_variant,
             full_refund_below_size=full_refund_below_size,
         )
         if best_bets:
@@ -858,7 +858,6 @@ def find_correlation(
             search_payouts,
             full_payouts,
             parlay_df,
-            contest_variant,
             corr_sink,
             story_sink,
             stat_map[platform],

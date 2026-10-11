@@ -43,7 +43,7 @@ def independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float,
     return p_ind * payout, _log_growth(p_ind, payout)
 
 
-def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict) -> dict:
+def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, stat_by_label: dict) -> dict:
     """Exact copula score for one subset (reuses parlay's gate-free scorer)."""
     size = len(bet_id)
     g = sctx.g
@@ -79,7 +79,7 @@ def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict)
                     "Game": sctx.game,
                     "Date": sctx.date,
                     "Platform": sctx.platform,
-                    "Stat": resolve_leg_stat(sctx.bet_df[i]["Market"], new_map),
+                    "Stat": resolve_leg_stat(sctx.bet_df[i]["Market"], stat_by_label),
                 }
             )
             for i in bet_id

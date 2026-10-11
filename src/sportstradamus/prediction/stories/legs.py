@@ -153,10 +153,10 @@ def narrative_side(leg: Leg) -> str:
     return "Under" if leg.bet == "Over" else "Over"
 
 
-def lower_leg(row: Mapping, new_map: dict) -> dict:
+def lower_leg(row: Mapping, stat_by_label: dict) -> dict:
     """Map a canonical uppercase-keyed leg row to the lowercase keys ``enrich_legs`` wants.
 
-    ``new_map`` is the platform's display-name → slug map (``parlay.leg_market_map``);
+    ``stat_by_label`` is the platform's display-name → slug map (``parlay.leg_market_map``);
     ``stat`` is the slug behind the display ``Market``, resolved the same way the
     persisted leg's ``Stat`` field is so a leg that misses the offers join still
     categorizes off the slug. Pass ``{}`` where only the display fields are read.
@@ -166,7 +166,7 @@ def lower_leg(row: Mapping, new_map: dict) -> dict:
         "bet": row["Bet"],
         "line": row["Line"],
         "market": row["Market"],
-        "stat": resolve_leg_stat(row["Market"], new_map),
+        "stat": resolve_leg_stat(row["Market"], stat_by_label),
     }
 
 

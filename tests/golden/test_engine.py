@@ -85,13 +85,13 @@ def test_enrich_legs_reads_the_slug_when_the_offer_join_misses():
     ``narrative_side`` hands the bank silently inverted. ``lower_leg`` carries the
     resolved slug, so both spellings of the same leg read the same.
     """
-    new_map = leg_market_map("NFL", "Underdog")
+    stat_by_label = leg_market_map("NFL", "Underdog")
     rows = [
         {"Player": "Pocket Passer", "Bet": "Under", "Line": 0.5, "Market": name}
         for name in ("INTs Thrown", "interceptions")
     ]
     for leg in enrich_legs(
-        [lower_leg(row, new_map) for row in rows],
+        [lower_leg(row, stat_by_label) for row in rows],
         pd.DataFrame(columns=["Player", "Bet", "Line"]),
     ):
         assert leg.market == "interceptions"

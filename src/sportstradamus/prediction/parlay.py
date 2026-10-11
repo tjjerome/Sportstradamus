@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from operator import itemgetter
-from typing import Literal
 
 import numpy as np
 from tqdm import tqdm
@@ -161,10 +160,10 @@ def leg_market_map(league: str, platform: str) -> dict[str, str]:
     return {label: cell_market(league, platform, label) for label in stat_map[platform]}
 
 
-def resolve_leg_stat(market: str, new_map: dict) -> str:
+def resolve_leg_stat(market: str, stat_by_label: dict) -> str:
     """Gamelog stat key for a leg's display ``Market``, mirroring the ``cMarket`` idiom."""
     stripped = market.replace("H2H ", "")
-    return new_map.get(stripped, stripped)
+    return stat_by_label.get(stripped, stripped)
 
 
 def _is_sleeper_flex_candidate(info, bet_size):
@@ -254,7 +253,7 @@ def _evaluate_parlay(
     team,
     opp,
     leg_teams,
-    new_map,
+    stat_by_label,
     full_refund_below_size=None,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
@@ -303,7 +302,7 @@ def _evaluate_parlay(
             {
                 **leg,
                 "Platform": info["Platform"],
-                "Stat": resolve_leg_stat(leg["Market"], new_map),
+                "Stat": resolve_leg_stat(leg["Market"], stat_by_label),
             }
         )
         for leg in bet
@@ -341,7 +340,6 @@ def beam_search_parlays(
     team,
     opp,
     *,
-    contest_variant: Literal["pooled", "power", "flex"] = "pooled",
     full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
@@ -364,8 +362,6 @@ def beam_search_parlays(
         info: ``{Game, Date, League, Platform}`` metadata dict.
         team: Home team abbreviation.
         opp: Away team abbreviation.
-        contest_variant: Underdog contest variant. Affects payout curve
-            interpretation in :func:`payouts.expected_payout_with_pushes`.
         full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
             — entries at or below this size refund in full on any push
             (Sleeper's 2-pick divergence). ``None`` keeps the generic
@@ -379,7 +375,7 @@ def beam_search_parlays(
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
     leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
-    new_map = leg_market_map(info["League"], info["Platform"])
+    stat_by_label = leg_market_map(info["League"], info["Platform"])
 
     candidates = [(i,) for i in leg_indices]
     all_results = []
@@ -404,7 +400,7 @@ def beam_search_parlays(
                 team,
                 opp,
                 leg_teams,
-                new_map,
+                stat_by_label,
                 full_refund_below_size,
             )
             if result is not None:
