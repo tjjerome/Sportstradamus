@@ -77,7 +77,6 @@ def _platform_candidates(
     trigger a second, redundant scrape for whichever platform it's called under.
     """
     entries = construct_entries(
-        date,
         _ledger_selection.BANKROLL_PER_REPLICATE,
         _SHARED_CONFIG,
         parlay_dfs=parlay_dfs,

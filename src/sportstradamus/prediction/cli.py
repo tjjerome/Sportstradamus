@@ -470,7 +470,6 @@ def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], s
         try:
             all_entries.extend(
                 build_entries_from_scored(
-                    datetime.date.today(),
                     REFERENCE_BANKROLL,
                     scored,
                     stats,

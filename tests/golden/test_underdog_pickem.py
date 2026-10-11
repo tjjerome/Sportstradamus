@@ -203,7 +203,6 @@ def test_construct_entries_both_variants(fake_market_calibration):
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3)]),
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
@@ -224,7 +223,6 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibratio
     )
     parlay_dfs = {"power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5)])}
     entries = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
@@ -270,7 +268,6 @@ def test_dedupe_max_overlap(fake_market_calibration):
         )
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
@@ -288,9 +285,7 @@ def test_entry_carries_the_product_of_its_pair_modifiers(fake_market_calibration
         )
     }
 
-    (entry,) = construct_entries(
-        datetime.date(2026, 5, 8), Decimal("500"), cfg, parlay_dfs=parlay_dfs
-    )
+    (entry,) = construct_entries(Decimal("500"), cfg, parlay_dfs=parlay_dfs)
 
     assert entry.pair_modifier == pytest.approx(0.72)
 
@@ -405,7 +400,6 @@ def test_construct_entries_sleeper_platform(fake_market_calibration):
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3, platform="Sleeper")]),
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
@@ -445,7 +439,6 @@ def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
         ),
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
@@ -473,7 +466,6 @@ def test_recommended_entry_platform_roundtrips_yaml_and_frame(
         "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5, platform=platform)])
     }
     entries = construct_entries(
-        datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,

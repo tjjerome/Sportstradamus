@@ -20,7 +20,6 @@ import click
 import pandas as pd
 
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, cell_market
-from sportstradamus.helpers.logging import get_logger
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
@@ -29,8 +28,6 @@ from sportstradamus.strategies.kelly import (
     fractional_kelly_stake,
     resolve_shrinkage,
 )
-
-_logger = get_logger("pickem-build")
 
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
@@ -188,14 +185,13 @@ def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
 
 
 def construct_entries(
-    date: datetime.date,
     bankroll: Decimal,
     config: PickemConfig | None = None,
     *,
     parlay_dfs: dict[str, pd.DataFrame] | None = None,
     platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
-    """Build ranked, sized Pick'em entries for ``date`` on ``platform``.
+    """Build ranked, sized Pick'em entries on ``platform``.
 
     ``parlay_dfs`` injection short-circuits the live scraper so tests and
     offline reruns do not hit the network.
@@ -281,7 +277,6 @@ def _parlays_per_variant(
 
 
 def build_entries_from_scored(
-    date: datetime.date,
     bankroll: Decimal,
     scored_offers_df: pd.DataFrame,
     stats: dict[str, Any],
@@ -299,7 +294,6 @@ def build_entries_from_scored(
     config = config or PickemConfig()
     parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config, platform)
     return construct_entries(
-        date,
         bankroll,
         config,
         parlay_dfs=parlay_dfs,
@@ -362,7 +356,7 @@ def pickem_build(date: str, bankroll: str, platform: str, out_path: str | None) 
     """Build today's Pick'em entries for ``platform`` and emit recommendations YAML."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     config = PickemConfig()
-    entries = construct_entries(slate_date, Decimal(bankroll), config, platform=platform)
+    entries = construct_entries(Decimal(bankroll), config, platform=platform)
     target = (
         Path(out_path)
         if out_path
