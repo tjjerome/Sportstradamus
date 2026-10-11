@@ -132,7 +132,8 @@ Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the pro
 crontab — they run on the dev box beside the manual weekly `meditate`, then
 `scripts/sync_to_prod.sh` uploads the models, the gitignored serving artifacts
 (`book_weights.json`, `stat_calibration.json`, `model_stats.{parquet,csv}`,
-per-league `corr_*` matrices — see the script header), and their snapshots
+per-league `corr_*` matrices, MLB's two Savant comp tables — see the script
+header), and their snapshots
 (snapshots additive, never `--delete`). The models mirror skips
 `data/models/prior/`: the superseded model files a retrain keeps stay on the box
 that trained them (`training/prior_models.py` in

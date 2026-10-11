@@ -17,8 +17,8 @@
 #   * COLLECTOR SNAPSHOTS (additive, NO --delete): the Cleaning the Glass (NBA),
 #     Baseball Savant (MLB) and FantasyPoints (NFL) snapshot dirs are pushed
 #     additively. They live under player_data/ and team_data/ beside prod-only
-#     siblings (nba_players_*.csv, affinity_*.csv, gamelogs, NFL seasons prod
-#     pulled and dev never did) — a --delete there would wipe those. Hard rule:
+#     siblings (nba_players_*.csv, gamelogs, NFL seasons prod pulled and dev
+#     never did) — a --delete there would wipe those. Hard rule:
 #     NEVER --delete on a player_data/ or team_data/ path. A collector dir absent
 #     on dev (catalog not yet populated) is skipped.
 #     NFL rides here even though prod runs its own weekly fp-fetch: when that job
@@ -29,10 +29,12 @@
 #   * SERVING ARTIFACTS (single files, additive): gitignored training outputs the
 #     prod serving pipeline reads — book_weights.json and stat_calibration.json
 #     (consensus weights + per-cell cv/zi read at serve), model_stats.{parquet,csv}
-#     (kelly shrinkage), and each league's corr_* correlation trio (parlay
-#     scoring). With prod's `meditate` cron disabled, this script is the ONLY path
-#     these take to prod; models synced without them serve against stale
-#     calibration (the 2026-08 WNBA book_weights incident). Explicit file list,
+#     (kelly shrinkage), each league's corr_* correlation trio (parlay scoring),
+#     and MLB's two Savant comp tables (player_data/MLB/affinity_*.csv, which only
+#     `meditate` refreshes: a model learns its comp features from the copy on the
+#     box that trained it). With prod's `meditate` cron disabled, this script is
+#     the ONLY path these take to prod; models synced without them serve against
+#     stale calibration (the 2026-08 WNBA book_weights incident). Explicit file list,
 #     never a config/-wide pass — config/ also holds prod-local runtime state
 #     (goalies.json) that a directory sync would clobber.
 #
@@ -82,6 +84,8 @@ SERVING_FILE_RELS=(
     "src/sportstradamus/data/config/stat_calibration.json"
     "src/sportstradamus/data/training/model_stats.parquet"
     "src/sportstradamus/data/training/model_stats.csv"
+    "src/sportstradamus/data/player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
+    "src/sportstradamus/data/player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
 )
 for league_dir in "$LOCAL_DIR"/src/sportstradamus/data/leagues/*/; do
     [[ -d "$league_dir" ]] || continue
