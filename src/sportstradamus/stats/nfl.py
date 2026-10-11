@@ -533,7 +533,6 @@ class StatsNFL(Stats):
         self._coerce_numeric_gamelog()
 
     def _update(self):
-        """Update data from the web API."""
         self.need_pbp = True
         # QW-4 gametime / own rest / opp rest were reverted 2026-06-20 (the
         # PrimeTime/RestDiff features they fed carried zero importance). Shed them

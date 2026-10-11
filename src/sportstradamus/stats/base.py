@@ -2471,7 +2471,7 @@ class Stats:
         return frame.infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
     def trim_gamelog(self):
-        """Trims the gamelog to the league's training-window rows plus one year."""
+        """Trims the gamelog to the league's training-window rows plus the log window they read."""
         ROWS = _TRAINING_WINDOW_ROWS.get(self.league, _TRAINING_WINDOW_ROWS_DEFAULT)
 
         usable_gamelog = self.gamelog[

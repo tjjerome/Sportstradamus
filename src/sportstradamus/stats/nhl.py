@@ -500,7 +500,6 @@ class StatsNHL(Stats):
         return n | stats
 
     def _update(self):
-        """Updates the NHL skater and goalie data."""
         latest_date = self.season_start
         if not self.gamelog.empty:
             latest_date = pd.to_datetime(self.gamelog["gameDate"]).max().date() + timedelta(days=1)

@@ -591,7 +591,6 @@ class StatsNBA(Stats):
         self.season = f"{day.year}-{(day.year + 1) % 100:02d}"
 
     def _update(self) -> None:
-        """Update data from the web API."""
         self._clean_player_positions()
 
         latest_date = self._latest_gamelog_date()
