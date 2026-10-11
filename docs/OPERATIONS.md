@@ -17,8 +17,12 @@ weekly (or when model accuracy drops):
 
 League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
 is derived automatically from the Odds API events feed, so season starts and ends
-need no manual edits. The hand-set `season_start` constants in the Stats classes
-are only fallback seeds. To force a gamelog update in the offseason, set
+need no manual edits. The feed's opening night is captured once a season, when a
+league comes back from an off-season (more than 60 days between games), and is kept
+through breaks and idle spells. `Stats.update` adopts it as the season start only
+when it falls more than 300 days after the hand-set `season_start` constant in the
+Stats class: a nearer one was captured inside the season the constant already
+names, and the constant stands. To force a gamelog update in the offseason, set
 `SPORTSTRADAMUS_FORCE_UPDATE=1`.
 
 Pre-season is never priced: a game dated before the feed's opening night for its
@@ -210,6 +214,12 @@ Quick checks when collection or serving looks wrong:
   `shipped: "withheld"`, or `sportstradamus ship config --branch devel --prune`.
 - **Diverged dispersion fit**: serving logs "dispersion_cal … pinned at its fit
   bound" and serves the unscaled shape; retrain the cell to clear it.
+- **`prophecize` pings FAIL but a board was written**: grep its log for
+  `update failed` and `platforms failed`. A league whose gamelog update raised sits
+  that run out (`stats.load_live_leagues`): its lines are archived, the other
+  leagues are scored, and the run exits 1 once its snapshots are written. It is not
+  scored on the cached gamelog, because the day's schedule arrives only with an
+  update. `pickem-build` drops the league the same way and only logs it.
 - **Whole league unfit to serve** (retrain in flight, schema break): prefix the
   cron line with `SPORTSTRADAMUS_HOLD_LEAGUES=NFL` (comma-separated for several).
   `league_is_live` then reports the league idle, so `prophecize` and

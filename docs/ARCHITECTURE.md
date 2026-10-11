@@ -94,7 +94,8 @@ Sportstradamus/
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |
 | `collector_snapshots.py` | Date-keyed snapshot loader for the collector framework (CTG / Savant) |
 | `model_dependencies.py` | Versioned, serving-independent model dependencies for matrix reconstruction |
-| `__init__.py` | Re-exports the five league classes |
+| `live.py` | `load_live_leagues`: the one loader `prophecize` and `pickem-build` score through. A live league whose gamelog update raises sits the run out |
+| `__init__.py` | Re-exports the five league classes and `load_live_leagues` |
 
 ### `training/` — The `meditate` pipeline
 
@@ -265,7 +266,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `LIVE_BLEND_FLOOR`, `LIVE_BLEND_FULL` |
 | Change the Optuna hyperparameter search | `training/hyperparams.py` → `tune_hyperparameters` |
 | Change how distributions blend with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
-| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when newer than the `Stats{League}.season_start` seed constant |
+| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when it falls more than 300 days after the `Stats{League}.season_start` constant ([OPERATIONS.md](OPERATIONS.md)) |
 | Run a `Stats.update()` in the offseason | `SPORTSTRADAMUS_FORCE_UPDATE=1` — bypasses the season window (`helpers/odds_budget.py:update_window_open`) |
 | Refresh the per-cell SHAP diagnostic CSVs | `training/shap.py:see_features` — diagnostics only; training uses the full unfiltered candidate feature set |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |
@@ -319,9 +320,9 @@ change is about the seam.
 5. **Add stat name mappings** in `data/config/stat_map.json` and
    **abbreviations** in `data/config/abbreviations.json`.
 
-6. **Register the class** in the explicit `(league, class)` tuples in
-   `training/cli.py` and `prediction/cli.py`, and add the league to the
-   `--league` `click.Choice` list in `training/cli.py`.
+6. **Register the class** in the explicit `(league, class)` tuple in
+   `training/cli.py` and in the class tuple of `stats/live.py`, and add the league
+   to the `--league` `click.Choice` list in `training/cli.py`.
 
 ---
 

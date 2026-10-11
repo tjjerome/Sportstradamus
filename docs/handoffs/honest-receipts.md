@@ -56,7 +56,8 @@ Decisions 1 to 14 are of 2026-10-04. Decisions 15 to 25 are the owner's answers 
 the asks that then stood in §8, each named here by what it decides. Decision 26 is of 2026-10-09.
 Decisions 27 to 35 are the owner's go of 2026-10-08 on the story page and on the asks that
 building 15 to 25 raised ("Take all of your recommendations except waiting on the MLB offseason.
-Let's fix it now"), in the order they stood in §8.
+Let's fix it now"), in the order they stood in §8. Decisions 36 to 42 are the owner's answers
+of 2026-10-11 to the eight asks that building those raised.
 
 1. **Hero cohort = recommended**: edge ≥ 5 % at the platform payout, payout in (1, 2.5], with all
    posted sides as the context row. The ledger's `recommended` definition carries the same cap
@@ -118,15 +119,15 @@ Let's fix it now"), in the order they stood in §8.
     same day set four pair values (§6, I5).
 26. **A pre-season game is never priced, in any league**, and no cron line is held for it. An
     offer dated before the odds feed's opening night for its league is archived and not scored;
-    the rule is off while the feed holds no opening night (silent over three days). A new NBA or
-    WNBA season stands on last season's rosters until its own players arrive, and a new NBA
-    season reads the newest earlier roster seed file until its own is dropped in.
+    the rule is off while the feed holds no opening night (silent over three days). A new NBA
+    season reads the newest earlier roster seed file until its own is dropped in; what a new
+    season's roster does not hold yet is decision 37.
 27. **The Tonight card shows no side arrow, and a date's Over leads fill toward half of its
     games.** The rule picks which story leads a game. The legs inside a story are the models',
     so no balanced leg mix is promised. Where the platforms lead a game on different sides the
     card keeps the higher-EV lead ([story-balance.md](story-balance.md) §2, §5).
 28. **49ers and 76ers games get their game lines again**: a team name is matched under one
-    spelling on both sides, in every league. Past games stay at the default line (§8).
+    spelling on both sides, in every league. Past games stay at the default line (decision 36).
 29. **The MLB profile defect is fixed now, not in the off-season**: the fix, then a cold rebuild
     of the MLB matrices and a retrain. Nothing is synced to production before the owner has
     seen the gate table.
@@ -141,6 +142,23 @@ Let's fix it now"), in the order they stood in §8.
 34. **A 4-pick Underdog entry stays Flex** (§7, the entry-kind record).
 35. **Sleeper NHL assists, points and blocks legs go by the league's own market key**, in the
     parlay search, the stories and a slip seeded from a story.
+36. **The past game lines of 49ers and 76ers games are not bought.** Those games stay at the
+    default line in the archive, the matrices and the models (decision 28, §7).
+37. **A player the new season's roster does not hold yet is read from last season's**, in the
+    NBA, the WNBA and the NHL, on the old team if the player has moved since. The NHL lookup
+    no longer fails while the new season is not stored, and a roster pull the site blocks
+    leaves the NHL's stored roster as it was.
+38. **One league's failed gamelog update does not cost the others their board.** That league
+    sits the run out, with its lines still archived; the board run still ends failed, so the
+    alarm fires.
+39. **The deep dive's pairing cards find their board rows**: a stored partner names its market
+    by the board's own name.
+40. **Portland's WNBA players get their roster, and their game rows are stored again.**
+41. **A league's opening night is pinned for the season.** The odds feed's opening night is
+    captured only when a league returns from an off-season, and a league keeps it through a
+    break. A season start already held is not moved by a feed date inside that season, which
+    puts MLB back on 2026-03-25 and the WNBA on 2026-05-15.
+42. **A cleanup pass on the style-review leftovers follows the MLB and NHL rebuilds.**
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, `stat_meta.json` never committed from a session.
@@ -226,7 +244,7 @@ nowhere on the page.
 | 7 | `e339e047` | The dashboard's parlay search looks a leg's trust up under the league's own market key (decision 23) |
 | 7 | `21e00ebd` | A new NFL row takes the game line of its own game day (decision 21): the schedule joins on team and week |
 | 7 | `33ce9b28` | A push is half an Over in training (decision 19, I6a): `training/labels.over_label` at the eleven label sites, the ship gates' label included |
-| 8 | `cf0f374e` | A new NBA or WNBA season starts on last season's rosters (decision 26): `Stats._roster_player_df` falls back while the season holds nobody, `nba._roster_seed_path` reads the newest earlier seed file, and one `_merge_season_roster` adds a team the season lacks (production's WNBA 2026 roster held 6 of 15 teams) |
+| 8 | `cf0f374e` | A new NBA or WNBA season starts on last season's rosters (decision 26): `Stats._roster_player_df` falls back to last season's (player by player since decision 37), `nba._roster_seed_path` reads the newest earlier seed file, and one `_merge_season_roster` adds a team the season lacks (production's WNBA 2026 roster held 6 of 15 teams) |
 | 8 | `f3713b95` | A pre-season game is never priced (decision 26): `prediction/scoring._in_season_markets` drops an offer dated before the feed's opening night, after it is archived |
 | 9 | `d35a8aa3` | The Tonight card shows the lead story's headline with no side arrow (decision 27); `narrative.game_lead_side` retired to `src/deprecated/` |
 | 9 | `0212ca65` | Over leads fill toward half of each date's games (decision 27): `stories/lead._pick_sides` ([story-balance.md](story-balance.md) §5) |
@@ -235,6 +253,11 @@ nowhere on the page.
 | 9 | `439bbd34` | The Underdog scrape raises when a full feed holds no even pick (decision 33): `UD_EVEN_PICK_MIN_LINES`, `UNDERDOG_EVEN_PICK_MULTIPLIER` |
 | 9 | `b2f3274c`, `0c4fc099`, `09f64934` | Parlay and story legs name a market by the league's own key (decision 35): `parlay.leg_market_map` builds on `helpers.cell_market`, and a slip seeded from a story finds its board rows under that key |
 | 9 | `67309a51` | A rebuilt base profile forgets the market it held (decision 29): `Stats.base_profile` clears `profiled_market`, so an MLB matrix build profiles the market on every game day |
+| 10 | `148f81a1`, `2fbc8d14` | Last season's roster row stands in for a player the season does not hold (decision 37): `Stats._roster_player_df` for the NBA, the WNBA and the NHL; the NHL update merges a pull into the season's roster, so a blocked pull cannot empty it |
+| 10 | `911fc9a6` | One loader for the board run and the ledger build (decision 38): `stats.load_live_leagues`; a league whose update raises sits the run out, and `prophecize` exits 1 after its snapshots |
+| 10 | `d7ba4766` | A stored correlation partner names its market as the board does and carries its league (decision 39): `correlation._corr_partners` |
+| 10 | `e71f748e` | The WNBA shot map's team code goes through the alias map (decision 40), so Portland's players stay in the player frame |
+| 10 | `03395751`, `59e79056` | A league's opening night is pinned (decision 41): `moneylines._is_opening_night` captures it only after more than 60 days without a game and idle records keep it; `Stats.update` adopts it only when more than 300 days after the start it holds |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
@@ -655,7 +678,7 @@ eras.
   way (`moneylines._TEAM_ABBR`). No other lookup changes in the five polled leagues; in the two
   college lists, which no job polls, 159 more names resolve and two (Augustana (IL) and (SD))
   fold to one key. What the fix does not reach: 39 49ers games (78 NFL team-games: 34, 38 and 6
-  in 2024 to 2026) and 176 76ers games sit at the default in training (§8), and in serving
+  in 2024 to 2026) and 176 76ers games sit at the default in training (decision 36), and in serving
   every player of both teams in such a game was scored at a 0.5 win chance and the
   league-average team total (22 players in the serve-time log for the Seattle game of
   2026-10-11) until an odds poll on the fixed code stores the game.
@@ -679,53 +702,102 @@ eras.
   names NHL assists and points `AST` and `PTS`, and NBA and WNBA Underdog fantasy points by the
   platform's name, so a slip seeded from a story folds both sides to the league's key.
 
+- The odds feed's opening night moved in mid-season for two leagues. The activity classifier
+  (`moneylines._league_activity_record`) recorded an opener whenever a league was tiered
+  preseason and dropped it from an idle record, and a league whose feed empties over a break
+  comes back tiered preseason, as one nearing opening night does. MLB's opener has read
+  2026-07-16 since the All-Star break and the WNBA's 2026-09-17 since a gap in September.
+  `Stats.update` adopted each as the season start, so serving has counted `DaysIntoSeason` 113
+  and 125 days short since, and so does every matrix row built in between; the pre-season rule
+  (decision 26) would have dropped an offer dated before the first game after such a gap. Both
+  ends are fixed (decision 41): an opener is captured only when the next game falls more than
+  60 days after the last one seen, and a start a class holds gives way only to an opener more
+  than 300 days after it. What the fix does not reach: the two wrong dates stay in the feed's
+  record until next season's capture replaces them, and the 300-day rule is what ignores them;
+  the NBA's and the NHL's classes hold last season's starts, so for those two the capture rule
+  is the only guard this season; and a matrix row built while a wrong start was held keeps its
+  short count until its matrix is rebuilt (MLB's are, decision 29).
+- A player the season's roster did not hold was priced by the book alone, and the NHL's opening
+  night went unscored. The lookup knew two states: the new season's roster, or last season's
+  whole while the new one held nobody (decision 26). A WNBA or NHL roster learns a player at
+  that player's first game of the season, and the NBA's holds whoever the seed file names. The
+  NHL branch had no fall-back at all: it raised on a season the store did not hold and on one
+  stored empty, the two errors in production's board log from 2026-09-19 to 09-30.
+  `Stats._roster_player_df` now returns the season's rows and, for each name the season does
+  not hold, last season's row (decision 37). Replayed on the training box in both of those
+  states, 25 of 30 opening-night offers are scored where none was (the other 5 fall to the
+  price rule for unquoted offers). The NHL update also assigned each pull to the season's
+  roster, and the scraper answers a blocked pull with nothing, so one blocked pull emptied the
+  season; it merges now. What the fix does not reach: a player who changed teams reads on the
+  old team until a first game with the new one, and a blocked pull is only a warning line in
+  the log (§8).
+- No Portland player game row was stored for the last 27 games of the WNBA's 2026 season.
+  stats.wnba.com names the team `PDX` and ours is `POR`. The alias went in on 2026-06-15 for
+  the player index, the player logs and the team logs, but not for the shot map, and
+  `_build_wnba_player_profiles` inner-joins the player frame with the shot map on player and
+  team: every Portland player dropped out of that frame, and `_assemble_wnba_player_rows`
+  takes each game row's position from it. On production the gamelog holds 147 Portland player
+  rows through 2026-06-17, all under `PDX`, and none for the 27 games from 06-24 to 09-22
+  (about 270 rows), while the team log holds all 41 games; the 2026 roster holds 14 of the 15
+  teams. The shot map's code goes through the alias map now (decision 40). What the fix does
+  not reach: the lost rows are not refetched, because an update pulls from the latest stored
+  date on, and the 147 older rows still read `PDX` (§8).
+- The deep dive's pairing cards were empty from 2026-07-03 (`13d01613`). A board row's
+  partners were stored under the platform's label ("Receiving Yards") and looked up on a board
+  renamed through the platform's map: on production's board of 2026-10-08, 0 of the 1,204
+  partners stored on Underdog rows and 70 of the 123 on Sleeper rows named a market the board
+  holds. A partner is stored under the board's name now, with its league (decision 39), from
+  the first board run on that code. A card names a market as its board row does, which for the
+  four markets of ask 6 (§8) is still the platform's code.
+- One league's failed gamelog update cost every league its board. `prophecize` and the ledger
+  build each updated every live league before scoring anything, with no guard: on 2026-10-10
+  the NBA update raised on its missing seed file, and production's board runs of 19:50 and
+  20:50 UTC and its 20:05 ledger run each ended in five seconds, until decision 26's fix was
+  pulled at 21:10. Both load through `stats.load_live_leagues` now (decision 38). A league
+  whose update raises is logged with its traceback and left out of the run, its lines still
+  archived, and the board run exits 1 once its snapshots are written. The league is not scored
+  on its cached gamelog, because the day's schedule is fetched only inside an update: without
+  it every player reads as away and an MLB hitter faces no pitcher, on a board that would look
+  like any other. What the guard does not reach: a constructor or a first load that raises
+  (§8), and the ledger build, which logs a failed update and raises no alarm of its own.
+
 ## 8. Owner asks (one each)
 
-The nine asks that stood here were answered by the owner's go of 2026-10-08 and are decisions
-28–35 (§2), all but the pairs to read in the app (2 below). The rest came out of building them
-and decision 26. None is built, and each record is in §7 or the section it names. Not asked
-because no change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting
-tested returns $1 per $1 while the legs are over-read).
+The six asks that stood here, and two put to the owner with them (the opening-night pin and a
+cleanup pass), were answered on 2026-10-11 and are decisions 36–42 (§2). The two items that
+are the owner's own to do stay (1 and 2 below). The rest came out of building those
+decisions. None is built, and each record is in §7 or the section it names. Not asked because no
+change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns
+$1 per $1 while the legs are over-read).
 
-1. **Buy the past game lines of 49ers and 76ers games?** (yes / no; recommended no for now.)
-   About 6,450 Odds API credits: 39 49ers dates and 176 76ers dates since 2024-05-07 at 30
-   credits a date (§7). A bought line reaches a model only through a matrix rebuild, NBA's
-   stored game lines are not re-read at all (decision 20), and a cycle's leftover credits,
-   about 1,000, are spoken for by the monthly NFL combo-history job.
-2. **Read the nine other banned touchdown pairs in the app** (ten minutes; no automated
+1. **Read the nine other banned touchdown pairs in the app** (ten minutes; no automated
    probing). The one banned pair checked, a quarterback's pass TDs with his own receiver's TDs,
    is allowed at 0.794 (§6, I5). The nine other keys of that family, and every sub-1 value
    without a quote, are guesses until a payout read in the app backs them. From a payout, the
    pair's modifier is the payout over the table value over the product of each pick's shown
    price divided by 1.8708. In `banned_combos.json` a pair's first slot is the same side and
    its second the opposite; the read is recorded in [underdog_api.md](../underdog_api.md) §6.8.
-3. **Give NHL's roster lookup the fall-back to last season that NBA and WNBA now have?** (yes /
-   no; recommended yes, before the 2027 rollover.) `Stats._roster_player_df` reads the new
-   season's key and raises when the season holds no roster yet. Production's board log shows
-   NHL "features unavailable" on every day from 2026-09-19 to 09-30, a `KeyError: 2026` among
-   the errors, and NHL's opening night of 09-29 went unscored. Nothing stops the same at the
-   next rollover.
-4. **Guard each league's gamelog update in the board and ledger runs?** (yes / no; recommended
-   yes.) Both runs update every live league before they score anything, with no guard, so one
-   league's failed update costs every league its board; the nightly job has a guard. On
-   2026-10-10 the NBA update failed on its missing seed file and production's board runs of
-   19:50 and 20:50 UTC and its 20:05 ledger run each ended in five seconds, until decision 26's
-   fix was pulled at 21:10.
-5. **Let last season's roster row stand in for a player the new season has not seen yet?**
-   (yes / no; recommended no.) A season's roster learns a player at his first game, so his
-   first game of a season, and each team's opener, is priced by the book alone. A stand-in
-   would price them from the model, with a player who changed teams read on his old team for
-   that one game.
-6. **Drop the season's Cleaning the Glass export on both boxes** when it is published
+2. **Drop the season's Cleaning the Glass export on both boxes** when it is published
    (`player_data/NBA/nba_players_2026-27.csv`). Until then the NBA reads last season's file: ages
    and positions are a year old (decision 26).
-7. **Fix the deep dive's pairing lookup?** (yes / no; recommended yes.) A board row stores its
-   correlation partners under the platform's label ("Receiving Yards") and the deep dive looks
-   each one up under the board's mapped name, so the pairing cards come up empty. On
-   production's board of 2026-10-08, 0 of the 1,204 partners stored on Underdog rows and 70 of
-   the 123 on Sleeper rows name a market the board holds (`correlation._corr_partners`,
-   `deep_dive_tabs._lift_survivors`; since `13d01613`, 2026-07-03).
-8. **Give Portland's WNBA players their roster?** (yes / no; recommended yes, before May 2027.)
-   The gamelog names the team `PDX` and the player index `POR`, so production's 2026 roster
-   holds 14 of the 15 teams after the merge fix (6 before it) and Portland's players would be
-   priced by the book alone, as the players of every team the roster lacked were.
+3. **Refill Portland's lost WNBA game rows?** (yes / no; recommended yes, before the next WNBA
+   retrain.) About 270 player rows of 27 games, 2026-06-24 to 09-22, were never stored, and
+   147 older rows read `PDX` (§7). A one-off script would fetch those games again and rename
+   the older rows, proven on the training box first; on production the owner runs it, because
+   a session may not write there.
+4. **Make an empty NHL roster pull end the board run failed?** (yes / no; recommended yes.) A
+   moneypuck pull the site blocked used to empty the season's roster and drop the NHL from the
+   board, which is how a block got noticed. It now keeps the stored roster and leaves a warning
+   line (decision 37): a block that lasts would let the roster's season rates go stale with no
+   alarm.
+5. **Guard a league's constructor and first load as its update is guarded?** (yes / no;
+   recommended yes.) `StatsMLB()` calls the MLB schedule on every board and ledger run, MLB
+   live or not, outside decision 38's guard: an outage there still costs every league its
+   board.
+6. **Read NHL assists, points and blocks and NBA and WNBA Underdog fantasy points under the
+   league's own name on the dashboard?** (yes / no; recommended yes.) The board names those
+   four markets by the platform's code (`AST`, `fantasy points underdog`): 129 of the NHL's 252
+   rows on production's board of 2026-10-11. Such a row shows the code where others show a
+   name, the History tab, the form sparks and the story detail stats find no gamelog column
+   for it, and a slip built from it on the dashboard stores a market that settlement cannot
+   read.
