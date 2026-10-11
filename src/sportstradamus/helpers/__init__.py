@@ -21,9 +21,9 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.market_display` — ``market_display_name``, the
   render-only market-slug-to-prose lookup.
 
-The package re-exports the shared public names listed in ``__all__``, and
-``from sportstradamus.helpers import <name>`` is the canonical path the rest
-of the code imports them by.
+The package re-exports the shared public names listed in ``__all__``;
+``from sportstradamus.helpers import <name>`` is the canonical import path for
+them.
 """
 
 import requests

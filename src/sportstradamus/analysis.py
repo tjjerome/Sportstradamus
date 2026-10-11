@@ -101,7 +101,8 @@ def check_bet(bet, stats):
     """Resolve a single parlay bet against actual game logs.
 
     Returns (legs, misses) where legs is valid legs count
-    and misses is number of legs that missed.
+    and misses is number of legs that missed, or (nan, nan) while the bet's
+    league is not loaded or its game has no gamelog rows.
     """
     if bet.League not in stats:
         return np.nan, np.nan
