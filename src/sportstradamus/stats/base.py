@@ -184,6 +184,10 @@ _TRAINING_WINDOW_ROWS_DEFAULT = 21_500
 # the gamelog this many days before the first training day so that day keeps its window.
 _SHORT_LOG_WINDOW_DAYS: int = 300
 
+# Four years of gamelog (4 * 365 + 1): the NBA, MLB and the NHL prune older rows on each
+# update to bound the file. The NFL keeps six, by its own constant.
+GAMELOG_RETENTION_DAYS: int = 1461
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.

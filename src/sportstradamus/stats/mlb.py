@@ -40,6 +40,7 @@ from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.helpers.text import mlb_game_is_over
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
+    GAMELOG_RETENTION_DAYS,
     ComboSpec,
     Stats,
     archive,
@@ -985,7 +986,7 @@ class StatsMLB(Stats):
                 entry["throws"] = person["pitchHand"]["code"]
 
     def _trim_old_games(self, today):
-        four_years_ago = today - timedelta(days=1461)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             self.gamelog["gameDate"].apply(
                 lambda x: four_years_ago <= datetime.strptime(x, "%Y-%m-%d").date() <= today

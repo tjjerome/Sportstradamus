@@ -32,6 +32,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
+    GAMELOG_RETENTION_DAYS,
     ComboSpec,
     Stats,
     archive,
@@ -39,9 +40,6 @@ from sportstradamus.stats.base import (
     scraper,
 )
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
-
-# Days of gamelog history to retain (~4 NHL seasons); older rows pruned on each update.
-_GAMELOG_RETENTION_DAYS = 1431
 
 # DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
 # are carried as separate shots/blocked components because those are distinct book
@@ -517,7 +515,7 @@ class StatsNHL(Stats):
             self.season_start.year, skater_df.to_dict("index") | goalie_df.to_dict("index")
         )
 
-        four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
         ]

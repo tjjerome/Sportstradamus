@@ -32,6 +32,7 @@ from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
+    GAMELOG_RETENTION_DAYS,
     ComboSpec,
     Stats,
     archive,
@@ -42,8 +43,6 @@ from sportstradamus.stats.nba_client import NBAStatsError
 
 # Days since last fetch beyond which play-in and playoff logs are re-pulled (off-season catch-up)
 _CATCHUP_THRESHOLD_DAYS: int = 150
-# Retention window: keep 4 seasons of logs to bound file growth
-_GAMELOG_RETENTION_DAYS: int = 1461
 
 # Cleaning the Glass publishes a season's player export only after games are played,
 # so a new season starts on the newest earlier file until the real one is dropped in.
@@ -668,7 +667,7 @@ class StatsNBA(Stats):
             )
 
         # Remove old games to prevent file bloat
-        four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date >= four_years_ago
         ]
