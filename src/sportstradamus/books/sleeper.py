@@ -48,7 +48,9 @@ def _sleeper_prop_offers(prop: dict, players: dict, league: str, games: dict) ->
         return []
 
     player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
-    player_team = player["team"]
+    # The game's two codes are already through ABBR_MAP: against the raw code a home team
+    # whose code is remapped (WSH to WAS) matches neither and becomes its own opponent.
+    player_team = ABBR_MAP.get(player["team"], player["team"])
     game = games.get(league, {}).get(prop["game_id"], {})
     teams = game.get("teams")
     if not teams or len(teams) != 2:
@@ -68,8 +70,8 @@ def _sleeper_prop_offers(prop: dict, players: dict, league: str, games: dict) ->
             {
                 "Player": player_name,
                 "League": league.upper(),
-                "Team": ABBR_MAP.get(player_team, player_team),
-                "Opponent": ABBR_MAP.get(opp, opp),
+                "Team": player_team,
+                "Opponent": opp,
                 "Date": game_date,
                 "Market": prop["wager_type"],
                 "Line": line,
