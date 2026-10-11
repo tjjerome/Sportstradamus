@@ -106,6 +106,10 @@ ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/
 _LIVE_DAY_WINDOW = 6
 _HIST_DAY_WINDOW = 1
 
+# Longer than any in-season break (about four weeks, for an Olympics), shorter than
+# any off-season (about fifteen, the NHL's): a wider gap between games is a new season.
+_OFF_SEASON_GAP_DAYS = 60
+
 # Markets whose main line has left the `us` region entirely: the only books still
 # quoting them (fliff, ballybet, betparx, hardrockbet, espnbet) sit in `us2`, so a
 # us-only request archives nothing and the cell silently loses its book. Billing is
@@ -167,6 +171,22 @@ def _get_with_retry(url, params=None):
     return res
 
 
+def _is_opening_night(tier: str, last_game: str | None, next_game: datetime) -> bool:
+    """True when a league's next game opens its season.
+
+    A league whose feed emptied over a mid-season break comes back tiered
+    preseason, exactly as one approaching opening night, so the tier alone
+    cannot tell them apart: the next game must also fall more than
+    ``_OFF_SEASON_GAP_DAYS`` after the last one seen. A league never seen
+    with a past game is taken at its tier.
+    """
+    if tier != "preseason":
+        return False
+    if last_game is None:
+        return True
+    return next_game - odds_budget.feed_ts(last_game) > timedelta(days=_OFF_SEASON_GAP_DAYS)
+
+
 def _league_activity_record(prev, commences, now):
     """Build one league's snapshot record from its feed commence times.
 
@@ -174,29 +194,33 @@ def _league_activity_record(prev, commences, now):
     rolled forward from the previous record — and is what keeps
     ``Stats.update`` running through the post-season ingest tail.
     ``opener`` is the season's first game: tracked live off the feed while
-    the league is still preseason (the earliest upcoming game IS opening
-    night), then frozen for the season so ``Stats`` can adopt it as
-    ``season_start``. Returns ``None`` for a league with nothing scheduled
-    and nothing to remember.
+    the league is preseason after an off-season (the earliest upcoming game
+    IS opening night, see :func:`_is_opening_night`), then frozen so
+    ``Stats`` can adopt it as ``season_start``. Every later record carries
+    it, an idle one included, until the next season's capture replaces it.
+    Returns ``None`` for a league with nothing scheduled and nothing to
+    remember.
     """
     past = [c for c in (prev.get("next_game"), prev.get("last_game")) if c is not None]
     past += commences
-    past = [c for c in past if datetime.fromisoformat(c.replace("Z", "+00:00")) <= now]
+    past = [c for c in past if odds_budget.feed_ts(c) <= now]
     last_game = max(past, default=None)
     days_to_next = None
     if commences:
-        next_game = datetime.fromisoformat(commences[0].replace("Z", "+00:00"))
+        next_game = odds_budget.feed_ts(commences[0])
         days_to_next = (next_game - now).total_seconds() / 86400
     tier = odds_budget.classify_tier(days_to_next, prev.get("tier"), odds_budget.BUDGET_CFG)
+    opener = prev.get("opener")
     if tier is not None:
         record = {"tier": tier, "next_game": commences[0]}
-        opener = commences[0] if tier == "preseason" else prev.get("opener")
-        if opener is not None:
-            record["opener"] = opener
+        if _is_opening_night(tier, last_game, next_game):
+            opener = commences[0]
     elif prev or last_game:
         record = {"tier": "idle"}
     else:
         return None
+    if opener is not None:
+        record["opener"] = opener
     if last_game is not None:
         record["last_game"] = last_game
     return record
@@ -209,7 +233,8 @@ def _classify_league_activity(key, sports):
     commence time (:func:`odds_budget.classify_tier` — sticky through
     mid-season gaps), and persists the snapshot the prophecize/meditate/
     pickem-build gates read. Leagues that go idle keep an ``idle`` record
-    (season-end memory for the ``Stats.update`` window), including leagues
+    (the last game, season-end memory for the ``Stats.update`` window, and
+    the opener, which a mid-season break must not lose), including leagues
     the sports index no longer lists. A non-OK events response carries the
     league's previous record forward so one bad response can't silently
     black out a league.

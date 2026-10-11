@@ -42,7 +42,8 @@ mid-season gaps (NFL weekdays, all-star breaks) while any game stays inside
 admitted after every live league. Leagues with nothing inside the horizon
 are idle: not polled, kept in the snapshot at
 ``helpers.io.LEAGUE_ACTIVITY_PATH`` only as an ``idle`` record remembering
-the last seen game. :func:`league_is_live` serves the snapshot to the
+the last seen game and the season's opening night.
+:func:`league_is_live` serves the snapshot to the
 prophecize/meditate/pickem-build offer loops (``SPORTSTRADAMUS_HOLD_LEAGUES``
 holds named leagues out of them regardless of tier), and
 :func:`update_window_open` gates ``Stats.update`` itself (10 days before
@@ -367,19 +368,22 @@ def league_is_live(league: str, season_start) -> bool:
     return datetime.now(UTC).date() > season_start - timedelta(days=_SEASON_START_LEAD_DAYS)
 
 
-def _feed_ts(commence: str) -> datetime:
+def feed_ts(commence: str) -> datetime:
+    """Parse an Odds API commence time (ISO 8601, ``Z``-suffixed UTC) to an aware datetime."""
     return datetime.fromisoformat(commence.replace("Z", "+00:00"))
 
 
 def season_opener(league: str):
     """Feed-observed opening-night date for the league's current season.
 
-    Captured by the activity classifier during the preseason window and
-    frozen once play starts; ``Stats.update`` adopts it as ``season_start``
-    when it is newer than the hand-set constant. The commence timestamp is
-    converted to an America/Chicago date to match the archive's game-date
-    convention. ``None`` when unobserved (league seen only mid-season) or
-    the snapshot is stale.
+    Captured by the activity classifier in the preseason window that ends an
+    off-season and frozen once play starts. Mid-season breaks and idle
+    records keep it, so through an off-season it still names the season just
+    played until the next one's is captured. ``Stats.update`` adopts it as
+    ``season_start`` when it is newer than the hand-set constant. The
+    commence timestamp is converted to an America/Chicago date to match the
+    archive's game-date convention. ``None`` when unobserved (league seen
+    only mid-season) or the snapshot is stale.
     """
     leagues = _fresh_leagues()
     if leagues is None:
@@ -387,7 +391,7 @@ def season_opener(league: str):
     opener = leagues.get(league, {}).get("opener")
     if opener is None:
         return None
-    return _feed_ts(opener).astimezone(pytz.timezone("America/Chicago")).date()
+    return feed_ts(opener).astimezone(pytz.timezone("America/Chicago")).date()
 
 
 def update_window_open(league: str, season_start) -> bool:
@@ -410,10 +414,10 @@ def update_window_open(league: str, season_start) -> bool:
     window = timedelta(days=_UPDATE_WINDOW_DAYS)
     now = datetime.now(UTC)
     next_game = record.get("next_game")
-    if next_game is not None and _feed_ts(next_game) - now <= window:
+    if next_game is not None and feed_ts(next_game) - now <= window:
         return True
     last_game = record.get("last_game")
-    return last_game is not None and now - _feed_ts(last_game) <= window
+    return last_game is not None and now - feed_ts(last_game) <= window
 
 
 class BudgetDecision(NamedTuple):
