@@ -37,6 +37,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.combined_markets import POST_RNG_SEED
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
+from sportstradamus.helpers.text import mlb_game_is_over
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     ComboSpec,
@@ -271,7 +272,9 @@ def _mlb_team_abbr(mlb_teams, team_id):
 def _build_mlb_upcoming_games(mlb_games, mlb_teams):
     mlb_upcoming_games = {}
     for game in mlb_games:
-        if game["status"] in ["Pre-Game", "Scheduled"] and game["game_type"] not in ["A"]:
+        # Until it is over: the feed moves a game to "Warmup" minutes before first pitch,
+        # and the board run that falls there is the last one before the game.
+        if not mlb_game_is_over(game["status"]) and game["game_type"] not in ["A"]:
             awayTeam = _mlb_team_abbr(mlb_teams, game["away_id"])
             homeTeam = _mlb_team_abbr(mlb_teams, game["home_id"])
             game_bs = mlb.boxscore_data(game["game_id"])

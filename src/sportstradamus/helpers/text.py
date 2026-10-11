@@ -25,6 +25,13 @@ MIN_TREND_ROWS = 3
 # How far ahead to fetch MLB schedules when building the probable-pitcher dict.
 MLB_PITCHER_LOOKAHEAD_DAYS = 7
 
+# The MLB feed's detailed game states that end a game or call it off; a cause, when one
+# is given, follows a colon ("Postponed: Rain"). Every other state is a game still to
+# come or under way: "Warmup" and "Delayed Start: Rain" both come before first pitch.
+MLB_FINISHED_STATES = frozenset(
+    {"Final", "Game Over", "Completed Early", "Postponed", "Cancelled", "Forfeit"}
+)
+
 # Team abbreviation corrections applied by both DFS scrapers. PDX→POR makes
 # Portland's WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept
 # for Sleeper's wire format only — abbreviations.json now emits POR, so nothing
@@ -124,10 +131,16 @@ def hmean(items):
     return 0
 
 
+def mlb_game_is_over(status: str) -> bool:
+    """Whether the MLB feed's detailed game state says the game is finished or called off."""
+    return status.split(":")[0] in MLB_FINISHED_STATES
+
+
 @functools.cache
 def get_mlb_pitchers():
     """Return a ``{team_abbr: pitcher_name}`` dict for the next week of MLB.
 
+    A game counts until it is over, so today's starter stays listed through warm-up.
     Hits mlb-statsapi once per process; subsequent calls return the cache.
     The LA/ANA/ARI/WAS aliases exist because different sportsbooks spell
     those franchises differently from the league feed.
@@ -139,7 +152,7 @@ def get_mlb_pitchers():
     mlb_teams = mlb.get("teams", {"sportId": 1})
     pitchers = {}
     for game in mlb_games:
-        if game["status"] in ["Pre-Game", "Scheduled"]:
+        if not mlb_game_is_over(game["status"]):
             abbrs = _resolve_team_abbrs(game, mlb_teams)
             if abbrs is None:
                 continue
