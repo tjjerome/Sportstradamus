@@ -515,8 +515,10 @@ class StatsNHL(Stats):
         player_df = self._fetch_player_bios_nhl()
         skater_df = self._fetch_skater_summary(player_df)
         goalie_df = self._fetch_goalie_summary(player_df)
-        self.players[self.season_start.year] = skater_df.to_dict("index") | goalie_df.to_dict(
-            "index"
+        # A pull moneypuck blocks comes back empty. Merged, it leaves the season's rows as
+        # they were; assigned, it would hand every player to last season's row.
+        self._merge_season_roster(
+            self.season_start.year, skater_df.to_dict("index") | goalie_df.to_dict("index")
         )
 
         four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)

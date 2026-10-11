@@ -1411,14 +1411,16 @@ class Stats:
         return player_df
 
     def _merge_season_roster(self, season_key, fresh):
-        """Fold freshly fetched per-team rosters into the season's stored ones.
+        """Fold a freshly fetched roster into the season's stored one, entry by entry.
 
-        A team the season does not hold yet is added whole: a season's first update can
-        hold only the teams that have played.
+        An entry is a team's players in the NBA and the WNBA and one player's row in the
+        NHL. One the season does not hold yet is added whole: a season's first update can
+        hold only the teams that have played. One the pull lacks is kept, so a pull that
+        comes back empty changes nothing.
         """
         stored = self.players.get(season_key, {})
         self.players[season_key] = {
-            team: stored.get(team, {}) | fresh.get(team, {}) for team in stored | fresh
+            entry: stored.get(entry, {}) | fresh.get(entry, {}) for entry in stored | fresh
         }
 
     def get_depth(self, offers, date=datetime.today().date()):

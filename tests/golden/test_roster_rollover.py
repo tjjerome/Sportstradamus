@@ -5,18 +5,20 @@ Glass has not published the season's player export. A season's roster can then l
 a player until that player's first game, so the roster lookup lets last season's row
 stand in for every player the season does not hold yet, in the NBA, the WNBA and the
 NHL. The seed read falls on the newest earlier file, and the season's own roster
-fills team by team as its first updates find players.
+fills team by team as its first updates find players. A pull the site blocks comes
+back empty and must not wipe what the season holds: every player would fall to last
+season's row with nothing to say so.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
 
-from sportstradamus.stats import StatsNBA, StatsNHL, StatsWNBA, nba
+from sportstradamus.stats import StatsNBA, StatsNHL, StatsWNBA, nba, nhl
 
 _LAST_SEASON = {"BOS": {"A": {"POS": "G"}}, "NYK": {"B": {"POS": "F"}, "C": {"POS": "C"}}}
 _THIS_SEASON = {"LAL": {"D": {"POS": "W"}}}
@@ -191,6 +193,32 @@ def test_roster_merge_starts_a_season_the_store_does_not_hold():
     stats._merge_season_roster(2026, _THIS_SEASON)
 
     assert stats.players == {2025: _LAST_SEASON, 2026: _THIS_SEASON}
+
+
+class _SilentSites:
+    """A scraper every site answers with nothing, which is what a blocked pull returns."""
+
+    def get(self, url):
+        return {}
+
+    def get_csv(self, url):
+        return pd.DataFrame()
+
+
+def test_a_blocked_nhl_roster_pull_keeps_the_rows_the_season_holds(monkeypatch):
+    monkeypatch.setattr(nhl, "scraper", _SilentSites())
+    monkeypatch.setattr(nhl, "write_gamelog", lambda *args: None)
+    stats = StatsNHL()
+    stats.season_start = date.today() - timedelta(days=30)
+    stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerName", "team"])
+    stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
+    season = stats.season_start.year
+    held = {8470001: {"playerName": "A", "team": "TOR", "position": "C"}}
+    stats.players = {season - 1: _NHL_LAST_SEASON, season: dict(held)}
+
+    stats._update()
+
+    assert stats.players == {season - 1: _NHL_LAST_SEASON, season: held}
 
 
 def _nba_before_opening_night(players):
