@@ -368,9 +368,9 @@ class StatsWNBA(StatsNBA):
             - stat_df["TOV"]
         )
         stat_df["fantasy points parlay"] = stat_df["PRA"] + stat_df["BLST"] * 2 - stat_df["TOV"]
-        stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
-        stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
+        stat_df["FTR"] = (stat_df["FTM"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
+        stat_df["FG3_RATIO"] = (stat_df["FG3A"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
+        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).where(stat_df["BLKA"] > 0, 0)
         stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
         stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
         stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
@@ -380,7 +380,6 @@ class StatsWNBA(StatsNBA):
         stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
         stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
         stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
-        stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
         stat_df.TEAM_ABBREVIATION = _remap_abbr(stat_df.TEAM_ABBREVIATION)
         stat_df.OPP = _remap_abbr(stat_df.OPP)
 
@@ -406,9 +405,8 @@ class StatsWNBA(StatsNBA):
 
         team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
         team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
-        team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
-        team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
-        team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+        team_df["FTR"] = (team_df["FTM"] / team_df["FGA"]).where(team_df["FGA"] > 0, 0)
+        team_df["BLK_RATIO"] = (team_df["BLK"] / team_df["BLKA"]).where(team_df["BLKA"] > 0, 0)
         team_df.TEAM_ABBREVIATION = _remap_abbr(team_df.TEAM_ABBREVIATION)
         team_df.OPP = _remap_abbr(team_df.OPP)
 
