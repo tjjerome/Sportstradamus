@@ -2,10 +2,12 @@
 
 ``base.Stats.update`` wraps every league's ``_update`` behind
 ``odds_budget.update_window_open`` and, when the activity feed has observed
-a newer opening night, adopts it as ``season_start`` before fetching (unless
-``SPORTSTRADAMUS_FORCE_UPDATE`` pins manual control for replay tools). The
-``_set_season_start`` hook keeps NBA's ``"2025-26"`` season string and
-WNBA's season year derived from whatever date is adopted.
+an opening night that starts a new season, adopts it as ``season_start``
+before fetching (unless ``SPORTSTRADAMUS_FORCE_UPDATE`` pins manual control
+for replay tools). A feed opener inside the season already held was captured
+mid-season and is ignored. The ``_set_season_start`` hook keeps NBA's
+``"2025-26"`` season string and WNBA's season year derived from whatever date
+is adopted.
 """
 
 from __future__ import annotations
@@ -55,6 +57,28 @@ def test_update_adopts_newer_feed_opener(gates) -> None:
     s.update()
     assert s.update_ran
     assert s.season_start == _FEED_OPENER
+
+
+# Production's feed on 2026-10-10. MLB's opener was captured again when the league came
+# back from the All-Star break, 113 days into its season; NHL's is next season's opening
+# night, 357 days after the start the class holds.
+@pytest.mark.parametrize(
+    ("held_start", "feed_opener", "adopted"),
+    [
+        (date(2026, 3, 25), date(2026, 7, 16), False),
+        (date(2025, 10, 7), date(2026, 9, 29), True),
+    ],
+    ids=["mid-season capture", "next season"],
+)
+def test_update_adopts_a_feed_opener_only_when_it_starts_a_new_season(
+    gates, held_start, feed_opener, adopted
+) -> None:
+    gates.setattr(odds_budget, "season_opener", lambda league: feed_opener)
+    s = _FakeLeague()
+    s.season_start = held_start
+    s.update()
+    assert s.update_ran
+    assert s.season_start == (feed_opener if adopted else held_start)
 
 
 def test_update_keeps_constant_when_opener_older_or_absent(gates) -> None:

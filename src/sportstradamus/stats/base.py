@@ -119,6 +119,10 @@ _MIN_PARTICIPATION_RATE: float = 0.1
 # calendar year. Aug+ rolls the season year forward for fall/winter leagues.
 _SEASON_ROLLOVER_MONTH: int = 8
 
+# No league's season, playoffs included, runs this long: a feed opener further than this past
+# the season start a class holds opens a new season, a nearer one is a mid-season capture.
+_SEASON_MAX_DAYS: int = 300
+
 # Days ahead (including today) that fetch_upcoming_games scrapes. Three days
 # covers today + tomorrow + day-after so late-night runs don't miss next-day
 # tip-offs.
@@ -613,18 +617,20 @@ class Stats:
         (full rebuilds, historical backfills); the bypass also pins
         ``season_start``, so replay tools keep manual control.
 
-        When the activity feed has observed the season's opening night
-        (:func:`odds_budget.season_opener`) and it is newer than the
-        hand-set constant, it is adopted before fetching — season-year API
-        params and ``DaysIntoSeason`` then track the real calendar without an
-        annual code edit.
+        When the activity feed has observed an opening night
+        (:func:`odds_budget.season_opener`) more than ``_SEASON_MAX_DAYS``
+        after the season start held, it opens a new season and is adopted
+        before fetching — season-year API params and ``DaysIntoSeason`` then
+        track the real calendar without an annual code edit. A nearer one
+        falls inside the season already held and is ignored: it was captured
+        mid-season, when a league came back from a break.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):
             logger.info(f"{self.league} update skipped: outside season window")
             return
         if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
             opener = odds_budget.season_opener(self.league)
-            if opener is not None and opener > self.season_start:
+            if opener is not None and (opener - self.season_start).days > _SEASON_MAX_DAYS:
                 self._set_season_start(opener)
         self._update()
 
