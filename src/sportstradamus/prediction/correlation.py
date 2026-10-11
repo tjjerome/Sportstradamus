@@ -463,27 +463,34 @@ def _select_bet_offers(game_df):
     )
 
 
-def _corr_partners(legs: pd.DataFrame) -> list[dict]:
-    """One structured record per correlated partner: player/market/bet/line/mult."""
+def _corr_partners(legs: pd.DataFrame, market_map: dict[str, str]) -> list[dict]:
+    """One structured record per correlated partner: player/market/bet/line/league/mult.
+
+    ``market`` is the board's name for it (``market_map`` mirrors the remap ``cli``
+    applies after ``process_offers``), so the deep dive finds the partner's row in
+    ``current_offers.parquet``; ``league`` is what ``leg_label`` needs to show that
+    name the way the board does.
+    """
     return [
         {
             "player": r["Player"],
-            "market": r["Market"],
+            "market": market_map.get(r["Market"], r["Market"]),
             "bet": r["Bet"],
             "line": float(r["Line"]),
+            "league": r["League"],
             "mult": round(float(r["Corr Mult"]), 2),
         }
         for _, r in legs.iterrows()
     ]
 
 
-def _annotate_correlation_columns(df, game_df, g):
+def _annotate_correlation_columns(df, game_df, g, market_map):
     """Fill each offer's ``Corr Same`` / ``Corr Opp`` correlated-partner columns in ``df``.
 
     For every leg, surface its top correlated same-team and opponent partners
     (one per player) that clear the display EV / correlation gates. Each partner
-    is a structured record (player/market/bet/line/mult), not a display string —
-    ``leg_schema.leg_label`` renders it on demand.
+    is a structured record (player/market/bet/line/league/mult), not a display
+    string — ``leg_schema.leg_label`` renders it on demand.
     """
     EV, EVb, C, V = g.EV, g.EVb, g.C, g.V
     for i, offer in game_df.iterrows():
@@ -502,8 +509,8 @@ def _annotate_correlation_columns(df, game_df, g):
         # to a 2D array and mis-shapes on an empty partner list) mirrors the old
         # scalar-string assignment's broadcast-to-every-matched-row semantics.
         mask = (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"])
-        same_partners = _corr_partners(same)
-        other_partners = _corr_partners(other)
+        same_partners = _corr_partners(same, market_map)
+        other_partners = _corr_partners(other, market_map)
         df.loc[mask, "Corr Same"] = pd.Series([same_partners] * mask.sum(), index=df.index[mask])
         df.loc[mask, "Corr Opp"] = pd.Series([other_partners] * mask.sum(), index=df.index[mask])
 
@@ -655,7 +662,7 @@ def _process_league_games(
             league,
             shrinkage_cache,
         )
-        _annotate_correlation_columns(df, game_df, g)
+        _annotate_correlation_columns(df, game_df, g, market_map)
 
         if corr_sink is not None:
             corr_sink.extend(

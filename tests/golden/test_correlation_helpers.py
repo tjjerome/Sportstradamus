@@ -42,6 +42,7 @@ from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
+    _annotate_correlation_columns,
     _build_cmarket,
     _build_correlation_matrices,
     _build_game_corr_map,
@@ -211,8 +212,9 @@ def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
 # above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
 # the c_map is fixed — 10/12 legs annotate, with the Corr Same and Corr Opp columns both
 # exercised. Each partner is the structured record ``_annotate_correlation_columns`` writes
-# (player/market/bet/line/mult) — ``leg_schema.leg_label`` renders it to a string on demand,
-# so the test pins the structured fields directly rather than a formatted label.
+# (player/market/bet/line/mult, plus a ``league`` the test adds: NBA on every leg here) —
+# ``leg_schema.leg_label`` renders it to a string on demand, so the test pins the structured
+# fields directly rather than a formatted label.
 _EXPECTED_OFFER_CORR = [
     (
         "De'Aaron Fox",
@@ -405,7 +407,16 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
         (r["Player"], r["Market"], r["Corr Same"] or [], r["Corr Opp"] or [])
         for _, r in offer_df[["Player", "Market", "Corr Same", "Corr Opp"]].iterrows()
     )
-    assert actual == sorted(_EXPECTED_OFFER_CORR)
+    expected = sorted(
+        (
+            player,
+            market,
+            [{**partner, "league": "NBA"} for partner in same],
+            [{**partner, "league": "NBA"} for partner in opp],
+        )
+        for player, market, same, opp in _EXPECTED_OFFER_CORR
+    )
+    assert actual == expected
 
 
 # --- synthetic WNBA slate (parlay-assembly structure) -----------------------
@@ -951,6 +962,25 @@ def test_build_correlation_matrices_honors_push_column() -> None:
         game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {}
     ).p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]
+
+
+def test_annotate_names_a_partners_market_the_way_the_board_does() -> None:
+    """The board run renames ``Market`` through the platform's map once scoring is done,
+    and the deep dive looks each partner up on that board: stored under the platform's
+    own label, no Underdog partner was ever found there. A label the map lacks stays as
+    it is, the fall-through ``_collect_game_corr`` has."""
+    game_df, game_dict = _matrix_game()
+    game_df = game_df.assign(League="NBA", Team=["NYK", "SAS", "NYK"], Line=[24.5, 6.5, 9.5])
+    c_map = {("G1.PTS", "C1.REB"): 0.4, ("G2.AST", "C1.REB"): 0.2}
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+    df = game_df.assign(**{"Corr Same": None, "Corr Opp": None})
+
+    # Of the fixture's Test1..Test3 labels the map holds only A's.
+    _annotate_correlation_columns(df, game_df, g, {"Test1": "PTS"})
+
+    same, opp = df.loc[2, ["Corr Same", "Corr Opp"]]
+    assert [(partner["player"], partner["market"]) for partner in same] == [("A", "PTS")]
+    assert [(partner["player"], partner["market"]) for partner in opp] == [("B", "Test2")]
 
 
 @pytest.mark.parametrize(

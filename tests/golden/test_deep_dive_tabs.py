@@ -26,8 +26,10 @@ from sportstradamus.dashboard.components.deep_dive_tabs import (
 )
 from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.slip_engine import modifier_map
+from sportstradamus.helpers import stat_map
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
-from sportstradamus.leg_schema import build_leg
+from sportstradamus.leg_schema import build_leg, leg_label
+from sportstradamus.prediction.correlation import _corr_partners
 from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 
@@ -262,3 +264,31 @@ def test_corr_partner_lookup_pins_platform_across_markets_and_lines():
     reb_partner = {"player": "Mitchell Robinson", "market": "REB", "bet": "Over", "line": 5.5}
     assert find_offer_idx(reb_partner, filtered, platform="Underdog") == 1
     assert find_offer_idx(partner, filtered, platform="Underdog") != 1
+
+
+def test_stored_partner_resolves_on_a_board_renamed_through_the_platform_map():
+    """Scoring runs under the platform's labels and the board run then renames ``Market``
+    through the platform's map, so a partner is stored under the mapped name. Stored
+    under the label ("Receiving Yards") no Underdog partner met its board row, and every
+    pairing card came up empty. The mapped name is the board's and not the league's own
+    key: an NHL assists row is ``AST`` there."""
+    scored = pd.DataFrame(
+        {
+            "League": ["NFL", "NHL"],
+            "Player": ["Travis Kelce", "Connor McDavid"],
+            "Market": ["Receiving Yards", "Assists"],
+            "Bet": ["Over", "Under"],
+            "Line": [60.5, 1.5],
+            "Corr Mult": [1.08, 1.04],
+        }
+    )
+    board = scored.assign(Market=scored["Market"].map(stat_map["Underdog"]), Platform="Underdog")
+
+    partners = _corr_partners(scored, stat_map["Underdog"])
+
+    assert [find_offer_idx(partner, board, platform="Underdog") for partner in partners] == [0, 1]
+    assert [leg_label(partner) for partner in partners] == [
+        "Travis Kelce Over 60.5 Receiving Yards",
+        # The display map names NHL assists by the league's key, so the board row reads AST too.
+        "Connor McDavid Under 1.5 AST",
+    ]
