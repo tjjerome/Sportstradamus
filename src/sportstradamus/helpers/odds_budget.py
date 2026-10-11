@@ -59,7 +59,7 @@ import importlib.resources as pkg_resources
 import json
 import os
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import NamedTuple
@@ -373,17 +373,17 @@ def feed_ts(commence: str) -> datetime:
     return datetime.fromisoformat(commence.replace("Z", "+00:00"))
 
 
-def season_opener(league: str):
+def season_opener(league: str) -> date | None:
     """Feed-observed opening-night date for the league's current season.
 
     Captured by the activity classifier in the preseason window that ends an
     off-season and frozen once play starts. Mid-season breaks and idle
     records keep it, so through an off-season it still names the season just
     played until the next one's is captured. ``Stats.update`` adopts it as
-    ``season_start`` when it is newer than the hand-set constant. The
-    commence timestamp is converted to an America/Chicago date to match the
-    archive's game-date convention. ``None`` when unobserved (league seen
-    only mid-season) or the snapshot is stale.
+    ``season_start`` only when it opens a season later than the one the
+    class holds. The commence timestamp is converted to an America/Chicago
+    date to match the archive's game-date convention. ``None`` when
+    unobserved (league seen only mid-season) or the snapshot is stale.
     """
     leagues = _fresh_leagues()
     if leagues is None:

@@ -233,8 +233,8 @@ def _classify_league_activity(key, sports):
     commence time (:func:`odds_budget.classify_tier` — sticky through
     mid-season gaps), and persists the snapshot the prophecize/meditate/
     pickem-build gates read. Leagues that go idle keep an ``idle`` record
-    (the last game, season-end memory for the ``Stats.update`` window, and
-    the opener, which a mid-season break must not lose), including leagues
+    (the last game, which is season-end memory for the ``Stats.update`` window,
+    and the opener, which a mid-season break must not lose), including leagues
     the sports index no longer lists. A non-OK events response carries the
     league's previous record forward so one bad response can't silently
     black out a league.
