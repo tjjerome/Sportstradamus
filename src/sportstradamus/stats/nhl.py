@@ -32,11 +32,9 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
-    SEASON_MAX_DAYS,
     ComboSpec,
     Stats,
     archive,
-    clean_data,
     scale_team_volume_to_budget,
     scraper,
 )
@@ -529,10 +527,7 @@ class StatsNHL(Stats):
         ]
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 

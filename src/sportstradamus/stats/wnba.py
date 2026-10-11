@@ -21,7 +21,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import SEASON_MAX_DAYS, archive, clean_data, fetch_upcoming_games
+from sportstradamus.stats.base import archive, fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
@@ -147,10 +147,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self._enrich_team_markets(
                 self.gamelog,
                 date_col=self.log_strings["date"],

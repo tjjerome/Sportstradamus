@@ -228,8 +228,8 @@ _BASE_STAT_COLUMNS = [
 archive = LazyArchive()
 scraper = Scrape()
 
-# When True, forces a full reload of all cached CSVs on the next load() /
-# update() call. Flipped manually by operators to clear corrupt gamelog state.
+# When True, every league's update runs its whole-gamelog clean pass (see
+# Stats._full_clean_due). Flipped by hand to repair a gamelog.
 clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
@@ -641,6 +641,15 @@ class Stats:
 
     def _update(self):
         """League-specific fetch behind the :meth:`update` season gate."""
+
+    def _full_clean_due(self) -> bool:
+        """Whether an update runs the league's clean pass over its whole gamelog.
+
+        Due once the season held is over (it began more than ``SEASON_MAX_DAYS`` ago)
+        and while ``clean_data`` is set.
+        """
+        oldest_live_start = datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
+        return self.season_start < oldest_live_start or clean_data
 
     def _enrich_team_markets(
         self,

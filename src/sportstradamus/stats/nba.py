@@ -32,11 +32,9 @@ from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
-    SEASON_MAX_DAYS,
     ComboSpec,
     Stats,
     archive,
-    clean_data,
     fetch_upcoming_games,
     scale_team_volume_to_budget,
 )
@@ -683,10 +681,7 @@ class StatsNBA(Stats):
         self._canonicalize_team_abbrevs(self.gamelog)
         self._canonicalize_team_abbrevs(self.teamlog)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
             self._enrich_team_markets(
                 self.gamelog, date_col=self.log_strings["date"], team_col="TEAM_ABBREVIATION"

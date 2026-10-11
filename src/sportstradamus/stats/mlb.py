@@ -40,11 +40,9 @@ from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.helpers.text import mlb_game_is_over
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
-    SEASON_MAX_DAYS,
     ComboSpec,
     Stats,
     archive,
-    clean_data,
     is_mlb_pitcher_market,
     scraper,
 )
@@ -937,10 +935,7 @@ class StatsMLB(Stats):
 
         self._trim_old_games(today)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 

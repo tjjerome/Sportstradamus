@@ -7,18 +7,20 @@ before fetching (unless ``SPORTSTRADAMUS_FORCE_UPDATE`` pins manual control
 for replay tools). A feed opener inside the season already held was captured
 mid-season and is ignored. The ``_set_season_start`` hook keeps NBA's
 ``"2025-26"`` season string and WNBA's season year derived from whatever date
-is adopted.
+is adopted. ``_full_clean_due`` is the one rule the five leagues' updates read
+for when the clean pass over the whole gamelog runs.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
 from sportstradamus.helpers import odds_budget
 from sportstradamus.stats import StatsNBA, StatsWNBA
-from sportstradamus.stats.base import Stats
+from sportstradamus.stats import base as stats_base
+from sportstradamus.stats.base import SEASON_MAX_DAYS, Stats
 
 _CONSTANT_START = date(2025, 10, 1)
 _FEED_OPENER = date(2026, 10, 20)
@@ -91,6 +93,19 @@ def test_update_keeps_constant_when_opener_older_or_absent(gates) -> None:
     s2 = _FakeLeague()
     s2.update()
     assert s2.season_start == _CONSTANT_START
+
+
+@pytest.mark.parametrize(
+    ("days_since_start", "forced", "due"),
+    [(SEASON_MAX_DAYS + 5, False, True), (SEASON_MAX_DAYS - 5, False, False), (30, True, True)],
+)
+def test_full_clean_is_due_once_the_season_held_is_over_or_when_forced(
+    monkeypatch, days_since_start, forced, due
+) -> None:
+    monkeypatch.setattr(stats_base, "clean_data", forced)
+    s = _FakeLeague()
+    s.season_start = date.today() - timedelta(days=days_since_start)
+    assert s._full_clean_due() is due
 
 
 def test_force_env_pins_manual_season_start(gates) -> None:

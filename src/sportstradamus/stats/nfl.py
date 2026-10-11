@@ -29,11 +29,9 @@ from sportstradamus.stats import (
     nfl_fp_weekly_aggregate,
 )
 from sportstradamus.stats.base import (
-    SEASON_MAX_DAYS,
     ComboSpec,
     Stats,
     apply_volume_budget,
-    clean_data,
 )
 
 # Phase-1.5 lookback rule:
@@ -559,10 +557,7 @@ class StatsNFL(Stats):
         self._load_player_ids()
         teamDataList = self._backfill_missing_rows(sched)
         self._finalize_logs(teamDataList)
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(
                 remove_accents
             )
