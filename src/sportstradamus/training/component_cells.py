@@ -8,9 +8,7 @@ from each component cell's ``data/test_sets/{LEAGUE}_{slug}.csv``: its test spli
 only, so every row is out-of-sample for that cell's own model.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -30,9 +28,9 @@ from sportstradamus.training.scorecard import (
 )
 
 # Unloaded league instances, used only for `_fantasy_combo_spec`'s pure per-league
-# weight tables. MLB's constructor otherwise fetches today's probable pitchers.
-_LEAGUE_STATS: dict[str, Callable[[], Stats]] = {
-    "MLB": partial(StatsMLB, load_live_pitchers=False),
+# weight tables.
+_LEAGUE_STATS: dict[str, type[Stats]] = {
+    "MLB": StatsMLB,
     "NBA": StatsNBA,
     "NFL": StatsNFL,
     "NHL": StatsNHL,

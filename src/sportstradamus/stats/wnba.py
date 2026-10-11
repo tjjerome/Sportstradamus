@@ -15,7 +15,6 @@ from sportstradamus.helpers import (
     combo_props,
     feature_filter,
     get_ev,
-    get_mlb_pitchers,
     get_odds,
     remove_accents,
 )

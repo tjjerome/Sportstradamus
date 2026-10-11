@@ -361,7 +361,6 @@ def _stub_stats_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(odds_budget, "league_is_live", lambda league, season_start: True)
     monkeypatch.setattr(odds_budget, "update_window_open", lambda league, season_start: True)
     monkeypatch.setattr(odds_budget, "season_opener", lambda league: None)
-    monkeypatch.setattr(mlb_module, "get_mlb_pitchers", dict)
 
     for mod in (nba_module, nfl_module, wnba_module, mlb_module, nhl_module):
         cls_name = {

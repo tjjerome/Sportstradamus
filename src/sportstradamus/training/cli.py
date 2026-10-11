@@ -620,13 +620,7 @@ def meditate(
     ):
         if league not in ("All", lg_name):
             continue
-        if cls is StatsMLB and (deterministic or full_rebuild or frozen_matrix_dir is not None):
-            # Frozen/cold builds consume cached historical inputs only. Probable
-            # pitchers describe the live upcoming slate and must not introduce
-            # a network dependency before the cached MLB gamelog is loaded.
-            struct = cls(load_live_pitchers=False)
-        else:
-            struct = cls()
+        struct = cls()
         if league == "All" and not odds_budget.league_is_live(lg_name, struct.season_start):
             continue
         click.echo(f"[{lg_name}] loading cached gamelogs...")

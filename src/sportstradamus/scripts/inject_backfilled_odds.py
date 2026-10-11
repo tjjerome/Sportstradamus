@@ -82,9 +82,7 @@ def _target_at(game_date: datetime.date) -> datetime.datetime:
 
 def _load_league(league: str):
     """Load one league's gamelog exactly as the training run does, minus the network."""
-    cls = _LEAGUE_CLASSES[league]
-    # Probable pitchers describe the live upcoming slate; a repair reads cached history only.
-    stat_data = cls(load_live_pitchers=False) if cls is StatsMLB else cls()
+    stat_data = _LEAGUE_CLASSES[league]()
     stat_data.load()
     stat_data.trim_gamelog()
     return stat_data

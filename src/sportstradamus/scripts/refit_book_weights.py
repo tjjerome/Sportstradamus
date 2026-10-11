@@ -48,10 +48,7 @@ def refit_book_weights(league: str) -> dict:
     the fit declines (too few graded samples, no book columns) comes back
     ``{}``, exactly as a ``meditate`` pass would leave it.
     """
-    stats_cls = _LEAGUE_CLASSES[league]
-    # Probable pitchers describe the live slate over the network; the fit only
-    # needs the cached gamelog (prophecize/meditate own the league-API refresh).
-    stat_data = stats_cls(load_live_pitchers=False) if stats_cls is StatsMLB else stats_cls()
+    stat_data = _LEAGUE_CLASSES[league]()
     stat_data.load()
     archive = LazyArchive()
 

@@ -10,7 +10,7 @@ from sportstradamus.training.markets import ALL_MARKETS
 
 @pytest.mark.parametrize("cls", [StatsNBA, StatsWNBA, StatsMLB, StatsNFL, StatsNHL])
 def test_volume_stats_read_the_shared_constant(cls):
-    stats = cls(load_live_pitchers=False) if cls is StatsMLB else cls()
+    stats = cls()
     assert tuple(stats.volume_stats) == VOLUME_STATS[stats.league]
 
 

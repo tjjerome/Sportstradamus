@@ -383,15 +383,13 @@ def test_mlb_hitter_rebuild_does_not_require_pitch_count_model(tmp_path):
         stats.preflight_training_dependencies("pitcher strikeouts")
 
 
-def test_mlb_frozen_constructor_does_not_fetch_live_pitchers(monkeypatch):
-    def fail_live_fetch():
-        raise AssertionError("live probable-pitcher lookup must stay off the frozen path")
+def test_mlb_constructor_does_not_reach_the_schedule_feed(monkeypatch):
+    def fail_live_fetch(**_):
+        raise AssertionError("constructing StatsMLB must stay off the network")
 
-    monkeypatch.setattr("sportstradamus.stats.mlb.get_mlb_pitchers", fail_live_fetch)
+    monkeypatch.setattr("statsapi.schedule", fail_live_fetch)
 
-    stats = StatsMLB(load_live_pitchers=False)
-
-    assert stats.pitchers == {}
+    StatsMLB()
 
 
 def test_trim_and_parquet_sha_are_reproducible(tmp_path):

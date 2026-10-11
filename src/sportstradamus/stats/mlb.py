@@ -28,7 +28,6 @@ from sportstradamus.helpers import (
     combo_props,
     feature_filter,
     get_ev,
-    get_mlb_pitchers,
     get_odds,
     remove_accents,
     set_model_start_values,
@@ -331,18 +330,16 @@ class StatsMLB(Stats):
     Inherits from the Stats parent class.
 
     Additional Attributes:
-        pitchers (mlb_pitchers): Object containing MLB pitcher data.
         gameIds (list): List of game ids in gamelog.
 
     Additional Methods:
         None
     """
 
-    def __init__(self, *, load_live_pitchers: bool = True):
+    def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
         self.season_start = datetime(2026, 3, 25).date()
-        self.pitchers = get_mlb_pitchers() if load_live_pitchers else {}
         self.gameIds = []
         self.gamelog = pd.DataFrame()
         self.teamlog = pd.DataFrame()

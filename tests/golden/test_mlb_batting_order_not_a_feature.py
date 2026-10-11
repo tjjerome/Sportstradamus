@@ -72,7 +72,7 @@ def upcoming_mlb_game(monkeypatch) -> tuple[StatsMLB, dt.date, list[dict]]:
     branch), and freezes today onto the gameday. ``profile_market`` is primed at the
     gameday so its cache guard lets both arms reuse one profile.
     """
-    stats = StatsMLB(load_live_pitchers=False)
+    stats = StatsMLB()
     stats.load()
 
     game = _fullest_logged_game(stats.gamelog)

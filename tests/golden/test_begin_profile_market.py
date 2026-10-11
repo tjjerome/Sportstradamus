@@ -103,7 +103,7 @@ def test_mlb_hitter_market_is_profiled_on_every_gameday_of_a_matrix_build(monkey
     ``get_depth``, which rebuilds the base profile for the day, and ``get_stats`` then
     profiles the market.
     """
-    stats = StatsMLB(load_live_pitchers=False)
+    stats = StatsMLB()
     stats.load()
     monkeypatch.setattr(base, "archive", _NoArchive())
     gamelog = stats.gamelog.assign(day=pd.to_datetime(stats.gamelog["gameDate"]).dt.date)

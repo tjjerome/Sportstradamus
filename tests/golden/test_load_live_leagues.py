@@ -5,7 +5,8 @@
 raised on a missing seed file and three production runs died in five seconds each,
 leaving no board for any league. The loader holds a failed update to its own league,
 which sits that run out, and ``prophecize`` still exits non-zero once its snapshots
-are written, so the job's health check fires.
+are written, so the job's health check fires. A constructor or a first load that
+raises is held the same way.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ class _FakeStats:
 def _install_leagues(monkeypatch, live_leagues, update_errors):
     """Swap the five ``Stats`` classes for ``_FakeStats``; return their shared call log.
 
-    The real constructors read gamelog files and, for MLB, call the network.
+    The real classes read gamelog files and call the league APIs.
     """
     calls = []
     for league in _LEAGUES:
@@ -99,6 +100,24 @@ def test_a_failed_update_is_held_to_its_own_league(monkeypatch, caplog):
     (record,) = caplog.records
     assert "NBA update failed" in record.getMessage()
     assert record.exc_info[1] is seed_missing
+
+
+def test_a_failed_constructor_or_first_load_is_held_to_its_own_league(monkeypatch, caplog):
+    _install_leagues(monkeypatch, live_leagues=_LEAGUES, update_errors={})
+    constructor_error = RuntimeError("MLB constructor")
+    load_error = OSError("NHL gamelog bundle")
+    unreadable = Mock()
+    unreadable.load.side_effect = load_error
+    monkeypatch.setattr(live, "StatsMLB", Mock(side_effect=constructor_error))
+    monkeypatch.setattr(live, "StatsNHL", Mock(return_value=unreadable))
+
+    with caplog.at_level(logging.ERROR, logger="log"):
+        stats, failed = live.load_live_leagues()
+
+    assert list(stats) == ["NBA", "NFL", "WNBA"]
+    assert failed == ["MLB", "NHL"]
+    assert [record.getMessage().split()[0] for record in caplog.records] == failed
+    assert [record.exc_info[1] for record in caplog.records] == [constructor_error, load_error]
 
 
 # The names ``main`` writes or deletes through, matched by prefix rather than listed:
