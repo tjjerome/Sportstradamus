@@ -210,7 +210,7 @@ def main(progress, contest_variant, log_level):
     """Run the full prediction pipeline and write parquet snapshots for the dashboard."""
     # style: allow-complexity — prophecize entrypoint: a flat top-level pipeline
     # (per-league load/update, per-platform fetch+score, snapshot + history
-    # persistence). The residual CC is sequential stages and per-platform/-league
+    # persistence). The residual CC is sequential stages and per-platform
     # guards, not nested logic; decomposing it would only scatter the pipeline.
     cli_log = get_logger("prophecize")
     cli_log.setLevel(log_level)
@@ -224,7 +224,6 @@ def main(progress, contest_variant, log_level):
     scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
     stats, updates_failed = load_live_leagues()
-    sports = list(stats)
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
@@ -366,7 +365,7 @@ def main(progress, contest_variant, log_level):
     write_current_offers(
         snapshot_offers,
         parlay_df,
-        sports,
+        list(stats),
         platforms_run,
         contest_variant=contest_variant,
     )
