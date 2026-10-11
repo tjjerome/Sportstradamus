@@ -7,12 +7,14 @@ stand in for every player the season does not hold yet, in the NBA, the WNBA and
 NHL. The seed read falls on the newest earlier file, and the season's own roster
 fills team by team as its first updates find players. A pull the site blocks comes
 back empty and must not wipe what the season holds: every player would fall to last
-season's row with nothing to say so.
+season's row with nothing to say so. Once the NHL's season has games, that empty pull
+also fails the update, so a block that lasts is seen.
 """
 
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from datetime import date, timedelta
 
 import pandas as pd
@@ -219,6 +221,31 @@ def test_a_blocked_nhl_roster_pull_keeps_the_rows_the_season_holds(monkeypatch):
     stats._update()
 
     assert stats.players == {season - 1: _NHL_LAST_SEASON, season: held}
+
+
+@pytest.mark.parametrize(
+    ("days_since_opening_night", "outcome"),
+    [(1, pytest.raises(RuntimeError, match="roster pull came back empty")), (-5, nullcontext())],
+    ids=["season under way", "before opening night"],
+)
+def test_a_blocked_nhl_roster_pull_fails_the_update_once_the_season_has_games(
+    monkeypatch, days_since_opening_night, outcome
+):
+    writes = []
+    monkeypatch.setattr(nhl, "scraper", _SilentSites())
+    monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: writes.append(bundle))
+    stats = StatsNHL()
+    stats.season_start = date.today() - timedelta(days=days_since_opening_night)
+    yesterday = str(date.today() - timedelta(days=1))
+    stats.gamelog = pd.DataFrame(
+        {"gameId": [1], "gameDate": [yesterday], "playerName": ["A"], "team": ["TOR"]}
+    )
+    stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
+
+    with outcome:
+        stats._update()
+
+    assert len(writes) == 1
 
 
 def _nba_before_opening_night(players):

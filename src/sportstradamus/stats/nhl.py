@@ -509,11 +509,10 @@ class StatsNHL(Stats):
         player_df = self._fetch_player_bios_nhl()
         skater_df = self._fetch_skater_summary(player_df)
         goalie_df = self._fetch_goalie_summary(player_df)
+        roster_pull = skater_df.to_dict("index") | goalie_df.to_dict("index")
         # A pull moneypuck blocks comes back empty. Merged, it leaves the season's rows as
         # they were; assigned, it would hand every player to last season's row.
-        self._merge_season_roster(
-            self.season_start.year, skater_df.to_dict("index") | goalie_df.to_dict("index")
-        )
+        self._merge_season_roster(self.season_start.year, roster_pull)
 
         four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
@@ -530,6 +529,15 @@ class StatsNHL(Stats):
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
+
+        # Raised after the write, so the parsed games and the stored roster are kept. Before
+        # opening night the season has no summary yet and an empty pull is normal.
+        game_days = pd.to_datetime(self.gamelog["gameDate"]).dt.date
+        if not roster_pull and (game_days >= self.season_start).any():
+            raise RuntimeError(
+                "NHL roster pull came back empty: moneypuck returned no skater or goalie "
+                f"season summary for {self.season_start.year}"
+            )
 
     def _collect_game_ids(self, latest_date, today):
         """Walk the NHL schedule day-by-day collecting (gameId, date) since latest_date."""
