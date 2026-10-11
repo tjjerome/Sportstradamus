@@ -387,7 +387,7 @@ def _resolve_player_positions(league_df, league, stat_data):
 
 
 def _build_cmarket(league_df, league, platform):
-    """Add the ``cMarket`` (position.corr-name) display column.
+    """Add ``cMarket``, each leg's key into the league's correlation matrices.
 
     One ``position.market`` token per leg — a list, for multi-position combo
     legs — with the market under the league's own name, the one its correlation
@@ -630,7 +630,8 @@ def _process_league_games(
     For each (team, opponent) pairing: assemble the game frame, build the
     correlation / boost matrices, annotate ``df``'s display columns, collect the
     per-game correlation slice into ``corr_sink`` (when not None), and — unless
-    the platform/league is parlay-ineligible — beam-search parlays onto
+    the platform/league is parlay-ineligible — capture the game's scoring bundle
+    into ``story_sink`` (when not None) and beam-search parlays onto
     ``parlay_df`` (returned).
     """
     checked_teams = []
@@ -738,10 +739,10 @@ def find_correlation(
         offers: List of scored offer dicts from :func:`process_offers`.
         stats: ``{league: Stats}`` dict for active leagues.
         platform: DFS platform name (e.g. ``"Underdog"``).
-        contest_variant: Underdog payout pool. Default ``"pooled"`` combines
-            ``power`` (sizes 2-3) and ``flex`` (sizes 4-6) into one pool;
-            the single-variant names are accepted for the ``pickem-build``
-            path. Ignored for non-Underdog platforms.
+        contest_variant: Underdog or Sleeper payout pool. Default ``"pooled"``
+            combines ``power`` (sizes 2-3) and ``flex`` (sizes 4-6) into one
+            pool; the single-variant names are accepted for the
+            ``pickem-build`` path. The legacy single-payout platforms ignore it.
         corr_sink: When provided, each game appends its upper-triangle
             correlation + pair-modifier slice (``Platform, League, Game, leg_a,
             leg_b, rho, modifier``) to this list for the dashboard rail/

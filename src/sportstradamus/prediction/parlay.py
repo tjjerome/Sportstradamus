@@ -161,7 +161,7 @@ def leg_market_map(league: str, platform: str) -> dict[str, str]:
 
 
 def resolve_leg_stat(market: str, stat_by_label: dict) -> str:
-    """Gamelog stat key for a leg's display ``Market``, mirroring the ``cMarket`` idiom."""
+    """Gamelog stat key for a leg's display ``Market``: the league's own name, ``H2H`` dropped."""
     stripped = market.replace("H2H ", "")
     return stat_by_label.get(stripped, stripped)
 
@@ -360,8 +360,8 @@ def beam_search_parlays(
         max_boost: Max allowed product boost for a parlay.
         bet_df: Dict of leg metadata keyed by DataFrame index.
         info: ``{Game, Date, League, Platform}`` metadata dict.
-        team: Home team abbreviation.
-        opp: Away team abbreviation.
+        team: One of the game's two team abbreviations.
+        opp: The other; a parlay must hold a leg of each.
         full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
             — entries at or below this size refund in full on any push
             (Sleeper's 2-pick divergence). ``None`` keeps the generic
