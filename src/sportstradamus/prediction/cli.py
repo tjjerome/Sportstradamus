@@ -30,7 +30,6 @@ from sportstradamus.helpers import (
     LazyArchive,
     archive_market,
     get_logger,
-    odds_budget,
     stat_dist,
     stat_map,
 )
@@ -64,7 +63,7 @@ from sportstradamus.prediction.stories.details import build_offer_details
 from sportstradamus.prediction.stories.lead import attach_prominence
 from sportstradamus.prediction.stories.lineup import attach_lineup_columns
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+from sportstradamus.stats import load_live_leagues
 
 pd.set_option("mode.chained_assignment", None)
 pd.set_option("future.no_silent_downcasting", True)
@@ -224,21 +223,8 @@ def main(progress, contest_variant, log_level):
     # the run saw, which is what point-in-time research needs.
     scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
-    sports = []
-    stats = {}
-    for lg_name, cls in (
-        ("NBA", StatsNBA),
-        ("NFL", StatsNFL),
-        ("WNBA", StatsWNBA),
-        ("MLB", StatsMLB),
-        ("NHL", StatsNHL),
-    ):
-        struct = cls()
-        struct.load()
-        if odds_budget.league_is_live(lg_name, struct.season_start):
-            struct.update()
-            stats[lg_name] = struct
-            sports.append(lg_name)
+    stats, updates_failed = load_live_leagues()
+    sports = list(stats)
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
@@ -452,9 +438,13 @@ def main(progress, contest_variant, log_level):
 
     # Non-zero only after every capture and snapshot has landed: run_job.sh pings
     # Healthchecks /fail on the exit code, and a swallowed platform that exits 0
-    # is how Underdog went dark for four days without an alert.
+    # is how Underdog went dark for four days without an alert. A league that sat
+    # the run out on a failed gamelog update alerts the same way.
+    if updates_failed:
+        logger.error("gamelog updates failed: %s", ", ".join(updates_failed))
     if platforms_failed:
         logger.error("platforms failed: %s", ", ".join(platforms_failed))
+    if updates_failed or platforms_failed:
         raise SystemExit(1)
     logger.info("Success!")
 

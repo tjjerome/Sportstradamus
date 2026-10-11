@@ -19,7 +19,7 @@ from typing import Any
 import click
 import pandas as pd
 
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, cell_market, odds_budget
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, cell_market
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
@@ -319,23 +319,13 @@ def live_load(
     """
     from sportstradamus.books import get_sleeper, get_ud
     from sportstradamus.prediction.scoring import process_offers
-    from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+    from sportstradamus.stats import load_live_leagues
 
     loaders = {"Underdog": get_ud, "Sleeper": get_sleeper}
 
-    stats: dict[str, Any] = {}
-    for cls, key in (
-        (StatsNBA, "NBA"),
-        (StatsNFL, "NFL"),
-        (StatsWNBA, "WNBA"),
-        (StatsMLB, "MLB"),
-        (StatsNHL, "NHL"),
-    ):
-        s = cls()
-        s.load()
-        if odds_budget.league_is_live(key, s.season_start):
-            s.update()
-            stats[key] = s
+    # A league whose gamelog update failed is logged by the loader and sits this build
+    # out; the board run of the same hour is what raises the alarm.
+    stats, _ = load_live_leagues()
     offers_df, _ = process_offers(
         loaders[platform](), platform, stats, contest_variant=config.contest_variants[0]
     )

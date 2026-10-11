@@ -330,20 +330,11 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
 
 
 def _live_load_offers(monkeypatch, platform: str, boost: float) -> pd.DataFrame:
-    """``live_load``'s offers frame with the Stats loaders, the scrape and the search stubbed.
+    """``live_load``'s offers frame with the league loader, the scrape and the search stubbed.
 
     ``boost`` is what ``process_offers`` hands back for the one offer.
     """
-
-    class _StubStats:
-        season_start = None
-
-        def load(self) -> None:
-            pass
-
-    for name in ("StatsNBA", "StatsNFL", "StatsWNBA", "StatsMLB", "StatsNHL"):
-        monkeypatch.setattr(f"sportstradamus.stats.{name}", _StubStats)
-    monkeypatch.setattr(underdog_pickem.odds_budget, "league_is_live", lambda *a: False)
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr("sportstradamus.books.get_ud", list)
     monkeypatch.setattr("sportstradamus.books.get_sleeper", list)
     monkeypatch.setattr(

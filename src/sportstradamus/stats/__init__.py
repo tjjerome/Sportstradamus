@@ -5,6 +5,7 @@ Public API re-exports for back-compat with any code that imported from
 """
 
 from sportstradamus.stats.base import Stats
+from sportstradamus.stats.live import load_live_leagues
 from sportstradamus.stats.mlb import StatsMLB
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nfl import StatsNFL
@@ -18,4 +19,5 @@ __all__ = [
     "StatsNFL",
     "StatsNHL",
     "StatsWNBA",
+    "load_live_leagues",
 ]
