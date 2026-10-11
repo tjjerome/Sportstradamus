@@ -234,7 +234,7 @@ prophecize  (prediction/cli.py)
   history.parquet / parlay_hist/ day partitions
 
 pickem-build  (strategies/underdog_pickem.py)
-  prediction/parlay.beam_search_parlays(contest_variant=...)
+  prediction/correlation.find_correlation(contest_variant=...)
   strategies/kelly.fractional_kelly_stake(...)
         │
         ▼

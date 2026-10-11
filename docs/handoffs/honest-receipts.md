@@ -3,13 +3,15 @@
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
 (Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
 the killed selection-shrink lever this lane continues), and the three research briefs in
-`docs/archive/` (§5). Status: OPEN — waves 1–9 are on `devel` (§4); all three briefs returned (R1
+`docs/archive/` (§5). Status: OPEN — waves 1–11 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
-profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–28
-and 32–35 (§2) are built (§4, §6), and the stored game lines of four leagues are re-read on the
-training box (§6, I6f). Approved and not yet run: the MLB rebuild and retrain behind decision 29's
-fix, the NHL rebuild (30) and production's re-read (31). No retrain has run since the re-read, so
-no served probability has moved with the training-side changes. What waits on the owner is §8.
+profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–29
+and 32–42 (§2) are built (§4, §6), and the stored game lines of four leagues are re-read on the
+training box (§6, I6f). Sixteen MLB matrices are rebuilt and 13 MLB models retrained on the
+training box (decision 29, §7); they are not on production, so no served probability has moved
+with the training-side changes. The NHL rebuild (30) stopped on a defect in the matrix builder
+(§7), and production's gamelog (31) gets its game lines with the MLB send. Both sends are the
+owner's to run. What waits on the owner is §8.
 
 ## 1. Mission & money logic
 
@@ -158,7 +160,8 @@ of 2026-10-11 to the eight asks that building those raised.
     captured only when a league returns from an off-season, and a league keeps it through a
     break. A season start already held is not moved by a feed date inside that season, which
     puts MLB back on 2026-03-25 and the WNBA on 2026-05-15.
-42. **A cleanup pass on the style-review leftovers follows the MLB and NHL rebuilds.**
+42. **A cleanup pass on the style-review leftovers follows the MLB and NHL rebuilds.** It
+    followed MLB's and did not wait for the NHL's, which is stopped (§7).
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, `stat_meta.json` never committed from a session.
@@ -258,12 +261,19 @@ nowhere on the page.
 | 10 | `d7ba4766` | A stored correlation partner names its market as the board does and carries its league (decision 39): `correlation._corr_partners` |
 | 10 | `e71f748e` | The WNBA shot map's team code goes through the alias map (decision 40), so Portland's players stay in the player frame |
 | 10 | `03395751`, `59e79056` | A league's opening night is pinned (decision 41): `moneylines._is_opening_night` captures it only after more than 60 days without a game and idle records keep it; `Stats.update` adopts it only when more than 300 days after the start it holds |
+| 11 | `6b9e00c7`, `d55a49eb`, `e91f6d1a`, `9fce9cf1`, `25976d05`, `3f5f5382` | The cleanup pass (decision 42), nothing computed differently: `check_bet`, `beam_search_parlays`, `construct_entries` and `build_entries_from_scored` drop a parameter each never read; `odds_budget.feed_ts` goes for `datetime.fromisoformat`; "no season runs 300 days" is one constant, `stats.base.SEASON_MAX_DAYS`, where it was written seven times; the unused parlay-history plot goes to `src/deprecated/`. One thing a reader of the box can see: the empty `logs/<date>/pickem-build.jsonl` no longer appears |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
 the I4 bullet); the `SPORTSTRADAMUS_ARCHIVE_DB` default-path expression now repeats in four scripts
 beside `helpers/archive.py`. `docs/ship_gate.md`'s devel → main row no longer describes a
 `profit_sim_kelly_yield ≥ 0` money rule: no code implemented it and the owner's rule forbids it.
+Three grading rules the cleanup pass's style review found, none reached today:
+`analysis._resolve_leg` grades a leg whose realized value is NaN as a hit (no NaN sits in the
+78 served market columns of the training box's gamelogs); a `" vs. "` parlay leg is graded on
+the sum of its two players where its offer row is graded on their difference (no matchup offer
+is scraped); and `underdog_pickem._parlay_shrinkage` gives a parlay whose legs all lack a cell
+mapping full trust, where Kelly's own no-evidence case gets 0.01.
 
 ## 5. Research program (three briefs, `research-analyst`, model opus, read-only)
 
@@ -658,8 +668,35 @@ eras.
   player's standardized level or home split in the market they price. `base_profile` now
   forgets the market it held when it rebuilds (decision 29): walked in the matrix builder's
   order over the training box's last two game days, the share of a game's hitters with a
-  `Player z` was .89 then 0 before the fix and about .9 on both after. The cached matrices,
-  and every model trained on them, keep the gap until the rebuild and retrain.
+  `Player z` was .89 then 0 before the fix and about .9 on both after. The rebuild and retrain
+  ran on the training box on 2026-10-11 for 16 of the 19 MLB cells: each matrix built cold, and
+  the 13 that have a model retrained. In the 11 rebuilt matrices that had the defect `Player z`
+  is non-zero on 88 % to 99.7 % of rows (home runs 60 %, stolen bases 33 %: only a player who
+  records the event often enough gets one), and no game day is left without a profile, where
+  337 to 359 a matrix had none. Inside the dates both cover, a rebuilt matrix keeps 100.0 % to
+  100.3 % of the old one's quoted rows. On the ship gates no cell went from pass to fail and
+  runs allowed went from fail (Gate 4) to pass. Skill against the book moved most in home runs
+  (0.305 to 0.227), stolen bases (0.218 to 0.035, model weight 0.77 to 0.48) and hits allowed
+  (0.026 to 0.002, weight 0.76 to 0.10), and the two tables are not like for like: the rebuild
+  resolved every quote again, so about a quarter fewer validation rows count as
+  sportsbook-priced (hits 10,299 to 7,775), `DaysIntoSeason` counts from one season start, the
+  pitch-count projection sits on every pitcher row, and the test set reaches three weeks
+  later. On held-out recommended legs the tail scorecard reads .709 against .660 hit before
+  (262 legs, gap .049 [−.018, .111]) and .624 against .539 after (687 legs, gap .086 [.047,
+  .118]; 636 of them Unders): the fix did not change the over-read or the Under lean. The
+  rebuilt models expect 118 features where production's expect 108 (hitters, pitches thrown)
+  or 112 (hits allowed, runs allowed): six game-line features and four player features that
+  were constant in the old matrices, which training drops. Made-up offers for each team's last
+  starting nine and starter, sent through the serve path in a sandbox on both file sets, score
+  in all 15 cells (2,928 rows each), every number finite and all 118 features in the frame fed
+  to each rebuilt model; no made-up offer found a sportsbook quote, so the blend with a quote
+  did not run. The models are on the training box only, and a board run on production with
+  them is not proven (§8, asks 1 and 2). Three cells were left out because a cold rebuild
+  keeps quoted rows only and would cost them four months of rows: batter strikeouts and the
+  hitter and pitcher fantasy points on Underdog keep their matrices, and batter strikeouts'
+  model its gap (§8, ask 3). Tables and logs:
+  `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/logs/`; the probe:
+  `~/backups/sportstradamus/2026-10-11-league-only-send/README.md`.
 - The four slope features after the re-read (`Player` and `Defense` `moneyline gain` and
   `totals gain`: a stat regressed on the stored game lines of the trailing 300 days). The matrix
   patch leaves them at their cached values. Recomputed from the re-read gamelog on sampled dates
@@ -668,7 +705,8 @@ eras.
   .48 to .69 for NHL shots and .16 to .23 for MLB pitcher strikeouts, where the cached value is
   zero on 60 % of the rows that would now hold one. A patch is enough for NFL and WNBA; MLB and
   NHL need a matrix rebuild to see the re-read lines in these four columns (decisions 29 and
-  30). They carry a median
+  30). MLB's 16 rebuilt matrices hold them; the NHL's rebuild is stopped (the NHL bullet
+  below). They carry a median
   1.4 % of a cell's stored importance in MLB, 1.7 % in NHL, 0.6 % in NFL and 0.8 % in WNBA.
 - No game line was stored for a 49ers or a 76ers game from 2024-05-07 until decision 28.
   `helpers.text.remove_accents` title-cases a team name, "San Francisco 49ers" became "San
@@ -712,11 +750,13 @@ eras.
   (decision 26) would have dropped an offer dated before the first game after such a gap. Both
   ends are fixed (decision 41): an opener is captured only when the next game falls more than
   60 days after the last one seen, and a start a class holds gives way only to an opener more
-  than 300 days after it. What the fix does not reach: the two wrong dates stay in the feed's
-  record until next season's capture replaces them, and the 300-day rule is what ignores them;
-  the NBA's and the NHL's classes hold last season's starts, so for those two the capture rule
-  is the only guard this season; and a matrix row built while a wrong start was held keeps its
-  short count until its matrix is rebuilt (MLB's are, decision 29).
+  than 300 days after it. On production's first board run on that code the MLB day-of-season
+  count in the serve-time log went from 85 or 86 to 200. What the fix does not reach: the two
+  wrong dates stay in the feed's record until next season's capture replaces them, and the
+  300-day rule is what ignores them; the NBA's and the NHL's classes hold last season's
+  starts, so for those two the capture rule is the only guard this season; and a matrix row
+  built while a wrong start was held keeps its short count until its matrix is rebuilt (16 of
+  MLB's 19 are, decision 29).
 - A player the season's roster did not hold was priced by the book alone, and the NHL's opening
   night went unscored. The lookup knew two states: the new season's roster, or last season's
   whole while the new one held nobody (decision 26). A WNBA or NHL roster learns a player at
@@ -728,7 +768,10 @@ eras.
   states, 25 of 30 opening-night offers are scored where none was (the other 5 fall to the
   price rule for unquoted offers). The NHL update also assigned each pull to the season's
   roster, and the scraper answers a blocked pull with nothing, so one blocked pull emptied the
-  season; it merges now. What the fix does not reach: a player who changed teams reads on the
+  season; it merges now. On production's first board run on that code the six NBA players
+  offered for opening night are read from last season's row, each with a position, and the
+  NHL's 2026 roster went from 676 to 677 rows, merged and not replaced. What the fix does not
+  reach: a player who changed teams reads on the
   old team until a first game with the new one, and a blocked pull is only a warning line in
   the log (§8).
 - No Portland player game row was stored for the last 27 games of the WNBA's 2026 season.
@@ -738,17 +781,19 @@ eras.
   team: every Portland player dropped out of that frame, and `_assemble_wnba_player_rows`
   takes each game row's position from it. On production the gamelog holds 147 Portland player
   rows through 2026-06-17, all under `PDX`, and none for the 27 games from 06-24 to 09-22
-  (about 270 rows), while the team log holds all 41 games; the 2026 roster holds 14 of the 15
-  teams. The shot map's code goes through the alias map now (decision 40). What the fix does
+  (about 270 rows), while the team log holds all 41 games; the 2026 roster held 14 of the 15
+  teams. The shot map's code goes through the alias map now (decision 40), and since its first
+  update on that code production's roster holds all 15 (236 players, 220 before). What the fix does
   not reach: the lost rows are not refetched, because an update pulls from the latest stored
   date on, and the 147 older rows still read `PDX` (§8).
 - The deep dive's pairing cards were empty from 2026-07-03 (`13d01613`). A board row's
   partners were stored under the platform's label ("Receiving Yards") and looked up on a board
   renamed through the platform's map: on production's board of 2026-10-08, 0 of the 1,204
   partners stored on Underdog rows and 70 of the 123 on Sleeper rows named a market the board
-  holds. A partner is stored under the board's name now, with its league (decision 39), from
-  the first board run on that code. A card names a market as its board row does, which for the
-  four markets of ask 6 (§8) is still the platform's code.
+  holds. A partner is stored under the board's name now, with its league (decision 39): on
+  production's first board run on that code every stored partner names a row of the board (603
+  same-team and 1,928 opposing on Underdog, 40 and 125 on Sleeper). A card names a market as
+  its board row does, which for the four markets of ask 17 (§8) is still the platform's code.
 - One league's failed gamelog update cost every league its board. `prophecize` and the ledger
   build each updated every live league before scoring anything, with no guard: on 2026-10-10
   the NBA update raised on its missing seed file, and production's board runs of 19:50 and
@@ -759,7 +804,8 @@ eras.
   on its cached gamelog, because the day's schedule is fetched only inside an update: without
   it every player reads as away and an MLB hitter faces no pitcher, on a board that would look
   like any other. What the guard does not reach: a constructor or a first load that raises
-  (§8), and the ledger build, which logs a failed update and raises no alarm of its own.
+  (§8), and the ledger build, which logs a failed update and raises no alarm of its own. No
+  update has raised on production since, so the guard has run there only where nothing fails.
 - An MLB row scored near first pitch, or for a game of a later date, is scored without the
   day's schedule, and history keeps that scoring for about nine rows in ten. The schedule map
   (`upcoming_games`) is the only source of an upcoming row's `Home` flag, opposing starter and
@@ -781,7 +827,7 @@ eras.
   the closing-line comparisons) is mostly of readings the holdout never scored. Not measured:
   the regular season, and the cost in hit rate. The same status test decides who starts today
   in `helpers/text.get_mlb_pitchers`, which the Underdog scrape uses to tell a pitcher's
-  fantasy-points offer from a hitter's (§8, asks 7 and 8).
+  fantasy-points offer from a hitter's (§8, asks 9 and 11).
 - A Sleeper offer for a home team whose code is remapped read that team as its own opponent.
   `_sleeper_games_map` passes a game's two team codes through `ABBR_MAP` (`WSH` to `WAS`), and
   `_sleeper_prop_offers` took as opponent the first of the two that differs from the player's
@@ -792,7 +838,7 @@ eras.
   Washington rows both platforms offer at one line the projection differs on all 32 (0.018 on
   average, up to 0.12), where the platforms agree to 0.0007 or better for the other home
   teams. The map holds three NBA codes (`GS`, `PHO`, `NOP`), and the NBA opens on 2026-10-20
-  (§8, ask 9).
+  (§8, ask 10).
 - Production's MLB comp tables are from March. MLB comps are read from two Baseball Savant
   match-score files under `player_data/MLB/` that only `meditate` refreshes; production runs
   no `meditate`, and the sync's file list never held them. Production's are dated 2026-03-06,
@@ -801,13 +847,13 @@ eras.
   training box and stand as their own comp on production. `Player comps z` and `Defense comp
   n` differ between a served row and the matrix row of the same player and date on 94 to 97 %
   of rows, by 0.7 to 0.8 standard deviations; they carry 2 to 5.6 % of |SHAP| in the hitter
-  cells (§8, ask 10).
+  cells (§8, ask 2).
 - A rain-shortened MLB game never reaches the gamelog. `_mlb_final_game_ids` takes a game
   whose state is exactly `Final`, and the feed ends a called game as `Completed Early` for
   good. Five games in 2025 and two in 2026, none of the seven in the gamelog (0.14 % of
   games): each of their players lacks one game in the rolling features, and the game gives no
   training row. The 58 postponed listings are all in, because a made-up game keeps its id and
-  ends `Final` (§8, ask 11).
+  ends `Final` (§8, ask 12).
 - The sync to production mirrors every league, and seven NFL flags reached production before
   their model files. `scripts/sync_to_prod.sh` has no league switch: it mirrors the model
   folder with delete and sends the book weights, the calibration file and the stats table
@@ -830,72 +876,168 @@ eras.
   (`~/backups/sportstradamus/2026-10-11-league-only-send/`) takes production's own three
   shared files, replaces one league's entries, and sends them with that league's model and
   correlation files; it deletes nothing and keeps every file it replaces on production. It
-  was rehearsed on a copy of production's own files, undo included (§8, ask 12).
+  was rehearsed on a copy of production's own files, undo included (§8, asks 4 and 13).
+- Every NHL matrix build raises on its first game day. On a past date `Stats.get_depth`
+  left-merges the day's gamelog players onto the roster (`6eac660c`, 2026-09-25, so a player
+  the roster lacks still gets a depth slot). Such a player takes a filled-in 0 in every roster
+  attribute, the NHL's roster rows carry a text one (`shootsCatches`), and the depth rank ran
+  over every column before one was picked, so it compared text with a number and raised
+  `TypeError`. 486 of the 570 NHL game days since 2024-02-10 hold such a player, and all 12 of
+  the new season: a cold rebuild and a retrain's top-up both raise, where a cold rebuild
+  worked in July. Serving reads today's roster without the merge and is not affected, and the
+  NBA's and the WNBA's rosters hold no text attribute beside the position. It was found on
+  2026-10-11 when decision 30's rebuild raised: the 15 cached matrices were put back byte for
+  byte and no NHL model changed. The fix is written and tested (the rank reads the usage
+  column alone). With it the matrix builder builds the game days of 2024-02-10 to 02-16 on the
+  training box for a quoted and an unquoted market, at about ten seconds a game day for the
+  quoted one: a cold start of the 15 matrices is about a day in one process (§8, asks 5 and
+  6). Record: `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/nhl_crash/README.md`.
+- The parlay search's `Fun` score reads no calibration on Underdog. A game keeps its top
+  parlays under three sort keys, model EV, recommended stake and `Fun`
+  (`correlation._append_parlay_rows`), and `parlay._parlay_fun` scores an Over leg by its line
+  in units of the market's spread, read from `stat_std` and `stat_cv` under the leg's `Market`.
+  Inside the search that is still the platform's label ("Points"); both tables are keyed by
+  the league's own name (`PTS`), and the board's rename runs after the search. Of the label
+  and league pairs that have a calibration, none of Underdog's 96 is a key and 13 of Sleeper's
+  65 are. The lookup then takes its default of 1 and the score is one plus the raw line: the
+  parlays `Fun` keeps are the ones whose Over legs carry the biggest numbers, a passing-yards
+  Over before any receptions Over, on every board. `Fun` is dropped before the parlay snapshot
+  is written, so it decides only which parlays are kept (§8, ask 18).
+- A team with offers on two game dates gets one game frame. `correlation._assemble_game_frame`
+  takes every leg of a team whatever its date and names the frame by the team's most common
+  opponent and date. Both games' legs are then scored with same-game correlations and can
+  share a parlay, and a line offered at one number on both dates is dropped as a duplicate.
+  In production's parlay store 23,974 of 2,236,339 parlays hold legs on two game dates (WNBA
+  20,000, MLB 3,974), every one stored for July or August 2026 (2.3 % of August's). None
+  since, and no team held two dates on the board of 2026-10-11; it returns whenever a platform
+  posts a team's next game before the current one is played (§8, ask 19).
+- `current_pickem.parquet` has a writer and no reader. The dashboard's batch Pick'em page is
+  retired and nothing else in `src/` reads the file. Every board run still builds it
+  (`cli._write_pickem_snapshot`): a parlay search per contest variant per platform, about ten
+  seconds of a ten-to-fourteen-minute run by the progress bars of production's 17:50 UTC run
+  of 2026-10-11, and a failure there is logged and never reaches the exit code. CLAUDE.md,
+  [ARCHITECTURE.md](../ARCHITECTURE.md) and `strategies/README.md` still say the dashboard
+  reads it; ARCHITECTURE.md also names the recommendations file `{date}.yaml` where the code
+  writes `{date}_{platform}.yaml`, and the README spells two commands `poetry run
+  pickem-build` and `poetry run kelly` (§8, ask 20).
 
 ## 8. Owner asks (one each)
 
-The six asks that stood here, and two put to the owner with them (the opening-night pin and a
-cleanup pass), were answered on 2026-10-11 and are decisions 36–42 (§2). The two items that
-are the owner's own to do stay (1 and 2 below). Asks 3 to 6 came out of building those
-decisions, and 7 to 12 out of checking them on production. Each record is in §7 or the
-section it names. None is on `devel`; where a fix is already written the ask says so. Not asked because no
-change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns
-$1 per $1 while the legs are over-read).
+The asks are numbered as they were put to the owner on 2026-10-11 17:50 UTC, beside the MLB
+gate table (the report is kept in `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/c4/`);
+18 to 20 were found after it. Each record is in §7 or the section it names. None is on
+`devel`; where a fix is already written the ask says so. Two items at the foot are the owner's
+own to do and need no answer. Not asked because no change is proposed: the parlay floor
+(`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while the legs are
+over-read).
 
-1. **Read the nine other banned touchdown pairs in the app** (ten minutes; no automated
-   probing). The one banned pair checked, a quarterback's pass TDs with his own receiver's TDs,
-   is allowed at 0.794 (§6, I5). The nine other keys of that family, and every sub-1 value
-   without a quote, are guesses until a payout read in the app backs them. From a payout, the
-   pair's modifier is the payout over the table value over the product of each pick's shown
-   price divided by 1.8708. In `banned_combos.json` a pair's first slot is the same side and
-   its second the opposite; the read is recorded in [underdog_api.md](../underdog_api.md) §6.8.
-2. **Drop the season's Cleaning the Glass export on both boxes** when it is published
-   (`player_data/NBA/nba_players_2026-27.csv`). Until then the NBA reads last season's file: ages
-   and positions are a year old (decision 26).
-3. **Refill Portland's lost WNBA game rows?** (yes / no; recommended yes, before the next WNBA
-   retrain.) About 270 player rows of 27 games, 2026-06-24 to 09-22, were never stored, and
-   147 older rows read `PDX` (§7). A one-off script would fetch those games again and rename
-   the older rows, proven on the training box first; on production the owner runs it, because
-   a session may not write there.
-4. **Make an empty NHL roster pull end the board run failed?** (yes / no; recommended yes.) A
-   moneypuck pull the site blocked used to empty the season's roster and drop the NHL from the
-   board, which is how a block got noticed. It now keeps the stored roster and leaves a warning
-   line (decision 37): a block that lasts would let the roster's season rates go stale with no
-   alarm.
-5. **Guard a league's constructor and first load as its update is guarded?** (yes / no;
-   recommended yes.) `StatsMLB()` calls the MLB schedule on every board and ledger run, MLB
-   live or not, outside decision 38's guard: an outage there still costs every league its
-   board.
-6. **Read NHL assists, points and blocks and NBA and WNBA Underdog fantasy points under the
-   league's own name on the dashboard?** (yes / no; recommended yes.) The board names those
-   four markets by the platform's code (`AST`, `fantasy points underdog`): 129 of the NHL's 252
-   rows on production's board of 2026-10-11. Such a row shows the code where others show a
-   name, the History tab, the form sparks and the story detail stats find no gamelog column
-   for it, and a slip built from it on the dashboard stores a market that settlement cannot
-   read.
-7. **Keep an MLB game on the schedule map until the game is over?** (yes / no; recommended
+1. **Send the rebuilt MLB models to production?** (yes / no; recommended yes.) Sixteen
+   matrices rebuilt, 13 models retrained, no cell from pass to fail (§7). The runbook
+   (`~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/c4/RUNBOOK.md`) is the owner's to run,
+   about two minutes between two board runs. It first copies the training box's game lines of
+   past games into production's MLB gamelog (decision 31, by copy and not by re-read: the
+   backfilled 2025 lines exist only in the training box's archive; 4,855 of 2025's 4,884
+   team-games sit at the default line on production, 28 after the copy), then sends MLB's
+   files and no other league's. Every replaced file is kept on production, with one undo
+   command each. The check after the send: the next board run's MLB rows, and all 118 feature
+   columns in production's serve-time log.
+2. **Send MLB's two comp tables with the models?** (yes / no; recommended yes.) Production's
+   are from March (§7). Two lines in the sync's file list, written; the one-league send has a
+   flag for them.
+3. **Recompute the three left-out MLB cells' features in place, then retrain the two that
+   have a model?** (yes / no; recommended yes.) Batter strikeouts and the hitter and pitcher
+   fantasy points on Underdog were left out of the rebuild: a cold rebuild keeps quoted rows
+   only, and they would fall from 15,360, 26,220 and 3,480 rows to about 8,179, 7,701 and 557.
+   Batter strikeouts' model learned with the player's profile empty on 94 % of its rows where
+   serving feeds it real values, and all three hold slope features built from the old game
+   lines. A one-off script would call the builder's own per-day feature path on the rows each
+   matrix holds, proven equal to a cold rebuild on the rows both keep. Not written.
+4. **Send the NFL ship-15 models to production?** (yes / no; recommended yes; no deadline.)
+   Seven NFL cells stopped being withheld on 2026-10-10 and production serves five of them on
+   its files of 09-27 (§7). One command, the owner's to run, rehearsed on a copy of
+   production's own files:
+   `~/backups/sportstradamus/2026-10-11-league-only-send/send_league_only.sh NFL`.
+5. **Fix the depth rank that stops every NHL matrix build?** (yes / no; recommended yes.) The
+   fix is written and tested: the rank reads the usage column alone (§7).
+6. **Retrain the NHL after its rebuild?** (yes / no; recommended yes.) Needs 5. From a cold
+   start the rebuild is about a day in one process; the pipeline's full-rebuild mode, which
+   builds outside the canonical folder and takes the NHL's snapshot path, has not been timed
+   and may be the faster road.
+7. **Retrain the WNBA now?** (yes / no; recommended no.) Two teams still have offers; a
+   retrain serves next season more, after ask 14's refill.
+8. **Retrain the NFL from this lane?** (yes / no; recommended no.) It is the NFL lane's own,
+   after 4.
+9. **Keep an MLB game on the schedule map until the game is over?** (yes / no; recommended
    yes.) Today a game leaves the map when the feed stops calling it `Pre-Game`, minutes before
    first pitch, and the last board run before most games scores it with no starter and every
    player away (§7). The fix is written and tested: one rule, `helpers/text.mlb_game_is_over`,
    read by the schedule map and by the probable-pitcher table. With it, 683 of the 701 rows
-   history kept for the games of 2026-10-10 would have been scored with the entry. Its cost: a
-   doubleheader's second game is stored under a key the lookup never reads, so its offers read
-   game one's entry until game one is over, where today they read it until game one begins.
-8. **Score a later date's MLB offers with that date's schedule?** (yes / no; recommended yes,
-   after 7.) The map holds one game a team and the schedule is asked only up to today: all
-   308 rows for 2026-10-12 on the board of 10-11 read every player as away. Such a row is
-   scored again on game day (decision 15), so the change is to the board a bettor reads the
-   day before. Keying the map by date and team reaches about ten call sites. Not written.
-9. **Give a Sleeper home team its real opponent?** (yes / no; recommended yes.) Washington's
-   home rows have read `WAS` against `WAS` since 2026-10-07 (§7). The fix is written and
-   tested: the opponent is picked against the remapped code. To check on the first Sleeper
-   NBA board, 2026-10-20: no row where the team is its own opponent.
-10. **Send MLB's two comp tables with the models?** (yes / no; recommended yes.) Production's
-    are from March (§7). Two lines in the sync's file list, written; the one-league send has a
-    flag for them.
-11. **Take a rain-shortened MLB game into the gamelog?** (yes / no; recommended yes.) One more
+   history kept for the one game of 2026-10-10 would have been scored with the entry. Its two
+   costs: a doubleheader's second game is stored under a key the lookup never reads, so its
+   offers read game one's entry until game one is over, where today they read it until game
+   one begins; and the pitcher table names today's starter until today's game is over, so the
+   next day's starter's Underdog fantasy-points offer is filed as a hitter's while today's
+   game is played, where today it is today's starter who is misfiled, on the last run before
+   that game.
+10. **Give a Sleeper home team its real opponent?** (yes / no; recommended yes.) Washington's
+    home rows have read `WAS` against `WAS` since 2026-10-07 (§7). The fix is written and
+    tested: the opponent is picked against the remapped code. To check on the first Sleeper
+    NBA board, 2026-10-20: no row where the team is its own opponent.
+11. **Score a later date's MLB offers with that date's schedule?** (yes / no; recommended yes,
+    after 9.) The map holds one game a team and the schedule is asked only up to today: all
+    308 rows for 2026-10-12 on the board of 10-11 read every player as away. Such a row is
+    scored again on game day (decision 15), so the change is to the board a bettor reads the
+    day before. Keying the map by date and team reaches about ten call sites. Not written.
+12. **Take a rain-shortened MLB game into the gamelog?** (yes / no; recommended yes.) One more
     state in `_mlb_final_game_ids`, and a one-off refill of the seven games of 2025 and 2026 on
     both boxes; the owner runs production's (§7). Not written.
-12. **Give `scripts/sync_to_prod.sh` a `--league` switch?** (yes / no; recommended yes.) The
+13. **Give `scripts/sync_to_prod.sh` a `--league` switch?** (yes / no; recommended yes.) The
     one-league send lives in a backup folder (§7). The switch would bring its merge, its
-    proof and its backup of every replaced file into the script.
+    proof and its backup of every replaced file into the script. Not written.
+14. **Refill Portland's lost WNBA game rows?** (yes / no; recommended yes, before the next WNBA
+    retrain.) About 270 player rows of 27 games, 2026-06-24 to 09-22, were never stored, and
+    147 older rows read `PDX` (§7). A one-off script would fetch those games again and rename
+    the older rows, proven on the training box first; on production the owner runs it, because
+    a session may not write there. Not written.
+15. **Make an empty NHL roster pull end the board run failed?** (yes / no; recommended yes.) A
+    moneypuck pull the site blocked used to empty the season's roster and drop the NHL from the
+    board, which is how a block got noticed. It now keeps the stored roster and leaves a warning
+    line (decision 37): a block that lasts would let the roster's season rates go stale with no
+    alarm. Not written.
+16. **Guard a league's constructor and first load as its update is guarded?** (yes / no;
+    recommended yes.) `StatsMLB()` calls the MLB schedule on every board and ledger run, MLB
+    live or not, outside decision 38's guard: an outage there still costs every league its
+    board. Not written.
+17. **Read NHL assists, points and blocks and NBA and WNBA Underdog fantasy points under the
+    league's own name on the dashboard?** (yes / no; recommended yes.) The board names those
+    four markets by the platform's code (`AST`, `fantasy points underdog`): 129 of the NHL's 252
+    rows on production's board of 2026-10-11. Such a row shows the code where others show a
+    name, the History tab, the form sparks and the story detail stats find no gamelog column
+    for it, and a slip built from it on the dashboard stores a market that settlement cannot
+    read. Not written.
+18. **Make the parlay search's `Fun` score read a market's spread under the league's own
+    name?** (yes / no; recommended yes.) One lookup through the map the search already holds
+    (§7). It changes which parlays a game keeps under the `Fun` sort key, on every board; the
+    parlays kept for model EV and for stake are untouched. Not written.
+19. **Give each game date of a team its own game frame in the parlay search?** (yes / no;
+    recommended yes.) Frames are grouped by team alone and the stored correlation slice is
+    keyed by game without a date (§7), so the change reaches a key the dashboard joins on. Not
+    written; it needs a short design first.
+20. **Stop building the pick'em snapshot nothing reads?** (yes / no; recommended yes.) It
+    removes `cli._write_pickem_snapshot`, `persist.write_current_pickem` and
+    `underdog_pickem.build_entries_from_scored`, which has no other caller, and corrects the
+    docs that say the dashboard reads the file (§7). The `bet pickem` command and the ledger
+    build do not use them. Not written.
+
+The owner's own, no answer needed:
+
+- **Read the nine other banned touchdown pairs in the app** (ten minutes; no automated
+  probing). The one banned pair checked, a quarterback's pass TDs with his own receiver's TDs,
+  is allowed at 0.794 (§6, I5). The nine other keys of that family, and every sub-1 value
+  without a quote, are guesses until a payout read in the app backs them. From a payout, the
+  pair's modifier is the payout over the table value over the product of each pick's shown
+  price divided by 1.8708. In `banned_combos.json` a pair's first slot is the same side and
+  its second the opposite; the read is recorded in [underdog_api.md](../underdog_api.md) §6.8.
+- **Drop the season's Cleaning the Glass export on both boxes** when it is published
+  (`player_data/NBA/nba_players_2026-27.csv`). Until then the NBA reads last season's file: ages
+  and positions are a year old (decision 26).
