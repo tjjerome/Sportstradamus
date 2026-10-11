@@ -261,7 +261,7 @@ nowhere on the page.
 | 10 | `d7ba4766` | A stored correlation partner names its market as the board does and carries its league (decision 39): `correlation._corr_partners` |
 | 10 | `e71f748e` | The WNBA shot map's team code goes through the alias map (decision 40), so Portland's players stay in the player frame |
 | 10 | `03395751`, `59e79056` | A league's opening night is pinned (decision 41): `moneylines._is_opening_night` captures it only after more than 60 days without a game and idle records keep it; `Stats.update` adopts it only when more than 300 days after the start it holds |
-| 11 | `6b9e00c7`, `d55a49eb`, `e91f6d1a`, `9fce9cf1`, `25976d05`, `3f5f5382` | The cleanup pass (decision 42), nothing computed differently: `check_bet`, `beam_search_parlays`, `construct_entries` and `build_entries_from_scored` drop a parameter each never read; `odds_budget.feed_ts` goes for `datetime.fromisoformat`; "no season runs 300 days" is one constant, `stats.base.SEASON_MAX_DAYS`, where it was written seven times; the unused parlay-history plot goes to `src/deprecated/`. One thing a reader of the box can see: the empty `logs/<date>/pickem-build.jsonl` no longer appears |
+| 11 | `6b9e00c7`, `d55a49eb`, `e91f6d1a`, `9fce9cf1`, `25976d05`, `3f5f5382` | The cleanup pass (decision 42), nothing computed differently: `check_bet`, `beam_search_parlays`, `construct_entries` and `build_entries_from_scored` drop a parameter each never read; `odds_budget.feed_ts` goes for `datetime.fromisoformat`; "no season runs 300 days" is one constant, `stats.base.SEASON_MAX_DAYS`, where it was written seven times, and the test five league updates each made with it is one method, `Stats._full_clean_due` (`9ddfe5af`, `5d0cc5c5`); the unused parlay-history plot goes to `src/deprecated/`. One thing a reader of the box can see: the empty `logs/<date>/pickem-build.jsonl` no longer appears |
 
 Recorded, not in scope: Gate 2's `n`, `book_bss` and over-rates still count unposted rows
 (`nightly._build_cell_row`); Kelly's "live_bss" is a CLV beat-rate remap with 1–19 legs → full trust (§6,
@@ -831,14 +831,22 @@ eras.
 - A Sleeper offer for a home team whose code is remapped read that team as its own opponent.
   `_sleeper_games_map` passes a game's two team codes through `ABBR_MAP` (`WSH` to `WAS`), and
   `_sleeper_prop_offers` took as opponent the first of the two that differs from the player's
-  raw code: for a home `WSH` player, `WAS`. Every Washington Capitals home date since
-  2026-10-07 is affected, 207 history rows (42 of the 171 Sleeper NHL rows on the board of
-  2026-10-11), and no row before, in any league. Such a row is scored against Washington's
-  own defense and sits in a game of its own (`WAS/WAS`) for stories and parlays. On the 32
-  Washington rows both platforms offer at one line the projection differs on all 32 (0.018 on
-  average, up to 0.12), where the platforms agree to 0.0007 or better for the other home
-  teams. The map holds three NBA codes (`GS`, `PHO`, `NOP`), and the NBA opens on 2026-10-20
-  (§8, ask 10).
+  raw code: for a home `WSH` player, `WAS`. The comparison is as old as the Sleeper scraper
+  (`b836c0fc`, 2024-06-08). History holds 8,841 such rows among its 308,644 Sleeper rows,
+  every home date of five teams for as long as it goes back (July 2026): MLB Arizona 4,241
+  and Washington 3,626, WNBA Phoenix 389 and Portland 377, NHL Washington 208 (42 of the 171
+  Sleeper NHL rows on the board of 2026-10-11). History's own `Opponent` column is blank
+  before 2026-10-05, so the count is taken from the gamelog's home dates; the stored parlays
+  agree on every team-date they hold (the game key names the team twice, `ARI/ARI`, on all 33
+  home team-dates, on none of the 30 away ones, and never on Underdog). Such a row is scored
+  against the team's own defense and sits in a game of its own for stories and parlays.
+  Where both platforms offer one player at one line, the projection differs on 88 % of
+  Arizona's home pairs and 95 % of Washington's (median gap 1.3 % and 4.7 %) against 14 to
+  24 % of MLB's other pairs, and on all 153 of the NHL's against 16 to 27 %; the WNBA's two
+  teams show no move (38 and 32 % against 23 to 45 %). Sleeper's NFL codes and the WNBA's
+  `WAS` need no remap and are not affected. The map holds three NBA codes (`GS`, `PHO`,
+  `NOP`); last season's stored parlays show no sign of it on the five home team-dates they
+  hold for those teams (§8, ask 10).
 - Production's MLB comp tables are from March. MLB comps are read from two Baseball Savant
   match-score files under `player_data/MLB/` that only `meditate` refreshes; production runs
   no `meditate`, and the sync's file list never held them. Production's are dated 2026-03-06,
@@ -890,8 +898,11 @@ eras.
   byte and no NHL model changed. The fix is written and tested (the rank reads the usage
   column alone). With it the matrix builder builds the game days of 2024-02-10 to 02-16 on the
   training box for a quoted and an unquoted market, at about ten seconds a game day for the
-  quoted one: a cold start of the 15 matrices is about a day in one process (§8, asks 5 and
-  6). Record: `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/nhl_crash/README.md`.
+  quoted one: a cold start of the 15 matrices is about a day in one process. The pipeline's
+  full-rebuild mode, which builds outside the canonical folder with the NHL's caches on, is
+  no shortcut: on two weeks of one quoted market it gave the same 3,039 rows cell for cell,
+  at 9.7 seconds a game day against 11.2 (§8, asks 5 and 6). Record:
+  `~/backups/sportstradamus/2026-10-09-mlb-nhl-rebuild/nhl_crash/README.md`.
 - The parlay search's `Fun` score reads no calibration on Underdog. A game keeps its top
   parlays under three sort keys, model EV, recommended stake and `Fun`
   (`correlation._append_parlay_rows`), and `parlay._parlay_fun` scores an Over leg by its line
@@ -959,10 +970,9 @@ over-read).
    `~/backups/sportstradamus/2026-10-11-league-only-send/send_league_only.sh NFL`.
 5. **Fix the depth rank that stops every NHL matrix build?** (yes / no; recommended yes.) The
    fix is written and tested: the rank reads the usage column alone (§7).
-6. **Retrain the NHL after its rebuild?** (yes / no; recommended yes.) Needs 5. From a cold
-   start the rebuild is about a day in one process; the pipeline's full-rebuild mode, which
-   builds outside the canonical folder and takes the NHL's snapshot path, has not been timed
-   and may be the faster road.
+6. **Retrain the NHL after its rebuild?** (yes / no; recommended yes.) Needs 5. The rebuild
+   is about a day in one process, by a cold start or by the pipeline's full-rebuild mode
+   (the same rows, 13 % faster: §7).
 7. **Retrain the WNBA now?** (yes / no; recommended no.) Two teams still have offers; a
    retrain serves next season more, after ask 14's refill.
 8. **Retrain the NFL from this lane?** (yes / no; recommended no.) It is the NFL lane's own,
@@ -979,10 +989,12 @@ over-read).
    next day's starter's Underdog fantasy-points offer is filed as a hitter's while today's
    game is played, where today it is today's starter who is misfiled, on the last run before
    that game.
-10. **Give a Sleeper home team its real opponent?** (yes / no; recommended yes.) Washington's
-    home rows have read `WAS` against `WAS` since 2026-10-07 (§7). The fix is written and
-    tested: the opponent is picked against the remapped code. To check on the first Sleeper
-    NBA board, 2026-10-20: no row where the team is its own opponent.
+10. **Give a Sleeper home team its real opponent?** (yes / no; recommended yes.) Five teams'
+    home rows have read the team against itself for as long as history goes back, 8,841 rows
+    (§7); Washington's NHL rows still do. The fix is written and tested: the opponent is
+    picked against the remapped code. To check after it: no Sleeper row where the team is its
+    own opponent, on the next NHL board and on the first NBA home date of Golden State,
+    Phoenix or New Orleans.
 11. **Score a later date's MLB offers with that date's schedule?** (yes / no; recommended yes,
     after 9.) The map holds one game a team and the schedule is asked only up to today: all
     308 rows for 2026-10-12 on the board of 10-11 read every player as away. Such a row is
