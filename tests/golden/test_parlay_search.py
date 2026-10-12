@@ -21,13 +21,15 @@ import pandas as pd
 import pytest
 from scipy.optimize import brentq
 
-from sportstradamus.helpers import sleeper_payouts, underdog_payouts
+from sportstradamus.helpers import sleeper_payouts, stat_cv, stat_std, underdog_payouts
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.joint import _PSD_EIG_TOLERANCE, _nearest_psd
 from sportstradamus.prediction.parlay import (
     GameArrays,
     _leg_boost_payout,
+    _parlay_fun,
     beam_search_parlays,
+    leg_market_map,
     resolve_leg_stat,
 )
 from sportstradamus.prediction.payouts import (
@@ -315,6 +317,41 @@ def test_resolve_leg_stat_strips_h2h_prefix_before_lookup() -> None:
     """``"H2H "`` is stripped before the map lookup, mirroring the cMarket idiom."""
     stat_by_label = {"Points": "points"}
     assert resolve_leg_stat("H2H Points", stat_by_label) == "points"
+
+
+def test_parlay_fun_reads_a_markets_spread_under_the_leagues_own_name(monkeypatch) -> None:
+    """A leg names its market by the platform's label and the spread is filed under the
+    league's own key: Underdog's NHL ``Assists`` is the ``assists`` cell. A cell meditate
+    has not calibrated holds no std, and scores on a unit one."""
+    monkeypatch.setitem(stat_std, "NHL", {"assists": 0.75, "points": None})
+    monkeypatch.setitem(stat_cv, "NHL", {"assists": 0.5, "points": 1.0})
+    stat_by_label = leg_market_map("NHL", "Underdog")
+
+    def fun(market: str, line: float, bet: str) -> float:
+        return _parlay_fun([{"Market": market, "Line": line, "Bet": bet}], "NHL", stat_by_label)
+
+    assert fun("Assists", 1.5, "Over") == pytest.approx(2 - 1 / 0.5 + 1.5 / 0.75)
+    assert fun("H2H Assists", -1.5, "Under") == pytest.approx(3 - 1.5 / 0.75)
+    assert fun("Points", 1.5, "Over") == pytest.approx(2 - 1 / 1.0 + 1.5 / 1)
+    assert fun("Assists", 1.5, "Under") == 0
+
+
+def test_beam_search_scores_fun_on_the_leagues_own_spread(monkeypatch) -> None:
+    """The search hands its label map to the Fun score: looked up under the platform's
+    label, every leg fell back to a unit spread."""
+    monkeypatch.setitem(stat_std, "NHL", {"assists": 0.75})
+    monkeypatch.setitem(stat_cv, "NHL", {"assists": 0.5})
+    inputs = _beam_inputs()
+    inputs["info"]["League"] = "NHL"
+    for leg in inputs["bet_df"].values():
+        leg.update(League="NHL", Market="Assists")
+
+    res = beam_search_parlays(**inputs)
+
+    per_leg = 2 - 1 / 0.5 + 1.5 / 0.75
+    assert {r["Bet Size"]: r["Fun"] for r in res} == pytest.approx(
+        {2: 2 * per_leg, 3: 3 * per_leg, 4: 4 * per_leg}
+    )
 
 
 def test_beam_search_characterization() -> None:

@@ -140,19 +140,23 @@ def _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_bo
     return boost
 
 
-def _parlay_fun(bet, league):
-    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count."""
-    return np.sum(
-        [
-            3 - (np.abs(leg["Line"]) / stat_std.get(league, {}).get(leg["Market"], 1))
-            if ("H2H" in leg["Market"])
-            else 2
-            - 1 / stat_cv.get(league, {}).get(leg["Market"], 1)
-            + leg["Line"] / stat_std.get(league, {}).get(leg["Market"], 1)
-            for leg in bet
-            if (leg["Bet"] == "Over") or ("H2H" in leg["Market"])
-        ]
-    )
+def _parlay_fun(bet, league, stat_by_label):
+    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count.
+
+    A market's spread is filed under the league's own key, not the label the leg
+    carries. A cell with no stored spread scores on a unit one.
+    """
+    stds, cvs = stat_std.get(league, {}), stat_cv.get(league, {})
+    fun = 0.0
+    for leg in bet:
+        stat = resolve_leg_stat(leg["Market"], stat_by_label)
+        # stat_std holds None for a cell meditate has not calibrated yet.
+        line_in_stds = leg["Line"] / (stds.get(stat) or 1)
+        if "H2H" in leg["Market"]:
+            fun += 3 - abs(line_in_stds)
+        elif leg["Bet"] == "Over":
+            fun += 2 - 1 / cvs.get(stat, 1) + line_in_stds
+    return fun
 
 
 def leg_market_map(league: str, platform: str) -> dict[str, str]:
@@ -318,9 +322,10 @@ def _evaluate_parlay(
         "Bet ID": bet_id,
         "P": prev_p,
         "PB": prev_pb,
-        # Transient — used only for the Fun sort in _append_parlay_rows and
-        # dropped by persist._PARLAY_DROP_COLS before current_parlays.parquet.
-        "Fun": _parlay_fun(bet, info["League"]),
+        # One of the three sort keys _append_parlay_rows keeps the top rows by. Stored
+        # in the parlay history; persist._PARLAY_DROP_COLS drops it only from
+        # current_parlays.parquet.
+        "Fun": _parlay_fun(bet, info["League"], stat_by_label),
         "Bet Size": bet_size,
         "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
         "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
