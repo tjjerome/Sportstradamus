@@ -407,22 +407,21 @@ def _build_cmarket(league_df, league, platform):
     return league_df
 
 
-def _assemble_game_frame(league_df, team):
+def _assemble_game_frame(date_df, team):
     """Concatenate a team's legs with its opponent's and any split (combo) legs.
 
-    Opponent and split legs get their ``cMarket`` tokens ``_OPP_``-prefixed so
-    the correlation lookup can tell the two sides of the matchup apart. Returns
-    ``(game_df, opp, date)``.
+    ``date_df`` is one game date's legs. Opponent and split legs get their
+    ``cMarket`` tokens ``_OPP_``-prefixed so the correlation lookup can tell the
+    two sides of the matchup apart. Returns ``(game_df, opp)``.
     """
-    team_df = league_df.loc[league_df["Team"] == team]
+    team_df = date_df.loc[date_df["Team"] == team]
     opp = team_df.Opponent.mode().values[0]
-    date = team_df.Date.mode().values[0]
-    opp_df = league_df.loc[league_df["Team"] == opp]
+    opp_df = date_df.loc[date_df["Team"] == opp]
     if not opp_df.empty:
         opp_df["cMarket"] = opp_df.apply(lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
-    split_df = league_df.loc[
-        league_df["Team"].str.contains("/")
-        & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))
+    split_df = date_df.loc[
+        date_df["Team"].str.contains("/")
+        & (date_df["Team"].str.contains(team) | date_df["Team"].str.contains(opp))
     ]
     if not split_df.empty:
         split_df["cMarket"] = split_df.apply(
@@ -434,7 +433,27 @@ def _assemble_game_frame(league_df, team):
         )
     game_df = pd.concat([team_df, opp_df, split_df])
     game_df.drop_duplicates(subset=["Player", "Market", "Bet", "Line"], inplace=True)
-    return game_df, opp, date
+    return game_df, opp
+
+
+def _game_frames(league_df):
+    """Yield ``(game_df, team, opp, date)`` for each game of a league's slate.
+
+    One frame per game date: a team with offers on two dates (an MLB series, an
+    NBA back-to-back) plays two games, and their legs do not parlay together. The
+    earliest date comes first, because the stored correlation slice and
+    pair-modifier file keep the first of two rows for one game and leg pair, and
+    both games of a series carry the same ``Game`` key.
+    """
+    # groupby sorts its keys, and an ISO date string sorts by date.
+    for date, date_df in league_df.groupby("Date"):
+        checked_teams = set()
+        for team in date_df.Team.unique():
+            if "/" in team or team in checked_teams:
+                continue
+            game_df, opp = _assemble_game_frame(date_df, team)
+            checked_teams.update((team, opp))
+            yield game_df, team, opp, date
 
 
 def _select_bet_offers(game_df):
@@ -506,11 +525,16 @@ def _annotate_correlation_columns(df, game_df, g, market_map):
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
         same = corr.loc[corr["Team"] == offer["Team"]]
         other = corr.loc[corr["Team"] != offer["Team"]]
-        # A (Player, Market) pair can span more than one row (Sleeper alt lines).
+        # A (Player, Market) pair can span more than one row (Sleeper alt lines), and
+        # the same pair plays again on a series' next date, which is another game.
         # Broadcasting via a same-length Series (not a bare list, which numpy casts
         # to a 2D array and mis-shapes on an empty partner list) mirrors the old
         # scalar-string assignment's broadcast-to-every-matched-row semantics.
-        mask = (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"])
+        mask = (
+            (df["Player"] == offer["Player"])
+            & (df["Market"] == offer["Market"])
+            & (df["Date"] == offer["Date"])
+        )
         same_partners = _corr_partners(same, market_map)
         other_partners = _corr_partners(other, market_map)
         df.loc[mask, "Corr Same"] = pd.Series([same_partners] * mask.sum(), index=df.index[mask])
@@ -627,26 +651,20 @@ def _process_league_games(
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
-    For each (team, opponent) pairing: assemble the game frame, build the
-    correlation / boost matrices, annotate ``df``'s display columns, collect the
-    per-game correlation slice into ``corr_sink`` (when not None), and — unless
-    the platform/league is parlay-ineligible — capture the game's scoring bundle
-    into ``story_sink`` (when not None) and beam-search parlays onto
-    ``parlay_df`` (returned).
+    For each game frame (:func:`_game_frames`): build the correlation / boost
+    matrices, annotate ``df``'s display columns, collect the per-game correlation
+    slice into ``corr_sink`` (when not None), and — unless the platform/league is
+    parlay-ineligible — capture the game's scoring bundle into ``story_sink``
+    (when not None) and beam-search parlays onto ``parlay_df`` (returned).
     """
-    checked_teams = []
     # Shared across every game this league processes below — resolve_market_shrinkage
     # hits training/CLV I/O per (league, market), and markets repeat heavily
     # across a slate, so caching here (not per-game) keeps it out of the hot path.
     shrinkage_cache: dict[tuple[str, str], float] = {}
-    teams = [team for team in league_df.Team.unique() if "/" not in team]
-    for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
-        if team in checked_teams:
-            continue
-        game_df, opp, date = _assemble_game_frame(league_df, team)
-        checked_teams.append(team)
-        checked_teams.append(opp)
-
+    # Listed up front so the bar has a total.
+    for game_df, team, opp, date in tqdm(
+        list(_game_frames(league_df)), desc=f"Checking {league} games", unit="game"
+    ):
         c_map = _build_game_corr_map(team, opp, c_same, c_opp)
         game_df.reset_index(drop=True, inplace=True)
         game_dict = game_df.to_dict("index")

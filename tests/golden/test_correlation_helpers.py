@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import json
+from itertools import permutations
 
 import numpy as np
 import pandas as pd
@@ -52,6 +53,7 @@ from sportstradamus.prediction.correlation import (
     _resolve_player_positions,
     find_correlation,
 )
+from sportstradamus.prediction.parlay import GameArrays
 from tests.golden.test_underdog_pickem import stub_cell_trust
 
 
@@ -382,13 +384,10 @@ _EXPECTED_OFFER_CORR = [
 ]
 
 
-def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
-    """Pin the deterministic offer_df correlation annotation: the real NBA offer slate driven by
-    a FIXED synthetic c_map (and a stubbed corr-parquet read), so it no longer false-positives on
-    the drifting, gitignored correlation parquets and runs everywhere (no real data needed)."""
-    monkeypatch.setattr(
-        correlation, "_build_game_corr_map", lambda *a, **k: _synthetic_offer_cmap()
-    )
+def _stub_corr_sources(monkeypatch, c_map: dict[tuple[str, str], float]) -> None:
+    """Stand a fixed ``c_map`` in for every game's, and an empty frame for the gitignored
+    corr parquets it is built from, so a slate scores the same on any box."""
+    monkeypatch.setattr(correlation, "_build_game_corr_map", lambda *a, **k: c_map)
     real_read = pd.read_parquet
 
     def _stub_corr_read(path, *args, **kwargs):
@@ -397,6 +396,13 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
         return real_read(path, *args, **kwargs)
 
     monkeypatch.setattr(pd, "read_parquet", _stub_corr_read)
+
+
+def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
+    """Pin the deterministic offer_df correlation annotation: the real NBA offer slate driven by
+    a FIXED synthetic c_map (and a stubbed corr-parquet read), so it no longer false-positives on
+    the drifting, gitignored correlation parquets and runs everywhere (no real data needed)."""
+    _stub_corr_sources(monkeypatch, _synthetic_offer_cmap())
 
     offers = _nba_offers()
     stats = {"NBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
@@ -488,6 +494,54 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     # remap-actually-fires case (WNBA "Fantasy Points") is pinned directly on
     # resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
     assert all(leg["stat"] == leg["market"] for row in parlay_df["legs"] for leg in row)
+
+
+# The cMarket tokens the WNBA slate resolves to: LVA is listed first, so NYL is the
+# ``_OPP_`` side.
+_WNBA_TOKENS = ("C1.PTS", "G1.PRA", "G2.AST", "_OPP_G1.PTS", "_OPP_F1.REB", "_OPP_C1.PTS")
+
+
+def test_find_correlation_builds_one_game_frame_per_game_date(monkeypatch) -> None:
+    """A team with offers on two dates plays two games. Grouped by team alone, a
+    back-to-back made one frame of both nights: parlays mixing the two, one story
+    context under one date, partner lists naming the other night's lines, and a line
+    posted at the same number both nights kept once. The earlier game is walked first,
+    because the stored correlation slice keeps the first of two rows for a game and
+    leg pair."""
+    _stub_corr_sources(monkeypatch, dict.fromkeys(permutations(_WNBA_TOKENS, 2), 0.2))
+    first = _wnba_offers()
+    later = [{**leg, "Date": "2026-05-09", "Line": leg["Line"] + 1.0} for leg in first]
+    later[0]["Line"] = first[0]["Line"]
+    offers = later + first
+    stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
+    story_sink: list = []
+
+    offer_df, parlay_df = find_correlation(
+        offers, stats, "Underdog", contest_variant="power", story_sink=story_sink
+    )
+
+    assert [(ctx.game, ctx.date) for ctx in story_sink] == [
+        ("LVA/NYL", "2026-05-08"),
+        ("LVA/NYL", "2026-05-09"),
+    ]
+    for ctx in story_sink:
+        assert {leg["Date"] for leg in ctx.bet_df.values()} == {ctx.date}
+        assert len(ctx.bet_df) == len(first)
+
+    assert set(parlay_df["Date"]) == {"2026-05-08", "2026-05-09"}
+    for legs, date in zip(parlay_df["legs"], parlay_df["Date"], strict=True):
+        assert {leg["date"] for leg in legs} == {date}
+
+    # All but one of the later night's lines are a point higher, so a partner's line
+    # tells its date.
+    lines_on = {
+        date: set(zip(legs["Player"], legs["Line"], strict=True))
+        for date, legs in offer_df.groupby("Date")
+    }
+    for _, leg in offer_df.iterrows():
+        partners = leg["Corr Same"] + leg["Corr Opp"]
+        assert partners
+        assert {(p["player"], p["line"]) for p in partners} <= lines_on[leg["Date"]]
 
 
 @_needs_wnba_corr
@@ -964,15 +1018,23 @@ def test_build_correlation_matrices_honors_push_column() -> None:
     assert p_push.tolist() == [0.1, 0.0, 0.2]
 
 
+def _annotated_game() -> tuple[pd.DataFrame, GameArrays]:
+    """The matrix game as one night's frame, C correlated with both A and B."""
+    game_df, game_dict = _matrix_game()
+    game_df = game_df.assign(
+        League="NBA", Team=["NYK", "SAS", "NYK"], Line=[24.5, 6.5, 9.5], Date="2026-06-03"
+    )
+    c_map = {("G1.PTS", "C1.REB"): 0.4, ("G2.AST", "C1.REB"): 0.2}
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+    return game_df, g
+
+
 def test_annotate_names_a_partners_market_the_way_the_board_does() -> None:
     """The board run renames ``Market`` through the platform's map once scoring is done,
     and the deep dive looks each partner up on that board: stored under the platform's
     own label, no Underdog partner was ever found there. A label the map lacks stays as
     it is, the fall-through ``_collect_game_corr`` has."""
-    game_df, game_dict = _matrix_game()
-    game_df = game_df.assign(League="NBA", Team=["NYK", "SAS", "NYK"], Line=[24.5, 6.5, 9.5])
-    c_map = {("G1.PTS", "C1.REB"): 0.4, ("G2.AST", "C1.REB"): 0.2}
-    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+    game_df, g = _annotated_game()
     df = game_df.assign(**{"Corr Same": None, "Corr Opp": None})
 
     # Of the fixture's Test1..Test3 labels the map holds only A's.
@@ -981,6 +1043,21 @@ def test_annotate_names_a_partners_market_the_way_the_board_does() -> None:
     same, opp = df.loc[2, ["Corr Same", "Corr Opp"]]
     assert [(partner["player"], partner["market"]) for partner in same] == [("A", "PTS")]
     assert [(partner["player"], partner["market"]) for partner in opp] == [("B", "Test2")]
+
+
+def test_annotate_leaves_a_players_row_of_another_date_alone() -> None:
+    """A game's partner lists belong to that game's rows. Matched on player and market
+    alone, they also landed on the same player's row of the series' next game."""
+    game_df, g = _annotated_game()
+    next_game = game_df.assign(Date="2026-06-05")
+    df = pd.concat([game_df, next_game], ignore_index=True).assign(
+        **{"Corr Same": None, "Corr Opp": None}
+    )
+
+    _annotate_correlation_columns(df, game_df, g, {})
+
+    assert df.loc[df["Date"] == "2026-06-03", "Corr Same"].notna().all()
+    assert df.loc[df["Date"] == "2026-06-05", ["Corr Same", "Corr Opp"]].isna().all(axis=None)
 
 
 @pytest.mark.parametrize(
