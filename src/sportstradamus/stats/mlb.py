@@ -1613,8 +1613,6 @@ class StatsMLB(Stats):
             self.playerProfile.fillna(0, inplace=True)
 
         else:
-            # The parlay search asks again with records that carry no date; those read
-            # each team's next game.
             dates = earliest_game_dates(offers)
             depth = {}
             for player in list(players):

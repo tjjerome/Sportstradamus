@@ -636,13 +636,17 @@ def test_resolve_player_positions_mlb_labels_batting_slots() -> None:
     assert list(resolved["Player position"]) == ["B3", "B9", "P", ["B3", "P"], "P", "P"]
     assert len(stat_data.depth_calls) == 1  # once for the league, not once per leg
     records, call_date = stat_data.depth_calls[0]
+    # Dated: a hitter offered for a later game gets that game's slot, as his features do.
     assert records == [
-        {"Player": "Kyle Tucker", "Team": "CHC"},
-        {"Player": "Nico Hoerner", "Team": "CHC"},
-        {"Player": "Shota Imanaga", "Team": "CHC"},
-        {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC"},
-        {"Player": "Ian Happ", "Team": "CHC"},
-        {"Player": "Oneil Cruz", "Team": "PIT"},
+        {"Player": player, "Team": team, "Date": "2026-09-04"}
+        for player, team in [
+            ("Kyle Tucker", "CHC"),
+            ("Nico Hoerner", "CHC"),
+            ("Shota Imanaga", "CHC"),
+            ("Kyle Tucker + Shota Imanaga", "CHC"),
+            ("Ian Happ", "CHC"),
+            ("Oneil Cruz", "PIT"),
+        ]
     ]
     assert call_date is None  # the default, today, exactly as scoring.py calls it
 

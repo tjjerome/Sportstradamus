@@ -372,7 +372,10 @@ def _resolve_player_positions(league_df, league, stat_data):
         # only for non-MLB leagues — and base_profile has since rebuilt playerProfile
         # from scratch for this date, zeroing the depth process_offers resolved.
         # Re-resolve it here.
-        stat_data.get_depth(league_df[["Player", "Team"]].drop_duplicates().to_dict("records"))
+        # Dated, so a later game's hitter gets the slot his feature row was built on.
+        stat_data.get_depth(
+            league_df[["Player", "Team", "Date"]].drop_duplicates().to_dict("records")
+        )
         depth = stat_data.playerProfile["depth"].to_dict()
         slot_labels = []
         for player in league_df.Player:
