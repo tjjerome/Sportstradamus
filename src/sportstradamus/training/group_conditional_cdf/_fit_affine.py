@@ -23,8 +23,6 @@ from sportstradamus.training.group_conditional_cdf._affine import (
 )
 from sportstradamus.training.group_conditional_cdf._config import StrategyConfig
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    AFFINE_INTERCEPT_BOUNDS,
-    AFFINE_SLOPE_BOUNDS,
     MARGINAL_MEAN_FLOOR,
     PLAYER_CV_FOLDS,
     RANDOMIZED_PIT_DRAWS,

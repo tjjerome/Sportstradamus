@@ -5,9 +5,8 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.config` — loads every JSON in ``data/`` and
   ``creds/`` at import time and exposes the resulting dicts as module-level
   constants. Changing a JSON shape means touching this file.
-* :mod:`sportstradamus.helpers.text` — name normalization and small
-  collection helpers (``remove_accents``, ``ABBR_MAP``, ``merge_dict``,
-  ``hmean``, ``get_trends``, ``get_mlb_pitchers``).
+* :mod:`sportstradamus.helpers.text` — name normalization and the MLB
+  schedule readers (``remove_accents``, ``ABBR_MAP``, ``get_mlb_pitchers``).
 * :mod:`sportstradamus.helpers.distributions` — the distributional math
   that the model/bookmaker fusion runs on: ``get_ev``, ``get_odds``,
   ``fused_loc``, ``set_model_start_values``, ``decode_predictive_mean``,
@@ -91,9 +90,6 @@ from sportstradamus.helpers.scraping import Scrape
 from sportstradamus.helpers.text import (
     ABBR_MAP,
     get_mlb_pitchers,
-    get_trends,
-    hmean,
-    merge_dict,
     remove_accents,
 )
 
@@ -133,10 +129,7 @@ __all__ = [
     "get_mlb_pitchers",
     "get_odds",
     "get_push_prob",
-    "get_trends",
-    "hmean",
     "market_display_name",
-    "merge_dict",
     "name_map",
     "negbin_crps",
     "nhl_goalies",

@@ -34,7 +34,7 @@ import importlib.resources as pkg_resources
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click

@@ -22,7 +22,6 @@ milder median pricing lands in ``veto_slack``, the admissibility bar confirm's n
 reads (:func:`_ledger_gate_discounts`).
 """
 
-import collections
 import contextlib
 import functools
 import hashlib
@@ -53,7 +52,6 @@ from sportstradamus.helpers.locks import (
     TRAINING_ARTIFACTS_LOCK_FILE,
     file_lock,
 )
-from sportstradamus.training.baselines import resolve_denom_col
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy.identity import (
     InactiveStrategyArtifactError,

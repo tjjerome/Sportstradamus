@@ -15,25 +15,15 @@ from typing import cast
 import numpy as np
 
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    AFFINE_INTERCEPT_BOUNDS,
-    AFFINE_POSITION_CODES,
-    AFFINE_SCHEMA_VERSION,
-    AFFINE_SLOPE_BOUNDS,
-    AFFINE_STRATEGY_NAME,
-    BOUNDARY_LOGIT_CLIP,
     CDF_BRANCH_TOLERANCE,
     INTERCEPT_BRACKET,
-    MARGINAL_MEAN_FLOOR,
     PIT_LAMBDAS,
     PLAYER_CV_FOLDS,
     ROLE_VALUES,
     TEMPERATURE_BOUNDS,
     TWO_PART_SCHEMA_VERSION,
     TWO_PART_STRATEGY_NAME,
-    AffineCalibrationBlob,
-    AffinePredictive,
     CalibrationRows,
-    GroupCdfBlob,
     TwoPartCalibrationBlob,
 )
 from sportstradamus.training.group_conditional_cdf.cdf_map_validation import cdf_map_blob_is_valid

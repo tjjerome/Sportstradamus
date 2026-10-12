@@ -18,6 +18,7 @@ import shap
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.helpers.io import market_file_slug
 
 # Raw SHAP output is 3-D (samples, features, outputs) for multi-output boosters;
 # anything lower is already per-feature and needs no output-axis reduction.
@@ -32,9 +33,6 @@ def _collapse_multi_output_shap(subvals: np.ndarray | list) -> np.ndarray:
     * 2-D ``(samples, features)`` for single-output boosters — abs and pass through.
     * ``list`` of ``(samples, features)`` per output, older SHAP — sum |·| across outputs.
     * 3-D ``(samples, features, outputs)`` for multi-output, newer SHAP — sum |·| across outputs.
-
-    All three reductions are exercised by ``tests/golden/test_shap_reduction.py``;
-    if SHAP changes its return shape again the test fails before the live pipeline does.
     """
     if isinstance(subvals, list):
         return np.sum([np.abs(sv) for sv in subvals], axis=0)
@@ -95,7 +93,7 @@ def compute_market_importance(league: str, market: str, model: Any, test_df: pd.
     """
     shap_dict, corr_dict = _compute_shap_and_corr(model, test_df)
 
-    col_name = f"{league}_{market.replace(' ', '-')}"
+    col_name = market_file_slug(league, market)
     shap_path = pkg_resources.files(data) / "training" / "feature_importances.csv"
     corr_path = pkg_resources.files(data) / "training" / "feature_correlations.csv"
 

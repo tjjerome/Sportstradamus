@@ -172,8 +172,6 @@ ignore = [
     #   B007 B008 B023 — bugbear false positives in numeric code
     #   E402 — late imports inside script-style modules
     #   E714 E721 E722 E741 — older idioms inside stats/train
-    #   F401 F403 F405 F811 — wildcard re-exports across packages
-    #   F821 — undefined names (limited to deprecated/unused_funcs.py; archived in Phase 2)
     #   PERF401 PERF403 — performance suggestions
     #   PLW0127 PLW2901 — assignment patterns
     #   PLR1704 — argument shadowing
@@ -183,7 +181,6 @@ ignore = [
     #   W291 W293 — whitespace inside docstrings
     "B007", "B008", "B023",
     "E402", "E714", "E721", "E722", "E741",
-    "F401", "F403", "F405", "F811", "F821",
     "PERF401", "PERF403",
     "PLW0127", "PLW2901", "PLR1704",
     "RUF001", "RUF002", "RUF003", "RUF012",

@@ -27,7 +27,7 @@ from sportstradamus.helpers.io import (
     _atomic_write_parquet,
     read_history,
 )
-from sportstradamus.nightly import LIVE_METRICS_COLUMNS, _compute_live_metrics
+from sportstradamus.nightly import _compute_live_metrics
 
 _KEY_COLUMNS = ("league", "market", "computed_at", "window_days")
 

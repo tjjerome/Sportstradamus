@@ -6,7 +6,6 @@ import json
 import os
 import pickle
 import random
-import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +22,6 @@ from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.utils import softmax_fn
 from scipy.optimize import minimize_scalar
 from scipy.special import expit, logit
-from scipy.stats import norm
 from sklearn.metrics import (
     accuracy_score,
     log_loss,

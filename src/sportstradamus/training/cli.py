@@ -17,7 +17,6 @@ from sportstradamus import data
 from sportstradamus.helpers import (
     LazyArchive,
     book_weights,
-    feature_filter,
     get_logger,
     odds_budget,
 )

@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 
 from sportstradamus.collectors.catalog import EndpointSpec, load_catalog
-from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION  # noqa: F401 — re-exported
 
 # Number of leading characters to echo when previewing a token value —
 # enough to confirm it changed without leaking the full secret.
