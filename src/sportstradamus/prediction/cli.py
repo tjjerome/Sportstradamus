@@ -49,7 +49,6 @@ from sportstradamus.prediction.persist import (
     write_current_game_stories,
     write_current_offer_details,
     write_current_offers,
-    write_current_pickem,
     write_line_movement,
 )
 from sportstradamus.prediction.scoring import process_offers
@@ -231,8 +230,6 @@ def main(progress, contest_variant, log_level):
     platforms_failed: list[str] = []
     corr_sink: list[dict] = []
     story_sink: list = []
-    scored_ud: pd.DataFrame | None = None
-    scored_sl: pd.DataFrame | None = None
 
     # Each platform scores into its own sinks and only merges them into the shared
     # ones from ``else``, so a raise mid-block cannot leave that platform's parlays
@@ -247,9 +244,6 @@ def main(progress, contest_variant, log_level):
             corr_sink=ud_corr,
             story_sink=ud_story,
         )
-        # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
-        # Pick'em snapshot — find_correlation expects the process_offers shape.
-        ud_scored = ud_offers.copy()
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers["Stat"] = ud_offers[
             "Market"
@@ -271,7 +265,6 @@ def main(progress, contest_variant, log_level):
         platforms_run.append("Underdog")
         corr_sink.extend(ud_corr)
         story_sink.extend(ud_story)
-        scored_ud = ud_scored
 
     sl_corr, sl_story = [], []
     try:
@@ -283,9 +276,6 @@ def main(progress, contest_variant, log_level):
             corr_sink=sl_corr,
             story_sink=sl_story,
         )
-        # Capture the raw scored frame (pre Market-remap) for the Pick'em
-        # snapshot — find_correlation expects the process_offers shape.
-        sl_scored = sl_offers.copy()
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers["Stat"] = sl_offers[
             "Market"
@@ -304,7 +294,6 @@ def main(progress, contest_variant, log_level):
         platforms_run.append("Sleeper")
         corr_sink.extend(sl_corr)
         story_sink.extend(sl_story)
-        scored_sl = sl_scored
 
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
@@ -373,8 +362,6 @@ def main(progress, contest_variant, log_level):
     write_current_game_context(game_context)
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
-
-    _write_pickem_snapshot({"Underdog": scored_ud, "Sleeper": scored_sl}, stats)
 
     if not parlay_df.empty:
         upsert_parlay_hist(parlay_df, dedup_subset=["Model EV", "Market EV"])
@@ -446,39 +433,6 @@ def main(progress, contest_variant, log_level):
     if updates_failed or platforms_failed:
         raise SystemExit(1)
     logger.info("Success!")
-
-
-def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], stats: dict) -> None:
-    """Build the per-platform Pick'em entries snapshot from already-scored offers.
-
-    Reuses prophecize's scored frames — no second scrape, no extra archive
-    lock — and writes one combined ``current_pickem.parquet`` for the
-    dashboard, tagged by ``platform``. Each platform's entry construction is
-    guarded independently so one platform's failure logs and continues
-    rather than blanking the other's entries.
-    """
-    from sportstradamus.strategies._pickem_emit import entries_to_frame
-    from sportstradamus.strategies.underdog_pickem import (
-        REFERENCE_BANKROLL,
-        build_entries_from_scored,
-    )
-
-    all_entries = []
-    for platform, scored in scored_by_platform.items():
-        if scored is None or scored.empty:
-            continue
-        try:
-            all_entries.extend(
-                build_entries_from_scored(
-                    REFERENCE_BANKROLL,
-                    scored,
-                    stats,
-                    platform=platform,
-                )
-            )
-        except Exception:
-            logger.exception("Failed to build %s pickem snapshot", platform)
-    write_current_pickem(entries_to_frame(all_entries))
 
 
 def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:

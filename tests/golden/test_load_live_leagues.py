@@ -171,3 +171,11 @@ def test_board_run_exits_zero_when_every_league_updated(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     writers.write_history.assert_called_once()
+
+
+def test_board_run_builds_no_pickem_snapshot(monkeypatch, tmp_path):
+    """``current_pickem.parquet`` had a writer and no reader: a parlay search per contest
+    variant per platform, every run, for a file nothing opened."""
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[])
+
+    assert not [name for name, _args, _kwargs in writers.mock_calls if "pickem" in name]

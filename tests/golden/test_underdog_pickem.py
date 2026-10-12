@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus import clv
-from sportstradamus.strategies._pickem_emit import emit_yaml, entries_to_frame
+from sportstradamus.strategies._pickem_emit import emit_yaml
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
     _filter_parlays,
@@ -451,7 +451,7 @@ def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
 
 
 @pytest.mark.parametrize("platform", ["Underdog", "Sleeper"])
-def test_recommended_entry_platform_roundtrips_yaml_and_frame(
+def test_recommended_entry_platform_roundtrips_yaml(
     tmp_path: Path, fake_market_calibration, platform
 ):
     cfg = PickemConfig(
@@ -479,7 +479,4 @@ def test_recommended_entry_platform_roundtrips_yaml_and_frame(
     emit_yaml(entries, datetime.date(2026, 5, 8), Decimal("500"), cfg, out_path)
     payload = yaml.safe_load(out_path.read_text())
     assert payload["entries"][0]["platform"] == platform
-
-    frame = entries_to_frame(entries)
-    assert frame["platform"].iloc[0] == platform
-    assert all(frame["legs"].iloc[0])
+    assert all(payload["entries"][0]["legs"])
