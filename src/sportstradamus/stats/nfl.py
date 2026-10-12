@@ -2,8 +2,6 @@
 
 import importlib.resources as pkg_resources
 import json
-import os.path
-import pickle
 from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from urllib.error import HTTPError
@@ -16,10 +14,7 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    remove_accents,
-    set_model_start_values,
-)
+from sportstradamus.helpers import remove_accents
 from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import (

@@ -3,41 +3,25 @@
 import importlib.resources as pkg_resources
 import json
 import os.path
-import pickle
 import warnings
 from bisect import bisect_left
 from datetime import datetime, timedelta
 from functools import partial
-from io import StringIO
-from time import sleep
 
 import line_profiler
 import numpy as np
 import pandas as pd
 import statsapi as mlb
 from scipy.special import expit, logit
-from scipy.stats import iqr, norm, poisson
+from scipy.stats import norm, poisson
 from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    Scrape,
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_odds,
-    remove_accents,
-    set_model_start_values,
-    stat_cv,
-    stat_dist,
-)
+from sportstradamus.helpers import combo_props, get_ev, get_odds, remove_accents, stat_cv, stat_dist
 from sportstradamus.helpers.combined_markets import POST_RNG_SEED
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.helpers.text import MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
-from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     _SCHEDULE_LOOKAHEAD_DAYS,
     GAMELOG_RETENTION_DAYS,
@@ -1090,7 +1074,6 @@ class StatsMLB(Stats):
             .groupby("playerName")
         )
 
-        # defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(["opponent", "gameId"])
         defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg(
             {

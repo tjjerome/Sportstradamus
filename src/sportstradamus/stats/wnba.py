@@ -1,26 +1,15 @@
 """StatsWNBA: WNBA player stats, inherits from StatsNBA."""
 
-import importlib.resources as pkg_resources
-import json
 from datetime import date, datetime, timedelta
 
 import nba_api.stats.endpoints as nba
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import BallTree
 
-from sportstradamus import data
-from sportstradamus.helpers import (
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_odds,
-    remove_accents,
-)
+from sportstradamus.helpers import remove_accents
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import archive, fetch_upcoming_games
+from sportstradamus.stats.base import fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 

@@ -8,32 +8,21 @@ import warnings
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from functools import partial
-from io import StringIO
 from pathlib import Path
-from time import sleep
 
 import line_profiler
-import nba_api.stats.endpoints as nba
-import nfl_data_py as nfl
-import nflreadpy as nflr
 import numpy as np
 import pandas as pd
-import requests
-import statsapi as mlb
-from scipy.stats import iqr, norm, poisson
-from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
     LazyArchive,
     Scrape,
-    abbreviations,
     book_weights,
     combo_props,
     feature_filter,
     get_ev,
-    get_mlb_pitchers,
     get_odds,
     odds_budget,
     predictive_std,
@@ -105,9 +94,8 @@ _COMP_RECENCY_HALFLIFE_DAYS: float = 45.0
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
 _VOLUME_SCALE_RATIO_CAP: float = 10.0
 
-# Players with fewer than this many games get a zero trend — the vectorized
-# reimplementation of helpers.text.get_trends, which returns zeros below the
-# same floor (the trailing-window slope is too noisy on <3 points).
+# Players with fewer than this many games get a zero trend — the trailing-window
+# slope is too noisy on so few points.
 _MIN_GAMES_FOR_TRENDS: int = 3
 
 # Participation floor for defense/usage profiling: keep only players whose
@@ -495,21 +483,16 @@ class Stats:
     """A parent class for handling and analyzing sports statistics.
 
     Attributes:
-        gamelog (list): A list of dictionaries representing game logs.
-        archive (dict): A dictionary containing archived statistics.
-        players (dict): A dictionary containing player specific data.
-        season_start (datetime): The start date of the  season.
-        playerStats (dict): Dictionary containing player statistics.
-        edges (list): List of edges.
-        dvp_index (dict): Dictionary containing DVP index data.
+        gamelog (pd.DataFrame): Player game logs.
+        players (dict): Player specific data; a DataFrame in the NFL class.
+        season_start (date): The start date of the season.
 
     Methods:
-        parse_game(game): Parses a game and updates the gamelog.
+        parse_game(game): Hook: parses one game. No-op on base.
         load(): Loads game logs from a file.
         update(): Updates the gamelog with new game data.
-        bucket_stats(market): Groups statistics into buckets based on market type.
-        get_stats(offer, game_date): Retrieves statistics for a given offer and game date.
-        get_training_matrix(market): Retrieves the training data matrix and target labels for a specified market.
+        get_stats(market, offers, date): Builds the feature rows for the offered players.
+        get_training_matrix(market, cutoff_date): Builds the training matrix for a market.
     """
 
     def __init__(self):
@@ -2398,14 +2381,18 @@ class Stats:
         )
 
     def get_training_matrix(self, market, cutoff_date=None):
-        """Retrieves the training data matrix and target labels for a specified market.
+        """Retrieves the training data matrix for a specified market.
 
         Args:
             market (str): The market type to retrieve training data for.
+            cutoff_date (date): Only gamedays after this date and before today are
+                used. Defaults to 850 days before today.
 
         Returns:
-            X (pd.DataFrame): The training data matrix.
-            y (pd.DataFrame): The target labels.
+            pd.DataFrame: A row is one player on one gameday: the ``get_stats`` features,
+            the quote and provenance columns of ``resolve_player_market_odds``, and
+            ``Result`` (the target), ``Player``, ``Date`` and ``GameTime``. Empty when
+            no gameday yields a row.
         """
         # style: allow-complexity — one gameday loop assembling every matrix source in order:
         # offers, volume dispatch, features, usage, quotes, then the MLB book-first split.
