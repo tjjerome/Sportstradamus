@@ -564,3 +564,160 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 
     parlays.drop(columns=["_date", "Hit"], inplace=True, errors="ignore")
     return profit_df, daily_parlays, size_stats, corr_cal
+
+
+# ARCHIVED 2026-10-11 from src/sportstradamus/analysis.py
+# Reason: Nothing called reconstruct_prob, and backfill_crps, the only way into the
+#         CRPS helpers, lost its caller when the dashboard-side resolve was archived
+#         (dashboard_resolve.py); reflect never called it.
+# Last live SHA: a63b9107
+# Original imports (now unresolved here):
+#   import numpy as np
+#   import pandas as pd
+#   from scipy.stats import gamma as gamma_dist
+#   from scipy.stats import nbinom
+#   from sportstradamus.analysis import _dist_params
+#   from sportstradamus.helpers import dp_crps, get_odds
+#   from sportstradamus.helpers.distributions import _dp_mu_from_mean
+
+# From src/sportstradamus/analysis.py.
+def reconstruct_prob(row, line=None):
+    """Reconstruct P(outcome <= line) from saved distribution parameters.
+
+    If line is None, uses the row's saved Line. Returns NaN if distribution
+    params are missing (old data).
+    """
+    if pd.isna(row.get("Dist")):
+        return np.nan
+    if line is None:
+        line = row["Line"]
+
+    dist, cv, ev, param, gate = _dist_params(row)
+    r = param if dist in ("NegBin", "ZINB") else None
+    alpha = param if dist in ("Gamma", "ZAGamma") else None
+    phi = param if dist == "DPO" and not pd.isna(param) else None
+    return get_odds(
+        line, ev, dist, cv, alpha=alpha, r=r, gate=gate, phi=phi, step=row.get("Step", 1)
+    )
+
+
+# From src/sportstradamus/analysis.py. resolve_and_save (dashboard_resolve.py) called
+# backfill_crps after resolve_history and rewrote history.parquet when it returned True.
+#
+# Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
+# well before this, so the cap only guards pathological (huge-EV) inputs.
+_CRPS_NEGBIN_SUM_CAP = 500
+
+
+def compute_crps_row(row):
+    """Compute CRPS for a single prediction against the actual outcome.
+
+    Uses closed-form expressions:
+    - Gamma: Gneiting & Raftery (2007), eq. 21
+    - NegBin: Finite sum over PMF (Jordan et al. 2019)
+
+    Returns NaN if distribution params or actual value are missing.
+    """
+    if pd.isna(row.get("Dist")) or pd.isna(row.get("Actual")):
+        return np.nan
+    y = row["Actual"]
+    dist, cv, ev, param, gate = _dist_params(row)
+    if dist == "DPO":
+        return _dp_crps_row(y, ev, param, cv)
+    if dist in ("NegBin", "ZINB"):
+        return _negbin_crps(y, ev, param, cv, gate, dist)
+    return _gamma_crps(y, ev, param, cv, gate, dist)
+
+
+def _zero_inflate_pmf(pmf, gate):
+    """Zero-inflate a PMF: add mass ``gate`` at 0, scale the rest by (1 - gate)."""
+    pmf_zi = pmf.copy()
+    pmf_zi[0] = gate + (1 - gate) * pmf[0]
+    pmf_zi[1:] = (1 - gate) * pmf[1:]
+    return pmf_zi
+
+
+def _dp_crps_row(y, ev, param, cv):
+    """CRPS of the double-Poisson via the shared truncated-series kernel."""
+    phi = param if not pd.isna(param) else 1.0 / (1.0 + cv * ev)
+    phi_arr = np.asarray([phi], dtype=float)
+    mu = _dp_mu_from_mean(np.asarray([ev], dtype=float), phi_arr)
+    return float(dp_crps(np.asarray([y], dtype=float), mu, phi_arr)[0])
+
+
+def _negbin_crps(y, ev, param, cv, gate, dist):
+    """CRPS of the (zero-inflated) negative-binomial via finite PMF sum (Jordan et al. 2019).
+
+    CRPS = sum_k (F(k) - 1(k >= y))^2 over a support truncated where the tail is
+    negligible (capped by _CRPS_NEGBIN_SUM_CAP).
+    """
+    r = param if param is not None and not np.isnan(param) else 1 / cv
+    p_nb = r / (r + ev)  # scipy parameterization: p = success prob
+    upper = int(max(y, ev) * 3 + 10 * np.sqrt(ev * (1 + ev / r)))
+    upper = min(upper, _CRPS_NEGBIN_SUM_CAP)
+    k = np.arange(0, upper + 1)
+    pmf = nbinom.pmf(k, r, p_nb)
+    if gate is not None and dist == "ZINB":
+        pmf = _zero_inflate_pmf(pmf, gate)
+    cdf = np.cumsum(pmf)
+    indicator = (k >= y).astype(float)
+    return np.sum((cdf - indicator) ** 2)
+
+
+def _gamma_crps(y, ev, param, cv, gate, dist):
+    """CRPS of the (zero-augmented) gamma model.
+
+    Closed-form for plain Gamma (Gneiting & Raftery 2007, eq. 21); the
+    zero-augmented mixture has no closed form, so integrate the squared CDF error.
+    """
+    alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
+    beta = alpha / ev
+    if gate is not None and dist == "ZAGamma":
+        return _zagamma_crps(y, ev, alpha, beta, gate)
+
+    from scipy.special import beta as beta_fn
+
+    scale = 1 / beta
+    cdf_y = gamma_dist.cdf(y, alpha, scale=scale)
+    cdf_y_a1 = gamma_dist.cdf(y, alpha + 1, scale=scale)
+    return (
+        y * (2 * cdf_y - 1) - (alpha / beta) * (2 * cdf_y_a1 - 1) - 1 / (beta * beta_fn(0.5, alpha))
+    )
+
+
+def _zagamma_crps(y, ev, alpha, beta, gate):
+    """ZA-Gamma CRPS via numerical integration of the squared CDF error."""
+    from scipy.integrate import quad
+
+    def _cdf(x):
+        if x < 0:
+            return 0.0
+        base = gamma_dist.cdf(x, alpha, scale=1 / beta)
+        return gate + (1 - gate) * base
+
+    def integrand(x):
+        return (_cdf(x) - (1 if x >= y else 0)) ** 2
+
+    crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
+    return crps
+
+
+def backfill_crps(history: pd.DataFrame) -> bool:
+    """Fill the per-prediction ``CRPS`` column in place for newly-resolved rows.
+
+    CRPS is a pure function of a prediction's distribution and its realized
+    ``Actual``, so it never changes once the prediction resolves. The nightly
+    resolve computes it once here and stores it in history.parquet; the dashboard
+    then only aggregates the column instead of re-integrating per row on every
+    rerun. Returns True if any cell was filled, so the caller knows whether the
+    parquet needs rewriting.
+    """
+    if "Dist" not in history.columns or "Actual" not in history.columns:
+        return False
+    if "CRPS" not in history.columns:
+        history["CRPS"] = np.nan
+    need = history["Dist"].notna() & history["Actual"].notna() & history["CRPS"].isna()
+    if not need.any():
+        return False
+    history.loc[need, "CRPS"] = history.loc[need].apply(compute_crps_row, axis=1)
+    return True

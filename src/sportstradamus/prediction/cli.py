@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import creds, data
+from sportstradamus import data
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,

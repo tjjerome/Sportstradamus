@@ -25,7 +25,7 @@ import pytest
 from sportstradamus.helpers import config
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.config import book_gate, stat_cv, stat_dist
-from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev, get_odds
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev
 from sportstradamus.helpers.training_quotes import resolve_training_quote
 from sportstradamus.scripts.migrate_archive_shapefree import _migrate_cell
 

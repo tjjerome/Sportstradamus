@@ -2,7 +2,7 @@
 
 Plain (non-widget) ``st.session_state`` keys hold the active slip: its legs,
 platform, builder type, bankroll, and the id of the locked slip being edited.
-This module owns seeding (from a story, offer rows, or a locked slip), the
+This module owns seeding (from a story or a locked slip), the
 add/remove/clear primitives, and the **Lock it in!** persistence to
 ``user_slips.parquet``. The render layer lives in ``slip_builder``; the rail and
 surfaces drive these functions. Money is ``Decimal`` at the scoring boundary;
@@ -100,17 +100,6 @@ def seed_from_story(story_legs: Sequence[Mapping], platform: str, offers: pd.Dat
     st.session_state[_LEGS] = _legs_from_records(story_legs, platform, offers)
     st.session_state[_PLATFORM] = platform
     st.session_state[_BUILDER] = "constellation"
-    st.session_state[_EDIT_ID] = None
-
-
-def seed_from_legs(rows: Sequence[Mapping], platform: str, builder: str) -> None:
-    """Seed a builder from selected offer rows (Game → constellation, Board → simple).
-
-    A slip is single-platform; rows off ``platform`` are dropped.
-    """
-    st.session_state[_LEGS] = [build_leg(r) for r in rows if r["Platform"] == platform]
-    st.session_state[_PLATFORM] = platform
-    st.session_state[_BUILDER] = builder
     st.session_state[_EDIT_ID] = None
 
 

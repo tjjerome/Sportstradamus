@@ -468,8 +468,9 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     Structural only (parlay EVs are non-deterministic on correlated legs); the
     guard is that the assembly path runs and produces sane rows. ``legs`` (the
     P8 structured-leg schema) replaces the retired ``Leg 1..6`` / ``Legs`` /
-    ``Desc`` / ``Family`` columns; ``Fun`` survives as a transient sort key that
-    ``persist._PARLAY_DROP_COLS`` strips before ``current_parlays.parquet``.
+    ``Desc`` / ``Family`` columns; ``Fun`` survives as a sort key the parlay
+    history stores: ``persist._PARLAY_DROP_COLS`` strips it from
+    ``current_parlays.parquet`` only.
     """
     offers = _wnba_offers()
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}

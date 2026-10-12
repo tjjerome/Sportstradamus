@@ -5,8 +5,6 @@ offline ship gates, and their outcome-label oracle) on synthetic test-set frames
 so no trained model, network, or plotting backend is required.
 """
 
-import hashlib
-import importlib.resources as pkg_resources
 import json
 import math
 from datetime import datetime, timedelta
@@ -16,7 +14,6 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from sportstradamus import data
 from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_ppf
 from sportstradamus.training import group_conditional_cdf as receiving
 from sportstradamus.training import posthoc

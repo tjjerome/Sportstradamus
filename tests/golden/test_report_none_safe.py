@@ -20,7 +20,6 @@ import math
 from unittest import mock
 
 import pandas as pd
-import pytest
 
 from sportstradamus.training.report import _wide_row
 

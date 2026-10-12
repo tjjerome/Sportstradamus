@@ -3,10 +3,9 @@
 import altair as alt
 import numpy as np
 import pandas as pd
-import streamlit as st
 from scipy import stats
 
-from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
+from sportstradamus.dashboard.data import load_gamelog
 from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
 from sportstradamus.helpers.distributions import apply_cdf_recal, dp_pmf_curve
 

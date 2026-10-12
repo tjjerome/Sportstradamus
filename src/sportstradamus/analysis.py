@@ -5,7 +5,7 @@
 platform payout (``Model EV`` / ``Market EV`` / ``Kelly``); ``check_bet`` and
 ``_resolve_leg`` grade parlay and slip legs. ``precompute_profit_sim_summary`` is the
 strategy x horizon grid nightly writes for Receipts. The rest are scoring rules: Brier
-skill against a base rate and against the book, the Murphy decomposition, CRPS, and
+skill against a base rate and against the book, the Murphy decomposition, and
 prediction-interval coverage. Realized performance itself is priced in ``realized``.
 """
 
@@ -19,12 +19,7 @@ from scipy.stats import nbinom
 from sklearn.metrics import brier_score_loss
 from tqdm import tqdm
 
-from sportstradamus.helpers import (
-    MAX_FAVORED_PAYOUT,
-    dp_crps,
-    get_odds,
-    platform_payout,
-)
+from sportstradamus.helpers import MAX_FAVORED_PAYOUT, platform_payout
 from sportstradamus.helpers.distributions import _dp_mu_from_mean, _dp_ppf
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
@@ -39,10 +34,6 @@ TIMEFRAMES = [
     ("6m", 183),
     ("1y", 365),
 ]
-
-# Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
-# well before this, so the cap only guards pathological (huge-EV) inputs.
-_CRPS_NEGBIN_SUM_CAP = 500
 
 
 def _bet_gameday_rows(gamelog, ls, bet):
@@ -376,8 +367,8 @@ def precompute_profit_sim_summary(
 def _dist_params(row):
     """Extract (Dist, CV, Projection, Model Param, Gate) from a saved-prediction row.
 
-    Gate is normalized to None when absent (NaN), matching how the reconstruct
-    and CRPS math treat "no zero-inflation gate".
+    Gate is normalized to None when absent (NaN): the quantile math reads None as
+    "no zero-inflation gate".
     """
     gate = row.get("Gate")
     return (
@@ -386,26 +377,6 @@ def _dist_params(row):
         row["Projection"],
         row.get("Model Param"),
         None if pd.isna(gate) else gate,
-    )
-
-
-def reconstruct_prob(row, line=None):
-    """Reconstruct P(outcome <= line) from saved distribution parameters.
-
-    If line is None, uses the row's saved Line. Returns NaN if distribution
-    params are missing (old data).
-    """
-    if pd.isna(row.get("Dist")):
-        return np.nan
-    if line is None:
-        line = row["Line"]
-
-    dist, cv, ev, param, gate = _dist_params(row)
-    r = param if dist in ("NegBin", "ZINB") else None
-    alpha = param if dist in ("Gamma", "ZAGamma") else None
-    phi = param if dist == "DPO" and not pd.isna(param) else None
-    return get_odds(
-        line, ev, dist, cv, alpha=alpha, r=r, gate=gate, phi=phi, step=row.get("Step", 1)
     )
 
 
@@ -452,120 +423,6 @@ def _gamma_quantile(q, ev, param, cv, gate, dist):
             return 0.0
         q = (q - gate) / (1 - gate)
     return gamma_dist.ppf(q, alpha, scale=ev / alpha)
-
-
-def compute_crps_row(row):
-    """Compute CRPS for a single prediction against the actual outcome.
-
-    Uses closed-form expressions:
-    - Gamma: Gneiting & Raftery (2007), eq. 21
-    - NegBin: Finite sum over PMF (Jordan et al. 2019)
-
-    Returns NaN if distribution params or actual value are missing.
-    """
-    if pd.isna(row.get("Dist")) or pd.isna(row.get("Actual")):
-        return np.nan
-    y = row["Actual"]
-    dist, cv, ev, param, gate = _dist_params(row)
-    if dist == "DPO":
-        return _dp_crps_row(y, ev, param, cv)
-    if dist in ("NegBin", "ZINB"):
-        return _negbin_crps(y, ev, param, cv, gate, dist)
-    return _gamma_crps(y, ev, param, cv, gate, dist)
-
-
-def _zero_inflate_pmf(pmf, gate):
-    """Zero-inflate a PMF: add mass ``gate`` at 0, scale the rest by (1 - gate)."""
-    pmf_zi = pmf.copy()
-    pmf_zi[0] = gate + (1 - gate) * pmf[0]
-    pmf_zi[1:] = (1 - gate) * pmf[1:]
-    return pmf_zi
-
-
-def _dp_crps_row(y, ev, param, cv):
-    """CRPS of the double-Poisson via the shared truncated-series kernel."""
-    phi = param if not pd.isna(param) else 1.0 / (1.0 + cv * ev)
-    phi_arr = np.asarray([phi], dtype=float)
-    mu = _dp_mu_from_mean(np.asarray([ev], dtype=float), phi_arr)
-    return float(dp_crps(np.asarray([y], dtype=float), mu, phi_arr)[0])
-
-
-def _negbin_crps(y, ev, param, cv, gate, dist):
-    """CRPS of the (zero-inflated) negative-binomial via finite PMF sum (Jordan et al. 2019).
-
-    CRPS = sum_k (F(k) - 1(k >= y))^2 over a support truncated where the tail is
-    negligible (capped by _CRPS_NEGBIN_SUM_CAP).
-    """
-    r = param if param is not None and not np.isnan(param) else 1 / cv
-    p_nb = r / (r + ev)  # scipy parameterization: p = success prob
-    upper = int(max(y, ev) * 3 + 10 * np.sqrt(ev * (1 + ev / r)))
-    upper = min(upper, _CRPS_NEGBIN_SUM_CAP)
-    k = np.arange(0, upper + 1)
-    pmf = nbinom.pmf(k, r, p_nb)
-    if gate is not None and dist == "ZINB":
-        pmf = _zero_inflate_pmf(pmf, gate)
-    cdf = np.cumsum(pmf)
-    indicator = (k >= y).astype(float)
-    return np.sum((cdf - indicator) ** 2)
-
-
-def _gamma_crps(y, ev, param, cv, gate, dist):
-    """CRPS of the (zero-augmented) gamma model.
-
-    Closed-form for plain Gamma (Gneiting & Raftery 2007, eq. 21); the
-    zero-augmented mixture has no closed form, so integrate the squared CDF error.
-    """
-    alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
-    beta = alpha / ev
-    if gate is not None and dist == "ZAGamma":
-        return _zagamma_crps(y, ev, alpha, beta, gate)
-
-    from scipy.special import beta as beta_fn
-
-    scale = 1 / beta
-    cdf_y = gamma_dist.cdf(y, alpha, scale=scale)
-    cdf_y_a1 = gamma_dist.cdf(y, alpha + 1, scale=scale)
-    return (
-        y * (2 * cdf_y - 1) - (alpha / beta) * (2 * cdf_y_a1 - 1) - 1 / (beta * beta_fn(0.5, alpha))
-    )
-
-
-def _zagamma_crps(y, ev, alpha, beta, gate):
-    """ZA-Gamma CRPS via numerical integration of the squared CDF error."""
-    from scipy.integrate import quad
-
-    def _cdf(x):
-        if x < 0:
-            return 0.0
-        base = gamma_dist.cdf(x, alpha, scale=1 / beta)
-        return gate + (1 - gate) * base
-
-    def integrand(x):
-        return (_cdf(x) - (1 if x >= y else 0)) ** 2
-
-    crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
-    return crps
-
-
-def backfill_crps(history: pd.DataFrame) -> bool:
-    """Fill the per-prediction ``CRPS`` column in place for newly-resolved rows.
-
-    CRPS is a pure function of a prediction's distribution and its realized
-    ``Actual``, so it never changes once the prediction resolves. The nightly
-    resolve computes it once here and stores it in history.parquet; the dashboard
-    then only aggregates the column instead of re-integrating per row on every
-    rerun. Returns True if any cell was filled, so the caller knows whether the
-    parquet needs rewriting.
-    """
-    if "Dist" not in history.columns or "Actual" not in history.columns:
-        return False
-    if "CRPS" not in history.columns:
-        history["CRPS"] = np.nan
-    need = history["Dist"].notna() & history["Actual"].notna() & history["CRPS"].isna()
-    if not need.any():
-        return False
-    history.loc[need, "CRPS"] = history.loc[need].apply(compute_crps_row, axis=1)
-    return True
 
 
 def compute_brier_skill_score(subset, base_rate=0.5):

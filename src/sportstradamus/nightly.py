@@ -2,20 +2,20 @@
 
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
-2. Fill in Actual column in history (parquet primary, .dat fallback)
-3. Fill in Close Books P / Market CLV / Model CLV per offer
-4. Fill in Legs Resolved/Misses columns in parlay_hist
+2. Fill in Actual column in history
+3. Fill in Close Market Prob / Market CLV / Model CLV per offer; persist CLV segments
+4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
-7. Compute and persist the realized-by-side ledger at platform payouts
+7. Persist the realized-by-side, profit-sim and calibration summaries; fold the modifier overlay
 
-Schedule with cron after games finish, e.g.:
-    0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
+Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
+``docs/OPERATIONS.md``.
 """
 
 import importlib.resources as pkg_resources
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import click

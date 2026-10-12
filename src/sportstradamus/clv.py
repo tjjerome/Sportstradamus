@@ -30,16 +30,11 @@ from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.archive import archive_market
 from sportstradamus.helpers.config import book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_odds
-from sportstradamus.helpers.logging import get_logger
 from sportstradamus.history_schema import PREDICTION_KEY
 
 # Per-(League, Market, Platform) CLV summary segments require this many legs
 # to be reported. Smaller segments are statistical noise.
 CLV_SEGMENT_MIN_N = 20
-
-# An archive snapshot taken more than this many minutes before kickoff is too
-# stale to credibly stand in for the closing line; warn once per segment.
-CLOSE_LOOKBACK_WARN_MINUTES = 90
 
 # Stand-in kickoff for a row with no `Commence` of its own and none to borrow: rows
 # scored before the column existed (2026-10-05), and a Sleeper offer with no Underdog
@@ -48,8 +43,6 @@ CLOSE_LOOKBACK_WARN_MINUTES = 90
 _COMMENCE_DEFAULT_OFFSET = timedelta(hours=20)
 
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
-
-_logger = get_logger("reflect")
 
 
 def _segments_parquet_path() -> Path:
@@ -166,9 +159,8 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx, commence_time) -> 
 
     No-op (leaves a row NaN) when the key isn't a real (league, market) pair, the
     archive lookup misses, or the resolved probability falls outside ``[0, 1]`` — the
-    last case is a clamp-to-NaN quarantine, matching ``migrate_leg_schema.py``'s
-    existing handling of out-of-range ``Close Market Prob`` values. A bad conversion at
-    one line does not blank out other lines in the same group that resolved fine.
+    last case is a clamp-to-NaN quarantine. A bad conversion at one line does not
+    blank out other lines in the same group that resolved fine.
     """
     player, league, date, market = key
     if not (isinstance(league, str) and isinstance(market, str)):
@@ -405,7 +397,7 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
 
 
 def persist_segments(grouped: pd.DataFrame) -> None:
-    """Write the full per-segment frame to ``data/clv_segments.parquet``.
+    """Write the full per-segment frame to ``data/runtime/clv_segments.parquet``.
 
     All segments are persisted (not just the reportable ones) so the Kelly
     shrinkage getter can reason about sample size for low-n segments too.
@@ -421,7 +413,7 @@ def persist_segments(grouped: pd.DataFrame) -> None:
 def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
     """Return ``(shrinkage, n)`` for one ``(league, market)`` segment.
 
-    Reads ``data/clv_segments.parquet`` (written by :func:`summarize`).
+    Reads ``data/runtime/clv_segments.parquet`` (written by :func:`persist_segments`).
     The shrinkage weight is ``frac_beat_close`` linearly remapped from
     ``[0.5, 1.0]`` onto ``[0.0, 1.0]`` and clamped — a segment that beats
     the close 50% of the time gets no credit; one that beats it every
@@ -448,67 +440,6 @@ def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
     weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
     shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
     return shrinkage, n
-
-
-def check_close_sample_freshness(
-    samples: pd.DataFrame,
-    *,
-    logger=None,
-) -> pd.DataFrame:
-    """Warn when archive close-snapshots lag too far behind ``commence_time``.
-
-    Iterates the supplied ``samples`` frame — one row per offer — and emits
-    one WARNING per ``(league, market, date)`` segment when any snapshot's
-    ``sample_ts`` precedes ``commence_time`` by more than
-    :data:`CLOSE_LOOKBACK_WARN_MINUTES`. Rows missing either timestamp are
-    skipped silently.
-
-    Args:
-        samples: DataFrame with columns ``league``, ``market``, ``date``,
-            ``sample_ts``, ``commence_time``. The latter two must be
-            timezone-aware datetimes (or NaT).
-        logger: Optional override for the structured ``reflect`` logger;
-            tests pass a captured logger to assert on warnings.
-
-    Returns:
-        A frame of the segments that produced warnings, with columns
-        ``league``, ``market``, ``date``, ``max_lag_minutes``, ``n``.
-        Empty when nothing was stale.
-    """
-    log = logger if logger is not None else _logger
-    required = {"league", "market", "date", "sample_ts", "commence_time"}
-    if samples.empty or not required.issubset(samples.columns):
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    df = samples.copy()
-    df["sample_ts"] = pd.to_datetime(df["sample_ts"], utc=True, errors="coerce")
-    df["commence_time"] = pd.to_datetime(df["commence_time"], utc=True, errors="coerce")
-    df = df.dropna(subset=["sample_ts", "commence_time"])
-    if df.empty:
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    df["lag_minutes"] = (df["commence_time"] - df["sample_ts"]).dt.total_seconds() / 60.0
-    stale = df.loc[df["lag_minutes"] > CLOSE_LOOKBACK_WARN_MINUTES]
-    if stale.empty:
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    grouped = (
-        stale.groupby(["league", "market", "date"], dropna=False)["lag_minutes"]
-        .agg(["max", "count"])
-        .reset_index()
-        .rename(columns={"max": "max_lag_minutes", "count": "n"})
-    )
-    for _, seg in grouped.iterrows():
-        log.warning(
-            "stale close snapshot (lag=%.0fmin > %dmin) for %s/%s on %s across %d legs",
-            seg["max_lag_minutes"],
-            CLOSE_LOOKBACK_WARN_MINUTES,
-            seg["league"],
-            seg["market"],
-            seg["date"],
-            int(seg["n"]),
-        )
-    return grouped
 
 
 def _normalize_date(date) -> str:

@@ -23,7 +23,7 @@ from scipy.optimize import brentq
 
 from sportstradamus.helpers import sleeper_payouts, stat_cv, stat_std, underdog_payouts
 from sportstradamus.leg_schema import leg_label
-from sportstradamus.prediction.joint import _PSD_EIG_TOLERANCE, _nearest_psd
+from sportstradamus.prediction.joint import _nearest_psd
 from sportstradamus.prediction.parlay import (
     GameArrays,
     _leg_boost_payout,

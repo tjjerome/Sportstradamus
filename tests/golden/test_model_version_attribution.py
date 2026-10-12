@@ -11,7 +11,6 @@ filedict carries a well-formed version string.
 
 from __future__ import annotations
 
-import importlib
 import pickle
 
 import pandas as pd

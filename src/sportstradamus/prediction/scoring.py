@@ -14,7 +14,6 @@ was trained on.
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
-import os.path
 import pickle
 import warnings
 
