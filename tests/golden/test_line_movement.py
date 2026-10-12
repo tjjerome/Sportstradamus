@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import datetime
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
 from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
+from sportstradamus.prediction import cli as prediction_cli
 from sportstradamus.prediction.line_movement import _MOVEMENT_POINTS, build_line_movement
 
 _BASE = pd.Timestamp("2026-09-05 08:00:00")
@@ -44,6 +46,9 @@ def _offers(**overrides) -> pd.DataFrame:
         "CV": 0.5,
     }
     row.update(overrides)
+    # The league's own key, which the ladder is filed under: for most markets, the
+    # board's name too.
+    row.setdefault("Stat", row["Market"])
     return pd.DataFrame([row])
 
 
@@ -140,6 +145,46 @@ def test_only_offer_keys_survive_the_join():
 
     movement = build_line_movement(observations, _offers())
     assert movement["Player"].tolist() == ["Travis Etienne"]
+
+
+def _nhl_assists() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """An NHL board row and its ladder: the board says ``AST``, the archive ``assists``."""
+    offers = _offers(League="NHL", Market="AST", Stat="assists", Player="Connor McDavid")
+    ladder = _observations(
+        [0.5, 1.5], [0, 60], league="NHL", market="assists", entity="Connor McDavid"
+    )
+    return offers, ladder
+
+
+def test_a_ladder_filed_under_the_leagues_key_keeps_the_boards_market_name():
+    # The dashboard joins the movement row to the board on Market, so the row must
+    # carry the board's name for it, not the key its rungs were read under.
+    offers, ladder = _nhl_assists()
+    movement = build_line_movement(ladder, offers)
+
+    assert movement["Market"].tolist() == ["AST"]
+    assert movement.iloc[0]["move"] == 1.0
+
+
+def test_snapshot_asks_the_archive_under_the_leagues_key(monkeypatch):
+    offers, ladder = _nhl_assists()
+    asked = []
+
+    def histories(keys, *, books, since):
+        asked.append(keys)
+        return ladder.merge(keys, on=["league", "entity", "market"])
+
+    monkeypatch.setattr(
+        prediction_cli, "archive", SimpleNamespace(get_book_line_histories=histories)
+    )
+    monkeypatch.setattr(prediction_cli, "write_line_movement", lambda movement: None)
+
+    movement = prediction_cli.snapshot_line_movement(offers)
+
+    assert asked[0].to_dict("records") == [
+        {"league": "NHL", "entity": "Connor McDavid", "market": "assists"}
+    ]
+    assert movement["Market"].tolist() == ["AST"]
 
 
 def test_one_row_per_offer_key_across_platforms():

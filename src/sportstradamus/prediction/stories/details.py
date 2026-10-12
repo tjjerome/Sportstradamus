@@ -15,6 +15,8 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers.io import market_file_slug
+
 _COMPS_WINDOW_DAYS = 300
 _VOLUME_TREND_GAMES = 10  # sparkline window for the volume-stat trend
 _OTHER_STATS_K = 4  # SHAP-ranked extra stats surfaced in the "Other stats" tab
@@ -242,7 +244,8 @@ def _market_detail_rows(
     vol_by_pos = {p: _resolve_volume_stat(volume_stat, p) for p in mgrp["Position"].astype(str)}
     vol_present = [s for s in dict.fromkeys(vol_by_pos.values()) if s and s in gl.columns]
     ranked = rank_other_stats(
-        f"{league}_{market}",
+        # The importance table names a cell's column the way its model file is named.
+        market_file_slug(league, stat),
         importances,
         exclude=exclude | set(vol_by_pos.values()) | {stat},
         available=set(gl.columns),

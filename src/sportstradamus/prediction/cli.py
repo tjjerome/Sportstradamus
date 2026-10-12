@@ -29,6 +29,7 @@ from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     archive_market,
+    cell_market,
     get_logger,
     stat_dist,
     stat_map,
@@ -159,10 +160,11 @@ def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
     """
     observations = pd.DataFrame()
     if not offers.empty:
+        # Stat, not Market: the archive files a ladder under the league's own market key.
         keys = (
-            offers[["League", "Player", "Market"]]
+            offers[["League", "Player", "Stat"]]
             .drop_duplicates()
-            .rename(columns={"League": "league", "Player": "entity", "Market": "market"})
+            .rename(columns={"League": "league", "Player": "entity", "Stat": "market"})
         )
         observations = archive.get_book_line_histories(
             keys,
@@ -244,10 +246,14 @@ def main(progress, contest_variant, log_level):
             corr_sink=ud_corr,
             story_sink=ud_story,
         )
+        # Stat is the league's own key for the market, the name its gamelog column,
+        # model cell and archive rows go by. Market becomes the board's name for it,
+        # which is not that key for every league: NHL assists is AST on the board.
+        ud_offers["Stat"] = [
+            cell_market(league, "Underdog", label)
+            for league, label in zip(ud_offers["League"], ud_offers["Market"], strict=True)
+        ]
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Stat"] = ud_offers[
-            "Market"
-        ]  # preserve gamelog key for dashboard history lookups
         # model_prob pre-multiplied Boost by UNDERDOG_BOOST_BASELINE so that
         # ``Model = Model P * Boost`` is per-$1 EV. The persisted snapshot
         # (current_offers.parquet, history.parquet) is consumed downstream
@@ -276,10 +282,11 @@ def main(progress, contest_variant, log_level):
             corr_sink=sl_corr,
             story_sink=sl_story,
         )
+        sl_offers["Stat"] = [
+            cell_market(league, "Sleeper", label)
+            for league, label in zip(sl_offers["League"], sl_offers["Market"], strict=True)
+        ]
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
-        sl_offers["Stat"] = sl_offers[
-            "Market"
-        ]  # preserve gamelog key for dashboard history lookups
         # Sleeper Boost stays at the raw books/sleeper.py value (model_prob only
         # applies UNDERDOG_BOOST_BASELINE to platform == "Underdog"), so no
         # division is needed here for display/storage to match the raw

@@ -45,12 +45,16 @@ _P_OVER_DECIMALS = 3
 # where the normal quantile is infinite; the clip holds a fair line within 2.33σ.
 _P_FLOOR, _P_CEIL = 0.01, 0.99
 
+# The ladder is filed under the league's own market key, which the board carries as
+# ``Stat`` beside the ``Market`` name its rows go by (an NHL board says AST where the
+# archive says assists).
 _ARCHIVE_TO_OFFER = {
     "league": "League",
     "book": "Platform",
-    "market": "Market",
+    "market": "Stat",
     "entity": "Player",
 }
+_LADDER_KEYS = ["League", "Platform", "Stat", "Player", "Date"]
 
 
 def build_line_movement(observations: pd.DataFrame, offers: pd.DataFrame) -> pd.DataFrame:
@@ -77,7 +81,8 @@ def build_line_movement(observations: pd.DataFrame, offers: pd.DataFrame) -> pd.
             ``observed_at`` (naive UTC), ``line`` (stat units) and ``p_over`` (the
             rung's de-vigged over-probability).
         offers: The scored slate. Its ``(League, Platform, Market, Player, Date)``
-            identity filters the observations; each key's first row supplies σ from
+            identity filters the observations, matched on ``Stat``, the key the
+            ladder is filed under; each key's first row supplies σ from
             ``Projection``, ``Projection STD`` and ``CV``.
 
     Returns:
@@ -101,7 +106,8 @@ def build_line_movement(observations: pd.DataFrame, offers: pd.DataFrame) -> pd.
     obs = observations.rename(columns=_ARCHIVE_TO_OFFER)
     # game_date arrives as a DuckDB DATE; offers.Date is an ISO string.
     obs["Date"] = pd.to_datetime(obs["game_date"]).dt.strftime("%Y-%m-%d")
-    obs = obs.merge(offers[LINE_MOVEMENT_KEYS].drop_duplicates(), on=LINE_MOVEMENT_KEYS)
+    # The join hands each rung the board's Market, the name the dashboard joins on.
+    obs = obs.merge(offers[[*LINE_MOVEMENT_KEYS, "Stat"]].drop_duplicates(), on=_LADDER_KEYS)
     if obs.empty:
         return pd.DataFrame(columns=LINE_MOVEMENT_COLS)
 
