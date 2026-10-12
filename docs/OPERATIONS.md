@@ -132,7 +132,7 @@ Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the pro
 crontab — they run on the dev box beside the manual weekly `meditate`, then
 `scripts/sync_to_prod.sh` uploads the models, the gitignored serving artifacts
 (`book_weights.json`, `stat_calibration.json`, `model_stats.{parquet,csv}`,
-per-league `corr_*` matrices, MLB's two Savant comp tables — see the script
+per-league `corr_*` files, MLB's two Savant comp tables — see the script
 header), and their snapshots
 (snapshots additive, never `--delete`). The models mirror skips
 `data/models/prior/`: the superseded model files a retrain keeps stay on the box
@@ -143,6 +143,38 @@ each other's models and serving artifacts.
 Both are `run_job.sh` cases, so scheduling either (with a
 `HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
 See [data_collectors.md](data_collectors.md).
+
+That sync carries every league at once: the models mirror deletes any prod model
+file the dev box lacks, and `book_weights.json`, `stat_calibration.json` and
+`model_stats.{parquet,csv}` each hold every league's entries. When it would
+carry a league that is not ready (its `--dry-run` lists every league's files;
+a retrain may still be running), send the ready league alone:
+
+```bash
+scripts/sync_to_prod.sh --league NFL --dry-run   # proof and file list; writes nothing on prod
+scripts/sync_to_prod.sh --league NFL             # send
+```
+
+`--league` copies prod's three shared files down, replaces only that league's
+entries with the dev box's, and prints the proof: per league, how many entries
+differ from prod's copy, which only the named league may. It then sends the
+league's `models/<LEAGUE>_*` files, the merged shared files, the league's
+`corr_*` files and, for MLB, the two comp tables. It deletes nothing on prod (a
+model file the dev box no longer has stays until a full sync), sends no
+collector snapshots, and refuses to send when the proof fails or a shared file
+changed on prod after it was copied down. Send between board runs, after one
+`prophecize` logs `OK` and well before the next starts, so no run reads half a
+send.
+
+Every file a send replaces is kept on prod in
+`~/league-send-backup/<LEAGUE>-<UTC stamp>/`, laid out like the data folder, so
+one command run on prod puts them all back:
+`cp -a <that folder>/. <repo-dir>/src/sportstradamus/data/`. The send prints the
+folder before it writes and the whole command as its last line. A send that
+stops partway is finished by running it again. To take back several sends, run
+their commands newest first. A file a send added rather than replaced (the
+model of a cell prod never had; its line in the send's output reads
+`<f+++++++++`) stays after the undo; delete it by hand.
 
 ## Dashboard as a service
 
