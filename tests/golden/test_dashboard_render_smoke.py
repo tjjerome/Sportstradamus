@@ -420,6 +420,33 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     assert "NBA - REB" not in tile_labels
 
 
+def test_lab_diagnostics_keeps_a_market_history_names_by_its_platform(monkeypatch, tmp_path):
+    """History keeps Underdog's name for NBA fantasy points, ``fantasy points underdog``,
+    and stat_meta names the cell ``fantasy points prizepicks``: the rows pass the Lab
+    filter and the market table reads the cell's Family beside them.
+    """
+    fixture = tmp_path / "history.parquet"
+    rows = [_diag_row("NBA", "fantasy points underdog", i) for i in range(25)]
+    pd.DataFrame(rows).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.HISTORY_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.HISTORY_PATH", fixture)
+    tables = []
+    monkeypatch.setattr(
+        "sportstradamus.dashboard.components.grid.render_themed_grid",
+        lambda table, **_: tables.append(table),
+    )
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_diagnostics.py")
+    at._page_hash = calc_hash("lab-diagnostics")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert "NBA - fantasy points underdog" in {m.label for m in at.metric}
+    assert tables[-1]["Family"].notna().all()
+
+
 def _training_cell(league: str, market: str, *, ship: bool, n_fails: int) -> dict:
     """One ``model_stats.parquet`` row with exactly ``n_fails`` gates set to False,
     starting from ``g6_pass`` backward so a 1-fail cell fails only g6 (the newest
@@ -621,6 +648,46 @@ def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):
     assert not at.exception
     solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
     assert list(solved.values()) == [[0.9, 1.0]]
+
+
+def test_lab_modifiers_pair_key_names_a_market_by_the_leagues_own_key(monkeypatch, tmp_path):
+    """The default pair key names a leg's market as ``banned_combos`` does: the league's
+    own key, not the name the platform's map gives the board.
+
+    The legs sit on no board row, so each key is the market alone, with no position prefix.
+    """
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH",
+        tmp_path / "modifier_overrides.json",
+    )
+    st.cache_data.clear()
+
+    skater = dict(_OFFER_ROWS[0], League="NHL", Player="Skater", Market="AST", Stat="assists")
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(skater),
+        # A leg saved while the board's Stat copied its Market.
+        build_leg(dict(skater, Player="Winger", Market="PTS", Stat="PTS")),
+        build_leg(dict(_OFFER_ROWS[1], Player="Guard", Market="fantasy points underdog")),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert [at.text_input(key=f"mod_key_rail_{i}").value for i in range(3)] == [
+        "assists",
+        "points",
+        "fantasy points prizepicks",
+    ]
 
 
 @pytest.mark.xfail(

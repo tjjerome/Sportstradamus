@@ -22,6 +22,7 @@ from sportstradamus import data
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.data import load_current_offers
 from sportstradamus.dashboard.legs import find_offer_idx
+from sportstradamus.helpers import archive_market
 from sportstradamus.helpers.config import apply_modifier_overrides
 from sportstradamus.helpers.io import (
     read_modifier_overrides,
@@ -69,7 +70,10 @@ def _default_key(leg: dict, offers, platform: str) -> str:
     idx = find_offer_idx(leg, offers, platform)
     position = offers.at[idx, "Position"] if idx is not None else None
     prefix = _pos_prefix(leg["league"], position)
-    return f"{prefix}.{leg['market']}" if prefix else str(leg["market"])
+    # banned_combos keys a pair by the league's own market name, the one the scorer prices
+    # it under (NHL ``C.assists``), not the name the platform's map gives the board.
+    market = archive_market(leg["league"], leg.get("stat") or leg["market"])
+    return f"{prefix}.{market}" if prefix else market
 
 
 def _removal_hints(legs: list[Leg], labels: list[str], platform_mods: dict) -> list[str]:

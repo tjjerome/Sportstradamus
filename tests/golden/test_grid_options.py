@@ -240,6 +240,27 @@ def test_add_market_display_keeps_slug_column() -> None:
     # An unmapped slug falls back to itself (helpers.market_display_name's own contract).
 
 
+def test_add_market_display_reads_a_board_name_as_the_leagues_own_label() -> None:
+    # The second row is a snapshot written while Stat still copied Market.
+    df = pd.DataFrame(
+        {
+            "League": ["NHL", "NHL", "NBA"],
+            "Market": ["AST", "AST", "fantasy points underdog"],
+            "Stat": ["assists", "AST", "fantasy points prizepicks"],
+        }
+    )
+    out = add_market_display(df)
+    assert out["Market Display"].tolist() == ["Assists", "Assists", "Fantasy Points"]
+    assert out["Market"].tolist() == df["Market"].tolist()
+
+
+def test_add_market_display_leaves_a_row_with_no_market_name_blank() -> None:
+    # The board maps a platform's label through its stat_map, so a label the map lacks
+    # arrives with no Market, and reading an NBA name under the league's key is a string method.
+    df = pd.DataFrame({"League": ["NBA", "NBA"], "Market": ["PTS", None]})
+    assert add_market_display(df)["Market Display"].tolist() == ["Points", ""]
+
+
 def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
     df = pd.DataFrame({"Line": [23.5, 8.5], "Bet": ["Over", "Under"], "Market": ["PTS", "AST"]})
     options = build_themed_grid_options(

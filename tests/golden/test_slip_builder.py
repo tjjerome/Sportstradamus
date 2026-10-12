@@ -9,8 +9,10 @@ against a bare ``st.session_state`` (Streamlit's own documented "bare mode" — 
 outside a running app), rather than standing up a full ``AppTest`` page render, since no
 component event needs simulating here.
 
-The last tests pin ``slip_state._legs_from_records``, which finds a story's or a saved
-slip's stored legs on the board again before they seed a builder.
+The last tests pin the market names a slip leg is read under: ``slip_state._legs_from_records``
+finds a story's or a saved slip's stored legs on the board again before they seed a builder,
+a leg added from a board row keeps that row's ``Stat``, and ``slip_shrinkage`` reads a leg's
+model cell.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from sportstradamus.dashboard.components.slip_builder import (
     _active_lenses,
     _apply_constellation_action,
     _open_offer_detail,
+    slip_shrinkage,
 )
 from sportstradamus.dashboard.components.slip_state import _LEGS, _legs_from_records
 from sportstradamus.leg_schema import build_leg
@@ -247,3 +250,31 @@ def test_stored_legs_resolve_to_nothing_without_an_offers_snapshot():
     # An absent snapshot loads as an empty frame with no League or Market column to read.
     leg = _stored_leg("Skater", "Assists", "assists", "NHL", "Underdog")
     assert _legs_from_records([leg], "Underdog", pd.DataFrame()) == []
+
+
+def test_a_star_added_from_a_board_row_stores_the_rows_stat():
+    # Settlement reads a slip leg's stat as a gamelog column: the board's Stat is the
+    # league's key, its Market the name the platform's map gives.
+    pool = _pool_df(_board_row("Skater", "AST", "NHL", "Underdog") | {"Stat": "assists"})
+    _apply_constellation_action(_emit(1, {"Skater|AST|Over": True}), pd.DataFrame(), pool, None)
+    (leg,) = st.session_state[_LEGS]
+    assert (leg["market"], leg["stat"]) == ("AST", "assists")
+
+
+def test_slip_shrinkage_reads_a_legs_cell_under_the_leagues_own_market_name(monkeypatch):
+    # model_stats names a cell by the league's key and a leg names its market as the board does.
+    cells = pd.DataFrame(
+        [("NHL", "assists", 0.4), ("NBA", "fantasy points prizepicks", 0.25), ("NBA", "PTS", 0.9)],
+        columns=["league", "market", "kelly_shrinkage"],
+    )
+    monkeypatch.setattr(
+        "sportstradamus.dashboard.components.slip_builder.load_model_stats", lambda: cells
+    )
+    skater = _board_row("Skater", "AST", "NHL", "Underdog")
+    guard = _board_row("Guard", "fantasy points underdog", "NBA", "Underdog")
+    wing = _board_row("Wing", "PTS", "NBA", "Underdog")
+
+    assert slip_shrinkage([build_leg(skater | {"Stat": "assists"})]) == 0.4
+    # A leg saved while the board's Stat copied its Market holds the board's name in both.
+    assert slip_shrinkage([build_leg(skater)]) == 0.4
+    assert slip_shrinkage([build_leg(guard), build_leg(wing)]) == 0.25

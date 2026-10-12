@@ -75,7 +75,8 @@ def _legs_from_records(
     # Story legs carry the display market name in ``market`` but the league's own key in
     # ``stat`` (NHL ``assists``), and the board names a market by its platform's map
     # (``AST``): look up by ``stat``, with both sides under the league's key. A
-    # dashboard-built leg has market == stat == the board's name, which folds the same way.
+    # dashboard-built leg saved while the board's ``Stat`` copied its ``Market`` has the
+    # board's name in ``stat``, which folds the same way.
     # A label its platform's map lacks reaches the board with no ``Market``: no leg matches it.
     league_keyed = offers.assign(
         Market=list(map(archive_market, offers["League"], offers["Market"].fillna("")))

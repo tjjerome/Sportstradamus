@@ -289,6 +289,6 @@ def test_stored_partner_resolves_on_a_board_renamed_through_the_platform_map():
     assert [find_offer_idx(partner, board, platform="Underdog") for partner in partners] == [0, 1]
     assert [leg_label(partner) for partner in partners] == [
         "Travis Kelce Over 60.5 Receiving Yards",
-        # The display map names NHL assists by the league's key, so the board row reads AST too.
-        "Connor McDavid Under 1.5 AST",
+        # The display map names NHL assists by the league's key, and the label is read under it.
+        "Connor McDavid Under 1.5 Assists",
     ]

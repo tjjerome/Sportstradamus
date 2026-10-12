@@ -137,6 +137,25 @@ def test_join_casing_preserves_input_columns_and_casing():
     assert list(df.columns) == ["League", "Market", "row"]
 
 
+def test_history_row_named_by_its_platform_stays_under_its_model_cell():
+    # History keeps Underdog's name for NBA and WNBA fantasy points; stat_meta names the
+    # cell by the league's own key.
+    meta = pd.concat(
+        [_META, _META.iloc[[1]].assign(market="fantasy points prizepicks", dist="Gamma")],
+        ignore_index=True,
+    )
+    history = pd.DataFrame(
+        [
+            {"League": "NBA", "Market": "fantasy points underdog", "row": 1},
+            {"League": "NBA", "Market": "PTS", "row": 2},
+        ]
+    )
+    assert apply_lab_filters(history, meta, {})["row"].tolist() == [1, 2]
+    assert apply_lab_filters(history, meta, {"dist": ["Gamma"]}).to_dict("records") == [
+        {"League": "NBA", "Market": "fantasy points underdog", "row": 1}
+    ]
+
+
 def test_load_stat_meta_nba_ast_sparse_defaults():
     meta = load_stat_meta()
     row = meta.loc[(meta["league"] == "NBA") & (meta["market"] == "AST")].iloc[0]

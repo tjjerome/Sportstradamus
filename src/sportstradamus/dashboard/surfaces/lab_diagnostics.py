@@ -39,6 +39,7 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     reliability_diagram,
     sharpness_histogram,
 )
+from sportstradamus.helpers import archive_market
 
 # Minimum predicted-probability std; markets below this cluster too tightly
 # to discriminate, flagged as likely under-dispersed.
@@ -147,9 +148,12 @@ for (league, market), grp in df.groupby(["League", "Market"]):
 
 market_df = pd.DataFrame(market_rows)
 if not market_df.empty:
+    # stat_meta names a cell by the league's own key, and history keeps the platform's
+    # name for NBA and WNBA Underdog fantasy points.
+    market_df["market"] = list(map(archive_market, market_df["League"], market_df["Market"]))
     market_df = market_df.merge(
         stat_meta[["league", "market", "dist", "target_normalization"]],
-        left_on=["League", "Market"],
+        left_on=["League", "market"],
         right_on=["league", "market"],
         how="left",
     ).rename(columns={"dist": "Family", "target_normalization": "Norm"})

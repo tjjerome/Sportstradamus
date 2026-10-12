@@ -155,7 +155,9 @@ def add_market_display(df: pd.DataFrame) -> pd.DataFrame:
     itself is left unchanged — offer matching and lens/filter logic key off the slug.
     """
     df = df.copy()
+    # A label its platform's map lacks reaches the board with no ``Market``: it reads blank.
     df["Market Display"] = [
-        market_display_name(lg, m) for lg, m in zip(df["League"], df["Market"], strict=True)
+        market_display_name(lg, m)
+        for lg, m in zip(df["League"], df["Market"].fillna(""), strict=True)
     ]
     return df
