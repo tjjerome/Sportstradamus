@@ -9,8 +9,12 @@ path (``Scrape.get`` returns ``{}`` on exhausted retries, so indexing raises
 ``KeyError`` and the loop yields no games). The reference keeps the old broad
 ``except Exception`` so the narrowed ``(KeyError, IndexError, TypeError)`` catch
 in the extracted helper is proven equivalent on the realistic failure shape.
+
+The helper returns that next-game map first and, second, every game it saw under
+its own day: a later-dated offer reads its own game there.
 """
 
+from copy import deepcopy
 from datetime import date, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -62,11 +66,15 @@ def _old_inline(league_id, season, today):
 
 
 def _install_scraper(monkeypatch, payloads_by_date):
-    """Stateless url->payload stub so the helper and the reference agree."""
+    """Stateless url->payload stub so the helper and the reference agree.
+
+    Each request gets its own copy, as a real one does: the reference extends the
+    first day's game list in place, which would leave later days' games in it.
+    """
 
     def _get(url, *args, **kwargs):
         date_str = parse_qs(urlparse(url).query)["Date"][0]
-        return payloads_by_date.get(date_str, {})
+        return deepcopy(payloads_by_date.get(date_str, {}))
 
     monkeypatch.setattr(base.scraper, "get", _get)
 
@@ -92,16 +100,30 @@ _EXPECTED = {
 )
 def test_matches_reference_and_expected(monkeypatch, league_id, season):
     _install_scraper(monkeypatch, _RECORDED)
-    result = fetch_upcoming_games(league_id, season, _TODAY)
-    assert result == _EXPECTED
-    assert result == _old_inline(league_id, season, _TODAY)
+    upcoming, _ = fetch_upcoming_games(league_id, season, _TODAY)
+    assert upcoming == _EXPECTED
+    assert upcoming == _old_inline(league_id, season, _TODAY)
+
+
+def test_every_game_is_also_listed_under_its_own_day(monkeypatch):
+    """BOS and LAL play twice in the window: the next-game map holds only their first."""
+    _install_scraper(monkeypatch, _RECORDED)
+    _, by_date = fetch_upcoming_games("00", "2024", _TODAY)
+    assert by_date == {
+        ("BOS", "2024-12-01"): {"Opponent": "NYK", "Home": False},
+        ("NYK", "2024-12-01"): {"Opponent": "BOS", "Home": True},
+        ("LAL", "2024-12-02"): {"Opponent": "BOS", "Home": False},
+        ("BOS", "2024-12-02"): {"Opponent": "LAL", "Home": True},
+        ("MIA", "2024-12-03"): {"Opponent": "LAL", "Home": False},
+        ("LAL", "2024-12-03"): {"Opponent": "MIA", "Home": True},
+    }
 
 
 def test_endpoint_failure_yields_empty(monkeypatch):
     # Scrape.get returns {} after exhausting retries -> ["resultSets"] KeyErrors.
     _install_scraper(monkeypatch, {})
-    assert fetch_upcoming_games("00", "2024", _TODAY) == {}
-    assert fetch_upcoming_games("00", "2024", _TODAY) == _old_inline("00", "2024", _TODAY)
+    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})
+    assert _old_inline("00", "2024", _TODAY) == {}
 
 
 def test_partial_fetch_failure_yields_empty(monkeypatch):
@@ -109,10 +131,10 @@ def test_partial_fetch_failure_yields_empty(monkeypatch):
     # game loop, so no games are recorded -- matching the old single-try block.
     partial = {"12/01/2024": _RECORDED["12/01/2024"]}
     _install_scraper(monkeypatch, partial)
-    assert fetch_upcoming_games("00", "2024", _TODAY) == {}
-    assert fetch_upcoming_games("00", "2024", _TODAY) == _old_inline("00", "2024", _TODAY)
+    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})
+    assert _old_inline("00", "2024", _TODAY) == {}
 
 
 def test_empty_game_list_yields_empty(monkeypatch):
     _install_scraper(monkeypatch, dict.fromkeys(_RECORDED, _payload([])))
-    assert fetch_upcoming_games("00", "2024", _TODAY) == {}
+    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})

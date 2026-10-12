@@ -59,6 +59,7 @@ class _StatsStub:
 
     def get_depth(self, offers):
         self.depth_calls += 1
+        self.depth_offers = offers
         if self.depth_error is not None:
             raise self.depth_error
 
@@ -188,3 +189,22 @@ def test_an_offer_with_no_date_is_never_dropped_as_preseason(monkeypatch):
     scored = scoring._match_league_offers("NBA", markets, {"NBA": _StatsStub()}, _BOOK, _Pbar())
 
     assert scored == [{"Player": "A", "Market": "PTS"}]
+
+
+def test_feature_prep_gets_each_players_earliest_dated_offer(monkeypatch):
+    """Features are one row a player, built for his earlier game, so depth and volume
+    have to be prepared for that game too.
+    """
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    later = "2026-09-13"
+    markets = _nba_markets()
+    markets["PTS"].append(markets["PTS"][0] | {"Date": later})
+    markets["REB"][0]["Date"] = later
+    stats = {"NBA": _StatsStub()}
+
+    scoring._match_league_offers("NBA", markets, stats, _BOOK, _Pbar())
+
+    prepared = {offer["Player"]: offer["Date"] for offer in stats["NBA"].depth_offers}
+    assert prepared == {"A": _DATE, "B": later, "C": _DATE}
+    assert len(stats["NBA"].depth_offers) == 3

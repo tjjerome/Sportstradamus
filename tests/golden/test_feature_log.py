@@ -28,11 +28,13 @@ from sportstradamus.prediction.feature_log import (
     prune_feature_log,
     upsert_feature_log,
 )
+from sportstradamus.stats.base import Stats
 
 # The package __init__ re-exports the model_prob *function*, shadowing the submodule.
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 _DATE = "2026-10-04"
+_NEXT_DATE = "2026-10-05"
 _OBSERVED_AT = datetime.datetime(2026, 10, 4, 12, 0, 0)
 
 
@@ -177,7 +179,8 @@ def test_book_leg_columns_follow_each_rows_quote(log_dir):
 
 def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_team(log_dir):
     offers = [*_offers(["A"], team="NYY"), *_offers(["B"], team="SEA")]
-    upcoming = SimpleNamespace(upcoming_games={"NYY": {"Opponent Pitcher": "Logan Gilbert"}})
+    upcoming = Stats()
+    upcoming.upcoming_games = {"NYY": {"Opponent Pitcher": "Logan Gilbert"}}
     _upsert(
         _features({"A": 1.0, "B": 2.0}),
         league="MLB",
@@ -190,6 +193,36 @@ def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_team(log_dir):
     pitchers = _read(log_dir, "MLB_hits").set_index("Player")["Opponent Pitcher"]
     assert pitchers.to_dict() == {"A": "Logan Gilbert", "B": None}
     assert "Opponent Pitcher" not in _read(log_dir, "NBA_PTS")
+
+
+def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_own_game_date(log_dir):
+    """NYY plays on both days and SEA only tomorrow: the next-game map names neither's
+    starter for tomorrow.
+    """
+    tomorrow = "2026-10-05"
+    offers = [
+        *_offers(["A"], team="NYY"),
+        *_offers(["B"], date=tomorrow, team="NYY"),
+        *_offers(["C"], date=tomorrow, team="SEA"),
+    ]
+    schedule = Stats()
+    schedule.upcoming_games = {"NYY": {"Opponent Pitcher": "Today Arm"}}
+    schedule.upcoming_games_by_date = {
+        ("NYY", _DATE): {"Opponent Pitcher": "Today Arm"},
+        ("NYY", tomorrow): {"Opponent Pitcher": "Tomorrow Arm"},
+        ("SEA", tomorrow): {"Opponent Pitcher": "Sea Arm"},
+    }
+    _upsert(
+        _features({"A": 1.0, "B": 2.0, "C": 3.0}),
+        league="MLB",
+        market="hits",
+        offers=offers,
+        stat_data=schedule,
+    )
+
+    assert _read(log_dir, "MLB_hits")["Opponent Pitcher"].tolist() == ["Today Arm"]
+    later = _read(log_dir, "MLB_hits", date=tomorrow).set_index("Player")["Opponent Pitcher"]
+    assert later.to_dict() == {"B": "Tomorrow Arm", "C": "Sea Arm"}
 
 
 def test_prune_removes_only_partitions_past_retention(log_dir):
@@ -261,8 +294,11 @@ def _predict(_filedict, _market, _stat_data, player_stats, *_args) -> pd.DataFra
     )
 
 
-def _score(monkeypatch, tmp_path) -> pd.DataFrame:
-    """Serve three NBA BLK offers through the real ``model_prob``; return its records."""
+def _score(monkeypatch, tmp_path, also_next_day=()) -> pd.DataFrame:
+    """Serve three NBA BLK offers through the real ``model_prob``; return its records.
+
+    A player named in ``also_next_day`` is offered again a day later, listed last.
+    """
     pickle_path = tmp_path / "NBA_BLK.mdl"
     with open(pickle_path, "wb") as outfile:
         pickle.dump(_FILEDICT, outfile)
@@ -288,6 +324,7 @@ def _score(monkeypatch, tmp_path) -> pd.DataFrame:
         }
         for player in _PLAYERS
     ]
+    offers += [offer | {"Date": _NEXT_DATE} for offer in offers if offer["Player"] in also_next_day]
     player_stats = pd.DataFrame(
         {
             "Avg5": [1.0, 2.0, 3.0],
@@ -341,6 +378,26 @@ def test_model_prob_logs_each_scored_player(log_dir, monkeypatch, tmp_path):
     assert logged["Quote Observed At"].tolist() == [pd.Timestamp(_OBSERVED_AT)] * 3
     np.testing.assert_allclose(logged["Quote Over Prob"], 1 - _BOOK_UNDER)
     assert served["Player"].tolist() == _PLAYERS
+
+
+def test_a_two_date_player_is_priced_and_logged_for_his_earlier_game(
+    log_dir, monkeypatch, tmp_path
+):
+    """A player has one feature row, his earlier game's: the book leg and the log follow it."""
+    asked = []
+    quote_inputs = _StubArchive.get_training_quote_inputs
+
+    def recording(self, league, market, date, entities, at=None):
+        asked.append(date)
+        return quote_inputs(self, league, market, date, entities, at)
+
+    monkeypatch.setattr(_StubArchive, "get_training_quote_inputs", recording)
+
+    _score(monkeypatch, tmp_path, also_next_day=_PLAYERS[:1])
+
+    assert set(asked) == {_DATE}
+    assert _read(log_dir, "NBA_BLK")["Player"].tolist() == _PLAYERS
+    assert not (log_dir / f"date={_NEXT_DATE}").exists()
 
 
 @pytest.mark.parametrize(

@@ -44,6 +44,7 @@ from sportstradamus.helpers.io import (
     market_file_slug,
     read_parquet_safe,
 )
+from sportstradamus.stats.base import earliest_last
 
 if TYPE_CHECKING:
     from sportstradamus.helpers.training_quotes import TrainingQuote
@@ -91,7 +92,8 @@ def upsert_feature_log(
         model_weight: The pickle's model share of the book blend.
         hist_gate: Zero-rate gate the serve read from ``stat_zi``.
     """
-    game_dates = {offer["Player"]: offer["Date"] for offer in offers}
+    # One row a player: the game his features were built for, the earliest he is offered on.
+    game_dates = {offer["Player"]: offer["Date"] for offer in earliest_last(offers)}
     rows = pd.DataFrame(
         {
             "League": league,
@@ -112,7 +114,9 @@ def upsert_feature_log(
     if league == "MLB":
         teams = {offer["Player"]: offer["Team"] for offer in offers}
         rows["Opponent Pitcher"] = [
-            stat_data.upcoming_games.get(teams.get(player), {}).get("Opponent Pitcher")
+            stat_data.upcoming_game(teams.get(player), game_dates.get(player)).get(
+                "Opponent Pitcher"
+            )
             for player in rows.index
         ]
     rows = rows.join(player_stats).join(prob_params).dropna(subset=["Date"])

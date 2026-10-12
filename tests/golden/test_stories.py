@@ -32,6 +32,7 @@ from sportstradamus.prediction.stories.why import (
     _matchup_clause,
     story_dek,
 )
+from sportstradamus.stats.base import Stats
 
 _DATE = "2026-06-13"
 
@@ -734,9 +735,12 @@ _MLB_UPCOMING = {
 }
 
 
-def _fake_mlb() -> SimpleNamespace:
-    """The two ``StatsMLB`` attributes ``attach_lineup_columns`` reads."""
-    return SimpleNamespace(players=_MLB_PLAYERS, upcoming_games=_MLB_UPCOMING)
+def _fake_mlb() -> Stats:
+    """A ``Stats`` holding the ``StatsMLB`` data ``attach_lineup_columns`` reads."""
+    mlb = Stats()
+    mlb.players = _MLB_PLAYERS
+    mlb.upcoming_games = _MLB_UPCOMING
+    return mlb
 
 
 def _mlb_offer(*, position="B3", bats="R", opp_hand="L", lineup="posted") -> pd.DataFrame:
@@ -874,7 +878,7 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
             {"League": "MLB", "Team": "NYY", "Player": "Gerrit Cole", "Position": "P"},
             {"League": "NBA", "Team": "BOS", "Player": "Jayson Tatum", "Position": "B1"},
         ]
-    )
+    ).assign(Date=_DATE)
     out = attach_lineup_columns(offers, {"MLB": _fake_mlb()})
     assert out[["Bats", "Opp Hand", "Lineup"]].to_numpy().tolist() == [
         ["R", "R", "posted"],
@@ -886,6 +890,25 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
         ["", "", ""],
         ["", "", ""],
     ]
+
+
+def test_attach_lineup_columns_reads_the_game_of_the_rows_own_date():
+    """Judge is on tonight's card against a right-hander; tomorrow his team faces a
+    left-hander and no card is posted yet.
+    """
+    tomorrow = "2026-06-14"
+    mlb = _fake_mlb()
+    mlb.players = _MLB_PLAYERS | {1: {"name": "Lefty Arm", "throws": "L"}}
+    mlb.upcoming_games_by_date = {
+        ("NYY", _DATE): _MLB_UPCOMING["NYY"],
+        ("NYY", tomorrow): {"Opponent Pitcher": "Lefty Arm", "Batting Order": []},
+    }
+    judge = {"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"}
+    offers = pd.DataFrame([judge | {"Date": _DATE}, judge | {"Date": tomorrow}])
+
+    out = attach_lineup_columns(offers, {"MLB": mlb})
+
+    assert out[["Opp Hand", "Lineup"]].to_numpy().tolist() == [["R", "posted"], ["L", "usual"]]
 
 
 def test_attach_lineup_columns_blanks_when_mlb_is_not_loaded():

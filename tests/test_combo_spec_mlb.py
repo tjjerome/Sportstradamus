@@ -181,6 +181,7 @@ def test_bernoulli_p_bucket_table(monkeypatch):
     stats = make_stats(
         gamelog=empty_gamelog(),
         upcoming_games={"NYY": {"Pitcher": "Gerrit Cole"}},
+        upcoming_games_by_date={},
         _sp_win_curve=None,
     )
     for p_team, ratio in ((0.5, 0.589), (0.70, 0.684), (0.35, 0.430)):
@@ -220,6 +221,7 @@ def test_bernoulli_p_fitted_curve(monkeypatch):
     stats = make_stats(
         gamelog=synthetic_starter_gamelog(),
         upcoming_games={"NYY": {"Pitcher": "Probable Guy"}},
+        upcoming_games_by_date={},
         _sp_win_curve=None,
     )
     monkeypatch.setattr(mlb_mod, "archive", fake_archive(0.5))
@@ -233,7 +235,9 @@ def test_bernoulli_p_fitted_curve(monkeypatch):
 
 
 def test_bernoulli_p_unresolved_team_is_nan():
-    stats = make_stats(gamelog=empty_gamelog(), upcoming_games={}, _sp_win_curve=None)
+    stats = make_stats(
+        gamelog=empty_gamelog(), upcoming_games={}, upcoming_games_by_date={}, _sp_win_curve=None
+    )
     assert np.isnan(stats._combo_bernoulli_p("pitcher win", "Unknown Arm", QUOTE_DATE))
 
 
@@ -248,6 +252,7 @@ def test_pitcher_team_resolution(monkeypatch):
     stats = make_stats(
         gamelog=gamelog,
         upcoming_games={"NYY2": {"Pitcher": "Nightcap Guy"}},
+        upcoming_games_by_date={},
         _sp_win_curve=(),
     )
     assert stats._pitcher_team("Settled Starter", "2026-06-01") == "BOS"
@@ -256,6 +261,28 @@ def test_pitcher_team_resolution(monkeypatch):
     monkeypatch.setattr(mlb_mod, "archive", fake_archive(0.5, seen))
     stats._combo_bernoulli_p("pitcher win", "Nightcap Guy", QUOTE_DATE)
     assert seen == [("MLB", QUOTE_DATE, "NYY")]
+
+
+def test_pitcher_team_reads_the_schedule_of_the_quoted_date():
+    """Tomorrow's probable starter is the usual later-dated pitcher offer, and the
+    next-game map names only today's.
+    """
+    tomorrow = "2026-08-31"
+    stats = make_stats(
+        gamelog=empty_gamelog(),
+        upcoming_games={"NYY": {"Pitcher": "Today Guy"}},
+        upcoming_games_by_date={
+            ("NYY", QUOTE_DATE): {"Pitcher": "Today Guy"},
+            ("NYY", tomorrow): {"Pitcher": "Tomorrow Guy"},
+            ("SEA2", tomorrow): {"Pitcher": "Nightcap Guy"},
+        },
+    )
+    assert stats._pitcher_team("Tomorrow Guy", tomorrow) == "NYY"
+    assert stats._pitcher_team("Nightcap Guy", tomorrow) == "SEA"
+    assert stats._pitcher_team("Tomorrow Guy", QUOTE_DATE) is None
+    assert stats._pitcher_team("Today Guy", QUOTE_DATE) == "NYY"
+    # A date the schedule does not reach still reads the next game.
+    assert stats._pitcher_team("Today Guy", "2026-09-05") == "NYY"
 
 
 def test_bucket_edges_cover_the_unit_interval():

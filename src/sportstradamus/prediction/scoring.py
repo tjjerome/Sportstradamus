@@ -27,6 +27,7 @@ from sportstradamus.helpers import LazyArchive, odds_budget, stat_map
 from sportstradamus.prediction.correlation import find_correlation
 from sportstradamus.prediction.model_prob import book_fallback_prob, model_prob, normalize_market
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.base import earliest_last
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -103,7 +104,11 @@ def _match_league_offers(league, markets, stats, book, pbar):
         return []
 
     stat_data = stats[league]
-    by_player = {offer["Player"]: offer for offers in markets.values() for offer in offers}
+    # Depth and volume are prepared once a player, for the game his feature row is built on.
+    by_player = {
+        offer["Player"]: offer
+        for offer in earliest_last(offer for offers in markets.values() for offer in offers)
+    }
     all_offers = list(by_player.values())
     try:
         stat_data.get_depth(all_offers)

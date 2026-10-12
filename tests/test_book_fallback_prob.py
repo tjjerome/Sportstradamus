@@ -153,6 +153,25 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert rec["Home"] is True
 
 
+def test_a_two_date_players_book_leg_is_read_for_his_earlier_game(monkeypatch):
+    """His one feature row is built for the earlier game, so the quote is that game's too."""
+    _patch_cell(monkeypatch)
+    asked = []
+
+    class _RecordingArchive(_StubArchive):
+        def get_training_quote_inputs(self, league, market, date, entities, at=None):
+            asked.append(date)
+            return super().get_training_quote_inputs(league, market, date, entities, at)
+
+    monkeypatch.setattr(book_quotes, "archive", _RecordingArchive(_quote_rows()))
+    stats = _StubStats(_feature_frame(["Test Player"]))
+    listed_last = _offer() | {"Date": "2026-06-04"}
+
+    mp.book_fallback_prob([_offer(), listed_last], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+
+    assert asked == ["2026-06-03"]
+
+
 def test_neutral_fill_when_no_feature_matrix(monkeypatch):
     _patch_cell(monkeypatch)
     monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))

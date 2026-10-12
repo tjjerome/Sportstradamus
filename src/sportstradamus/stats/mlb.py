@@ -39,10 +39,13 @@ from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.helpers.text import MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
+    _SCHEDULE_LOOKAHEAD_DAYS,
     GAMELOG_RETENTION_DAYS,
     ComboSpec,
     Stats,
     archive,
+    earliest_game_dates,
+    earliest_last,
     is_mlb_pitcher_market,
     scraper,
 )
@@ -268,23 +271,33 @@ def _mlb_team_abbr(mlb_teams, team_id):
     )
 
 
-def _build_mlb_upcoming_games(mlb_games, mlb_teams):
+def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
     mlb_upcoming_games = {}
+    mlb_upcoming_games_by_date = {}
     for game in mlb_games:
         # Until it is over: the feed moves a game to "Warmup" minutes before first pitch,
         # and the board run that falls there is the last one before the game.
         if not mlb_game_is_over(game["status"]) and game["game_type"] not in ["A"]:
             awayTeam = _mlb_team_abbr(mlb_teams, game["away_id"])
             homeTeam = _mlb_team_abbr(mlb_teams, game["home_id"])
-            game_bs = mlb.boxscore_data(game["game_id"])
-            players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
+            # A later day's game is listed by date only, so the next-game map holds what
+            # it did while the schedule request ended today. No lineup is posted a day
+            # ahead, which saves that game's box score request.
+            later = game["game_date"] > today.isoformat()
+            if later:
+                away_order, home_order = [], []
+            else:
+                game_bs = mlb.boxscore_data(game["game_id"])
+                players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
+                away_order = [players[i] for i in game_bs["away"]["battingOrder"]]
+                home_order = [players[i] for i in game_bs["home"]["battingOrder"]]
             playoff = game["game_type"] in _MLB_POSTSEASON_GAME_TYPES
             away_entry = {
                 "Pitcher": remove_accents(game["away_probable_pitcher"]),
                 "Home": False,
                 "Opponent": homeTeam,
                 "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
+                "Batting Order": away_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
             }
@@ -293,14 +306,16 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams):
                 "Home": True,
                 "Opponent": awayTeam,
                 "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
+                "Batting Order": home_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
             }
             suffix = "" if game["game_num"] == 1 else str(game["game_num"])
-            mlb_upcoming_games[awayTeam + suffix] = away_entry
-            mlb_upcoming_games[homeTeam + suffix] = home_entry
-    return mlb_upcoming_games
+            for team, entry in ((awayTeam + suffix, away_entry), (homeTeam + suffix, home_entry)):
+                mlb_upcoming_games_by_date[team, game["game_date"]] = entry
+                if not later:
+                    mlb_upcoming_games[team] = entry
+    return mlb_upcoming_games, mlb_upcoming_games_by_date
 
 
 def _mlb_final_game_ids(mlb_games, prev_game_ids):
@@ -898,7 +913,8 @@ class StatsMLB(Stats):
         """Fetch and append new MLB game logs, then trim to the rolling 4-year window.
 
         Queries a 60-day schedule window starting from the last logged date (or
-        season start if the gamelog is empty), parses each Final-status game, and
+        season start if the gamelog is empty) and ending no later than the last day
+        of the schedule lookahead, parses each game whose box score is final, and
         writes the updated gamelog/teamlog/players bundle to disk.
         """
         today = datetime.today().date()
@@ -909,12 +925,14 @@ class StatsMLB(Stats):
         next_day = max(next_day, self.season_start)
         next_day = min(next_day, today)
         end_date = next_day + timedelta(days=60)
-        end_date = min(end_date, today)
+        end_date = min(end_date, today + timedelta(days=_SCHEDULE_LOOKAHEAD_DAYS - 1))
         mlb_games = mlb.schedule(
             start_date=next_day.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
         )
         mlb_teams = mlb.get("teams", {"sportId": _MLB_SPORT_ID})
-        self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
+        self.upcoming_games, self.upcoming_games_by_date = _build_mlb_upcoming_games(
+            mlb_games, mlb_teams, today
+        )
         self._refresh_handedness()
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
@@ -1237,7 +1255,9 @@ class StatsMLB(Stats):
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
             home_map = day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
         else:
-            home_map = {p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()}
+            home_map = {
+                r["Player"]: self.upcoming_game(r["Team"], r["Date"]).get("Home") for r in records
+            }
 
         teams = set(team_of.values())
         adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
@@ -1274,8 +1294,6 @@ class StatsMLB(Stats):
         alone; an unquoted game yields a neutral market factor via the archive default.
         """
         records = offers if isinstance(offers, list) else list(offers.values())
-        opponent_of = {r["Team"]: r["Opponent"] for r in records}
-        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
 
         if date < datetime.today().date():
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
@@ -1284,9 +1302,15 @@ class StatsMLB(Stats):
                 named = day.loc[day[self.log_strings["team"]] == team, "opponent pitcher"]
                 starter_of[team] = named.mode().iloc[0] if not named.mode().empty else None
         else:
+            # A team gets one multiplier, so its starter, opponent and park side have to
+            # be one game's: the earliest its players are offered on.
+            records = earliest_last(records)
             starter_of = {
-                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher") for team in teams
+                r["Team"]: self.upcoming_game(r["Team"], r["Date"]).get("Opponent Pitcher")
+                for r in records
             }
+        opponent_of = {r["Team"]: r["Opponent"] for r in records}
+        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
 
         adjustment = {}
         for team in teams:
@@ -1512,8 +1536,10 @@ class StatsMLB(Stats):
     def _pitcher_team(self, player, date):
         """Team abbreviation for a pitcher on ``date``.
 
-        A settled date reads the player's gamelog row; otherwise the
-        probable-pitcher table. ``None`` when neither knows the player.
+        A settled date reads the player's gamelog row; otherwise the probable
+        starters of ``date``'s own games, then of each team's next game: a pitcher
+        offered a day ahead starts a game the next-game map does not hold.
+        ``None`` when none of them knows the player.
         """
         if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
@@ -1521,7 +1547,12 @@ class StatsMLB(Stats):
         day = rows[rows[self.log_strings["date"]].astype(str).str[:10] == date]
         if not day.empty:
             return day.iloc[-1][self.log_strings["team"]]
-        for team, game in self.upcoming_games.items():
+        on_date = [
+            (team, game)
+            for (team, game_date), game in self.upcoming_games_by_date.items()
+            if game_date == date
+        ]
+        for team, game in [*on_date, *self.upcoming_games.items()]:
             if game.get("Pitcher") == player:
                 # doubleheader entries key as e.g. "NYY2"; the archive stores
                 # the bare abbreviation
@@ -1582,9 +1613,12 @@ class StatsMLB(Stats):
             self.playerProfile.fillna(0, inplace=True)
 
         else:
+            # The parlay search asks again with records that carry no date; those read
+            # each team's next game.
+            dates = earliest_game_dates(offers)
             depth = {}
             for player in list(players):
-                order = self.upcoming_games.get(teams[player], {}).get("Batting Order", [])
+                order = self.upcoming_game(teams[player], dates[player]).get("Batting Order", [])
 
                 if player in order:
                     depth[player] = order.index(player) + 1

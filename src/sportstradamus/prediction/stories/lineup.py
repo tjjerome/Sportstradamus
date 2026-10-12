@@ -4,8 +4,8 @@ The story layer reads only ``current_offers`` columns, so tonight's lineup facts
 have to become columns before ``why.py`` can turn them into clauses. Both sources
 are the loaded ``StatsMLB``: ``players`` is the ``{id: {name, bats, throws}}``
 registry, resolved by name because that is the only player key the offers frame
-carries, and ``upcoming_games[team]`` holds the probable opposing starter plus the
-posted batting order.
+carries, and ``upcoming_game(team, date)`` holds the probable opposing starter plus
+the posted batting order of the row's own game.
 """
 
 import re
@@ -52,8 +52,8 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
     bats_by_name = _hand_by_name(mlb.players, "bats")
     throws_by_name = _hand_by_name(mlb.players, "throws")
     bats, opp_hand, lineup = [], [], []
-    for league, team, player, position in offers[
-        ["League", "Team", "Player", "Position"]
+    for league, date, team, player, position in offers[
+        ["League", "Date", "Team", "Player", "Position"]
     ].itertuples(index=False, name=None):
         if league != "MLB" or batting_slot(position) is None:
             bats.append("")
@@ -62,7 +62,7 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
             continue
         # Doubleheaders key the second game "NYY2" while offers carry plain "NYY",
         # so its hitters miss the card and read as usual — same as get_depth.
-        game = mlb.upcoming_games.get(team, {})
+        game = mlb.upcoming_game(team, date)
         starter = game.get("Opponent Pitcher")
         bats.append(bats_by_name.get(player, ""))
         opp_hand.append(throws_by_name.get(starter, "") if starter else "")

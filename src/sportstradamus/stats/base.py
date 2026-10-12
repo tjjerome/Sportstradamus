@@ -5,7 +5,7 @@ import importlib.resources as pkg_resources
 import os.path
 import pickle
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from functools import partial
 from io import StringIO
@@ -124,9 +124,9 @@ _SEASON_ROLLOVER_MONTH: int = 8
 # a season start further than this behind today belongs to a season that is over.
 SEASON_MAX_DAYS: int = 300
 
-# Days ahead (including today) that fetch_upcoming_games scrapes. Three days
-# covers today + tomorrow + day-after so late-night runs don't miss next-day
-# tip-offs.
+# Days ahead (including today) that the NBA, WNBA and MLB schedule fetches cover.
+# Three days covers today + tomorrow + day-after so late-night runs don't miss
+# next-day tip-offs, and an offer dated a day or two ahead finds its own game.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
 
 # A "blowout" is a game lopsided enough to suppress a starter's volume. Each
@@ -290,6 +290,29 @@ def flatten_offers(offers: dict | list, market: str) -> dict | list:
     return flat
 
 
+def earliest_last(offers: Iterable[dict]) -> list[dict]:
+    """Order ``offers`` so a dict built over them keeps each key's earliest game.
+
+    A feature row is one per player and call, so a player offered on two dates is
+    built for the earlier one, and every per-player or per-team map has to pick
+    that same game. Later dates come first (``Date`` is ``YYYY-MM-DD`` text, which
+    orders as dates do), and before them an offer with no date, which so stands
+    only where no dated one does.
+    """
+    return sorted(
+        offers, key=lambda offer: (not offer.get("Date"), offer.get("Date") or ""), reverse=True
+    )
+
+
+def earliest_game_dates(offers: Iterable[dict]) -> dict[str, str | None]:
+    """Each offered player's earliest game date; a combo leg dates each of its players."""
+    dates = {}
+    for offer in earliest_last(offers):
+        for name in offer["Player"].replace(" vs. ", " + ").split(" + "):
+            dates[name] = offer.get("Date")
+    return dates
+
+
 def apply_volume_budget(
     player_profile: pd.DataFrame,
     market: str,
@@ -399,23 +422,27 @@ def scale_team_volume_to_budget(
         )
 
 
-def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict[str, dict]:
-    """Map each team to its next matchup from the stats.nba.com schedule.
+def fetch_upcoming_games(
+    league_id: str, season: str | int, today: date
+) -> tuple[dict[str, dict], dict[tuple[str, str], dict]]:
+    """Map each team to its next matchup, and to each matchup by day, from stats.nba.com.
 
     Scrapes the ``internationalbroadcasterschedule`` endpoint for ``today`` and
     the next two days. Shared by the NBA and WNBA ``update`` paths, which differ
     only in ``league_id`` ("00" vs "10") and the ``season`` value interpolated
     into the URL. Returns ``{team_abbr: {"Opponent": str, "Home": bool}}`` keyed
-    by the first date a team is seen.
+    by the first date a team is seen, then the same entries for every game seen,
+    keyed ``(team_abbr, "YYYY-MM-DD")`` by the day asked for.
 
     ``Scrape.get`` swallows network errors and returns ``{}`` on exhausted
     retries, so an unavailable endpoint surfaces here as a ``KeyError`` while
     indexing the empty response; that and the sibling ``IndexError`` /
-    ``TypeError`` from a malformed payload yield an empty mapping. This is the
+    ``TypeError`` from a malformed payload yield empty mappings. This is the
     historical bare-except behavior, narrowed to the exceptions the block can
     actually raise (§ E722).
     """
     upcoming_games: dict[str, dict] = {}
+    games_by_date: dict[tuple[str, str], dict] = {}
     try:
         ug_res = []
         for offset in range(_SCHEDULE_LOOKAHEAD_DAYS):
@@ -425,22 +452,19 @@ def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict
                 f"?LeagueID={league_id}&Season={season}&RegionID=1"
                 f"&Date={day.strftime('%m/%d/%Y')}&EST=Y"
             )
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
+            day_games = scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
+            ug_res.extend((day.isoformat(), game) for game in day_games)
 
-        for game in ug_res:
-            if game["vtAbbreviation"] not in upcoming_games:
-                upcoming_games[game["vtAbbreviation"]] = {
-                    "Opponent": game["htAbbreviation"],
-                    "Home": False,
-                }
-            if game["htAbbreviation"] not in upcoming_games:
-                upcoming_games[game["htAbbreviation"]] = {
-                    "Opponent": game["vtAbbreviation"],
-                    "Home": True,
-                }
+        for day, game in ug_res:
+            away = {"Opponent": game["htAbbreviation"], "Home": False}
+            home = {"Opponent": game["vtAbbreviation"], "Home": True}
+            games_by_date[game["vtAbbreviation"], day] = away
+            games_by_date[game["htAbbreviation"], day] = home
+            upcoming_games.setdefault(game["vtAbbreviation"], away)
+            upcoming_games.setdefault(game["htAbbreviation"], home)
     except (KeyError, IndexError, TypeError):
         pass
-    return upcoming_games
+    return upcoming_games, games_by_date
 
 
 @dataclasses.dataclass(frozen=True)
@@ -511,6 +535,9 @@ class Stats:
         self.defenseProfile = pd.DataFrame()
         self.teamProfile = pd.DataFrame()
         self.upcoming_games = {}
+        # Every scheduled game the league's update saw, by (team, "YYYY-MM-DD"): the map
+        # above holds one game a team, so a later-dated offer cannot read its own there.
+        self.upcoming_games_by_date: dict[tuple[str, str], dict] = {}
         self.usage_stat = ""
         self.tiebreaker_stat = ""
         self.comps = {}
@@ -1441,6 +1468,15 @@ class Stats:
             entry: stored.get(entry, {}) | fresh.get(entry, {}) for entry in stored | fresh
         }
 
+    def upcoming_game(self, team: str, date: str | None) -> dict:
+        """The schedule entry of ``team``'s game on ``date``, else of its next game.
+
+        ``upcoming_games`` holds one game a team, so read alone it hands a later-dated
+        offer the wrong game, or none when the team is off today. The NFL and the NHL
+        fill no dated map, and an offer can lack a date: both read the next game.
+        """
+        return self.upcoming_games_by_date.get((team, date), self.upcoming_games.get(team, {}))
+
     def get_depth(self, offers, date=datetime.today().date()):
         players = list(offers.keys()) if isinstance(offers, dict) else [x["Player"] for x in offers]
 
@@ -1549,6 +1585,9 @@ class Stats:
             teams = {k: v["Team"] for k, v in offers.items()}
             opponents = {k: v["Opponent"] for k, v in offers.items()}
         else:
+            # The row's date is the player's earliest, so his team and opponent are
+            # that game's too.
+            offers = earliest_last(offers)
             players = [x["Player"] for x in offers]
             teams = {x["Player"]: x["Team"] for x in offers}
             opponents = {x["Player"]: x["Opponent"] for x in offers}
@@ -1626,8 +1665,9 @@ class Stats:
         total) and the derived Spread / GameTotal / Blowout. Historical (``date``
         in the past) reads the realized ``gamelog`` row and rebinds ``teams`` /
         ``opponents`` (and MLB ``pitchers``) from it, taking OppTotal from the same
-        frame; upcoming reads ``upcoming_games`` plus the archived moneyline/total
-        and an extra ``get_total`` for the opponent. Returns the (possibly rebound)
+        frame; upcoming reads the schedule entry of each player's earliest offered
+        game (:meth:`upcoming_game`) plus the archived moneyline/total and an extra
+        ``get_total`` for the opponent. Returns the (possibly rebound)
         ``(stats, teams, opponents, pitchers)``; ``pitchers`` is ``None`` for
         non-MLB leagues.
         """
@@ -1647,26 +1687,15 @@ class Stats:
             if self.league == "MLB":
                 pitchers = todays_games["opponent pitcher"].to_dict()
         else:
+            dates = earliest_game_dates(offers)
+            games = {x: self.upcoming_game(teams[x], dates[x]) for x in stats.index}
             if self.league == "MLB":
-                pitchers = {
-                    x: self.upcoming_games.get(teams[x], {}).get("Opponent Pitcher")
-                    for x in stats.index
-                }
-
-            dates = {x["Player"]: x["Date"] for x in offers}
-            for player in list(dates.keys()):
-                if " + " in player.replace(" vs. ", " + "):
-                    split_players = player.replace(" vs. ", " + ").split(" + ")
-                    dates[split_players[0]] = dates[player]
-                    dates[split_players[1]] = dates[player]
-                    dates.pop(player)
+                pitchers = {x: games[x].get("Opponent Pitcher") for x in stats.index}
 
             # Explicit False (not the blanket fillna(0) below) keeps a missing
             # upcoming_games entry from writing an int into this otherwise-bool
             # column -- pyarrow rejects a mixed bool/int object column at parquet write.
-            stats["Home"] = [
-                self.upcoming_games.get(teams[x], {}).get("Home", False) for x in stats.index
-            ]
+            stats["Home"] = [games[x].get("Home", False) for x in stats.index]
             stats["Moneyline"] = [
                 archive.get_moneyline(self.league, dates[x], teams[x]) for x in stats.index
             ]

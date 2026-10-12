@@ -619,7 +619,9 @@ class StatsNBA(Stats):
             "Center-Guard": "B",
             "Guard-Center": "W",
         }
-        self.upcoming_games = fetch_upcoming_games("00", self.season[:4], today)
+        self.upcoming_games, self.upcoming_games_by_date = fetch_upcoming_games(
+            "00", self.season[:4], today
+        )
 
         params = {
             "season_nullable": self.season,

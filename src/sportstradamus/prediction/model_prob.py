@@ -57,6 +57,7 @@ from sportstradamus.prediction.offer_records import (
     finalize_records,
 )
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.base import earliest_last
 from sportstradamus.training.baselines import decode_model_params, serve_offset_mode
 from sportstradamus.training.group_conditional_cdf import (
     LEGACY_AFFINE_SCHEMA_VERSION,
@@ -1051,7 +1052,9 @@ def model_prob(
     """
     # style: allow-complexity -- top-level serving orchestrator: load pickle, build params,
     # apply posthoc/dispersion/structural calibration, blend with book, emit scoring columns.
-    dateMap = {x["Player"]: x["Date"] for x in offers}
+    # A player offered on two dates has one feature row, his earlier game's: the book leg
+    # is read for that game too.
+    dateMap = {x["Player"]: x["Date"] for x in earliest_last(offers)}
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
@@ -1279,7 +1282,7 @@ def book_fallback_prob(
         return []
     gate_arg = hist_gate or None
 
-    date_map = {x["Player"]: x["Date"] for x in offers}
+    date_map = {x["Player"]: x["Date"] for x in earliest_last(offers)}
     offer_df = _offer_frame_for_market(offers, market)
     if offer_df.empty:
         return []

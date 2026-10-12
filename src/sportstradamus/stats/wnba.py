@@ -116,7 +116,9 @@ class StatsWNBA(StatsNBA):
             latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
             latest_date = max(latest_date, self.season_start)
 
-        self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
+        self.upcoming_games, self.upcoming_games_by_date = fetch_upcoming_games(
+            "10", self.season_start.year, today
+        )
 
         (nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog, adv_teamlog) = (
             self._fetch_wnba_logs(latest_date, today)
