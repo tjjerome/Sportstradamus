@@ -25,12 +25,20 @@ MIN_TREND_ROWS = 3
 # How far ahead to fetch MLB schedules when building the probable-pitcher dict.
 MLB_PITCHER_LOOKAHEAD_DAYS = 7
 
+# The MLB feed's detailed game states whose box score will not change again. A game called
+# early stays "Completed Early" for good. "Game Over" is left out: its box score is not
+# final yet, and the feed lists that game again as "Final".
+MLB_FINAL_BOX_SCORE_STATES = frozenset({"Final", "Completed Early"})
+
 # The MLB feed's detailed game states that end a game or call it off; a cause, when one
 # is given, follows a colon ("Postponed: Rain"). Every other state is a game still to
 # come or under way: "Warmup" and "Delayed Start: Rain" both come before first pitch.
-MLB_FINISHED_STATES = frozenset(
-    {"Final", "Game Over", "Completed Early", "Postponed", "Cancelled", "Forfeit"}
-)
+MLB_FINISHED_STATES = MLB_FINAL_BOX_SCORE_STATES | {
+    "Game Over",
+    "Postponed",
+    "Cancelled",
+    "Forfeit",
+}
 
 # Team abbreviation corrections applied by both DFS scrapers. PDX→POR makes
 # Portland's WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept

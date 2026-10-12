@@ -36,7 +36,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.combined_markets import POST_RNG_SEED
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
-from sportstradamus.helpers.text import mlb_game_is_over
+from sportstradamus.helpers.text import MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     GAMELOG_RETENTION_DAYS,
@@ -307,7 +307,7 @@ def _mlb_final_game_ids(mlb_games, prev_game_ids):
     return [
         game["game_id"]
         for game in mlb_games
-        if game["status"] == "Final"
+        if game["status"].split(":")[0] in MLB_FINAL_BOX_SCORE_STATES
         and game["game_type"] not in ("E", "S", "A")
         and game["game_id"] not in prev_game_ids
     ]

@@ -4,6 +4,8 @@ The feed moves a game to ``Warmup`` minutes before first pitch and to
 ``Delayed Start: ...`` in bad weather. A filter that knew only ``Scheduled`` and
 ``Pre-Game`` dropped both, so the last board run before a game scored it with no
 starter, no home flag and no posted batting order.
+
+A game called early ends as ``Completed Early`` and is parsed as a ``Final`` one is.
 """
 
 from __future__ import annotations
@@ -29,16 +31,15 @@ _NOT_OVER = [
     "Manager challenge: Tag play",
     "Suspended: Rain",
 ]
-_OVER = [
-    "Final",
-    "Final: Tied",
+_BOX_SCORE_FINAL = ["Final", "Final: Tied", "Completed Early", "Completed Early: Rain"]
+_OVER_WITH_NO_BOX_SCORE = [
     "Game Over",
-    "Completed Early: Rain",
     "Postponed",
     "Postponed: Rain",
     "Cancelled: Snow",
     "Forfeit: Refusal",
 ]
+_OVER = [*_BOX_SCORE_FINAL, *_OVER_WITH_NO_BOX_SCORE]
 
 
 def _game(status: str, away_pitcher: str = "Away Arm") -> dict:
@@ -73,6 +74,18 @@ def test_game_over_leaves_the_schedule_map(monkeypatch: pytest.MonkeyPatch, stat
     monkeypatch.setattr(stats_mlb.mlb, "boxscore_data", lambda game_id: _BOXSCORE)
 
     assert stats_mlb._build_mlb_upcoming_games([_game(status)], _TEAMS) == {}
+
+
+@pytest.mark.parametrize("status", _BOX_SCORE_FINAL)
+def test_a_game_whose_box_score_is_final_is_parsed(status: str) -> None:
+    """A game called early ends as ``Completed Early`` for good, so nothing later parses it."""
+    assert stats_mlb._mlb_final_game_ids([_game(status)], prev_game_ids=[]) == [7]
+
+
+@pytest.mark.parametrize("status", [*_NOT_OVER, *_OVER_WITH_NO_BOX_SCORE])
+def test_a_game_with_no_final_box_score_is_not_parsed(status: str) -> None:
+    """``Game Over`` waits: the feed lists that game again as ``Final``."""
+    assert stats_mlb._mlb_final_game_ids([_game(status)], prev_game_ids=[]) == []
 
 
 def test_probable_pitchers_keep_todays_starter_through_warmup(
