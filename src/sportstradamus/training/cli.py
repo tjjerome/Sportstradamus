@@ -14,12 +14,7 @@ import tabulate
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    LazyArchive,
-    book_weights,
-    get_logger,
-    odds_budget,
-)
+from sportstradamus.helpers import LazyArchive, book_weights, get_logger, odds_budget
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.helpers.locks import (
@@ -655,22 +650,15 @@ def meditate(
         # (including correlate's per-run rebuild). Only trim_gamelog, which
         # yields league_start_date, is still needed.
         if not deterministic and not full_rebuild and frozen_matrix_dir is None:
-            # Fit book weights for moneylines and totals before per-market loop
-            book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
-            book_weights[lg]["Moneyline"] = fit_book_weights(
-                lg, "Moneyline", stat_data, archive, book_weights
-            )
-            book_weights.setdefault(lg, {}).setdefault("Totals", {})
-            book_weights[lg]["Totals"] = fit_book_weights(
-                lg, "Totals", stat_data, archive, book_weights
-            )
-
+            # Markets no training cell covers; train_market fits each cell's own book weights.
+            weighted_markets = ["Moneyline", "Totals"]
             if lg == "MLB":
-                for extra_market in ("1st 1 innings", "pitcher win", "triples"):
-                    book_weights.setdefault(lg, {}).setdefault(extra_market, {})
-                    book_weights[lg][extra_market] = fit_book_weights(
-                        lg, extra_market, stat_data, archive, book_weights
-                    )
+                weighted_markets += ["1st 1 innings", "pitcher win", "triples"]
+            for weighted_market in weighted_markets:
+                book_weights.setdefault(lg, {}).setdefault(weighted_market, {})
+                book_weights[lg][weighted_market] = fit_book_weights(
+                    lg, weighted_market, stat_data, archive, book_weights
+                )
 
             with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
                 json.dump(book_weights, outfile, indent=4)

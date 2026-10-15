@@ -87,11 +87,7 @@ from sportstradamus.helpers.distributions import (
 from sportstradamus.helpers.logging import JsonFormatter, get_logger
 from sportstradamus.helpers.market_display import market_display_name
 from sportstradamus.helpers.scraping import Scrape
-from sportstradamus.helpers.text import (
-    ABBR_MAP,
-    get_mlb_pitchers,
-    remove_accents,
-)
+from sportstradamus.helpers.text import ABBR_MAP, get_mlb_pitchers, remove_accents
 
 __all__ = [
     "ABBR_MAP",

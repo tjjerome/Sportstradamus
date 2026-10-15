@@ -1,4 +1,4 @@
-"""String normalization utilities.
+"""Name normalization and the MLB schedule readers.
 
 The name-normalization path is load-bearing: sportsbooks spell player
 names inconsistently (accents, suffixes, parenthesized team tags) and

@@ -27,8 +27,7 @@ from sportstradamus.training.scorecard import (
     load_test_set,
 )
 
-# Unloaded league instances, used only for `_fantasy_combo_spec`'s pure per-league
-# weight tables.
+# Constructed, never loaded, for `_fantasy_combo_spec`'s pure per-league weight tables.
 _LEAGUE_STATS: dict[str, type[Stats]] = {
     "MLB": StatsMLB,
     "NBA": StatsNBA,
