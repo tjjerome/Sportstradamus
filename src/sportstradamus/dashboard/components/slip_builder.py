@@ -46,7 +46,7 @@ from sportstradamus.dashboard.components.slip_state import (
     remove_leg,
 )
 from sportstradamus.dashboard.data import load_model_stats
-from sportstradamus.dashboard.legs import corr_key, find_offer_idx
+from sportstradamus.dashboard.legs import corr_key, find_offer_idx, leg_cell_market
 from sportstradamus.dashboard.slip_engine import (
     SlipScore,
     astrolabe_payload,
@@ -55,7 +55,6 @@ from sportstradamus.dashboard.slip_engine import (
     slip_headline,
 )
 from sportstradamus.dashboard.viewport import is_mobile
-from sportstradamus.helpers import archive_market
 from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
@@ -72,8 +71,7 @@ def slip_shrinkage(legs: Sequence[Mapping]) -> float:
         return 1.0
     vals = []
     for leg in legs:
-        # A cell goes by the league's own market name, a leg by the board's (NHL ``AST``).
-        market = archive_market(leg["league"], leg.get("stat") or leg["market"])
+        market = leg_cell_market(leg)
         cell = stats.loc[(stats["league"] == leg["league"]) & (stats["market"] == market)]
         if not cell.empty and pd.notna(cell.iloc[0]["kelly_shrinkage"]):
             vals.append(float(cell.iloc[0]["kelly_shrinkage"]))

@@ -19,7 +19,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.legs import find_offer_idx
+from sportstradamus.dashboard.legs import find_offer_idx, leg_cell_market
 from sportstradamus.dashboard.slip_engine import SlipScore
 from sportstradamus.helpers import archive_market
 from sportstradamus.helpers.io import upsert_user_slip
@@ -72,18 +72,15 @@ def _legs_from_records(
     # An absent offers snapshot loads as a frame with no ``League`` or ``Market`` column.
     if offers.empty:
         return []
-    # Story legs carry the display market name in ``market`` but the league's own key in
-    # ``stat`` (NHL ``assists``), and the board names a market by its platform's map
-    # (``AST``): look up by ``stat``, with both sides under the league's key. A
-    # dashboard-built leg saved while the board's ``Stat`` copied its ``Market`` has the
-    # board's name in ``stat``, which folds the same way.
+    # A leg is matched under the league's own market name (``leg_cell_market``) and the board
+    # names a market by its platform's map (NHL ``AST``), so the board's side folds too.
     # A label its platform's map lacks reaches the board with no ``Market``: no leg matches it.
     league_keyed = offers.assign(
         Market=list(map(archive_market, offers["League"], offers["Market"].fillna("")))
     )
     out: list[dict] = []
     for record in records:
-        market = archive_market(record["league"], record.get("stat") or record["market"])
+        market = leg_cell_market(record)
         idx = find_offer_idx({**record, "market": market}, league_keyed, platform)
         if idx is not None:
             out.append(build_leg(offers.loc[idx]))

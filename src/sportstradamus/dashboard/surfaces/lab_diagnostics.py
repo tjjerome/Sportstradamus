@@ -130,7 +130,6 @@ for (league, market), grp in df.groupby(["League", "Market"]):
         "BSS": round(bss, 4) if not np.isnan(bss) else None,
         "Samples": len(grp),
     }
-
     market_rows.append(row)
 
 market_df = pd.DataFrame(market_rows)
@@ -154,12 +153,9 @@ if not market_df.empty:
         for tile, (_, cell) in zip(tiles, worst_cells.iterrows(), strict=True):
             tile.metric(f"{cell['League']} - {cell['Market']}", f"{cell['BSS']:+.3f} BSS")
 
-    numeric_cols = [
-        c for c in ("Accuracy", "Balance", "Brier", "BSS", "Samples") if c in market_df.columns
-    ]
     render_themed_grid(
         market_df,
-        numeric_cols=numeric_cols,
+        numeric_cols=["Accuracy", "Balance", "Brier", "BSS", "Samples"],
         flag_col="BSS",
         flag_below=0.0,
         height=min(720, max(200, 40 + 32 * len(market_df))),
@@ -258,8 +254,7 @@ if decomp_rows:
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
     )
 
-has_dist = "Dist" in pred_df.columns and "Actual" in pred_df.columns
-if has_dist:
+if "Dist" in pred_df.columns and "Actual" in pred_df.columns:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
     if len(cov_df) >= 20:
         st.subheader("Prediction Interval Coverage")

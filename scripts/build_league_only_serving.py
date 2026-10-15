@@ -63,12 +63,9 @@ def _merge_stats(league_key: str, here_path: Path, prod_path: Path, out_dir: Pat
         print("model_stats: the two boxes' tables differ in columns or types; not merged")
         return False
     first = int((prod["league"] == league_key).to_numpy().argmax())
+    others = prod[prod["league"] != league_key]
     merged = pd.concat(
-        [
-            prod.iloc[:first][prod.iloc[:first]["league"] != league_key],
-            here[here["league"] == league_key],
-            prod.iloc[first:][prod.iloc[first:]["league"] != league_key],
-        ],
+        [others.iloc[:first], here[here["league"] == league_key], others.iloc[first:]],
         ignore_index=True,
     ).astype(prod.dtypes.to_dict())
     merged.to_parquet(out_dir / "model_stats.parquet", index=False)
