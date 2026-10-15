@@ -271,7 +271,7 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
                 away_order, home_order = [], []
             else:
                 game_bs = mlb.boxscore_data(game["game_id"])
-                players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
+                players = {p["id"]: p["fullName"] for p in game_bs["playerInfo"].values()}
                 away_order = [players[i] for i in game_bs["away"]["battingOrder"]]
                 home_order = [players[i] for i in game_bs["home"]["battingOrder"]]
             playoff = game["game_type"] in _MLB_POSTSEASON_GAME_TYPES
@@ -391,13 +391,10 @@ class StatsMLB(Stats):
 
         linescore = game["scoreboard"]["linescore"]
         boxscore = game["boxscore"]
-        awayTeam, homeTeam = (
-            ABBR_MAP.get(code, code)
-            for code in (
-                game["away_team_data"]["abbreviation"],
-                game["home_team_data"]["abbreviation"],
-            )
-        )
+        away_code = game["away_team_data"]["abbreviation"]
+        home_code = game["home_team_data"]["abbreviation"]
+        awayTeam = ABBR_MAP.get(away_code, away_code)
+        homeTeam = ABBR_MAP.get(home_code, home_code)
         bpf = self.park_factors[homeTeam]
         game_date = game["game_date"]
 
