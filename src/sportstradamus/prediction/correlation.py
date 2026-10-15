@@ -372,8 +372,8 @@ def _resolve_player_positions(league_df, league, stat_data):
         # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
         # only for non-MLB leagues — and base_profile has since rebuilt playerProfile
         # from scratch for this date, zeroing the depth process_offers resolved.
-        # Re-resolve it here, one record a leg for its earliest game: the game its feature
-        # row is built on, and get_depth splits a combo leg each time it is listed.
+        # Re-resolve it here, one record a leg: get_depth raises on a combo leg listed twice.
+        # The leg's earliest game is the one kept, the game its feature row is built on.
         records = earliest_last(league_df[["Player", "Team", "Date"]].to_dict("records"))
         stat_data.get_depth(list({record["Player"]: record for record in records}.values()))
         depth = stat_data.playerProfile["depth"].to_dict()

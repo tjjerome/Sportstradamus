@@ -657,20 +657,20 @@ def test_resolve_player_positions_mlb_hands_get_depth_one_record_a_leg() -> None
 
     That is the game its feature row is built on, as ``prediction/scoring.py`` hands it
     over. ``StatsMLB.get_depth`` splits a combo leg's name each time it is listed, and the
-    second split pops a team the first one already took: the ``KeyError`` cost the
+    second split pops a team the first one already took: the ``KeyError`` would cost the
     platform its whole board.
     """
     legs = _mlb_legs()
-    tomorrow = legs.iloc[[3]].assign(Date="2026-09-05")
+    combo = "Kyle Tucker + Shota Imanaga"
+    tomorrow = legs.loc[legs["Player"] == combo].assign(Date="2026-09-05")
     stat_data = _mlb_stats()
 
-    _resolve_player_positions(pd.concat([tomorrow, legs], ignore_index=True), "MLB", stat_data)
+    # Tomorrow's row goes last, the one a dict over the records keeps without earliest_last.
+    _resolve_player_positions(pd.concat([legs, tomorrow], ignore_index=True), "MLB", stat_data)
 
     records, _ = stat_data.depth_calls[0]
-    assert [r for r in records if r["Player"] == "Kyle Tucker + Shota Imanaga"] == [
-        {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC", "Date": "2026-09-04"}
-    ]
-    assert len(records) == len({r["Player"] for r in records}) == 6
+    assert [r["Date"] for r in records if r["Player"] == combo] == ["2026-09-04"]
+    assert len(records) == len({r["Player"] for r in records}) == len(legs)
 
 
 def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
