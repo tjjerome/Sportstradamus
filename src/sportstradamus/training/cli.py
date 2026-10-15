@@ -671,8 +671,6 @@ def meditate(
                     book_weights[lg][extra_market] = fit_book_weights(
                         lg, extra_market, stat_data, archive, book_weights
                     )
-            elif lg == "NHL":
-                stat_data.dump_goalie_list()
 
             with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
                 json.dump(book_weights, outfile, indent=4)

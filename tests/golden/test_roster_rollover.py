@@ -8,14 +8,17 @@ NHL. The seed read falls on the newest earlier file, and the season's own roster
 fills team by team as its first updates find players. A pull the site blocks comes
 back empty and must not wipe what the season holds: every player would fall to last
 season's row with nothing to say so. Once the NHL's season has games, that empty pull
-also fails the update, so a block that lasts is seen.
+also fails the update, so a block that lasts is seen. Every NHL update rewrites the goalie
+list Underdog's parser files an NHL fantasy line by, failed or not.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import nullcontext
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -210,6 +213,7 @@ class _SilentSites:
 def test_a_blocked_nhl_roster_pull_keeps_the_rows_the_season_holds(monkeypatch):
     monkeypatch.setattr(nhl, "scraper", _SilentSites())
     monkeypatch.setattr(nhl, "write_gamelog", lambda *args: None)
+    monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: None)
     stats = StatsNHL()
     stats.season_start = date.today() - timedelta(days=30)
     stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerName", "team"])
@@ -234,6 +238,7 @@ def test_a_blocked_nhl_roster_pull_fails_the_update_once_the_season_has_games(
     writes = []
     monkeypatch.setattr(nhl, "scraper", _SilentSites())
     monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: writes.append(bundle))
+    monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: writes.append("goalies"))
     stats = StatsNHL()
     stats.season_start = date.today() - timedelta(days=days_since_opening_night)
     yesterday = str(date.today() - timedelta(days=1))
@@ -245,7 +250,33 @@ def test_a_blocked_nhl_roster_pull_fails_the_update_once_the_season_has_games(
     with outcome:
         stats._update()
 
-    assert len(writes) == 1
+    assert len(writes) == 2
+    assert writes[1] == "goalies"
+
+
+def test_every_nhl_update_writes_the_goalie_list(monkeypatch, tmp_path):
+    """Only a training run wrote it, so production's list aged and a new goalie read as a skater."""
+    monkeypatch.setattr(nhl, "scraper", _SilentSites())
+    monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: None)
+    stats = StatsNHL()
+    (tmp_path / "config").mkdir()
+    monkeypatch.setattr(nhl, "pkg_resources", SimpleNamespace(files=lambda package: tmp_path))
+    stats.season_start = date.today() + timedelta(days=5)
+    yesterday = str(date.today() - timedelta(days=1))
+    stats.gamelog = pd.DataFrame(
+        {
+            "gameId": [1, 1],
+            "gameDate": [yesterday, yesterday],
+            "playerName": ["Skater", "Netminder"],
+            "team": ["TOR", "TOR"],
+            "position": ["C", "G"],
+        }
+    )
+    stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
+
+    stats._update()
+
+    assert json.loads((tmp_path / "config" / "goalies.json").read_text()) == ["Netminder"]
 
 
 def _nba_before_opening_night(players):

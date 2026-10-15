@@ -518,8 +518,11 @@ class StatsNHL(Stats):
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
+        # Underdog's parser files an NHL fantasy line as a goalie's or a skater's by this list;
+        # the hourly board run's update keeps it current.
+        self.dump_goalie_list()
 
-        # Raised after the write, so the parsed games and the stored roster are kept. Before
+        # Raised after the writes, so the parsed games and the stored roster are kept. Before
         # opening night the season has no summary yet and an empty pull is normal.
         game_days = pd.to_datetime(self.gamelog["gameDate"]).dt.date
         if not roster_pull and (game_days >= self.season_start).any():
