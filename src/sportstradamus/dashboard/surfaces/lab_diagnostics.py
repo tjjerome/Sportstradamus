@@ -2,9 +2,9 @@
 
 Combines market-level diagnostics with professional forecasting metrics
 following Gneiting & Raftery (2007) and Murphy (1973). Accuracy, Brier, BSS and
-reliability score the posted offers ``realized.settled_offers`` keeps; CRPS and
-interval coverage score every prediction once, posted or not, since neither
-depends on the side.
+reliability score the posted offers ``realized.settled_offers`` keeps; interval
+coverage scores every prediction once, posted or not, since it does not depend on
+the side.
 """
 
 import numpy as np
@@ -33,7 +33,6 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     bias_color,
     bss_bar,
     coverage_bar,
-    crps_line,
     ev_divergence_bar,
     murphy_decomp_bar,
     reliability_diagram,
@@ -97,8 +96,6 @@ if "Dist" in df.columns:
         help="Share of predictions in the current filter carrying a stored distribution family.",
     )
 
-# CRPS arrives as a precomputed per-prediction column; here we only aggregate
-# the stored values instead of re-integrating per row on every rerun.
 pred_df = get_prediction_history(
     history,
     leagues=filters["leagues"],
@@ -108,13 +105,6 @@ pred_df = apply_lab_filters(pred_df, stat_meta, lab_sel)
 pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
 if cutoff is not None:
     pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
-
-crps_by_market = pd.Series(dtype=float)
-crps_counts = pd.Series(dtype=int)
-if "CRPS" in pred_df.columns:
-    _crps_grp = pred_df.dropna(subset=["CRPS"]).groupby(["League", "Market"])["CRPS"]
-    crps_by_market = _crps_grp.mean()
-    crps_counts = _crps_grp.size()
 
 st.header("Market-Level Diagnostics")
 
@@ -141,9 +131,6 @@ for (league, market), grp in df.groupby(["League", "Market"]):
         "Samples": len(grp),
     }
 
-    if (league, market) in crps_by_market.index and crps_counts.get((league, market), 0) >= 5:
-        row["CRPS"] = round(float(crps_by_market.loc[(league, market)]), 4)
-
     market_rows.append(row)
 
 market_df = pd.DataFrame(market_rows)
@@ -168,9 +155,7 @@ if not market_df.empty:
             tile.metric(f"{cell['League']} - {cell['Market']}", f"{cell['BSS']:+.3f} BSS")
 
     numeric_cols = [
-        c
-        for c in ("Accuracy", "Balance", "Brier", "BSS", "CRPS", "Samples")
-        if c in market_df.columns
+        c for c in ("Accuracy", "Balance", "Brier", "BSS", "Samples") if c in market_df.columns
     ]
     render_themed_grid(
         market_df,
@@ -273,19 +258,7 @@ if decomp_rows:
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
     )
 
-has_crps = "CRPS" in pred_df.columns and pred_df["CRPS"].notna().any()
 has_dist = "Dist" in pred_df.columns and "Actual" in pred_df.columns
-if has_crps:
-    crps_df = pred_df.dropna(subset=["CRPS"]).copy()
-    if len(crps_df) >= 10:
-        st.subheader("CRPS Over Time")
-        crps_daily = (
-            crps_df.groupby(["_date", "League"])
-            .agg(CRPS=("CRPS", "mean"), Count=("CRPS", "count"))
-            .reset_index()
-        )
-        st.plotly_chart(crps_line(crps_daily), width="stretch")
-
 if has_dist:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
     if len(cov_df) >= 20:

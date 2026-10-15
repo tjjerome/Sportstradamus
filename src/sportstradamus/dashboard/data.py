@@ -635,7 +635,7 @@ def get_prediction_history(
     leagues: list | None = None,
     date_range: tuple | None = None,
 ) -> pd.DataFrame:
-    """Return one row per prediction (deduped on the identity key) for CRPS/coverage analysis.
+    """Return one row per prediction (deduped on the identity key) for coverage analysis.
 
     Filters by league and date range, then collapses the flat one-row-per-offer
     frame down to one row per :data:`~sportstradamus.history_schema.PREDICTION_KEY`.

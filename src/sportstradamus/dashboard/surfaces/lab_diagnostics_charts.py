@@ -157,19 +157,6 @@ def murphy_decomp_bar(decomp_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def crps_line(crps_daily: pd.DataFrame) -> go.Figure:
-    """Line chart of mean CRPS over time by league."""
-    fig = px.line(
-        crps_daily,
-        x="_date",
-        y="CRPS",
-        color="League",
-        labels={"_date": "Date", "CRPS": "Mean CRPS (lower=better)"},
-    )
-    fig.update_layout(height=400)
-    return fig
-
-
 def coverage_bar(cov_league_df: pd.DataFrame) -> go.Figure:
     """Grouped bar chart of prediction interval coverage by league and nominal level.
 
