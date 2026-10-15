@@ -652,6 +652,27 @@ def test_resolve_player_positions_mlb_labels_batting_slots() -> None:
     assert call_date is None  # the default, today, exactly as scoring.py calls it
 
 
+def test_resolve_player_positions_mlb_hands_get_depth_one_record_a_leg() -> None:
+    """A leg offered on two dates reaches ``get_depth`` once, dated by its earlier game.
+
+    That is the game its feature row is built on, as ``prediction/scoring.py`` hands it
+    over. ``StatsMLB.get_depth`` splits a combo leg's name each time it is listed, and the
+    second split pops a team the first one already took: the ``KeyError`` cost the
+    platform its whole board.
+    """
+    legs = _mlb_legs()
+    tomorrow = legs.iloc[[3]].assign(Date="2026-09-05")
+    stat_data = _mlb_stats()
+
+    _resolve_player_positions(pd.concat([tomorrow, legs], ignore_index=True), "MLB", stat_data)
+
+    records, _ = stat_data.depth_calls[0]
+    assert [r for r in records if r["Player"] == "Kyle Tucker + Shota Imanaga"] == [
+        {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC", "Date": "2026-09-04"}
+    ]
+    assert len(records) == len({r["Player"] for r in records}) == 6
+
+
 def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
     """cMarket tokens must key the way the MLB corr parquets do: ``B{n}``/``P``."""
     resolved = _resolve_player_positions(_mlb_legs(), "MLB", _mlb_stats())

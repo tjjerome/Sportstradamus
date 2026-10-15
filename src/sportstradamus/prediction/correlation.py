@@ -34,6 +34,7 @@ from sportstradamus.prediction.parlay import (
 )
 from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.base import earliest_last
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
 # (where the team is the offensive actor) are weighted higher than the
@@ -371,11 +372,10 @@ def _resolve_player_positions(league_df, league, stat_data):
         # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
         # only for non-MLB leagues — and base_profile has since rebuilt playerProfile
         # from scratch for this date, zeroing the depth process_offers resolved.
-        # Re-resolve it here.
-        # Dated, so a later game's hitter gets the slot his feature row was built on.
-        stat_data.get_depth(
-            league_df[["Player", "Team", "Date"]].drop_duplicates().to_dict("records")
-        )
+        # Re-resolve it here, one record a leg for its earliest game: the game its feature
+        # row is built on, and get_depth splits a combo leg each time it is listed.
+        records = earliest_last(league_df[["Player", "Team", "Date"]].to_dict("records"))
+        stat_data.get_depth(list({record["Player"]: record for record in records}.values()))
         depth = stat_data.playerProfile["depth"].to_dict()
         slot_labels = []
         for player in league_df.Player:
