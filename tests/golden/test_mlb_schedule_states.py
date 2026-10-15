@@ -10,6 +10,9 @@ A game called early ends as ``Completed Early`` and is parsed as a ``Final`` one
 The schedule request reaches past today, and a game dated after today is listed by
 day only: a later-dated offer reads its own game there, and the next-game map holds
 what it did when the request ended today.
+
+The feed's codes for Washington and Arizona are mapped to the ones the gamelog and the
+offers use.
 """
 
 from __future__ import annotations
@@ -154,6 +157,20 @@ def test_a_later_dated_game_is_listed_by_day_only_with_no_box_score_request(
             "game type": "D",
         },
     }
+
+
+def test_washington_and_arizona_are_listed_under_the_codes_the_offers_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The feed calls them ``WSH`` and ``AZ``; the gamelog and the offers say ``WAS`` and ``ARI``."""
+    monkeypatch.setattr(stats_mlb.mlb, "boxscore_data", lambda game_id: _BOXSCORE)
+    teams = {"teams": [{"id": 1, "abbreviation": "WSH"}, {"id": 2, "abbreviation": "AZ"}]}
+
+    upcoming, by_date = stats_mlb._build_mlb_upcoming_games([_game("Scheduled")], teams, _TODAY)
+
+    assert sorted(upcoming) == ["ARI", "WAS"]
+    assert upcoming["WAS"]["Opponent"] == "ARI"
+    assert sorted(by_date) == [("ARI", _TODAY.isoformat()), ("WAS", _TODAY.isoformat())]
 
 
 def _feed_through_today() -> list[dict]:

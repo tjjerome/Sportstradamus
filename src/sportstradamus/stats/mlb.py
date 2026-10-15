@@ -21,7 +21,7 @@ from sportstradamus import data
 from sportstradamus.helpers import combo_props, get_ev, get_odds, remove_accents, stat_cv, stat_dist
 from sportstradamus.helpers.combined_markets import POST_RNG_SEED
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
-from sportstradamus.helpers.text import MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
+from sportstradamus.helpers.text import ABBR_MAP, MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
 from sportstradamus.stats.base import (
     _SCHEDULE_LOOKAHEAD_DAYS,
     GAMELOG_RETENTION_DAYS,
@@ -248,11 +248,10 @@ def _build_quality_start_post(stats_obj, player, date, *, weight):
 
 
 def _mlb_team_abbr(mlb_teams, team_id):
-    return next(
-        team["abbreviation"].replace("AZ", "ARI")
-        for team in mlb_teams["teams"]
-        if team["id"] == team_id
+    abbreviation = next(
+        team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == team_id
     )
+    return ABBR_MAP.get(abbreviation, abbreviation)
 
 
 def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
@@ -392,8 +391,13 @@ class StatsMLB(Stats):
 
         linescore = game["scoreboard"]["linescore"]
         boxscore = game["boxscore"]
-        awayTeam = game["away_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
-        homeTeam = game["home_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
+        awayTeam, homeTeam = (
+            ABBR_MAP.get(code, code)
+            for code in (
+                game["away_team_data"]["abbreviation"],
+                game["home_team_data"]["abbreviation"],
+            )
+        )
         bpf = self.park_factors[homeTeam]
         game_date = game["game_date"]
 
