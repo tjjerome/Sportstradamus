@@ -231,7 +231,7 @@ Owned by the pipeline (canonical detail in code; this table is the UI's reading 
 | `data/runtime/live_metrics_per_market.parquet` | existing, newly wired | market-trust lines, Model Lab |
 | `data/runtime/current_line_movement.parquet` (per-offer posted + fair line history) | new file (written by `prophecize`) | Board `Move` column, deep-dive Movement tab, Games hover card |
 | game-line offer rows (provenance=book-implied) in `current_offers` | later stage (dfs-products stage 4) | Game board rows, rail, §5b chips |
-| `Alt Line` flag column in `current_offers`/`current_pickem` | later stage (dfs-products stage 2c; `persist.py` `_OFFER_KEEP_COLS`) | §5b alt markers, Receipts split |
+| `Alt Line` flag column in `current_offers` | later stage (dfs-products stage 2c; `persist.py` `_OFFER_KEEP_COLS`) | §5b alt markers, Receipts split |
 | ladder entry/rung columns (new snapshot artifact) | later stage (dfs-products stage 3) | §5b Ladders views, Receipts per-rung grading |
 
 ## 8. Placeholder register (scars — visible, honest, roadmap-backed)

@@ -103,7 +103,7 @@ than the line alone. A tie passes — that is the entire point. It follows that:
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
 | Sweep board (per-cell best corner + gate slacks) | `data/research/strategy_research_board.csv` |
 | Live telemetry / recorded picks / graduation | `data/runtime/*.parquet` + `sportstradamus ship graduation` |
-| Served-offer snapshots the dashboard reads | `data/runtime/{current_pickem,current_offers,history}.parquet` |
+| Served-offer snapshots the dashboard reads | `data/runtime/{current_offers,history}.parquet` |
 | Product-payout rules (Ladders, multipliers) | the decision lanes (`strategies/`, `books/`), **not** this track |
 | Lever stack, stages, per-league routing, session rules | **this doc** |
 | Research verdicts, citations, commit refs | [`../operation_ship_references.md`](../operation_ship_references.md) |

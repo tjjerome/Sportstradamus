@@ -353,7 +353,7 @@ Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
    lines, and writes model pickles.
 4. **Prediction** (`prediction/`): `model_prob` loads trained models, `process_offers`
    scores each offer for EV, `find_correlation` scores parlay legs, and `persist.py`
-   writes parquet snapshots (`current_offers`, `current_pickem`, `history`) the Streamlit
+   writes parquet snapshots (`current_offers`, `history`) the Streamlit
    dashboard reads.
 
 ### Core Class Hierarchy
@@ -376,7 +376,7 @@ bloats the DB ~10× for this row count; sorted-on-disk data + zone-map pruning g
 backend. Public methods: `get_ev`, `get_line` (sportsbook consensus line),
 `get_reference_line` (that, else the entry's line of record), `get_moneyline`, `get_total`,
 `get_team_market`, `to_pandas`, `add_dfs`, `merge_player_books`, `set_team_books`,
-`archived_players_by_date`, `write`, `clean_archive`.
+`write`.
 
 **`Scrape`** (`helpers/scraping.py`): HTTP client with ScrapeOps browser-header rotation
 and ScrapingFish proxy fallback.

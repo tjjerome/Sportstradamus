@@ -65,7 +65,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `config.py` | Loads the JSON config files and `creds/keys.json` at import time. Exposes `stat_meta` (per-cell union of committed `stat_meta.json` and the runtime-recomputed `stat_calibration.json`), the per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi`, plus `stat_map`, `book_weights`, `feature_filter`, `name_map`, `abbreviations`, and the other config dicts |
-| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_reference_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. `get_line` is the sportsbook consensus line, the median of each sportsbook's latest `odds.line` and `0.0` when no sportsbook posts one; `get_reference_line` falls back to the line of record in `lines`, which also logs each pick'em platform's own line and so never feeds the consensus. Writes buffer in memory and flush on `write()`: `add_dfs`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports. `archive_market` gives a market its league's own key (NHL `AST` is `assists`); `cell_market` does it from a platform's raw label |
+| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_reference_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`. `get_line` is the sportsbook consensus line, the median of each sportsbook's latest `odds.line` and `0.0` when no sportsbook posts one; `get_reference_line` falls back to the line of record in `lines`, which also logs each pick'em platform's own line and so never feeds the consensus. Writes buffer in memory and flush on `write()`: `add_dfs`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports. `archive_market` gives a market its league's own key (NHL `AST` is `assists`); `cell_market` does it from a platform's raw label |
 | `scraping.py` | `Scrape` — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
 | `odds_budget.py` | Odds API credit-budget governor: usage ledger, cycle math, cost estimates, broad-run league admission, the leftover a historical backfill may spend (`backfill_allowance`), season/activity windows (`league_is_live`, `update_window_open`, `season_opener`). Loads `config/odds_api_budget.json` itself — the one exception to `config.py` owning config loads |
 | `distributions.py` | Model/bookmaker fusion math: `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds` |
@@ -78,7 +78,7 @@ Sportstradamus/
 | `parlay_modifiers.py` | Expected-vs-actual quote reconciliation for pick'em correlation modifiers |
 | `provenance.py` | Code-version stamps for training artifacts |
 | `training_quotes.py` | Training-quote resolution with explicit provenance |
-| `text.py` | String normalization and small collection utilities (`remove_accents`, `merge_dict`, `hmean`), plus `ABBR_MAP` — team-abbreviation corrections shared by both DFS scrapers |
+| `text.py` | Name normalization (`remove_accents`), `ABBR_MAP` (the team-abbreviation corrections both DFS scrapers and MLB's schedule map apply) and the MLB schedule readers (`get_mlb_pitchers`, `mlb_game_is_over`, the finished-state sets) |
 | `__init__.py` | Re-exports the public API — `from sportstradamus.helpers import X` is the canonical import |
 
 ### `stats/` — Player statistics and feature engineering
@@ -109,7 +109,7 @@ Sportstradamus/
 | `labels.py` | `over_label` — the over/under outcome label every fit, metric and ship gate shares (a push is ½) |
 | `group_conditional_cdf/` | Structural calibration methods (group-conditional CDF maps: affine, two-part) |
 | `hyperparams.py` | `tune_hyperparameters` — Optuna search utilities |
-| `data.py` | `count_training_rows`, `trim_matrix` — training-data preparation |
+| `data.py` | `trim_matrix` — training-data preparation |
 | `markets.py` | `ALL_MARKETS` per-league market lists; `select_markets` narrowing for `--market` |
 | `correlate.py` | `correlate(league, stat_data)` — builds `corr_same_team.parquet`, `corr_opposing.parquet`, and `corr_metadata.json` under `data/leagues/{league}/` from player stat history (intermediate cache at `data/training_data/{LEAGUE}_corr.parquet`) |
 | `report.py` | `report()` — walks model pickles and writes the wide one-row-per-cell `data/training/model_stats.parquet` + `.csv` mirror; `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` |
@@ -135,7 +135,7 @@ Sportstradamus/
 | `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves |
 | `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam |
 | `stories/` | Narrative generation for the dashboard: game context, offer "why" text, parlay theses, offer details |
-| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, `write_current_pickem`, game corr + pair modifiers, context/stories/details) — the only files the dashboard reads |
+| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, game corr + pair modifiers, context/stories/details) — the only files the dashboard reads |
 | `feature_log.py` | `upsert_feature_log`, `prune_feature_log` — the serve-time feature log, `data/runtime/feature_log/date=YYYY-MM-DD/{LEAGUE}_{market}.parquet`: one row per scored player and game holding the frame fed to the model, its outputs before the book blend, and the decision-time book leg (row contract in the module docstring). Train/serve parity diagnostics, read by `sportstradamus admin feature-parity` and kept `FEATURE_LOG_RETENTION_DAYS`; not a dashboard input and never part of `history.parquet` |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays`) |
 
@@ -144,7 +144,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), `resolve_shrinkage` (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and the `kelly` CLI for offline re-sizing of a recommendations YAML. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
-| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power and Flex; emits `data/recommendations/{date}.yaml` |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `bet pickem` command. Pure orchestrator — no math. Covers Power and Flex; emits `data/recommendations/{date}_{platform}.yaml` |
 | `_pickem_emit.py` | YAML-emit helpers split out of `underdog_pickem.py` |
 | `ledger.py` + `_ledger_*.py` | Simulated-bettor ledger: twice-daily commit orchestrator with selection, cross-game candidate, settlement, bankroll, and JSONL store layers |
 | `profit_sim.py` | Kelly-sized profit / ROI / Sharpe / drawdown backtest |
@@ -233,14 +233,13 @@ prophecize  (prediction/cli.py)
   prediction/persist.py  →  parquet snapshots the dashboard reads
   history.parquet / parlay_hist/ day partitions
 
-pickem-build  (strategies/underdog_pickem.py)
+sportstradamus bet pickem  (strategies/underdog_pickem.py)
   prediction/correlation.find_correlation(contest_variant=...)
   strategies/kelly.fractional_kelly_stake(...)
         │
         ▼
-  data/recommendations/{date}.yaml
-        ├─ sportstradamus bet kelly    (offline re-sizing)
-        └─ dashboard                   (live review)
+  data/recommendations/{date}_{platform}.yaml
+        └─ sportstradamus bet kelly    (offline re-sizing)
 ```
 
 **NFL comp data:** Player-comp aggregates for NFL come from FantasyPoints
