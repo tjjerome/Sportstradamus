@@ -176,6 +176,22 @@ def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
     return movement
 
 
+def _name_markets(offers: pd.DataFrame, platform: str) -> pd.DataFrame:
+    """Give a platform's scored offers their two market names, ``Stat`` and ``Market``.
+
+    ``Stat`` is the league's own key for the market, the name its gamelog column, model
+    cell and archive rows go by. ``Market`` becomes the board's name for it, which is not
+    that key for every league: NHL assists is AST on the board. Both are read off the
+    platform's raw label, so ``Stat`` is set before ``Market`` is renamed.
+    """
+    offers["Stat"] = [
+        cell_market(league, platform, label)
+        for league, label in zip(offers["League"], offers["Market"], strict=True)
+    ]
+    offers["Market"] = offers["Market"].map(stat_map[platform])
+    return offers
+
+
 def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
     """Flag rows whose ``Line`` diverges from ``Reference Line`` beyond tolerance.
 
@@ -246,14 +262,7 @@ def main(progress, contest_variant, log_level):
             corr_sink=ud_corr,
             story_sink=ud_story,
         )
-        # Stat is the league's own key for the market, the name its gamelog column,
-        # model cell and archive rows go by. Market becomes the board's name for it,
-        # which is not that key for every league: NHL assists is AST on the board.
-        ud_offers["Stat"] = [
-            cell_market(league, "Underdog", label)
-            for league, label in zip(ud_offers["League"], ud_offers["Market"], strict=True)
-        ]
-        ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
+        ud_offers = _name_markets(ud_offers, "Underdog")
         # model_prob pre-multiplied Boost by UNDERDOG_BOOST_BASELINE so that
         # ``Model = Model P * Boost`` is per-$1 EV. The persisted snapshot
         # (current_offers.parquet, history.parquet) is consumed downstream
@@ -282,11 +291,7 @@ def main(progress, contest_variant, log_level):
             corr_sink=sl_corr,
             story_sink=sl_story,
         )
-        sl_offers["Stat"] = [
-            cell_market(league, "Sleeper", label)
-            for league, label in zip(sl_offers["League"], sl_offers["Market"], strict=True)
-        ]
-        sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
+        sl_offers = _name_markets(sl_offers, "Sleeper")
         # Sleeper Boost stays at the raw books/sleeper.py value (model_prob only
         # applies UNDERDOG_BOOST_BASELINE to platform == "Underdog"), so no
         # division is needed here for display/storage to match the raw

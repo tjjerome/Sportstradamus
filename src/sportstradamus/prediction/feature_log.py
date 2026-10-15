@@ -79,8 +79,8 @@ def upsert_feature_log(
         league: League key.
         market: Model cell, already through ``normalize_market``.
         platform: DFS platform the offers came from.
-        offers: The market's raw offers. They give each player's game date (the last
-            offer wins, as in ``model_prob``) and, for MLB, team.
+        offers: The market's raw offers. They give each player's game date (his
+            earliest, as in ``model_prob``) and, for MLB, team.
         stat_data: The league's ``Stats``, read only for MLB's probable pitchers.
         player_stats: Player-indexed frame fed to the model, with the book-leg columns
             ``model_prob`` adds.

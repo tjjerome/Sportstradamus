@@ -34,7 +34,7 @@ def batting_slot(position: object) -> str | None:
 def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
     """Add ``Bats``, ``Opp Hand``, and ``Lineup`` for MLB hitters; ``""`` everywhere else.
 
-    ``Lineup`` is ``"posted"`` when the hitter appears in tonight's posted order
+    ``Lineup`` is ``"posted"`` when the hitter appears in his game's posted order
     and ``"usual"`` when his slot came from ``get_depth``'s modal-slot fallback,
     so the prose can say which it is; the posted-order match is by name, exactly
     as ``get_depth`` makes it. ``Opp Hand`` stays blank when the game carries no

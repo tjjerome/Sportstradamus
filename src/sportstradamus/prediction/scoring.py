@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import pickle
 import warnings
+from itertools import chain
 
 import line_profiler
 import pandas as pd
@@ -105,8 +106,7 @@ def _match_league_offers(league, markets, stats, book, pbar):
     stat_data = stats[league]
     # Depth and volume are prepared once a player, for the game his feature row is built on.
     by_player = {
-        offer["Player"]: offer
-        for offer in earliest_last(offer for offers in markets.values() for offer in offers)
+        offer["Player"]: offer for offer in earliest_last(chain.from_iterable(markets.values()))
     }
     all_offers = list(by_player.values())
     try:

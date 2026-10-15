@@ -1054,7 +1054,7 @@ def model_prob(
     # apply posthoc/dispersion/structural calibration, blend with book, emit scoring columns.
     # A player offered on two dates has one feature row, his earlier game's: the book leg
     # is read for that game too.
-    dateMap = {x["Player"]: x["Date"] for x in earliest_last(offers)}
+    date_map = {x["Player"]: x["Date"] for x in earliest_last(offers)}
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
@@ -1148,7 +1148,7 @@ def model_prob(
         playerStats["Defense position"] = playerStats["Defense avg"]
 
     evs, sds, quotes = book_evs_for_players(
-        offer_df, league, market, dist, cv, hist_gate, dateMap, stat_data, playerStats.index
+        offer_df, league, market, dist, cv, hist_gate, date_map, stat_data, playerStats.index
     )
     playerStats["Market Projection"] = evs
     playerStats["Books STD"] = sds
