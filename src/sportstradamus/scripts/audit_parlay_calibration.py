@@ -1,7 +1,7 @@
 """Empirical calibration audit for beam-search parlay candidates.
 
-Reads ``data/parlay_hist.parquet`` (written by ``prophecize`` and resolved by
-``reflect``), filters to the last ``--days`` (default 90) of resolved
+Reads the parlay history (``data/runtime/parlay_hist/``, written by ``prophecize``
+and resolved by ``reflect``), filters to the last ``--days`` (default 90) of resolved
 parlays, recovers each parlay's predicted joint probability from
 ``Model EV`` and the stored payout (``Boost``), buckets by predicted
 probability deciles, and computes the empirical hit rate per decile from
@@ -19,7 +19,7 @@ Outputs (timestamped with today's date):
   predicted-probability bin edges, mean predicted probability, empirical
   hit rate, sample count, and Wilson 95% confidence bounds.
 
-If ``parlay_hist.parquet`` is missing or contains zero resolved rows in the
+If the parlay history is empty or contains zero resolved rows in the
 window, the script writes an empty CSV plus a placeholder PNG explaining
 the data gap, so the audit document can still reference the artifacts.
 """
@@ -96,7 +96,7 @@ def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
-    """Load ``parlay_hist.parquet`` and filter to resolved rows in the window.
+    """Load the parlay history and filter to resolved rows in the window.
 
     A resolved row has non-null ``Legs Resolved`` and ``Misses`` (filled by
     ``reflect``). Rows whose ``Date`` is before ``window_start`` or whose

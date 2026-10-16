@@ -332,7 +332,7 @@ def _lock_production_artifacts(
     help=(
         "Training distribution family. 'auto' (default) honors each cell's stat_meta dist "
         "(else the data-driven mean>=2 / zero-rate pick); an explicit family (DPO / NegBin / "
-        "ZINB / SkewNormal) overrides every cell — a WS-3 family sweep axis."
+        "ZINB / SkewNormal / Mixture) overrides every cell — a WS-3 family sweep axis."
     ),
 )
 @click.option(

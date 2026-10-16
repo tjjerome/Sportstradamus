@@ -11,7 +11,7 @@
 #   meditate           train/retrain models
 #   reflect            nightly resolution
 #   export-line-movement  refresh the Board's DFS line-movement snapshot from the archive
-#   gate-status        scripts/gate_status_update.sh (monthly: refresh main ship_config, open PR)
+#   gate-status        scripts/gate_status_update.sh (monthly: refresh main's stat_meta.json, open PR)
 #   fp-fetch           fetch fp run (weekly: snapshot Fantasy Points Data Suite)
 #   ctg-fetch          fetch ctg run (snapshot Cleaning the Glass NBA tables)
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)

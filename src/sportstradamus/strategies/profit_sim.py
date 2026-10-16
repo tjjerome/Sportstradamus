@@ -1,12 +1,10 @@
 """Kelly-sized profit / ROI / Sharpe / drawdown backtest.
 
-Phase 2 of the new ship-gate plan
-([docs/ship_gate.md](../../../docs/ship_gate.md)) — lifted from
-``pages/6_Stats_Profit_Sim.py`` so the same Monte-Carlo strategy backtest
-that powers the dashboard can also size the offline supersede gate
-(S3 — paired Sharpe) and the live devel→main gate (positive Kelly ROI;
-+0.5% / 2-wk vs incumbent). Behavior is preserved relative to the page;
-the page now imports these symbols.
+One Monte-Carlo strategy backtest shared by the dashboard's profit-sim panel
+(``dashboard/components/profit_sim.py``), the nightly's precomputed grid
+(``analysis.precompute_profit_sim_summary``) and the offline supersede gate (S3 —
+paired Sharpe; [docs/ship_gate.md](../../../docs/ship_gate.md)). No promotion rule
+reads realized ROI from it.
 
 Public surface:
 

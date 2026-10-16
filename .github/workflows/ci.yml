@@ -44,8 +44,8 @@ jobs:
         run: poetry run pytest
 
       - name: Integration smoke test
-        # Fake mode (default): odds API, nba_api, scrapers, and Sheets are
-        # all stubbed/canned. Live network calls only fire when
+        # Fake mode (default): odds API, nba_api and scrapers are all
+        # stubbed/canned. Live network calls only fire when
         # SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1, which CI never sets.
         # -n0: the integration suite is not xdist-safe (shared stat_meta.json fixture).
         run: poetry run pytest tests/integration/ -m integration -n0 -v

@@ -137,8 +137,8 @@ _BRIER_SKILL_DENOM_FLOOR = 1e-9
 _PROBA_CLIP = 1e-6
 # Confidence cutoff for the mode-stats and diagnostic masks: only rows where
 # the model's top-class probability exceeds this are counted in precision /
-# accuracy / over% statistics.  Mirrors the live scoring path in
-# prediction/scoring.py. Value from CLAUDE.md "Performance Table".
+# accuracy / over% statistics. A training-side convention that no live path
+# applies; the calibration scripts under scripts/ use the same 0.54.
 _MODE_CONFIDENCE_THRESHOLD: float = 0.54
 # Minimum rows in an EV-conditioned, confidence-masked subset before its over-
 # rate is reported; thinner slices give a noisy mean, so the diagnostic is NaN.

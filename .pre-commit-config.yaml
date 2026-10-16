@@ -1,5 +1,5 @@
 # Pre-commit hooks for Sportstradamus.
-# See docs/STYLE_GUIDE.md §14 for rationale.
+# See docs/STYLE_GUIDE.md §19 for rationale.
 #
 # Setup: `poetry install && poetry run pre-commit install`
 # Run on the whole tree: `poetry run pre-commit run --all-files`

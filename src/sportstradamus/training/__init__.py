@@ -1,7 +1,7 @@
 """Training package: LightGBMLSS model training pipeline.
 
 Re-exports the public API so callers can do
-``from sportstradamus.training import train_market`` without knowing the
+``from sportstradamus.training import meditate`` without knowing the
 internal module layout.
 """
 

@@ -3,7 +3,7 @@
 
 Read by :func:`compute_gates` from the test-set CSV ``meditate`` dumps
 (``data/test_sets/{LEAGUE}_{market}.csv``) and merged into the wide
-``model_stats.parquet`` row by ``training.report.report()``. The five offline
+``model_stats.parquet`` row by ``training.report.report()``. The six offline
 gates (see ``docs/ship_gate.md``) plus the compression diagnostics live here so
 the meditate path and the standalone A/B-test harness share one implementation.
 
@@ -86,10 +86,11 @@ from sportstradamus.training.structural_strategies import (
 # (set first baseline | supersede incumbent) x (research->devel offline |
 # devel->main live).
 #
-#   * research -> devel, set baseline: the FIVE offline gates computed here —
+#   * research -> devel, set baseline: the SIX offline gates computed here —
 #     Gate 1 Brier-vs-book paired bootstrap, Gates 2/3 star/bench bias-vs-spread
 #     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
-#     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
+#     low-variance bench segments), Gate 4 randomized-PIT KS (the IQR ratio stays a
+#     diagnostic), Gate 5 equal-mass ECE, Gate 6 the anti-shrinkage OR of three legs.
 #     The per-cell metrics (plus an "oracle" bound) land on the wide
 #     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
 #     wires the strict starter pass/fail. Cells with no book Odds, or with sportsbook
@@ -101,9 +102,7 @@ from sportstradamus.training.structural_strategies import (
 #   * research -> devel, supersede: pass all six + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
-#   * devel -> main: a profitability gate on live settled data (positive Kelly-sized
-#     ROI to set a baseline; >= +0.5% ROI over >= 2 weeks to supersede an incumbent)
-#     — see scripts/check_graduation.py.
+#   * devel -> main: the live Gate 2 of training/graduation.py (`ship graduation`).
 
 # Bottom-mean QUARTILE = the bench segment (Gate 3); the top-mean DECILE (N_DECILES)
 # is the star segment (Gate 2). Bench is pooled coarser on purpose — low-volume
@@ -124,7 +123,7 @@ _CI_HIGH_PCT: float = 97.5
 _ECE_BINS: int = 10
 
 # Strict starter thresholds for the research->devel set-baseline gate (see
-# docs/ship_gate.md). The 5-gate row carries the raw measurements; these set
+# docs/ship_gate.md). The gate row carries the raw measurements; these set
 # pass/fail. A cell ships (research -> devel) iff all six pass.
 #   G1 ci_hi  < δ    : non-inferiority — 95% CI upper bound below the statistical-tie
 #                      margin δ (ensemble Brier at most δ worse than the book: a tight
@@ -2256,7 +2255,7 @@ def compute_gates(
 
 
 def write_gate_scorecard(rows: list[dict[str, object]], out_path: Path) -> pd.DataFrame:
-    """Write the per-cell five-gate scorecard snapshot to CSV, one row per cell.
+    """Write the per-cell six-gate scorecard snapshot to CSV, one row per cell.
 
     Overwrites ``out_path`` each call — a *snapshot* of the latest audit (the six
     gate metrics, the oracle bound, and the per-gate ``*_pass`` flags + overall
@@ -2964,7 +2963,7 @@ def _resolve_diff_cell(
     "--scorecard/--no-scorecard",
     "write_scorecard",
     default=True,
-    help="On a full audit, write the per-cell five-gate scorecard CSV (model + oracle).",
+    help="On a full audit, write the per-cell six-gate scorecard CSV (model + oracle).",
 )
 @click.option(
     "--scorecard-out",

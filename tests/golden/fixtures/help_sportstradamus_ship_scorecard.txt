@@ -17,7 +17,7 @@ Options:
   --candidate PATH              Diff mode: candidate test-set CSV (compared
                                 against --baseline).
   --no-log                      Skip appending to the run log.
-  --scorecard / --no-scorecard  On a full audit, write the per-cell five-gate
+  --scorecard / --no-scorecard  On a full audit, write the per-cell six-gate
                                 scorecard CSV (model + oracle).
   --scorecard-out PATH          Gate scorecard CSV path. Defaults to
                                 /tmp/scorecard.csv on a full audit (no

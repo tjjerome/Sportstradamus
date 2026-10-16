@@ -6,12 +6,11 @@ into ``not-shipped`` / ``in-test`` / ``graduated`` / ``demoted``. Both the
 ``ship graduation`` display CLI and the ``ship config`` generator
 import these functions so the two share one definition of "graduated".
 
-The Gate-2 rule here (positive Gate-1 BSS + at least
+The Gate-2 rule here (a non-negative Gate-1 BSS, then at least
 :data:`MIN_SETTLED_FOR_GRADUATION` settled offers in the
-:data:`GRADUATION_WINDOW_DAYS`-day window + non-negative live book-BSS) is a
-*simplified proxy* of the full Gate 2 in ``docs/ship_gate.md``; see that doc's
-"Known gap" note. ``main`` is dormant (no live metrics yet), so the proxy is
-acceptable until the live aggregator is producing data.
+:data:`GRADUATION_WINDOW_DAYS`-day window, a non-negative live book-BSS and neither
+side's live precision below :data:`MIN_PRECISION_SIDE`) is the live table of
+``docs/ship_gate.md`` ("devel → main (live)").
 """
 
 from __future__ import annotations
