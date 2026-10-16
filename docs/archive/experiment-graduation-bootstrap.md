@@ -6,7 +6,7 @@
 > in `training/posthoc.py`), and the `--structural-strategy` axis is gone. §1–§6 are the plan
 > as briefed: they describe the tree before the bootstrap, and their line anchors point into
 > it. Whether a structural corner reaches a scored sweep verdict is followed in
-> [model-strategy-reachability-repairs.md](../handoffs/model-strategy-reachability-repairs.md).
+> [model-strategy-reachability-repairs.md](model-strategy-reachability-repairs.md).
 > Reopen by adding a roadmap row that points back here; §7 records the `posthoc` rename left
 > undone on purpose.
 

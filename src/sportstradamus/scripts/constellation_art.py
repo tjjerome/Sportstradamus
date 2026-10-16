@@ -3,7 +3,7 @@
 One piece of licence-free clip art in; one web-sized RGBA PNG out under
 ``data/assets/constellations/``, its provenance row in ``manifest.json``, and a copy of
 the input under ``sources/`` so the run reproduces offline. The recipe is the stage-0
-proof of concept in ``docs/handoffs/constellation-art.md``: rasterize at 900 px, mask
+proof of concept in ``docs/archive/constellation-art.md``: rasterize at 900 px, mask
 the ink (line art) or the edges (filled colour art), gaussian-blur, tint the theme's
 light blue, bake the alpha, crop. Dev-side only — the layers are committed, so
 production never runs this.
@@ -296,7 +296,7 @@ _SLUG_CHOICE = click.Choice(sorted(shape_catalog()["templates"]))
 
 @click.group()
 def constellation_art() -> None:
-    """Clip art into constellation layers (docs/handoffs/constellation-art.md)."""
+    """Clip art into constellation layers (docs/archive/constellation-art.md)."""
 
 
 @constellation_art.command()

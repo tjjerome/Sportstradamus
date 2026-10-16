@@ -1,6 +1,6 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 5 done 2026-09-14, the last in §6: the SVG silhouettes are retired; 99 of 101 templates have a layer, `the-chain-gang` (NFL) and `the-crossover` (NBA) on the owner's hand-hunt list; closing the lane is the owner's call
+> Status: DONE — closed 2026-10-16 by the owner (honest-receipts decision 73). Stage 5, the last in §6, was done 2026-09-14: the SVG silhouettes are retired; 99 of 101 templates have a layer, and `the-chain-gang` (NFL) and `the-crossover` (NBA) stay on the owner's hand-hunt list
 
 ## 1. Mission & money logic
 

@@ -1,12 +1,14 @@
 # Model-strategy reachability repairs
 
-> Status: ACTIVE — recommendations 1/2/3/5 landed (`b41e277a`, 2026-08-03). Sweeps
-> of the three NFL acceptance cells then ran on the repaired code (receiving and
+> Status: CLOSED — closed 2026-10-16 by the owner, code kept (honest-receipts
+> decision 74). Recommendations 1/2/3/5 landed (`b41e277a`, 2026-08-03). Sweeps of
+> the three NFL acceptance cells then ran on the repaired code (receiving and
 > rushing yards 2026-08-27, passing yards 2026-10-03), and every structural corner
 > failed on its own guard before scoring (`CalledProcessError`, slack −inf):
 > two-part on its role-support minima, affine on its probability-pool rho bounds.
-> No acceptance cell has been scored on a structural recipe; whether that closes
-> the lane is the owner's call.
+> No acceptance cell was ever scored on a structural recipe. Receiving and rushing
+> yards pass all six gates on the canonical SkewNormal recipe after the 2026-10-15
+> retrain.
 
 ## 1. Mission
 
@@ -24,9 +26,9 @@ code-test assertion.
 
 Read these after `CLAUDE.md` and `CONTRIBUTING.md`:
 
-1. [`model_improvement_track.md`](model_improvement_track.md) — strategy, gate,
+1. [`model_improvement_track.md`](../handoffs/model_improvement_track.md) — strategy, gate,
    and experiment contracts.
-2. [`matrix-provenance-and-crossfit-gates.md`](../archive/matrix-provenance-and-crossfit-gates.md)
+2. [`matrix-provenance-and-crossfit-gates.md`](matrix-provenance-and-crossfit-gates.md)
    — frozen-matrix and cross-fit constraints.
 3. `src/sportstradamus/training/model_strategy/` — registry, sweep, confirmation,
    and artifact identity.

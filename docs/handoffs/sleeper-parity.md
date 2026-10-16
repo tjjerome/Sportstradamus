@@ -1,8 +1,9 @@
 # Sleeper decision-layer parity
 
 > Status: QUEUED — stages 0–4 merged to `devel` 2026-07-14 (PR #85,
-> `b9f8a95e`); stage 5 (live soak) is open and its acceptance needs re-scoping
-> by the owner (§6 stage 5). Blocks no other lane.
+> `b9f8a95e`); stage 5 (live soak) is open. Its acceptance, re-scoped by the
+> owner on 2026-10-16, is `sportstradamus bet pickem --platform sleeper` output on
+> live slates (§6 stage 5). Blocks no other lane.
 
 ## 1. Mission & money logic
 
@@ -278,10 +279,10 @@ inference-path compatibility checklist in
   (WNBA/MLB), landed before NFL Week 1 (Sept 2026).
 - **Entry:** stage 4 merged to `devel`.
 - **Scope:** observation only; brief + ledger updates.
-- **Acceptance:** needs re-scoping by the owner — it asked for daily
-  `prophecize` runs to write Sleeper entries to the pick'em snapshot, and
-  `1bafd0a5` (2026-10-11) retired that snapshot to
-  `src/deprecated/pickem_snapshot.py`.
+- **Acceptance:** `sportstradamus bet pickem --platform sleeper --bankroll <N>`
+  writes Sleeper entries (`data/recommendations/<date>_sleeper.yaml`) on live
+  slates (owner, 2026-10-16). The pick'em snapshot it first named was retired
+  to `src/deprecated/pickem_snapshot.py` in `1bafd0a5` (2026-10-11).
 - **Est. sessions:** ongoing, low-touch.
 - **Kill criteria / branch:** product-assumption drift → §3 protocol (stop,
   re-verify stage 0, revise this brief in place, resume).

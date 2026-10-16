@@ -209,7 +209,7 @@ Owner decisions (nothing blocks on them; each has an honest fallback in place):
 Routed debts (recorded here so no session rediscovers them; the archive, Rivals, depth,
 `market_display` and voice-bank items are the [`cleanup-pass`](cleanup-pass.md)
 lane's scope since 2026-09-12, the silhouettes the
-[`constellation-art`](../handoffs/constellation-art.md) lane's):
+[`constellation-art`](constellation-art.md) lane's):
 
 - ~~`add_dfs` archives Sleeper's lowest tier as its `odds` row; `merge_archives` skips
   `ladder`~~ — CLOSED 2026-09-12 by `cleanup-pass` stage 1.

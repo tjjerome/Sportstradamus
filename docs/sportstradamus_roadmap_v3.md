@@ -78,9 +78,9 @@ an exception. A session works one lane and reads that lane's brief.
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
 | `model-track` | Profit-first: beat the DFS apps/mispriced books live (WS-1) + standing breadth harvest → D3/D5 + MLB/NHL post-GO grind (WS-2); the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
-| `nfl-ship15-recovery` | NFL back to ≥15/20 honest ships after the FantasyPoints bump re-rolled every verdict; passing / rushing / receiving yards, the two yards combos and targets mandatory | OPEN (count goal met: the seven `stat_meta` flips committed `8dfbe48c` 2026-10-10, the campaign's models on production since 2026-10-12; the NFL rebuilt and retrained on the training box 2026-10-15, its send waits on the owner, honest-receipts §8; passing yards withheld — next step is FantasyPoints feature design) | owner decisions in the brief §6 | [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) |
+| `nfl-ship15-recovery` | NFL back to ≥15/20 honest ships after the FantasyPoints bump re-rolled every verdict; passing / rushing / receiving yards, the two yards combos and targets mandatory | OPEN (count goal met: the seven `stat_meta` flips committed `8dfbe48c` 2026-10-10, the NFL rebuilt and retrained 2026-10-15, those models on production since 2026-10-16 (honest-receipts decision 70); passing yards withheld — next step is FantasyPoints feature design) | owner decisions in the brief §6 | [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) |
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (stages 1–2 live from cron; stage 3 analytics + circuit breaker next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
-| `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED (stages 0–4 merged to `devel` 2026-07-14, `b9f8a95e`; stage 5 live soak open, and its acceptance needs re-scoping — the pick'em snapshot it read was retired 2026-10-11, `1bafd0a5`; blocks nothing) | — (the owner re-scopes stage 5's acceptance) | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
+| `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED (stages 0–4 merged to `devel` 2026-07-14, `b9f8a95e`; stage 5 live soak open, its acceptance `sportstradamus bet pickem --platform sleeper` output on live slates (owner, 2026-10-16); blocks nothing) | — | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
 | `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening | ACTIVE | — (stage 0 near-done; 1 retired; 2a/2b/2c/5 startable — stage 5 never interleaves with `parlay-dependence`, §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
 | `mlb-nhl-activation` | Activated both leagues (D1/D2 = GO); post-GO grind runs in model-track WS-2; brief keeps the per-league detail | DONE (absorbed: model-track WS-2) | — | [archive/mlb-nhl-activation.md](archive/mlb-nhl-activation.md) |
@@ -90,15 +90,15 @@ an exception. A session works one lane and reads that lane's brief.
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
 | `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | DONE | — | [archive/cleanup-pass.md](archive/cleanup-pass.md) |
 | `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | DONE (all four stages closed 2026-09-13; the cache is per-box, so each box runs `sportstradamus fetch headshots` once) | — (owner installs the monthly cron row) | [archive/player-headshots.md](archive/player-headshots.md) |
-| `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
+| `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | DONE (closed 2026-10-16; 99 of 101 templates have art, `the-chain-gang` and `the-crossover` on the owner's hand-hunt list) | — | [archive/constellation-art.md](archive/constellation-art.md) |
 | `story-balance` | Honest ledger by bet side at platform payouts (Kelly / profit-sim / CLV / Gate-2 fixes), Over-led and Under-led star stories per game, live-analyst voice; selection-shrink lever researched and KILLED | OPEN (every workstream live on `devel`; the live read is the brief's §7, owner asks §10) | — | [handoffs/story-balance.md](handoffs/story-balance.md) |
-| `honest-receipts` | One pricing truth for realized performance (posted sides, platform payouts, the recommended cohort as the hero), decision-time columns in history, and the three research briefs (selection-aware trust layer, parlay-pricer repairs, train/serve skew) that decide the gated model-side fixes; no model is pulled on money, no model-free engine | OPEN (the 2026-10-08 follow-ups are built through push 5 and live on `devel` and production; league sends: the brief's §8) | owner asks in the brief §8 | [handoffs/honest-receipts.md](handoffs/honest-receipts.md) |
+| `honest-receipts` | One pricing truth for realized performance (posted sides, platform payouts, the recommended cohort as the hero), decision-time columns in history, and the three research briefs (selection-aware trust layer, parlay-pricer repairs, train/serve skew) that decide the gated model-side fixes; no model is pulled on money, no model-free engine | OPEN (the 2026-10-08 follow-ups are done and live on `devel` and production, the NHL, NFL and WNBA models sent 2026-10-16; open: the brief's §6 reads and the late-October version-age test) | — | [handoffs/honest-receipts.md](handoffs/honest-receipts.md) |
 
 Model-track sub-lane briefs with no row of their own:
 [breadth75_plan.md](handoffs/breadth75_plan.md),
 [combo-market-pricing.md](handoffs/combo-market-pricing.md),
-[model-strategy-reachability-repairs.md](handoffs/model-strategy-reachability-repairs.md),
-[shape_bound_triage.md](handoffs/shape_bound_triage.md).
+[shape_bound_triage.md](handoffs/shape_bound_triage.md). Closed 2026-10-16, code kept:
+[model-strategy-reachability-repairs.md](archive/model-strategy-reachability-repairs.md).
 
 ### 4.1 Build path (visual index)
 
@@ -164,7 +164,7 @@ flowchart LR
     BB["bestball-2027 S0-S6 (simulators S3-S4: Opus)"]:::sonnet
     CP["cleanup-pass DONE"]:::sonnet
     PH["player-headshots DONE"]:::sonnet
-    CA["constellation-art S1-S5 (S2: owner approves images)"]:::sonnet
+    CA["constellation-art DONE"]:::sonnet
 
     D3{"D3 start parlay-dependence"}:::owner
     D4{"D4 start bestball-2027 (~Nov 2026)"}:::owner
@@ -322,6 +322,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- 2026-10-16 — constellation-art DONE, brief archived; reachability sub-lane closed (code kept), brief archived; sleeper-parity stage 5 acceptance = `bet pickem --platform sleeper` on live slates; NFL row: retrained models on production.
 - 2026-10-16 — trued to git: sleeper-parity merged (`b9f8a95e`) → no critical path, §5 constraint 1 re-cut, constraint 3 met, stage 5 acceptance needs re-scope; honest-receipts / story-balance / nfl-ship15 / ledger / dfs-products rows trued; seven closed briefs → `docs/archive/`; §3 CLI names; §4 sub-lane note.
 - honest-receipts briefs back: R1 trust layer KILL; R2 pricer sound, legs fail (I5 = payout-truth refresh); R3 skews ≤0.7 pp of 12.5 pp selected-tail gap, rest = selection w/ little at-market info → I6 = model information (feature log, version-age test, as-of inputs); `admin tail-scorecard` diagnostic added; §4 row trued.
 - honest-receipts lane opened: Receipts/Lab/reflect graded at platform payouts via `realized.py` (flat −110 retired), history gains decision-time columns, three research briefs dispatched; ship_gate devel→main row trued to the implemented rule (no realized-money threshold); §4 row added.
