@@ -838,8 +838,8 @@ class Archive:
         """Flatten one league/market into a wide DataFrame.
 
         Indexed by ``(date, player)``, one column per book. Drops
-        pre-2023-05-03 rows for non-totals markets (stale format) to match
-        the legacy behaviour.
+        pre-2023-05-03 rows (the player props' stale format) for every market
+        but the two game lines, ``Moneyline`` and ``Totals``.
 
         Selects the latest observation per ``(date, player, book)`` so
         time-series storage does not change the per-book column semantics
@@ -861,7 +861,7 @@ class Archive:
             return pd.DataFrame()
 
         odds_df["game_date"] = pd.to_datetime(odds_df["game_date"])
-        if market not in ("Moneyline", "Total"):
+        if market not in ("Moneyline", "Totals"):
             odds_df = odds_df[odds_df["game_date"] >= cutoff]
             if odds_df.empty:
                 return pd.DataFrame()

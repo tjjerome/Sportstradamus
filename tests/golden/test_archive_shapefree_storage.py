@@ -618,6 +618,18 @@ def test_to_pandas_columns_are_the_books_and_nothing_else(archive):
     assert list(archive.to_pandas("WNBA", "AST").columns) == ["fanduel"]
 
 
+@pytest.mark.parametrize(("market", "kept"), [("Totals", True), ("Moneyline", True), ("AST", False)])
+def test_to_pandas_keeps_old_game_lines_only(archive, market, kept):
+    """Rows before the 2023-05-03 prop-format cutoff survive for the two game-line markets only."""
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES ('WNBA', ?, DATE '2022-06-01', 'P', 'fanduel', 5.0, ?, 0.5, 1.5)",
+        [market, _TS],
+    )
+
+    assert (("2022-06-01", "P") in archive.to_pandas("WNBA", market).index) is kept
+
+
 def test_composite_under_prob_weights_books(archive):
     """get_composite_under_prob returns the book-weighted mean of the stored under_prob."""
     league, market = "WNBA", "AST"
