@@ -9,10 +9,10 @@ when Gate-2 graduation runs, cells that pass move ``shipped: "devel"`` →
 
 Usage
 -----
-    poetry run generate-ship-config --branch main          # mutate stat_meta in place
-    poetry run generate-ship-config --branch main --dry-run
-    poetry run generate-ship-config --branch devel         # validate + summarize (no mutation)
-    poetry run generate-ship-config --branch devel --prune
+    sportstradamus ship config --branch main          # mutate stat_meta in place
+    sportstradamus ship config --branch main --dry-run
+    sportstradamus ship config --branch devel         # validate + summarize (no mutation)
+    sportstradamus ship config --branch devel --prune
 """
 
 from __future__ import annotations
@@ -139,13 +139,18 @@ def promote_for_main(
     "--model-stats",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate 1 parquet path (defaults to data/model_stats.parquet). Read for both branches.",
+    help=(
+        "Gate 1 parquet path (defaults to data/training/model_stats.parquet). "
+        "Read for both branches."
+    ),
 )
 @click.option(
     "--live-metrics",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet). main only.",
+    help=(
+        "Gate 2 parquet path (defaults to data/runtime/live_metrics_per_market.parquet). main only."
+    ),
 )
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Print the changes; do not mutate or prune."

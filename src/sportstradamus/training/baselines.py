@@ -21,8 +21,8 @@ Each strategy bundles:
   pickle, allowing the prediction-side mirror to recompute the baseline
   using the same ``global_mean`` snapshot the model was trained against.
 
-Registered strategies (more queued as A/B follow-ups in
-``docs/gbdt_mean_regression_plan.md``):
+Registered strategies (A/B history in
+``docs/archive/gbdt_mean_regression_plan.md``):
 
 * ``ratio_meanyr`` — current production. ``y / MeanYr_clipped`` ratio
   target; decode multiplies ``loc`` and ``scale`` by ``MeanYr``.
@@ -30,7 +30,7 @@ Registered strategies (more queued as A/B follow-ups in
   ``y − EB(MeanYr, GamesPlayed, K=10)`` and adds the EB prior back to
   ``loc`` only at decode; ``scale`` left in absolute residual units. Targets
   the multiplicative-amplification artifact (corr(pred_loc, MeanYr) ≈ −0.6
-  path-wide) identified in ``docs/OVERCONFIDENCE_INVESTIGATION.md``.
+  path-wide) identified in ``docs/archive/nba_overconfidence_investigation.md``.
   Path-wide A/B (PR #46) showed FGA SHIP, every other SkewNormal market
   KILL — the long-horizon baseline only fits markets where production is
   structural (e.g. shot volume).

@@ -23,8 +23,8 @@ The returned ``gate`` column is π.  By construction
 P(Y = 0) = π + (1 − π) · NB(0) = q, matching the calibrated classifier
 exactly — no ZINB/hurdle double-count.
 
-See ``docs/OVERCONFIDENCE_INVESTIGATION.md`` and
-``docs/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`` for the full
+See ``docs/archive/nba_overconfidence_investigation.md`` and
+``docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`` for the full
 analysis.
 """
 
@@ -90,7 +90,7 @@ class _ZeroTruncatedNB:
     ``q`` on most rows, which the frozen derived-π identity cannot represent (it
     clips π to 0, breaking the reconstruction). The joint/hurdle decode therefore
     stays on the full-support NB; see the Stage-B1 outcome + Track-B rescope in
-    ``docs/gbdt_mean_regression_plan.md``.
+    ``docs/archive/gbdt_mean_regression_plan.md``.
 
     Mechanics (for MZINB reuse): LightGBMLSS computes its loss as
     ``-Σ distribution(**params).log_prob(y)``, so assigning this class to a

@@ -340,7 +340,7 @@ parlays = load_current_parlays()
 legs = st.session_state[_LEGS]
 shapes: dict[str, GameShape] = {}
 if offers.empty:
-    st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
+    st.info("No current predictions. Run `sportstradamus prophecize` to generate offers.")
     focus_game = ""
 else:
     st.session_state[_BUILDER] = "constellation"

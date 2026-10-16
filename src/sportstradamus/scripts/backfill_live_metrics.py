@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot backfill of ``data/live_metrics_per_market.parquet``.
+"""One-shot backfill of ``data/runtime/live_metrics_per_market.parquet``.
 
 Walks backward through ``history.parquet`` for the last ``--days`` days,
 invoking :func:`sportstradamus.nightly._compute_live_metrics` once per
@@ -9,8 +9,8 @@ last-write wins). Stage 0 deliverable 0.5 — never called from cron.
 
 Usage
 -----
-    poetry run backfill-live-metrics --days 90
-    poetry run backfill-live-metrics --days 30 --step 7 --output /tmp/live.parquet
+    sportstradamus admin backfill-live-metrics --days 90
+    sportstradamus admin backfill-live-metrics --days 30 --step 7 --output /tmp/live.parquet
 """
 
 from __future__ import annotations
@@ -61,7 +61,10 @@ def _merge_with_existing(new_rows: pd.DataFrame, output: Path) -> pd.DataFrame:
     "--output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Override the output parquet path (defaults to data/live_metrics_per_market.parquet).",
+    help=(
+        "Override the output parquet path "
+        "(defaults to data/runtime/live_metrics_per_market.parquet)."
+    ),
 )
 def main(days: int, step: int, output: Path | None) -> None:
     """Backfill rolling live metrics over the last ``--days`` days."""

@@ -78,7 +78,7 @@ def _warn_ship_gate(
     every served cell (``ship_config`` value other than ``WITHHELD``, leagues actually loaded this
     run) whose ``model_stats`` row came back ``ship == False``. It never prunes — the cell keeps
     serving its fresh pickle until the operator demotes it (flip ``shipped: "withheld"`` and the
-    next meditate prunes, or ``generate-ship-config --branch devel --prune`` for an immediate
+    next meditate prunes, or ``sportstradamus ship config --branch devel --prune`` for an immediate
     dark-out). An empty ``ship_config`` (``--deterministic`` or the integration smoke test) serves
     nothing, so this no-ops.
     """
@@ -132,7 +132,7 @@ def _warn_ship_gate(
     )
     click.echo(
         'To cull: set "shipped": "withheld" in stat_meta.json (the next meditate prunes the '
-        "pickle), or generate-ship-config --branch devel --prune for an immediate dark-out."
+        "pickle), or sportstradamus ship config --branch devel --prune for an immediate dark-out."
     )
 
 
@@ -307,7 +307,7 @@ def _lock_production_artifacts(
         "every cell. 'joint' is the legacy jointly-fit LightGBMLSS ZINB. "
         "'hurdle' uses the two-stage HurdleZINB (calibrated zero classifier + "
         "NegBin on positives + derived-pi gate; see "
-        "docs/OVERCONFIDENCE_INVESTIGATION.md §2)."
+        "docs/archive/nba_overconfidence_investigation.md §2)."
     ),
 )
 @click.option(
@@ -540,8 +540,7 @@ def meditate(
     )
     # --deterministic implies --force: the input-freeze (new_M = empty) otherwise
     # short-circuits train_market when a prior model pickle exists, which is precisely
-    # when the eval harness needs a fresh deterministic rebuild. See
-    # docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    # when the eval harness needs a fresh deterministic rebuild.
     force = force or deterministic
     if full_rebuild:
         os.environ["SPORTSTRADAMUS_ARCHIVE_READ_ONLY"] = "1"
@@ -576,7 +575,7 @@ def meditate(
     # Validated here so a bad entry fails before the expensive gamelog loads
     # below. Deterministic A/B runs ignore it: they target an explicit
     # --market with an explicit --target-normalization and must never mutate
-    # production pickles. See docs/gbdt_mean_regression_plan.md "Ship
+    # production pickles. See docs/archive/gbdt_mean_regression_plan.md "Ship
     # mechanism — per-cell strategy".
     ship_config = {} if deterministic else load_ship_config(branch=branch)
     # Raw stat_meta carries the per-cell ``posthoc`` slug (the calibration-method

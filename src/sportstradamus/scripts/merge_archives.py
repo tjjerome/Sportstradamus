@@ -29,9 +29,9 @@ shared archive flock, so an in-place rebuild serializes against a live cron writ
 
 Usage
 -----
-    poetry run merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
-    poetry run merge-archives --source /tmp/prod_archive_snapshot.duckdb
-    poetry run merge-archives --source other.duckdb --output merged.duckdb
+    sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
+    sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb
+    sportstradamus admin merge-archives --source other.duckdb --output merged.duckdb
 """
 
 from __future__ import annotations

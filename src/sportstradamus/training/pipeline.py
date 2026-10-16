@@ -4655,8 +4655,8 @@ def train_market(
         zinb_mode: Either ``"joint"`` (legacy LightGBMLSS ZINB; the default) or
             ``"hurdle"`` (use ``HurdleZINB`` from ``sportstradamus.hurdle`` — a
             two-stage model with a derived-π gate; see
-            docs/OVERCONFIDENCE_INVESTIGATION.md §2 and
-            docs/CENTERED_TARGET_NEGATIVE_RESULT.md for context). Only consulted
+            docs/archive/nba_overconfidence_investigation.md §2 and its centered-target
+            negative result for context). Only consulted
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
         dist: Distribution-family override (the WS-3 ``meditate --dist`` sweep axis).

@@ -1,9 +1,9 @@
 """Shared lifecycle classification for (league, market) cells.
 
-Joins the offline Gate-1 view (``data/model_stats.parquet``) with the live
-Gate-2 view (``data/live_metrics_per_market.parquet``) and classifies each cell
+Joins the offline Gate-1 view (``data/training/model_stats.parquet``) with the live
+Gate-2 view (``data/runtime/live_metrics_per_market.parquet``) and classifies each cell
 into ``not-shipped`` / ``in-test`` / ``graduated`` / ``demoted``. Both the
-``check-graduation`` display CLI and the ``generate-ship-config`` generator
+``ship graduation`` display CLI and the ``ship config`` generator
 import these functions so the two share one definition of "graduated".
 
 The Gate-2 rule here (positive Gate-1 BSS + at least
@@ -242,7 +242,7 @@ def served_cells_failing_ship(
     """Return ``(league, market)`` cells marked ``shipped`` devel/main yet failing ship.
 
     Feeds the two warning surfaces — meditate's post-run table and the
-    ``generate-ship-config --branch devel`` summary — that tell the human which
+    ``ship config --branch devel`` summary — that tell the human which
     served cells fail the offline gates (``ship == False``; see
     ``training.scorecard``); the cull itself is a manual decision. A missing
     parquet or an ``NA`` ``ship`` (no scored evidence) is not a failure — only

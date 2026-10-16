@@ -10,7 +10,7 @@ Pins the train/predict mirror for the SkewNormal branch added in P1 Task 5:
   the EB-prior path: ``Model EV == EB_prior + loc + scale * delta * sqrt(2/pi)``
   with ``scale`` left in absolute residual units (no ``× MeanYr``).
 * ``Model Skew`` must be finite under both paths — guards the FGA NaN dead end
-  documented in ``docs/OVERCONFIDENCE_INVESTIGATION.md`` §3.4.
+  documented in ``docs/archive/nba_overconfidence_investigation.md`` §3.4.
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ def test_centered_additive_model_skew_is_finite():
 
     assert np.all(np.isfinite(out["Model Skew"].to_numpy())), (
         "Model Skew must be finite for every row — see "
-        "docs/OVERCONFIDENCE_INVESTIGATION.md §3.4 (FGA NaN dead end)."
+        "docs/archive/nba_overconfidence_investigation.md §3.4 (FGA NaN dead end)."
     )
     assert np.all(np.isfinite(out["Projection"].to_numpy()))
     assert np.all(np.isfinite(out["Model Sigma"].to_numpy()))

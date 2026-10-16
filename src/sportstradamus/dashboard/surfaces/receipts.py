@@ -63,7 +63,8 @@ if meta.get("last_run"):
     st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 else:
     st.warning(
-        "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."
+        "Nightly resolution has not run yet. Run `sportstradamus reflect` to resolve "
+        "prediction outcomes."
     )
 
 # Sport narrow runs before the sidebar builds its league multiselect, so the

@@ -32,7 +32,7 @@ offers = sport_filtered(load_current_offers())
 
 if offers.empty:
     st.info(
-        "No current predictions found. Run `poetry run prophecize` to "
+        "No current predictions found. Run `sportstradamus prophecize` to "
         "generate `current_offers.parquet`."
     )
     st.stop()

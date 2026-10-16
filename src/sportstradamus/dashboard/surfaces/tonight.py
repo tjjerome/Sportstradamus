@@ -100,7 +100,7 @@ stories = load_current_game_stories()
 game_context = load_current_game_context()
 
 if offers.empty:
-    st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
+    st.info("No current predictions. Run `sportstradamus prophecize` to generate offers.")
     st.caption("Prophecies arrive with the next data wave.")
     st.stop()
 

@@ -1,7 +1,7 @@
 """Golden pins for meditate's warn-only ship gate.
 
 A served cell whose fresh offline gates fail is *reported*, never pruned — the
-cull (flip ``shipped: "withheld"``, or ``generate-ship-config --prune``) is the
+cull (flip ``shipped: "withheld"``, or ``ship config --prune``) is the
 human's decision. Replaces the retired serve-iff-ship invariant test.
 """
 

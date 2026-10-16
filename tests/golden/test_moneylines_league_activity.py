@@ -1,6 +1,6 @@
 """Characterization of ``moneylines._classify_league_activity`` — the
 feed-derived league-activity classifier feeding the budget governor and the
-prophecize/meditate/pickem-build update gates.
+prophecize, meditate and bet pickem update gates.
 
 Pins the tier assignment from events-feed commence times (live / preseason /
 idle-omitted), the sticky-live carry across mid-season gaps, the opening

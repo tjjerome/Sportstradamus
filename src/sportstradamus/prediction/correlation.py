@@ -763,7 +763,7 @@ def find_correlation(
         contest_variant: Underdog or Sleeper payout pool. Default ``"pooled"``
             combines ``power`` (sizes 2-3) and ``flex`` (sizes 4-6) into one
             pool; the single-variant names are accepted for the
-            ``pickem-build`` path. The legacy single-payout platforms ignore it.
+            ``bet pickem`` path. The legacy single-payout platforms ignore it.
         corr_sink: When provided, each game appends its upper-triangle
             correlation + pair-modifier slice (``Platform, League, Game, leg_a,
             leg_b, rho, modifier``) to this list for the dashboard rail/

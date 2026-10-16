@@ -882,7 +882,8 @@ def _blend_with_book(
         # The book leg stays the symmetric constant-CV shape (fused_loc default). The WS2
         # settling experiment found the per-cell shaped book loses in the served blend OOS
         # (the model's per-row SkewNormal already carries the shape); the shaped book ships
-        # only on the book-only fallback leg. See docs/handoffs/book_shape_ws2_handoff.md.
+        # only on the book-only fallback leg. See the WS2 handoff, deleted after it closed
+        # (`git show cf4ce951:docs/handoffs/book_shape_ws2_handoff.md`).
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
             model_weight,
             model_ev,

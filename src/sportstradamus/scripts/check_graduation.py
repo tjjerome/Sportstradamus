@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Print the lifecycle status table for every (league, market) cell.
 
-Stage 0 deliverable 0.4. Joins ``data/model_stats.parquet`` (Gate 1) and
-``data/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
+Stage 0 deliverable 0.4. Joins ``data/training/model_stats.parquet`` (Gate 1) and
+``data/runtime/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
 ``training.graduation`` and prints the classification colored to stdout. The
 8-metric body shows 4 Gate 1 and 4 Gate 2 columns alongside the lifecycle state.
 
 Usage
 -----
-    poetry run check-graduation
-    poetry run check-graduation --league NBA
+    sportstradamus ship graduation
+    sportstradamus ship graduation --league NBA
 """
 
 from __future__ import annotations
@@ -100,13 +100,13 @@ def _print_summary(states: pd.Series) -> None:
     "--model-stats-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Override Gate 1 parquet path (defaults to data/model_stats.parquet).",
+    help="Override Gate 1 parquet path (defaults to data/training/model_stats.parquet).",
 )
 @click.option(
     "--live-metrics-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Override Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet).",
+    help="Override Gate 2 parquet path (defaults to data/runtime/live_metrics_per_market.parquet).",
 )
 def main(league: str | None, model_stats_path: Path | None, live_metrics_path: Path | None) -> None:
     """Print the lifecycle status table joining Gate 1 (offline) and Gate 2 (live)."""

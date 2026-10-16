@@ -21,8 +21,8 @@ one-to-one. Read-only w.r.t. everything except that output parquet.
 
 Usage
 -----
-    poetry run backfill-history-eras
-    poetry run backfill-history-eras --output /tmp/eras.parquet
+    sportstradamus admin backfill-history-eras
+    sportstradamus admin backfill-history-eras --output /tmp/eras.parquet
 """
 
 from __future__ import annotations

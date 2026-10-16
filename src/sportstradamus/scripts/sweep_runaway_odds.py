@@ -35,8 +35,8 @@ Only sweep AFTER both encoder fixes are deployed to the box you are sweeping: a
 ``confer`` running the old encode repopulates poisoned rows faster than you can
 repair them. Prod tracks ``devel``, so check what ``devel`` actually carries.
 
-    poetry run sweep-runaway-odds                                            # dry run
-    poetry run sweep-runaway-odds --apply                                    # back up + repair
+    sportstradamus admin sweep-runaway-odds                                  # dry run
+    sportstradamus admin sweep-runaway-odds --apply                          # back up + repair
     poetry run python -m sportstradamus.scripts.sweep_runaway_odds --apply   # on prod
 """
 

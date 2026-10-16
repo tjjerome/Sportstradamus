@@ -1,6 +1,6 @@
 """Odds API ingest for game-level and player-prop markets.
 
-Entry point: ``confer`` (wired to ``poetry run confer`` via ``pyproject.toml``).
+Entry point: ``confer`` (``sportstradamus confer``).
 Two internal workhorses:
 
 * :func:`get_moneylines` — fetches h2h / totals / spreads for every active
@@ -20,13 +20,13 @@ from props admission: they are bought for the whole live slate whenever
 the close-lines floor holds, even on runs where props fit nothing.
 
 The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
-pass: it reads ``data/upcoming_events.json`` (refreshed by every broad
+pass: it reads ``data/runtime/upcoming_events.json`` (refreshed by every broad
 ``confer`` run) and only fires per-event endpoint calls for games starting
 within the closing window. If the window is empty, it exits before
 touching the archive or the network. The intended cron schedule —
 American-sports start hours only — is::
 
-    */10 11-23,0-1 * * * cd <repo> && poetry run confer --close-lines
+    */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
 """
 
 import importlib.resources as pkg_resources
@@ -231,8 +231,8 @@ def _classify_league_activity(key, sports):
 
     Fetches ``/events`` (cost 0) per league, tiers by days to the earliest
     commence time (:func:`odds_budget.classify_tier` — sticky through
-    mid-season gaps), and persists the snapshot the prophecize/meditate/
-    pickem-build gates read. Leagues that go idle keep an ``idle`` record
+    mid-season gaps), and persists the snapshot the prophecize, meditate and
+    bet pickem gates read. Leagues that go idle keep an ``idle`` record
     (the last game, which is season-end memory for the ``Stats.update`` window,
     and the opener, which a mid-season break must not lose), including leagues
     the sports index no longer lists. A non-OK events response carries the
@@ -322,7 +322,7 @@ def _resolve_broad_run_leagues(keys, cli_log):
     is_flag=True,
     default=False,
     help=(
-        "Targeted close-line scrape only. Reads data/upcoming_events.json and hits "
+        "Targeted close-line scrape only. Reads data/runtime/upcoming_events.json and hits "
         "per-event endpoints for games starting within the closing window. "
         "Exits without touching archive or API when no events are due."
     ),
@@ -1047,7 +1047,7 @@ def _prune_upcoming_events(events):
 def _close_lines_pass(keys, props):
     """Per-event close-line scrape. Exits early when the window is empty.
 
-    Loads ``data/upcoming_events.json``, filters to events with a
+    Loads ``data/runtime/upcoming_events.json``, filters to events with a
     ``commence_time`` between ``CLOSING_LEAD_MIN`` and ``CLOSING_LEAD_MAX``
     minutes from now, and only then opens ``Archive`` and hits the per-event
     Odds API endpoint for each — spending from ``keys["odds_api_plus"]``,

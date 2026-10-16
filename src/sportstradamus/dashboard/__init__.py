@@ -1,6 +1,6 @@
 """Sportstradamus Dashboard — Streamlit entry point.
 
-Launched via `poetry run dashboard`. Uses subprocess to start Streamlit
+Launched via `sportstradamus dashboard`. Uses subprocess to start Streamlit
 with the main app file.
 """
 

@@ -266,7 +266,9 @@ desk_only_notice()
 
 stats = load_model_stats()
 if stats.empty:
-    st.info("No model stats found. Run `poetry run meditate` to generate `model_stats.parquet`.")
+    st.info(
+        "No model stats found. Run `sportstradamus meditate` to generate `model_stats.parquet`."
+    )
     st.stop()
 
 # The global sport switch narrows every other surface; apply it here too so the training

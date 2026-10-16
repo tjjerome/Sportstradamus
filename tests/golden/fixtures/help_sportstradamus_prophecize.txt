@@ -9,7 +9,7 @@ Options:
                                   Underdog payout pool for parlay scoring.
                                   Default 'pooled' combines power (2-3 legs) and
                                   flex (4-6 legs) into one pool; single-variant
-                                  names are kept for the pickem-build path.
+                                  names are kept for the bet pickem path.
   --log-level [DEBUG|INFO|WARNING|ERROR]
                                   Verbosity for the structured JSONL log.
   --help                          Show this message and exit.

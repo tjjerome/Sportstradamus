@@ -44,7 +44,7 @@ are idle: not polled, kept in the snapshot at
 ``helpers.io.LEAGUE_ACTIVITY_PATH`` only as an ``idle`` record remembering
 the last seen game and the season's opening night.
 :func:`league_is_live` serves the snapshot to the
-prophecize/meditate/pickem-build offer loops (``SPORTSTRADAMUS_HOLD_LEAGUES``
+prophecize, meditate and bet pickem offer loops (``SPORTSTRADAMUS_HOLD_LEAGUES``
 holds named leagues out of them regardless of tier), and
 :func:`update_window_open` gates ``Stats.update`` itself (10 days before
 the next game to 10 days after the last; ``SPORTSTRADAMUS_FORCE_UPDATE=1``
@@ -350,7 +350,7 @@ def _fresh_leagues() -> dict | None:
 
 
 def league_is_live(league: str, season_start: date) -> bool:
-    """Gate for the per-league offer loops (prophecize, meditate, pickem-build).
+    """Gate for the per-league offer loops (prophecize, meditate, bet pickem).
 
     A league is live when the feed-derived activity snapshot tiers it
     ``live`` or ``preseason`` (both poll — preseason starts

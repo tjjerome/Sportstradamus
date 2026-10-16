@@ -95,7 +95,7 @@ _TOP_DECILE_MIN_OFFERS = 10
 _MIN_BETS_FOR_PRECISION = 30
 # Clip bookmaker probabilities to avoid divide-by-zero in fair-odds payouts.
 _BOOKS_P_CLIP = 1e-3
-# Phase 4 live ship-gate (set-baseline -> main): Kelly stake fraction cap, mirroring
+# Kelly stake fraction cap of the live profit sim (display only, never a ship gate), mirroring
 # the offline S3 sim's 5% per-bet ceiling. The live ROI is the dollar-weighted
 # realized return on the staked dollars within the rolling window.
 _KELLY_LIVE_CAP_FRAC: float = 0.05
@@ -195,7 +195,7 @@ def _profit_sim_yield(group: pd.DataFrame) -> float:
 
 
 def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
-    """Kelly-sized realized ROI — Phase 4 set-baseline -> main live gate.
+    """Kelly-sized realized ROI, for display: realized money is never a ship gate.
 
     Per bettable offer (``Boost > 0``, see :func:`_bettable`): ``d`` is :func:`_fair_payout`
     and ``p`` is ``Win Prob``, both for the bet side whichever side it is (same convention

@@ -4,7 +4,7 @@ Usage: sportstradamus bet kelly [OPTIONS]
 
 Options:
   --bankroll TEXT   Bankroll in dollars.  [required]
-  --from FILE       Path to a recommendations YAML produced by pickem-build.
+  --from FILE       Path to a recommendations YAML produced by bet pickem.
                     [required]
   --fraction FLOAT  Kelly fraction multiplier.  [default: 0.25]
   --help            Show this message and exit.

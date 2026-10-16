@@ -1,4 +1,4 @@
-"""Unit tests for the gate-driven generate-ship-config CLI + helpers."""
+"""Unit tests for the gate-driven ``ship config`` CLI + helpers."""
 
 from __future__ import annotations
 

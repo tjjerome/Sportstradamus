@@ -121,7 +121,7 @@ _BOARD_ECHO_FIELDS: tuple[str, ...] = (
 # Leagues whose withheld cells confirm may never auto-flip: a board-passing cell is announced and
 # skipped until the owner's activation gates (D1/D2) go GO, then the league is removed here in the
 # same PR that ships its first cells. Empty since the MLB+NHL GO (2026-07-09,
-# docs/handoffs/mlb-nhl-activation.md); machinery stays for the next league onboarding.
+# docs/archive/mlb-nhl-activation.md); machinery stays for the next league onboarding.
 _ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
 # A full-HPO meditate confirm is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung
 # run from blocking the loop forever. A timeout is treated as a failure (the cell auto-reverts).

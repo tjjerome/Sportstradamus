@@ -3,7 +3,7 @@
 The name-normalization path is load-bearing: sportsbooks spell player
 names inconsistently (accents, suffixes, parenthesized team tags) and
 ``remove_accents`` is the canonical entry point that the archive, the
-stats loaders, and the prop-export writer all run names through.
+stats loaders and the DFS scrapers all run names through.
 """
 
 import datetime

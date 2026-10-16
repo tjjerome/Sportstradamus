@@ -6,7 +6,7 @@ the registry, and drives it through ``model_prob._decode_skewnormal`` with the
 serve-derived ``offset_mode``. Guards the invariants a serve-decode drift has broken:
 
 * ``Model Skew`` stays finite for every row (the FGA NaN dead end,
-  ``docs/OVERCONFIDENCE_INVESTIGATION.md`` 3.4).
+  ``docs/archive/nba_overconfidence_investigation.md`` 3.4).
 * The decoded mean is not inflated. A serve seeding drift (the prediction path deciding
   ``offset_mode`` from a hardcoded ``method`` string) doubled ``centered_additive_mean10``
   projections on 2026-06-24; a >= 1.5x median ``Projection/MeanYr`` fails here. This is the
@@ -110,7 +110,7 @@ def test_centered_skewnormal_live_decode_finite_and_uninflated(slug):
     # FGA NaN guard.
     assert np.isfinite(decoded["Model Skew"].to_numpy()).all(), (
         "Model Skew must be finite for every row -- see "
-        "docs/OVERCONFIDENCE_INVESTIGATION.md 3.4 (FGA NaN dead end)."
+        "docs/archive/nba_overconfidence_investigation.md 3.4 (FGA NaN dead end)."
     )
     proj = decoded["Projection"].to_numpy()
     assert decoded["Projection"].notna().all() and (proj > 0).all()

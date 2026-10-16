@@ -275,7 +275,7 @@ def _size_candidates(
     "yaml_path",
     type=click.Path(exists=True, dir_okay=False),
     required=True,
-    help="Path to a recommendations YAML produced by pickem-build.",
+    help="Path to a recommendations YAML produced by bet pickem.",
 )
 @click.option(
     "--fraction",

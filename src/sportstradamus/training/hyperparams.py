@@ -85,9 +85,10 @@ def _materialise_fold_datasets(train_set, valid_set, params):
     ``lgb.cv`` slices its folds with ``Dataset.subset``, and building a Booster over a subset
     corrupts the heap on wide frames: LightGBM 4.6 and 4.7 both abort inside ``LGBM_BoosterCreate``
     with a glibc heap message and no traceback, which cost the confirm walk both NFL carries
-    nominees (docs/handoffs/dpo-confirm-crash.md). ``fpreproc`` is cv's own hook for replacing the
-    fold data before that call, so its loop, early stopping and aggregation stay untouched, and
-    referencing the full Dataset keeps the binning identical to the subset this replaces.
+    nominees (``git show d7b88d41:docs/handoffs/dpo-confirm-crash.md``). ``fpreproc`` is cv's own
+    hook for replacing the fold data before that call, so its loop, early stopping and aggregation
+    stay untouched, and referencing the full Dataset keeps the binning identical to the subset
+    this replaces.
     """
     import lightgbm as lgb  # deferred for the same reason as run_hyper_opt's imports below
 

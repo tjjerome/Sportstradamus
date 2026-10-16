@@ -6,8 +6,8 @@ Orchestrates the full prediction pipeline:
 2. Scrape DFS offers (Underdog, Sleeper)
 3. Score via :func:`process_offers` (feature extraction + distributional model)
 4. Snapshot scored offers + parlays as parquet for the Streamlit dashboard
-5. Persist a rolling year of predictions to ``data/history.parquet`` and
-   the new parlays to the ``data/parlay_hist/`` day partitions
+5. Persist a rolling year of predictions to ``data/runtime/history.parquet`` and
+   the new parlays to the ``data/runtime/parlay_hist/`` day partitions
 """
 
 from __future__ import annotations
@@ -218,7 +218,7 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
     help=(
         "Underdog payout pool for parlay scoring. Default 'pooled' "
         "combines power (2-3 legs) and flex (4-6 legs) into one pool; "
-        "single-variant names are kept for the pickem-build path."
+        "single-variant names are kept for the bet pickem path."
     ),
 )
 @LOG_LEVEL_OPTION

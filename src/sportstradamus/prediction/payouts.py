@@ -129,7 +129,7 @@ def payout_curve_for(
     Underdog pulls from ``data/config/underdog_payouts.json``. The default
     ``"pooled"`` variant builds one combined pool
     (:func:`_pooled_underdog_curve`); the single-variant names serve the
-    ``pickem-build`` path and settlement. An Underdog payout table carries
+    ``bet pickem`` path and settlement. An Underdog payout table carries
     every size the app takes, while the search list stops at
     ``UNDERDOG_FLEX_CAP``. PrizePicks, ParlayPlay and Chalkboard keep the
     legacy single-payout table.
