@@ -353,6 +353,8 @@ A "market" is a betting category for a single stat in a single league (e.g.
    Pick the distribution family from whether the stat is continuous or
    count-valued and whether it is zero-inflated (`SkewNormal`, `NegBin`,
    `ZINB`, `DPO`, `Mixture` — the families `pipeline._FORCEABLE_DISTS` accepts).
+   `Mixture` is research-only: its strategy trains and scores in the sweep but
+   lacks the `serve` capability (`model_strategy/specs.py`), so serving refuses it.
    `shipped: "withheld"` keeps the cell out of training and serving until it
    clears the offline gates (see [docs/ship_gate.md](ship_gate.md)). Optional
    knobs (`blending`, `zinb_mode`, `dist_training_loss`, `sn_param`,

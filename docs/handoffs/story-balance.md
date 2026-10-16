@@ -146,10 +146,10 @@ in `finalize_records` after the confidence clip, on real-quote rows,
 `Model Version`, through-origin least squares on trailing recommended quoted legs, at least 1,000
 legs and a CI lower bound above 0, else λ = 0, never 1.
 
-## 7. First live read (run once after the first post-push `prophecize` and `reflect`)
+## 7. Live read
 
-Runtime parquets only; nothing here touches DuckDB. On the dev box run it after the `sync`
-from prod, or on prod as the `sportstradamus` user.
+Runtime parquets only; nothing here touches DuckDB. Run it on the dev box after a `sync` from
+prod. It reruns as is after any `prophecize` and `reflect`.
 
 ```bash
 poetry run python - <<'EOF'
@@ -186,24 +186,24 @@ parentheses.
 Then eyeball Tonight: star games above non-star games within a tier, and the Games tab opening on
 the led story.
 
-## 8. Behaviour changes you will see
+## 8. Behaviour changes the lane made (2026-10-03)
 
-- **Gate 2 will demote cells on Under precision.** On the dev-box history the symmetric
-  rule demotes five cells that pass on Over precision: NFL `rushing yards` (Under precision 0.39,
+- **Gate 2 demotes cells on Under precision.** On the dev-box history of the landing the
+  symmetric rule demoted five cells that passed on Over precision: NFL `rushing yards` (Under precision 0.39,
   Over has too few bets to read), NFL `receiving yards` (0.46), WNBA `PR` (0.43), `RA` (0.44),
   `PA` (0.47). Two of those are mandatory cells of
   [nfl-ship15-recovery.md](nfl-ship15-recovery.md). Demotion changes `lifecycle_state`, the monthly
-  `gate-status` PR and Lab › Training; it does not stop serving (serving is pickle-exists). If you want
-  the old asymmetric rule back, revert `a6d96fd8`; the precision inputs stay posted-only either way.
+  `gate-status` PR and Lab › Training; it does not stop serving (serving is pickle-exists). To restore
+  the old asymmetric rule, revert `a6d96fd8`; the precision inputs stay posted-only either way.
 - **Board Kelly reads 0** on every leg paying ≤ 1× or > 2.5× (61 MLB Underdog Unders on the first
   slate were −EV with Kelly 3.5–40 and ranked first everywhere). Tooltip updated.
-- **Every persisted headline reshuffles once** (`STORIES_VERSION` p5); `user_slips.parquet` keeps its
+- **Every persisted headline reshuffled once** (`STORIES_VERSION` p5); `user_slips.parquet` keeps its
   frozen text.
-- **CLV flips sign on every Under segment** at the next `reflect` (NFL Under beat-close reads ≈ 68%,
-  not 31%); pick'em CLV shrinkage follows.
-- **Live metrics move**: MLB home runs' Kelly yield leaves the hundreds of percent; flat and Kelly
-  yields share a sign on cells with n ≥ 100; `precision_under_live` drops where unposted Unders were
-  propping it up.
+- **CLV flipped sign on every Under segment** at the first `reflect` after the landing (NFL Under
+  beat-close ≈ 68%, not 31%); pick'em CLV shrinkage reads the bet-side value.
+- **Live metrics moved** on the dev-box history of the landing: MLB home runs' Kelly yield left the
+  hundreds of percent; flat and Kelly yields share a sign on cells with n ≥ 100;
+  `precision_under_live` dropped where unposted Unders had propped it up.
 - `voice_bank.json` lives under `data/config/`, so the production pull restarts the dashboard by
   itself (`run_job.sh`); nothing manual.
 

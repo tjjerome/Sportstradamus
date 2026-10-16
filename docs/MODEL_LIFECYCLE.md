@@ -211,6 +211,7 @@ selected cell; the `auto` default honors what the cell has persisted:
 - `--zinb-mode` — ZINB architecture: legacy `joint` fit vs two-stage `hurdle`.
 - `--dist-training-loss` — training loss (`nll`/`crps`) instead of the per-family default.
 - `--dist` — distribution family (DPO / Mixture / NegBin / ZINB / SkewNormal) over the data-driven pick.
+  Mixture never serves ([ARCHITECTURE](ARCHITECTURE.md#adding-a-new-market)).
 - `--blending-loss-fn` — loss minimized when fitting the model↔book blend weight.
 - `--stabilization` — per-parameter gradient damping (`MAD`/`L2`) on the scale head.
 - `--hpo-selection` — Optuna trial-selection rule: lowest CV loss vs PIT-KS-aware `calibrated`.
