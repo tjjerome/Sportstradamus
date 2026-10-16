@@ -53,7 +53,7 @@ repos:
       # runs only.
       - id: integration-smoke
         name: integration smoke (no APIs)
-        entry: env -u SPORTSTRADAMUS_INTEGRATION_REAL_APIS poetry run pytest tests/integration/ -m integration -q
+        entry: env -u SPORTSTRADAMUS_INTEGRATION_REAL_APIS poetry run pytest tests/integration/ -m integration -n0 -q
         language: system
         pass_filenames: false
         stages: [pre-commit]
