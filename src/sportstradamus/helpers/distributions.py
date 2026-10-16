@@ -218,7 +218,7 @@ SN_MAX_MEAN_FACTOR = 5.0
 # A SkewNormal's standardized skewness is bounded to |gamma| < 0.99527 (Azzalini 1985 [82]).
 # Clamp a target skew just inside it so the moment-match's alpha stays finite; a count cell's
 # low-mean right-skew that exceeds the bound is met in variance and finished by the integer PMF
-# correction (WS2 research brief, /tmp/researcher_ws2_book_shape.md Findings 2-3).
+# correction (WS2 research brief, Findings 2-3).
 _SN_SKEW_MAX = (
     0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
 )

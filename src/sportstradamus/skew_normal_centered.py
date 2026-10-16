@@ -13,7 +13,7 @@ alpha = 0 and the alpha score is collinear with loc, so per-parameter
 boosting cancels the skew signal and the skew head rails. The centered
 parametrization orthogonalizes the three scores (Arellano-Valle & Azzalini
 2008; Azzalini & Capitanio 2014 §3.1.4), giving the gamma1 trees a clean
-gradient. See /tmp/researcher_continuous_family.md §1a.
+gradient.
 
 Usage:
     from sportstradamus.skew_normal_centered import CenteredSkewNormal

@@ -1,9 +1,7 @@
 """Exact CDF endpoints and settlement for nonnegative integer outcomes.
 
-This is the shared parity prerequisite specified by
-``/tmp/researcher_structured_count_transfer_20260720.md`` (SHA-256
-``413c7e2049ddd9a0918a7d315dd1340f6bc26f22ac9069a1434abae0c002edf2``).
-It keeps observation randomization and whole/half-line settlement on the same
+This is the shared parity prerequisite of the structured-count transfer research of
+2026-07-20. It keeps observation randomization and whole/half-line settlement on the same
 integer-lattice convention without embedding any league or market policy.
 """
 

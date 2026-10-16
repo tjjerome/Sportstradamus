@@ -526,7 +526,7 @@ def fit_model_weight_crps(
     Mirrors :func:`fit_model_weight` — same ``fused_loc`` blend, same ``[0.05, 0.9]`` bounds, same
     zero-inflation gate plumbing — but swaps the clamped log-likelihood for the strictly-proper,
     bounded CRPS. CRPS needs no ``-20`` clamp, so it drops the clamp's left-tail bias on ``w``
-    (the robustness lever for heavy-tailed cells; see ``/tmp/researcher_crps_blending.md``). The
+    (the robustness lever for heavy-tailed cells). The
     gated CDF carries the zero spike, so no separate ``y==0`` term is added.
 
     Returns a single float w in [0.05, 0.9].
@@ -601,8 +601,9 @@ def fit_model_weight_crps_1se(
     instead of TNC-minimized: take the argmin, then return the smallest grid weight whose mean
     CRPS is within ``_ONE_SE_KAPPA`` player-clustered paired-bootstrap SEs of it — Diebold–Pauly
     shrinkage of the estimated combination weight toward the book
-    (``/tmp/researcher_blend_weight_slug.md``). On a no-edge cell the flat loss path drives ``w``
-    to the floor; on a real-edge cell the band is tight and ``w`` stays near the argmin.
+    (``docs/archive/researcher_blend_weight_slug.md``). On a no-edge cell the flat loss path
+    drives ``w`` to the floor; on a real-edge cell the band is tight and ``w`` stays near the
+    argmin.
 
     ``clusters`` is the per-row player identity (date for team markets); without it the fit
     falls back to the plain grid argmin.
@@ -668,7 +669,7 @@ def fit_dpo_weight(model_ev, book_ev, result, model_phi, cv, blending, clusters=
 # Each entry owns its weight-fitting objective and its weight bounds, so a strategy
 # can change the objective (as `crps_1se` does) and/or the bounds (e.g. drop the
 # 0.05 floor) without touching the others — but never a gate-scored functional like
-# Brier-at-line (assay-sensitivity; /tmp/researcher_blend_weight_slug.md). Default
+# Brier-at-line (assay-sensitivity; docs/archive/researcher_blend_weight_slug.md). Default
 # `nll` reproduces the historical behavior exactly.
 DEFAULT_BLENDING: str = "nll"
 BLENDING_SLUGS: frozenset[str] = frozenset({"nll", "crps", "crps_1se"})

@@ -211,7 +211,7 @@ _GATE5_ECE_MAX: float = 0.075
 # Gate 5 debias — Roelofs (2022) "Mitigating Bias in Calibration Error
 # Estimation". Equal-mass ECE is positively biased at finite N; the bias
 # scales O(1/sqrt(N_bin)) and falsely fails ~45% of perfectly calibrated
-# NFL-N≈240 cells per the lifecycle gate audit at /tmp/researcher_lifecycle_gate_audit.md.
+# NFL-N≈240 cells per the lifecycle gate audit.
 # Fix: bootstrap-estimate the null bias by drawing y ~ Bernoulli(p_model)
 # and subtracting the mean of those null ECEs from the raw ECE.
 _GATE5_DEBIAS_RESAMPLES: int = 200
@@ -229,7 +229,7 @@ _GATE5_DEBIAS_SEED: int = 9173
 # tiny z and passes. Gate 6 instead scores the model's STABLE top-MeanYr prediction against
 # recent form (Mean10) — the one yardstick these artifacts don't suppress — and fails the cell
 # when it sits below the causal real-game floor. The corr anchor (not the normalization or
-# family) scopes it. [research-analyst /tmp/researcher_overshrinkage_gate.md, 2026-06-19;
+# family) scopes it. [research-analyst brief, 2026-06-19;
 # scope widened to all cells 2026-06-21]
 # A "stable" player = recent form within this band of the season baseline; real production
 # tracks recent form for them (noisy windows mean-revert, stable ones don't).
@@ -814,22 +814,21 @@ def _iqr(values: np.ndarray) -> float:
     return float(p75 - p25)
 
 
-# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B per the
-# research brief at /tmp/researcher_g4_audit.md. The old gate computed
+# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B of the
+# Gate 4 research audit. The old gate computed
 # IQR(point_pred) / IQR(actual), a sharpness-vs-calibration category error
 # (Gneiting & Raftery 2007): point predictions are conditional means and
 # always lose to realized-outcome spread on the IQR. The fix is to compute
 # the pooled IQR of the predictive distribution per-row, by inverting the
 # per-row CDF at q = 0.25 / 0.75, then taking the IQR of the concatenated
-# bag. Validated against sample-based IQR with M=1000 on five real cells
-# (/tmp/g4_iqr_experiment.py) — agrees to <=0.001 on ZINB, within 10% on
-# SkewNormal.
+# bag. Validated against sample-based IQR with M=1000 on five real cells:
+# agrees to <=0.001 on ZINB, within 10% on SkewNormal.
 
 
 # torch's NegativeBinomial(probs=p) treats p as "probability of success" and
 # counts FAILURES; scipy.stats.nbinom(n, p) treats p the same way but counts
 # successes-needed before n failures, so the per-trial parameter is mirrored:
-# scipy_p = 1 - torch_probs. Mapping documented in /tmp/researcher_g4_audit.md.
+# scipy_p = 1 - torch_probs.
 def _zinb_ppf(q: float, r: np.ndarray, nb_p: np.ndarray, gate: np.ndarray) -> np.ndarray:
     """Vectorized inverse CDF for ZINB(``gate``, ``r``, ``nb_p``).
 
@@ -1674,9 +1673,8 @@ def _ece_debias_offset(
     The binned ECE estimator is positively biased at finite N — even a
     perfectly calibrated model produces ``_gate5_ece_equal_mass > 0``
     because sampling noise in each bin's mean-``y`` inflates
-    ``|mean_p - mean_y|``. Per the lifecycle gate audit at
-    ``/tmp/researcher_lifecycle_gate_audit.md`` this falsely fails up to
-    44.6 % of perfectly calibrated NFL-N≈240 cells.
+    ``|mean_p - mean_y|``. Per the lifecycle gate audit this falsely fails up
+    to 44.6 % of perfectly calibrated NFL-N≈240 cells.
 
     The fix: estimate the bias as the expected ECE under the null
     hypothesis that ``p_model`` IS the calibration, by drawing
