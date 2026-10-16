@@ -4,8 +4,8 @@
 source-specific closures — into a ``click.Group`` with the standard ``run`` /
 ``list`` / ``verify`` subcommands (plus ``backfill`` and ``refresh-auth`` when
 the source supports them). The per-command builders live in
-:mod:`collectors.commands`; source-only commands (e.g. a ``discover`` /
-``import-curl``) are attached by the source after building.
+:mod:`collectors.commands`; source-only commands (e.g. ``import-curl``) are
+attached by the source after building.
 """
 
 from __future__ import annotations

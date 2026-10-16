@@ -40,11 +40,11 @@ _DATA_BASE = Path(data.__path__[0])
 PLAYER_DATA_BASE = _DATA_BASE / "player_data"
 TEAM_DATA_BASE = _DATA_BASE / "team_data"
 
-# Catalog entries are named ``{context}_{slug_underscore}`` (see
-# discover.py). ``opponent`` rows are defensive aggregates — still
-# team-level data — so they land under team_data with an ``_opp``
-# suffix to keep them separate from the offensive view of the same
-# tool.
+# Catalog entries are named ``{context}_{slug_underscore}`` (as the archived
+# src/deprecated/fantasypoints_discover.py wrote them). ``opponent`` rows are
+# defensive aggregates — still team-level data — so they land under team_data
+# with an ``_opp`` suffix to keep them separate from the offensive view of the
+# same tool.
 _PLAYER_PREFIX = "player_"
 _TEAM_PREFIX = "team_"
 _OPPONENT_PREFIX = "opponent_"
