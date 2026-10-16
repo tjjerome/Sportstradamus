@@ -378,7 +378,7 @@ last-verified against `fbec3cc` (HEAD before Ship 75 rework):
 | [`src/sportstradamus/hurdle.py`](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here, unwired) | ~201 (NegBin loss) |
 | [`src/sportstradamus/training/scorecard.py`](../src/sportstradamus/training/scorecard.py) | P0 harness (promoted from `scripts/compression_eval.py` in `98e1b45`) — decile table, compression ratio, run log, diff verdict, gate scorecard, `supersede_verdict` | 84–149 (gate constants), 927 (`_gate4_iqr_spread`), 1110 (`gate_row`), 1295 (`apply_thresholds`), 1389 (`write_gate_scorecard`), 1641 (`supersede_verdict`), 1989 (`main`) |
 | [`src/sportstradamus/prediction/model_prob.py`](../src/sportstradamus/prediction/model_prob.py) | Live-path confound — shipped strategies must survive end-to-end | SkewNormal decode ~276, NegBin/ZINB decode 259–272, hurdle dispatch 205, `fused_loc` w≈0.9 blend, `temperature` ≈ 1.37 |
-| [`src/sportstradamus/training/ship_config.py`](../src/sportstradamus/training/ship_config.py) | per-cell `ship_config.json` loader + `resolve_cell_strategy` + `resolve_cell_zinb_mode` + `WITHHELD` | 37 (`WITHHELD`), 90 (`load_ship_config`), 117 (`resolve_cell_strategy`), 145 (`resolve_cell_zinb_mode`) |
+| [`src/sportstradamus/training/ship_config.py`](../src/sportstradamus/training/ship_config.py) | per-cell `stat_meta.json` loader and validator + `resolve_cell_target_normalization` + `WITHHELD` | 71 (`WITHHELD`), 107 (`load_stat_meta`), 155 (`load_ship_config`), 213 (`resolve_cell_target_normalization`) |
 | [`src/sportstradamus/training/baselines.py`](../src/sportstradamus/training/baselines.py) | strategy registry | 243–268 (`_STRATEGIES`), 272 (`STRATEGY_SLUGS`), 278 (`ZINB_MODES`) |
 
 ## 12. Per-change-type inference-path checklist
