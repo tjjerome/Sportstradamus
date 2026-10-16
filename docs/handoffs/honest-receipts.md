@@ -242,12 +242,17 @@ of the close-out report.
     2026-10-08 (decision 31): 10,768 of 10,928 team-games changed, and those at the default line
     fell from 3,446 to 24. The write's five checks passed, a second run changed nothing, and the
     sent files' checksums match on both boxes. Backups: `~/repair-backup/P3-20261016T0334Z/`,
-    `~/league-send-backup/NHL-20261016T033507Z/`.
+    `~/league-send-backup/NHL-20261016T033507Z/`. The 13:50 UTC board run, the first after all
+    three sends, ended `OK` with no traceback: seven NHL cells on the new files, every feature
+    each expects in production's frame. `hits` and goalie fantasy points had no offer for a
+    10-16 game in any run, so their first scoring on the new files is still to be read.
 70. **The NFL's rebuilt and retrained models are on production** (ask 33): 19 model files by
     `sync_to_prod.sh --league NFL` at 03:36 UTC, after the game-line copy at 03:35 (2,322 of 3,390
     team-games changed; at the default line 1,148 before, 1,036 after). Production keeps its
     withheld `NFL_passing-yards.mdl`, which serving skips. Backups:
-    `~/repair-backup/P7-20261016T0335Z/`, `~/league-send-backup/NFL-20261016T033558Z/`.
+    `~/repair-backup/P7-20261016T0335Z/`, `~/league-send-backup/NFL-20261016T033558Z/`. On the
+    13:50 UTC board run all 14 served cells scored on the new files, `qb yards` with its 476
+    features in production's frame.
 71. **`Archive.to_pandas` keeps the Totals rows dated before 2023-05-03** (ask 34), as it keeps
     the Moneyline rows: its exemption named `"Total"`, a market no row carries. The Totals
     book-weight fit gains 7 to 26 % of each league's rows at that league's next `meditate` (§7).
@@ -255,7 +260,9 @@ of the close-out report.
     03:34 UTC, after the game-line copy at 03:32 (2,095 of 3,106 team-games changed; at the default
     line 1,037 before, 977 after), which ran after decision 68's repair so Portland's rows match on
     `POR`. Backups: `~/repair-backup/P8-20261016T0332Z/`,
-    `~/league-send-backup/WNBA-20261016T033341Z/`.
+    `~/league-send-backup/WNBA-20261016T033341Z/`. On the 13:50 UTC board run the six served
+    cells offered for the 10-17 game scored on the new files with every feature in production's
+    frame.
 73. **The constellation-art lane is closed** (ask 36 of the close-out report): 99 of 101 templates
     have art, and `the-chain-gang` and `the-crossover` stay on the owner's hand-hunt list. Its
     brief is in `docs/archive/`.
