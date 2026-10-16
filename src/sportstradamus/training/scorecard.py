@@ -134,9 +134,10 @@ _ECE_BINS: int = 10
 #                      the worst-case alt-line probability mispricing — under the larger of
 #                      the δ effect-size floor and the cell's KS sampling-noise floor
 #   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5% (Roelofs-debiased: raw - null bias offset)
-#   G6 star ratio    : (all cells; corr anchor scopes it) stable top-MeanYr pred / recent form,
-#                      clustered-CI upper bound at/above the causal real-game floor — catches the
-#                      mean-regression the holdout-scored G1-G5 are blind to; anchor-miss auto-pass
+#   G6 three legs    : (all cells) stable top-MeanYr pred / recent form, clustered-CI upper bound
+#                      at/above the causal real-game floor — catches the mean-regression the
+#                      holdout-scored G1-G5 are blind to; corr anchor scopes this leg, anchor-miss
+#                      auto-pass — plus the CITL-under and count-bench over legs (_gate6_passes)
 # G1 ships on the tie margin (intent: "ensemble at least as good as the book"); the
 # stricter ci_hi < 0 (model provably beats the book) is retained as the reported,
 # non-decisive ``g1_has_edge`` flag for sizing/prioritization. G2/G3 score the FUSED
@@ -257,7 +258,7 @@ _GATE6_STAR_REF_BASKETBALL: float = 0.95
 _GATE6_STAR_REF_NFL: float = 0.94
 
 # Breadth target — at least this fraction of each league's markets should clear the
-# 5 gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
+# six gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
 BREADTH_TARGET_FRAC: float = 0.75
 
 # Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees

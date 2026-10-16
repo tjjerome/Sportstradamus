@@ -4,7 +4,7 @@
 Stage 0 deliverable 0.4. Joins ``data/training/model_stats.parquet`` (Gate 1) and
 ``data/runtime/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
 ``training.graduation`` and prints the classification colored to stdout. The
-8-metric body shows 4 Gate 1 and 4 Gate 2 columns alongside the lifecycle state.
+10-metric body shows 4 Gate 1 and 6 Gate 2 columns alongside the lifecycle state.
 
 Usage
 -----
@@ -30,7 +30,7 @@ _STATE_COLORS = {
     "demoted": "red",
     "not-shipped": "cyan",
 }
-# Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
+# Column order used by the printed table. 3 keys + 4 Gate 1 + 6 Gate 2 + 1 state.
 # precision_over_live and precision_under_live are both Gate-2 demote drivers
 # (see graduation.MIN_PRECISION_SIDE).
 _DISPLAY_COLUMNS = (

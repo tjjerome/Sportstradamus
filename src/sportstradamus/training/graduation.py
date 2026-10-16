@@ -63,7 +63,7 @@ def classify_lifecycle(
 ) -> str:
     """Map (Gate-1 BSS, n_settled, Gate-2 BSS, side precisions) to a lifecycle state.
 
-    NaN/negative Gate-1 BSS -> ``not-shipped``; positive Gate-1 BSS but
+    NaN/negative Gate-1 BSS -> ``not-shipped``; non-negative Gate-1 BSS but
     insufficient live data -> ``in-test``; negative live BSS or either side's
     live precision below :data:`MIN_PRECISION_SIDE` -> ``demoted``;
     otherwise -> ``graduated``.

@@ -20,7 +20,8 @@ Output: one ``data/zinb_routing/{LEAGUE}_diagnostics.parquet`` per league
 Usage
 -----
     poetry run python -m sportstradamus.scripts.zinb_routing_diagnostics
-    poetry run python -m sportstradamus.scripts.zinb_routing_diagnostics --league NBA --bootstrap 2000
+    poetry run python -m sportstradamus.scripts.zinb_routing_diagnostics \
+        --league NBA --bootstrap 2000
 """
 
 from __future__ import annotations

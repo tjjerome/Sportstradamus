@@ -117,7 +117,7 @@ def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     }
     missing = required - set(df.columns)
     if missing:
-        raise RuntimeError(f"parlay_hist.parquet missing columns: {sorted(missing)}")
+        raise RuntimeError(f"parlay history missing columns: {sorted(missing)}")
 
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date

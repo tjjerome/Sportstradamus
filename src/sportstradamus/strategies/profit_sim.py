@@ -14,6 +14,8 @@ Public surface:
 - :func:`simulate_kelly_all` — deterministic single-run, no-threshold,
   Kelly-sized variant used by the ship gate (two models bet the same
   universe, so paired Sharpe is well-defined).
+- :func:`extract_sim_returns` — per-event return series of a sim run, the
+  input to the S3 paired-Sharpe test.
 - :func:`summarize_runs` — collapse a simulation result into
   ``{mean_final, roi, max_drawdown, sharpe, win_rate}``.
 
@@ -177,8 +179,8 @@ def simulate_kelly_all(
     Equivalent to :func:`simulate_strategy` with no thresholds, no
     Monte-Carlo sampling, Kelly sizing, and ``ranking="EV"``. Two models
     invoked against the same input frame bet on the same universe of
-    events, which is what makes the paired Sharpe (S3) and live ROI
-    comparisons well-defined.
+    events, which is what makes the paired Sharpe (S3) comparison
+    well-defined.
     """
     return simulate_strategy(
         df,

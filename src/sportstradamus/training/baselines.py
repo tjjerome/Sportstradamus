@@ -24,21 +24,21 @@ Each strategy bundles:
 Registered strategies (A/B history in
 ``docs/archive/gbdt_mean_regression_plan.md``):
 
-* ``ratio_meanyr`` — current production. ``y / MeanYr_clipped`` ratio
+* ``ratio_meanyr`` — the default. ``y / MeanYr_clipped`` ratio
   target; decode multiplies ``loc`` and ``scale`` by ``MeanYr``.
 * ``centered_additive_eb_meanyr_k10`` — Phase-A. Trains on
   ``y − EB(MeanYr, GamesPlayed, K=10)`` and adds the EB prior back to
   ``loc`` only at decode; ``scale`` left in absolute residual units. Targets
   the multiplicative-amplification artifact (corr(pred_loc, MeanYr) ≈ −0.6
   path-wide) identified in ``docs/archive/nba_overconfidence_investigation.md``.
-  Path-wide A/B (PR #46) showed FGA SHIP, every other SkewNormal market
-  KILL — the long-horizon baseline only fits markets where production is
-  structural (e.g. shot volume).
 * ``centered_additive_mean10`` — same shape, swap the baseline to a
   trailing-10-game per-player mean. More responsive to current form; the
   hypothesis is that markets where production tracks recent role/rotation
   (PTS, REB, AST, PR, …) benefit from a faster-moving prior than MeanYr.
   Falls back to ``MeanYr`` / ``MeanYr_nonzero`` for sparse-history players.
+* ``ratio_projvol`` — ``ratio_meanyr``'s target and decode over the cell's
+  projected volume (``Player proj {vol} mean``, see :func:`resolve_denom_col`);
+  a row with no projection divides by ``MeanYr``.
 """
 
 from __future__ import annotations
