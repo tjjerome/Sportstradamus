@@ -195,7 +195,7 @@ def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache.
 
     ``columns`` projects the read to a scalar subset (Lab Correlations does this — the
-    full 1.7M-row history carries multi-GB ``list<float>`` struct columns it never plots).
+    full history carries multi-GB ``list<float>`` struct columns it never plots).
     """
     key = tuple(columns) if columns else None
     return _load_parlays_cached(PARLAY_HIST_PATH, parlay_hist_mtime(), key)

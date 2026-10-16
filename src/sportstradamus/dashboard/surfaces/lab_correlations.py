@@ -25,8 +25,8 @@ from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
 )
 
 # Lab Correlations only ever plots/aggregates these scalar parlay columns; projecting the
-# read skips the multi-GB list<float> struct columns (legs, Corr/Boost Pairs) in the 1.7M-row
-# parlay_hist.parquet, turning a multi-second load into a fast one.
+# read skips the multi-GB list<float> struct columns (legs, Corr/Boost Pairs) of the
+# parlay_hist/ day partitions, turning a multi-second load into a fast one.
 _PARLAY_SCALAR_COLS = (
     "Date",
     "League",

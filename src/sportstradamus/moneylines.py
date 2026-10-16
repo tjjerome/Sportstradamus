@@ -23,10 +23,7 @@ The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
 pass: it reads ``data/runtime/upcoming_events.json`` (refreshed by every broad
 ``confer`` run) and only fires per-event endpoint calls for games starting
 within the closing window. If the window is empty, it exits before
-touching the archive or the network. The intended cron schedule —
-American-sports start hours only — is::
-
-    */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
+touching the archive or the network. Its cron schedule is in docs/OPERATIONS.md.
 """
 
 import importlib.resources as pkg_resources
