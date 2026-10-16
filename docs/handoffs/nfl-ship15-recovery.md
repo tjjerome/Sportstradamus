@@ -8,12 +8,13 @@ those documents are the contract it works under.
 
 Status: OPEN. The confirm campaign is done and the count goal is met: 19 of 20 cells shipped on its
 board (section 3), the seven flips were committed in `8dfbe48c` (2026-10-10), and the campaign's
-models have been on production since 2026-10-12. But `passing yards` is withheld, so the definition
+models went to production on 2026-10-12. But `passing yards` is withheld, so the definition
 of done (section 10) is not met. The NFL was rebuilt and retrained on the training box on
-2026-10-15; its verdicts and whether to send them are [honest-receipts.md](honest-receipts.md) §8,
-ask 33. What sits with the owner is section 6, decisions 3 and 8–10: the passing-yards feature
-lane, the relabel of the NBA's and the WNBA's caches, switching on the combo history job (its code
-is on `origin/devel`; what is left is its crontab line on prod and a Healthchecks check of its own,
+2026-10-15, and those 19 models replaced the campaign's on production on 2026-10-16
+([honest-receipts.md](honest-receipts.md) decision 70). What sits with the owner is section 6,
+decisions 3 and 8–10: the passing-yards feature lane, the relabel of the NBA's and the WNBA's
+caches, switching on the combo history job (its code is on `origin/devel`; what is left is its
+crontab line on prod and a Healthchecks check of its own,
 since a shared check hides a failing job), and one serve-side finding handed to the honest-receipts
 lane.
 
@@ -118,8 +119,8 @@ Read the board with three facts in view.
   passes on all 19), and the gate values are evidence for the matrices it trained on. On 2026-10-15
   the honest-receipts lane rebuilt the matrices by section 4's recipe and retrained all 19 cells on
   the training box, which brought that lane's push-as-half-an-Over label and Brier-only temperature
-  fit to every cell; that retrain's verdicts, and whether to send its models, are honest-receipts
-  ask 33 (§8).
+  fit to every cell; that retrain's models are on production since 2026-10-16 (honest-receipts
+  decision 70).
 - **Ten cells are book-less** (blank g1 and BSS, `w = 1.0`): no sportsbook quote on their validation
   rows, so Gate 1 auto-passes, no blend weight is fitted — 1.0 is the fallback, not an optimum — and
   their ship is Gates 2–6. A pick'em-only cohort is the `pickem` provenance class and never counts as
@@ -300,7 +301,8 @@ are not book evidence. With the keys mapped (`player_rush_reception_yds` → `ya
 `player_pass_rush_yds` → `qb yards`; live `confer` polls them) sportsbook quotes now arrive: 109
 for `yards` and 92 for `qb yards`, 21 players each from four or five books, over the first four
 game dates (from 2026-10-05). The 2026-10-15 retrain was the first to score Gate 1 and fit a blend
-weight on both cells (honest-receipts ask 33), on a sample thin enough to move with every retrain.
+weight on both cells (honest-receipts decision 70), on a sample thin enough to move with every
+retrain.
 
 1. The deep evidence is two seasons of Odds API history, and it exists: a one-date probe of the 2024
    opener returned both markets with real cross-book spread. The `odds-backfill` job buys it from
@@ -447,9 +449,9 @@ on every board and need nothing. Interceptions is the owner's lowest-priority ce
    the flag.
 7. **Which retrain re-rolls the stale verdicts — the honest-receipts lane's, run 2026-10-15.** The
    seven shipped first on the campaign's evidence (decision 6); that lane then rebuilt the NFL
-   matrices by section 4's recipe and retrained all 19 cells on the training box (its ask 8). The
-   verdicts, and whether to send the 19 models, are [honest-receipts.md](honest-receipts.md) §8,
-   ask 33.
+   matrices by section 4's recipe and retrained all 19 cells on the training box (its ask 8), and
+   the 19 models went to production on 2026-10-16 ([honest-receipts.md](honest-receipts.md)
+   decision 70).
 8. **Passing-yards feature lane — directed 2026-10-03, not started.** Section 5.
 9. **Relabel the other leagues' caches — pending for the NBA and the WNBA; recommended before
    their next retrain.** Decision 5 reached the NFL caches only. All 73 non-NFL matrices carried
@@ -550,8 +552,8 @@ could decide to unblock it — scaling the goal down is the owner's call, not th
 Where that stands: on the campaign's board the count is met (19), every ship came from a full-HPO
 confirm retrain, the parity probe passes on all 19 pickles, the gates are green and the flips are
 committed (`8dfbe48c`). `passing yards` is out, so the lane is not done; section 5 says what binds
-it, section 6 lists what the owner holds, and the 2026-10-15 retrain's verdicts are honest-receipts
-ask 33.
+it, section 6 lists what the owner holds, and the 2026-10-15 retrain's models are on production
+(honest-receipts decision 70).
 
 The report is `~/backups/sportstradamus/2026-09-19-nfl-fp-bump/report_ship15.md` (normal prose).
 Per cell it carries: recipe before → after, the six gate values with caps, BSS, `model_weight`, n
