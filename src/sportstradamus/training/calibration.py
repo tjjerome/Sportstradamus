@@ -1,4 +1,4 @@
-"""Model calibration: book weight fitting and the model-blend weight."""
+"""Model calibration: book weight and book-shape fitting, and the model-blend weight."""
 
 import warnings
 
@@ -526,8 +526,8 @@ def fit_model_weight_crps(
     Mirrors :func:`fit_model_weight` — same ``fused_loc`` blend, same ``[0.05, 0.9]`` bounds, same
     zero-inflation gate plumbing — but swaps the clamped log-likelihood for the strictly-proper,
     bounded CRPS. CRPS needs no ``-20`` clamp, so it drops the clamp's left-tail bias on ``w``
-    (the robustness lever for heavy-tailed cells). The
-    gated CDF carries the zero spike, so no separate ``y==0`` term is added.
+    (the robustness lever for heavy-tailed cells). The gated CDF carries the zero spike, so no
+    separate ``y==0`` term is added.
 
     Returns a single float w in [0.05, 0.9].
     """

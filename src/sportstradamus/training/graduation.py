@@ -33,12 +33,11 @@ GRADUATION_WINDOW_DAYS = 30
 # `predicted_over_rate` vs `empirical_over_rate` instead conflates
 # publication-selection bias (Sleeper/UD push Over-skewed offers) with real
 # model bias and produces false-positive demotes (a research-analyst read of
-# FG3M, 2026-05-24). Below 0.50
-# that side's recommendations lose more often than they win, a losing
-# strategy at any boost ≤ 2.0×. A side's live precision is NaN when it has
-# fewer than `_MIN_BETS_FOR_PRECISION` bets in the window (see `nightly.py`);
-# NaN means no evidence for that side, so the check is skipped only for that
-# side, not the whole cell.
+# FG3M, 2026-05-24). Below 0.50 that side's recommendations lose more often
+# than they win, a losing strategy at any boost ≤ 2.0×. A side's live
+# precision is NaN when it has fewer than `_MIN_BETS_FOR_PRECISION` bets in
+# the window (see `nightly.py`); NaN means no evidence for that side, so the
+# check is skipped only for that side, not the whole cell.
 MIN_PRECISION_SIDE = 0.50
 
 

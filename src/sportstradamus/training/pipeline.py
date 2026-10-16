@@ -175,8 +175,8 @@ _MIXTURE_SCALE_STD_CEILING: float = 20.0
 # so a searched corner is only ever tightened, never loosened.
 _MIXTURE_MIN_CHILD_WEIGHT: float = 0.1
 _MIXTURE_LAMBDA_L2_FLOOR: float = 1.0
-# Constrained-SkewNormal guardrails (the HPO-objective alignment brief,
-# R1) — same Hathaway-style clamp as the Mixture above, but keyed to a ROBUST label scale
+# Constrained-SkewNormal guardrails (the HPO-objective alignment brief, R1) — same
+# Hathaway-style clamp as the Mixture above, but keyed to a ROBUST label scale
 # (IQR/1.349): np.std runs up to 47x looser on ratio_meanyr cells whose near-zero MeanYr
 # denominators fatten the normalized tail (brief finding 5). Ceiling 10: the corrected
 # shape ledger separates converged fits (max 2.46x the outcome SD) from diverged ones

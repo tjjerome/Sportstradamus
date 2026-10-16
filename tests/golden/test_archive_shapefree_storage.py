@@ -618,7 +618,9 @@ def test_to_pandas_columns_are_the_books_and_nothing_else(archive):
     assert list(archive.to_pandas("WNBA", "AST").columns) == ["fanduel"]
 
 
-@pytest.mark.parametrize(("market", "kept"), [("Totals", True), ("Moneyline", True), ("AST", False)])
+@pytest.mark.parametrize(
+    ("market", "kept"), [("Totals", True), ("Moneyline", True), ("AST", False)]
+)
 def test_to_pandas_keeps_old_game_lines_only(archive, market, kept):
     """Rows before the 2023-05-03 prop-format cutoff survive for the two game-line markets only."""
     archive._connection.execute(

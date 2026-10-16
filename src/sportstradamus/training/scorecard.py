@@ -229,8 +229,7 @@ _GATE5_DEBIAS_SEED: int = 9173
 # tiny z and passes. Gate 6 instead scores the model's STABLE top-MeanYr prediction against
 # recent form (Mean10) — the one yardstick these artifacts don't suppress — and fails the cell
 # when it sits below the causal real-game floor. The corr anchor (not the normalization or
-# family) scopes it. [research-analyst brief, 2026-06-19;
-# scope widened to all cells 2026-06-21]
+# family) scopes it. [research-analyst brief, 2026-06-19; scope widened to all cells 2026-06-21]
 # A "stable" player = recent form within this band of the season baseline; real production
 # tracks recent form for them (noisy windows mean-revert, stable ones don't).
 _GATE6_STABLE_BAND: float = 0.12  # |Mean10/MeanYr - 1| <= this
@@ -815,14 +814,14 @@ def _iqr(values: np.ndarray) -> float:
 
 
 # Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B of the
-# Gate 4 research audit. The old gate computed
-# IQR(point_pred) / IQR(actual), a sharpness-vs-calibration category error
-# (Gneiting & Raftery 2007): point predictions are conditional means and
-# always lose to realized-outcome spread on the IQR. The fix is to compute
-# the pooled IQR of the predictive distribution per-row, by inverting the
-# per-row CDF at q = 0.25 / 0.75, then taking the IQR of the concatenated
-# bag. Validated against sample-based IQR with M=1000 on five real cells:
-# agrees to <=0.001 on ZINB, within 10% on SkewNormal.
+# Gate 4 research audit. The old gate computed IQR(point_pred) / IQR(actual),
+# a sharpness-vs-calibration category error (Gneiting & Raftery 2007): point
+# predictions are conditional means and always lose to realized-outcome
+# spread on the IQR. The fix is to compute the pooled IQR of the predictive
+# distribution per-row, by inverting the per-row CDF at q = 0.25 / 0.75, then
+# taking the IQR of the concatenated bag. Validated against sample-based IQR
+# with M=1000 on five real cells: agrees to <=0.001 on ZINB, within 10% on
+# SkewNormal.
 
 
 # torch's NegativeBinomial(probs=p) treats p as "probability of success" and
