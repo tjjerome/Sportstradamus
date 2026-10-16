@@ -495,7 +495,6 @@ production data.
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
-| `config/prop_books.json` | Unused: a flat list re-exported as `helpers.books` that nothing reads (the consensus takes every non-DFS book) |
 | `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |
 
 ### Data Storage

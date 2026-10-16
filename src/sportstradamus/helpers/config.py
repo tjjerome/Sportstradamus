@@ -202,9 +202,6 @@ with (_config_dir / "stat_map.json").open() as infile:
 with (_config_dir / "book_weights.json").open() as infile:
     book_weights = json.load(infile)
 
-with (_config_dir / "prop_books.json").open() as infile:
-    books = json.load(infile)
-
 with (_config_dir / "goalies.json").open() as infile:
     nhl_goalies = json.load(infile)
 

@@ -155,8 +155,8 @@ all (S2 +0.0048 [+0.0021, +0.0074], S3 z +1.78).
   market in the archive (Mar–May 2026: 223 / 7971 / 5149 rows), it drops to 2 rows in June and
   none after (13 stray `betrivers` rows in August), while `hits allowed` keeps betmgm / bovada /
   draftkings / fanatics through the same window. The Odds API key `batter_strikeouts` is still
-  mapped in `stat_map.json`, so the market is requested; the book set in `prop_books.json` simply
-  no longer contains one that prices it. Owner call: add a book that prices batter strikeouts, or
+  mapped in `stat_map.json`, so the market is requested; no book in the Odds API's US region
+  prices it any more. Owner call: add a book that prices batter strikeouts, or
   accept the cell as book-less (it serves model-only under the cluster floor).
 - **Underdog NHL quote coverage starts 2026-03-16.** The archive's `odds` table holds Underdog
   NHL rows for 17 markets from 2026-03-16 to 2026-06-14 (169k rows) and none earlier; the only
