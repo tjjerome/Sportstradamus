@@ -26,14 +26,15 @@ exists, persists per-cell in `stat_meta.json`, and **NBA PTS ships with it**. Th
 continuous-family routing assigned each SN g4-failing cell to a cohort by normal-scores z of
 the gate-matched PIT; its shape/kurtosis bucket is this lane's target list.
 
-- The routing table came from the R2 research brief (`/tmp/researcher_continuous_family.md`).
-  `/tmp` does not survive; if the file is gone, re-derive the split from
+- The routing table came from the R2 research brief (`/tmp/researcher_continuous_family.md`),
+  which was never archived and is gone, so re-derive the split from
   `data/training/model_stats.parquet` — shape-bound ⇔ `g4_pass == False` with cov50/cov80 near
   nominal (the coverage triple is in the gate row); scale-bound cells (coverage below nominal)
   belong to the calibrated lever, not here.
-- Per cell: one confirm through the normal supersession lane (deterministic board does not see
-  `sn_param`; it is a confirm-time axis like `hpo_selection`). A shipping confirm persists the
-  pin; a failing one records the attempt in the ledger and moves the cell to workstream 3.
+- Per cell: one confirm through the normal supersession lane. The board sweeps `sn_param` on
+  every SkewNormal cell, so read the cell's centered corners first and confirm the best one. A
+  shipping confirm persists the pin; a failing one records the attempt in the ledger and moves
+  the cell to workstream 3.
 - Do not batch: one cell per confirm, board-confident ordering (positive-slack first).
 
 ## Workstream 2 — data-appropriateness audit before family blame

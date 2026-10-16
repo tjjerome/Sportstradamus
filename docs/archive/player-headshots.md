@@ -1,6 +1,11 @@
 # Player Headshots
 
-> Status: COMPLETE — all four stages closed; the monthly cron row is the owner's to install
+> Status: DONE — closed 2026-09-13. The fetcher, the monthly job and the card render landed
+> as `cb0090c6` and are on `devel`; the roadmap row is DONE
+> ([roadmap §4](../sportstradamus_roadmap_v3.md)). Left open on purpose: the monthly
+> `headshots` cron row ([OPERATIONS.md](../OPERATIONS.md)) is the owner's to install on
+> production, and the cache is per box, so each box runs `sportstradamus fetch headshots`
+> once. Reopen by adding a roadmap row that points back here.
 
 ## 1. Mission & money logic
 

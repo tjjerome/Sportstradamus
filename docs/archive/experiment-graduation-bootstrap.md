@@ -1,11 +1,14 @@
 # Experiment Graduation — Bootstrap (two-part + affine into the sweep pool)
 
-> Status: READY FOR THE `experiment-graduation-specialist`. This is the atypical
-> FIRST invocation of that agent: two proven methods graduate together, from a
-> partially-landed state, and the shared dispatch plumbing they need does not
-> exist yet. Steady-state graduations (one freshly-passed experiment) follow the
-> agent's own procedure without this bootstrap. Production-neutral: nothing ships;
-> the sweep + gates + human decide per cell afterward.
+> Status: COMPLETE — closed 2026-07-21 per the §8 ledger. Stage A (`51e95a6e`), Stage B
+> (`0a2aa90e`) and Stage C (`f2fc1633`) landed on `devel`, and `f28b102c` recorded the close:
+> two-part and affine are `posthoc` values the sweep can try on any market (`STRUCTURAL_STAGE`
+> in `training/posthoc.py`), and the `--structural-strategy` axis is gone. §1–§6 are the plan
+> as briefed: they describe the tree before the bootstrap, and their line anchors point into
+> it. Whether a structural corner reaches a scored sweep verdict is followed in
+> [model-strategy-reachability-repairs.md](../handoffs/model-strategy-reachability-repairs.md).
+> Reopen by adding a roadmap row that points back here; §7 records the `posthoc` rename left
+> undone on purpose.
 
 ## 1. Mission & money logic
 
@@ -32,7 +35,7 @@ ride today, so one field names at most one calibration method per cell.
   ([model_strategy/specs.py:25](../../src/sportstradamus/training/model_strategy/specs.py#L25)),
   applicable to every continuous cell (`role_registry_gated`). It self-killed only on
   multi-position cells; that granularity gap is **now fixed** (Lane A role-only fallback,
-  committed `ea564a7`). It needs pool-dispatch + the axis retirement — no market-agnostic code work.
+  committed `2fb54bf1`). It needs pool-dispatch + the axis retirement — no market-agnostic code work.
 - affine is the genuinely un-graduated one — same `--structural-strategy` axis, but its fit
   logic hardcodes `AFFINE_POSITIONS = {1:QB, 3:RB}`, so every off-NFL cell routes to
   `pooled_fallback` / support-kill. It needs the full market-agnostic conversion (§5 Stage C).
@@ -60,7 +63,7 @@ def). Do not reuse rushing yards' fitted coefficients anywhere; codify the
 1. **Two methods at once.** They share the new dispatch plumbing (§4). Doing them
    together builds it once.
 2. **Unequal starting states.**
-   - *two-part is already market-agnostic* — [cee7304](../../src/sportstradamus/training/structural_context.py)
+   - *two-part is already market-agnostic* — [b683fe99](../../src/sportstradamus/training/structural_context.py)
      generalized it (position codes discovered via `league_position_codes`, labels
      via `position_label`, role spec via `role_spec_for`; it already skips codes a
      market never fields). It needs **only** pool-exposure + dispatch + a
@@ -87,7 +90,7 @@ def). Do not reuse rushing yards' fitted coefficients anywhere; codify the
 1. `.claude/agents/experiment-graduation-specialist.md` — the charter you execute;
    §"codify the METHOD, not the artifact" and step 7 (non-regression) are binding.
 2. `CLAUDE.md`, `docs/STYLE_GUIDE.md`, `CONTRIBUTING.md` — repo law + the three gates.
-3. **The template diff:** `git show cee7304` — it is the two-part version of this
+3. **The template diff:** `git show b683fe99` — it is the two-part version of this
    exact job. `structural_context.py` (−32, the hardcoding removal),
    `role_specs.py` (+51, the per-cell role-spec registry),
    `model_prob.py` (serve generalization), `cli.py` (posthoc trainability). Mirror
@@ -219,11 +222,11 @@ in particular is the vestigial lever that §4.1 already deletes).
 | [model_prob.py:638-649](../../src/sportstradamus/prediction/model_prob.py#L638) | serve requires "QB/RB expert models" |
 
 **Already done — do not redo, and do not trust the commit subjects.** A prior
-partial generalization landed the naming and the sweep-*enrollment* side: `32a78f6`
+partial generalization landed the naming and the sweep-*enrollment* side: `942120fd`
 ("make the affine strategy a market-agnostic sweep candidate") only dropped affine's
 sweep enrollment lock (one line in `model_strategy/specs.py`), and a rename series
-(`cb05fdc`, `7b93f16`, `67498d8`, `3f0de44`) made affine's modules/symbols/persisted
-columns market-agnostic. What still remains — despite `32a78f6`'s subject claiming
+(`9bbaaaa5`, `3de8bf31`, `a8b9bdff`, `ba9aae5b`) made affine's modules/symbols/persisted
+columns market-agnostic. What still remains — despite `942120fd`'s subject claiming
 otherwise — is the fit **logic** (`AFFINE_POSITIONS`), the `validate_experiment_selection`
 applicability gate, the serve QB/RB requirement, and the posthoc-pool migration (§4).
 Read the code, not the log.
@@ -261,9 +264,9 @@ is already generic — the lock lives only in the expert-context + gate + serve 
 ## 8. Ledger
 
 - 2026-07-21 · bootstrap COMPLETE · Stage A (foundation + `--structural-strategy` axis retirement,
-  `308a564`), Stage B (two-part pilot pinned through the pool, `c40d9bc`), Stage C (affine made
+  `51e95a6e`), Stage B (two-part pilot pinned through the pool, `0a2aa90e`), Stage C (affine made
   market-agnostic — `AFFINE_POSITIONS` deleted, per-cell code discovery mirroring two-part; both
-  pilots pinned, `862e106`) all landed. Both methods are now single-valued `posthoc`-pool members
+  pilots pinned, `f2fc1633`) all landed. Both methods are now single-valued `posthoc`-pool members
   the sweep tries on any market; production-neutral (0 stat_meta cells carry a structural value).
   B5 rename `posthoc`→`calibration` ABORTED (§4.2) — collides with the existing `calibration.py` +
   overloaded concept; owner kept `posthoc`. Gates green throughout (1 pre-existing OOS ship-gate).
@@ -277,5 +280,5 @@ is already generic — the lock lives only in the expert-context + gate + serve 
   self-kill fixed, so it needs only pool-dispatch, no market-agnostic work.
 - Bootstrap authored for the first `experiment-graduation-specialist` run: graduate
   two-part + affine into the `posthoc` pool as the unified calibration selector;
-  affine gets the cee7304 market-agnostic treatment; pilots re-pinned via a
+  affine gets the b683fe99 market-agnostic treatment; pilots re-pinned via a
   data-driven generic-path non-regression table. Zero ship.

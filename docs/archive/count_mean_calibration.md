@@ -1,14 +1,18 @@
 # Lane record — count Gate-4 mean calibration: lever real, both cells walled here
 
-Status: **closed.** The mean lever **works** — it converts Gate 4 on both cells the brief called
-convertible — and neither cell shipped *in this lane*, for two different structural reasons.
-**NFL tds has since shipped:** its wall was the mean corrector sitting on the wrong side of the
-model↔book pool, and the successor lane
-[mean_corrector_stage_order.md](mean_corrector_stage_order.md) moved the corrector post-fusion and
-took the cell through all six gates. NBA PF's `posthoc`-slot wall is untouched and still open.
+> Status: DONE — closed 2026-08-25. The mean lever **works** — it converts Gate 4 on both cells
+> the brief called convertible — and neither cell shipped *in this lane*, for two different
+> structural reasons. **NFL tds has since shipped:** its wall was the mean corrector sitting on the
+> wrong side of the model↔book pool, and the successor lane
+> [mean_corrector_stage_order.md](mean_corrector_stage_order.md) moved the corrector post-fusion
+> and took the cell through all six gates. NBA PF's `posthoc`-slot wall is untouched and still
+> open; the cell is withheld and is now a §6.3 feature pilot in
+> [model_improvement_track.md](../handoffs/model_improvement_track.md). Reopen by adding a roadmap
+> row that points back here; §Residue lists what was left open on purpose.
+
 Context spine: CLAUDE.md,
 [docs/ARCHITECTURE.md](../ARCHITECTURE.md),
-[model_improvement_track.md](model_improvement_track.md) §6.1 Rung A / §6.5.
+[model_improvement_track.md](../handoffs/model_improvement_track.md) §6.1 Rung A / §6.5.
 Research brief (mechanism, literature, per-cell measurements):
 [researcher_count_gate4_zeroinflation.md](../archive/researcher_count_gate4_zeroinflation.md).
 Predecessor lane: [count_dispersion_flip.md](count_dispersion_flip.md).

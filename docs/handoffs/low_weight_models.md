@@ -32,7 +32,7 @@ forced floor — the model has to earn the weight.
 is fit on authentic-quoted validation rows only (`calibration.fit_blend_weight`; bounds
 `[0.05, 0.9]`); `1.0` means no authentic validation quotes. It never enters stake sizing.
 
-## The census (authentic test rows; Spearman vs `Result`)
+## The census (before wave 1; authentic test rows; Spearman vs `Result`)
 
 Reproduce with `poetry run python research/scripts/blend_weight_probe/census.py`; the cohort is
 derived from the class labels and `w` on every run.
@@ -75,7 +75,7 @@ waiver against a book-riding incumbent) is the lane's answer; see [ship_gate.md]
   (`SN_Sigma_model` / `SN_Alpha_model`, `R_model`, `Gate_model`, `DP_PHI_model`) so
   `research/scripts/blend_weight_probe/reblend.py` can re-run the pool at any `w`.
 
-## Per-cell status
+## Per-cell status (wave 1, 2026-09-02 — re-run the census for today's read)
 
 The re-predict fork (`repredict.py`) is closed for all three SkewNormal cells: the serve chain
 reproduces the dumped model mean to float noise (max |Δ| ≤ 2e-14; NHL skater fantasy has one
@@ -90,10 +90,10 @@ no authentic rows at all in 2025.
 | Cell | Class | Lever | Status |
 |---|---|---|---|
 | MLB hits allowed | BIASED (CITL 1.23) → WEAK | sweep under the floor | **SUPERSEDED 2026-09-02** (`31b5ae5c`): SkewNormal `ratio_meanyr / crps / direct / nll / roe_mean`, `w` 0.05 → 0.78 (1095 authentic rows / 214 clusters), 6/6, BSS +0.031, shape_ratio 4.99 → 0.91, negative means 139 → 0, CITL 0.94, ρ(model) 0.08 → 0.14 (line 0.18, Mean10 0.12); S1 pass, S2/S3 waived against the book-riding incumbent |
-| NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | 2026-09-02 sweep under the floor: 14/15 scored corners fit `w = 0.05`, the other 0.145 (325 authentic validation rows; the 1-SE rule floors it), so nothing nominated; keeps its coverage ship, lifts as seasons accumulate |
+| NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | 2026-09-02 sweep under the floor: 14/15 scored corners fit `w = 0.05`, the other 0.145 (325 authentic validation rows; the 1-SE rule floors it), so nothing nominated. **Withheld since 2026-09-26** (`7d986d3c`); the ship-15 walk passed it 6/6 only at `w` 0.05, under its 0.2 floor ([nfl-ship15-recovery.md](nfl-ship15-recovery.md) §5) |
 | NFL attempts | BROKEN | swept under the floor 2026-09-02 (36 corners, `--dist-class all`) | **HELD, coverage ship stands (w 0.05)**: no confirmable nominee. Every positive-slack corner rides the book (w 0.05–0.10) except `ZINB nll hurdle pit_ks crps prob_recal_platt` at w 0.42, slack +0.048, discounted −0.185 (under the nomination bar); the other 11 corners at w ≥ 0.3 (ZINB / NegBin / DPO) fail g1 at slack ≤ −0.76; both structural corners die on their own support guards (two-part `low.train_rows=817<4000`; affine slope outside the calibrated bounds). Book prices are real again (361/371 test rows authentic, 1.9% at exactly 0.5), so the volume-lane synthetic-price caveat is closed on the current dump |
 | NHL skater fantasy (UD) | BIASED (CITL 0.68) | swept under the floor 2026-09-02 (`--dist-class all`, 4 full-HPO confirms) | **HELD, incumbent stands (w 0.329, 6/6)**: all four nominees pass S1 at w 0.63 / 0.60 / 0.35 / 0.34 (6/6, served CITL 1.01–1.05, shape_ratio 0.85–0.92, BSS 0.09–0.11, 219 authentic validation rows) but fail S2 (paired Brier d within ±0.0013, n=2040) and S3 — both legs sit on the same pick'em line at p=0.5 — and the S1-only waiver does not fire because the incumbent is already above the floor. The ≥ 0.3 criterion is met by the incumbent while its model-only leg stays census-BIASED: the waiver keys on the incumbent's `w`, not on its model-leg class (owner call whether to extend it). Fork closed: training pathology. Quote classes: 1211 authentic = Underdog direct (`pickem` once the cache is relabelled — the 2026-09-29 owner decision makes the cell book-less; 2024 and 2026 only, none for the 2025 season; the archive holds UD rows 2026-03→06 only), 11.6k derived = `combo_ev_inversion` (excluded from the weight fit and the gates), 480 synthetic. UD's line runs high against outcomes (61% under / 36% over on the 1211 quotes) — pick'em softness, not a formula gap: the stored fantasy column reproduces goals×6 + assists×4 + (shots+blocks) + hits×0.5 + PPP×0.5 exactly, UD's line sits 0.6 *below* that formula's 365-day expectation (9.15 vs 9.72; realized 7.91), and the goalie UD cell balances 51/48 |
-| MLB runs allowed | BROKEN | swept under the floor 2026-09-02 (35 corners) | **HELD, coverage ship stands (w 0.63)**: no corner clears the nomination bar — the two best DPO corners (slack +0.058) fit `w` at 0.175, and the three positive-slack corners above the floor (DPO 0.318/0.390, NegBin 0.277) all carry negative discounted slack. The incumbent ZINB hurdle recipe was re-confirmed and **failed its own ship on the current matrix**: g4 fails, BSS −0.004 (was +0.001), matrix hash moved `f8b7f540` → `b5f66a09`. Artifacts were restored, so serving is unchanged, but the cell's ship is stale — the next `meditate` will withhold it unless a corner is found |
+| MLB runs allowed | BROKEN | swept under the floor 2026-09-02 (35 corners) | **HELD, coverage ship stands (w 0.63)**: no corner clears the nomination bar — the two best DPO corners (slack +0.058) fit `w` at 0.175, and the three positive-slack corners above the floor (DPO 0.318/0.390, NegBin 0.277) all carry negative discounted slack. The incumbent ZINB hurdle recipe was re-confirmed and **failed its own ship on the current matrix**: g4 fails, BSS −0.004 (was +0.001), matrix hash moved `f8b7f540` → `b5f66a09`. Artifacts were restored, so serving is unchanged, but the cell's ship is stale — the next `meditate` will list it in its ship-gate warnings unless a corner is found |
 | NHL hits | BROKEN → BIASED | swept under the floor 2026-09-02 | **SUPERSEDED (`45ef5698`)**: DPO `crps` dispersion / `nll` / `none`, `w` 0.775 → 0.670 (1396 authentic rows / 298 clusters — DFS-only, so `pickem` and book-less once the cache is relabelled per the 2026-09-29 owner decision), 6/6, S1 + **S2 pass** (paired Brier +0.0048 [+0.0021, +0.0074], n=2461) + **S3 pass** (Sharpe 0.130 → 0.162, z +1.78) — a real supersession, no waiver. Model leg now beats naive (ρ 0.22 → 0.336 vs Mean10 0.299, line 0.389), BSS +0.058, served CITL 0.995; census stays BIASED because the model-only mean still under-shoots (CITL 0.777 [0.745, 0.811]) |
 | NBA BLK | BROKEN | book-side packet first | blocked on the ingestion packet |
 | MLB batter strikeouts | DATA | guard result stands until the feed returns | retrained 2026-09-02: `w = 1.0` (2 authentic rows / 2 clusters), Gate 1 blank, skill / Kelly NaN; ships model-only as a book-less cell |
@@ -172,7 +172,7 @@ Raising `_MODEL_WEIGHT_MAX`; a Brier-at-line weight objective; a second book-qua
 shaped book inside the blend; BLP / decoupled blend; model-only quality as an HPO objective
 (Goodharts). Lowering `_MODEL_WEIGHT_MIN` is an owner policy call. Sources:
 `docs/archive/researcher_blend_weight_slug.md`, `docs/archive/researcher_passing_g1.md`,
-[mean_corrector_stage_order.md](mean_corrector_stage_order.md).
+[mean_corrector_stage_order.md](../archive/mean_corrector_stage_order.md).
 
 ## Follow-ups outside the lane
 

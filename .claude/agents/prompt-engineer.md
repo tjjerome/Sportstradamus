@@ -299,15 +299,15 @@ no conversation context, so the handoff prompt is the entire briefing.
 
 1. `CLAUDE.md` — project conventions (general rules, one-module-per-subagent,
    refactoring-specialist mandate, quality gates).
-2. `docs/STYLE_GUIDE.md` — code conventions, the §18 LLM-contributor block.
+2. `docs/STYLE_GUIDE.md` — code conventions, the §18 automated-contributor rules.
 3. The workstream brief at `docs/handoffs/{slug}.md` — the lane this session
    prompt serves: its stage plan, locked decisions, and ledger are the scope
    the prompt must inherit. The brief template is
    `.claude/handoff-template.md`.
 4. The lane's home-of-record docs per the brief's §2 — for the model track
-   that is `docs/handoffs/model_improvement_track.md` (§2 ground truth, §11
-   verification / inference-path checklist, §9 failure protocol, the target
-   stage's body and its acceptance and if-it-fails branch).
+   that is `docs/handoffs/model_improvement_track.md` (§3 verify-before-you-trust
+   commands, §7.3 inference-path checklist, §8.1 failure protocol, the target
+   stage's body in §6 and its acceptance and if-it-fails branch).
 5. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md` for
    style reference. Mirror its structure, not its exact wording.
 
@@ -329,9 +329,10 @@ no conversation context, so the handoff prompt is the entire briefing.
    name the specific files and tests the phase will touch on the
    prediction side. Skip only if the phase is genuinely training-only
    per the per-change-type table.
-6. **Universal decision threshold + cross-league testing policy** restated
-   inline — the next agent must know the smoke→full-verification gate
-   and Gate 1 / Gate 2 thresholds without re-reading the plan.
+6. **Ship bar + cross-league testing policy** restated inline — the next
+   agent must know the smoke→full-verification gate and Gate 1 / Gate 2
+   thresholds without re-reading the plan (the bar: track §7.1, thresholds
+   in `docs/ship_gate.md`; the testing policy: track §9).
 7. **Verification gates** — the three always-on gates, the new
    determinism tests if the phase touches the deterministic path, and
    the live-path test the phase must produce.
@@ -345,7 +346,8 @@ no conversation context, so the handoff prompt is the entire briefing.
       subagent, asking the user for review feedback, calling
       "done"). Cite CLAUDE.md "MANDATORY: run refactoring-specialist
       before any push, PR update, or review" — five-trigger rule.
-    - Update the master plan's Status table for the stage row.
+    - Append one §10 Ledger line to the brief, and update its `Status:`
+      line if a stage boundary was crossed.
     - Produce the **next phase's handoff prompt** via the
       prompt-engineer agent and save to
       `/tmp/{next-stage}_handoff_prompt.md`.
@@ -365,9 +367,7 @@ no conversation context, so the handoff prompt is the entire briefing.
 
 ### Output convention
 
-- Write the handoff prompt to `/tmp/{next-stage-slug}_handoff_prompt.md`
-  (matches the existing convention seen at
-  `/tmp/p2_handoff_prompt.md`).
+- Write the handoff prompt to `/tmp/{next-stage-slug}_handoff_prompt.md`.
 - After writing, print the file path + the first 30 lines so the user
   can confirm tone and structure before the next session starts.
 - Ephemeral session prompts stay in `/tmp`. Durable structure lives in the

@@ -1,5 +1,12 @@
 # NFL passing-yards Gate-1 improvement handoff
 
+> Status: CLOSED — superseded 2026-09-26 by
+> [nfl-ship15-recovery.md](../handoffs/nfl-ship15-recovery.md), whose §5 now carries passing
+> yards (withheld; the next step is the FantasyPoints feature lane, its §6 decision 8). This
+> handoff's one commit is `2730326c` (2026-07-26). Its KILL on Gate 1 only is for a frozen
+> recipe on matrix `79703d1f`; the matrix and the recipe have both moved since, so read it as
+> history. Reopen by adding a roadmap row that points back here.
+
 ## Goal
 
 Improve the current NFL passing-yards model until fresh, honestly earned evidence

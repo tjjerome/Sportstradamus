@@ -9,6 +9,8 @@ prediction pipeline — no league-specific math lives here.
 |---|---|
 | `kelly` | Fractional-Kelly stake sizing with CLV/training shrinkage blend. CLI `sportstradamus bet kelly`. |
 | `underdog_pickem` | Pick'em (Power/Flex) entry construction for Underdog and Sleeper. CLI `sportstradamus bet pickem --platform {Underdog,Sleeper}` emits a recommendations YAML. |
+| `ledger` | Simulated-bettor ledger commit: draws and sizes each persona's entries and appends them to the JSONL ledger (`_ledger_*` hold selection, cross-game pricing, settlement, bankroll and storage). CLI `sportstradamus bet ledger-commit`. |
+| `profit_sim` | Kelly-sized profit / ROI / Sharpe / drawdown Monte-Carlo backtest. |
 
 ## Pick'em entries (`underdog_pickem`)
 
@@ -20,8 +22,10 @@ The dashboard reads no pick'em file: its slip rail builds and sizes entries live
 
 ## Shrinkage resolution (`kelly.resolve_shrinkage`)
 
-Order of precedence, used by `fractional_kelly_stake` when no explicit
-`model_shrinkage` is supplied:
+`underdog_pickem.resolve_market_shrinkage` calls `resolve_shrinkage` for each
+cell, and callers pass the result to `fractional_kelly_stake` / `kelly_edge` as
+`model_shrinkage` (which defaults to `1.0`, full trust, when left unset).
+`resolve_shrinkage` takes the first rule that applies:
 
 1. Explicit kwarg — overrides everything.
 2. Both live (CLV-segment) and training Brier skill scores present →

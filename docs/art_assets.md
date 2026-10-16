@@ -27,8 +27,10 @@ The headshot disc lives in the constellation component's ticket card and nowhere
 is no separate person-icon stand-in on the offer-detail dialog (`components/deep_dive.py`) or
 the Board's mobile cards (`components/offer_cards.py`); the sweep for `:material/person:`-style
 icons and other `avatar`/`disc` stand-ins turned up nothing else.
-The `radial-gradient` sweep found exactly the four hero/card washes above (`theme.py`
-twice, `games.py`, `receipts.py`) — no other surface builds one.
+The `radial-gradient` sweep found the four hero/card washes above (`theme.py`'s Tonight card
+and page hero, `games.py`, `components/receipts_hero.py`), plus the starfield's own washes
+(`theme._starfield_background`) and the Games slip rail's leg-panel plate
+(`.st-key-constellation_legpanel` in `theme.py`) — no other surface builds one.
 
 ## The scar mechanism
 
@@ -68,9 +70,9 @@ needed logos.
 
 **Player headshots**: not a file drop — `sportstradamus fetch headshots` fills a gitignored
 per-box cache from the league CDNs and the card reads it, so a box that has never run the job
-shows the initials disc and nothing breaks. The owner's part is clearing each league's CDN
-terms before the job goes on the production cron; the lane is
-[`player-headshots`](handoffs/player-headshots.md).
+shows the initials disc and nothing breaks. The owner cleared all five leagues' CDN terms for
+this private box on 2026-09-13; the closed lane is
+[`player-headshots`](archive/player-headshots.md).
 
 **Commissioned logo**: the brief is [`art_briefs/logo_guru.md`](art_briefs/logo_guru.md).
 `app.py` already carries the reserved, existence-guarded slot — dropping

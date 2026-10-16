@@ -175,9 +175,11 @@ Do not undo that work:
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
-  pre-computed parquet snapshots only (`data/runtime/history.parquet`,
-  `data/runtime/parlay_hist/` day partitions, `data/training/model_stats.parquet`,
-  the `data/runtime/current_*.parquet` snapshots). DuckDB holds an
+  pre-computed parquet snapshots only (`data/runtime/`: `history.parquet`, the
+  `parlay_hist/` day partitions, the `current_*` snapshots, `profit_sim_summary`,
+  `calibration_summary`, `live_metrics_per_market` and its own `user_slips`;
+  `data/training/model_stats.parquet`; each league's `gamelog.parquet` and
+  `corr_market_summary.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
   connection it opens — even accidentally via a module-level `Archive()` in
@@ -303,8 +305,10 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
 
   The `ctg-fetch` (NBA, Cleaning the Glass) and `savant-fetch` (MLB,
   Baseball Savant) collectors are **dev-side**, not prod-cron: run them on
-  the dev box beside the manual weekly `meditate`, then `sync_to_prod.sh`
-  pushes their date-stamped snapshots up. They share the `fp-fetch`
+  the dev box beside the manual weekly `meditate`, then a full
+  `scripts/sync_to_prod.sh` pushes their date-stamped snapshots up (it also sends
+  every league's models and serving files; `--league LEAGUE` sends one league and
+  no snapshots — docs/OPERATIONS.md). They share the `fp-fetch`
   framework (`sportstradamus.collectors`); `StatsNBA`/`StatsMLB` fold the
   snapshots in via the `_join_fp_*_features` hooks once each source's join
   schema is pinned. Canonical guide: `docs/data_collectors.md`.
@@ -315,7 +319,7 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   the box (`GH_TOKEN` or `gh auth`) and `HEALTHCHECK_URL_GATE_STATUS` set.
   On `devel`, ship promotions are one-line edits to `stat_meta.json`
   (`shipped: "withheld"` → `shipped: "devel"`) the human commits directly;
-  `generate-ship-config --branch devel` only validates + summarizes.
+  `sportstradamus ship config --branch devel` only validates + summarizes.
 
   `prophecize` and `close-lines` both fire at `:50` during peak hours; the
   `run_job.sh` archive flock serializes them, so the second-to-acquire just
@@ -329,7 +333,8 @@ The old single-file modules no longer exist. Use these paths:
 |---|---|
 | `Stats`, `StatsNBA`, `StatsMLB`, `StatsNFL`, `StatsNHL`, `StatsWNBA` | `sportstradamus.stats` |
 | `Archive`, `Scrape`, `fused_loc`, `get_ev`, config dicts | `sportstradamus.helpers` |
-| `meditate` CLI, `train_market`, `report`, `correlate` | `sportstradamus.training` |
+| `meditate` CLI, `report`, `correlate` | `sportstradamus.training` |
+| `train_market` | `sportstradamus.training.pipeline` |
 | `main` (prophecize) CLI, `model_prob`, `find_correlation` | `sportstradamus.prediction` |
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
@@ -362,37 +367,43 @@ Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
 Key methods:
 - `load()` / `update()` — load/fetch game logs from league APIs
-- `get_training_matrix(market)` — feature matrix (X) and targets (y) for one market
-- `get_stats(offer, game_date)` — feature vector for a single prediction
+- `get_training_matrix(market, cutoff_date=None)` — one frame per market: features,
+  quote/provenance columns and the `Result` target
+- `get_stats(market, offers, date)` — feature rows for every offer of one market
 - `profile_market()` — aggregate stats for defense/offense profiling
 
 **`Archive`** (`helpers/archive.py`): DuckDB singleton persisting odds at
-`archive/archive.duckdb`. Two tables — `odds(league, market, game_date, entity, book, ev)`
-and `lines(league, market, game_date, entity, line)` — no PRIMARY KEY (the PK index alone
-bloats the DB ~10× for this row count; sorted-on-disk data + zone-map pruning give
-~1 ms point lookups without it). Writes accumulate in in-memory buffers
-(`_pending_odds`, `_pending_lines`, `_replace_keys`) and flush bulk-deduped on
-`Archive().write()` — same in-memory-mutate-then-dump semantics as the old klepto
-backend. Public methods: `get_ev`, `get_line` (sportsbook consensus line),
-`get_reference_line` (that, else the entry's line of record), `get_moneyline`, `get_total`,
-`get_team_market`, `to_pandas`, `add_dfs`, `merge_player_books`, `set_team_books`,
-`write`.
+`archive/archive.duckdb`. Three tables — `odds(league, market, game_date, entity, book, ev,
+observed_at, under_prob, line)`, `lines(league, market, game_date, entity, line,
+observed_at)` and `ladder(league, market, game_date, entity, book, line, p_over,
+observed_at)` — no PRIMARY KEY (the PK index alone bloats the DB ~10× for this row count;
+sorted-on-disk data + zone-map pruning give ~1 ms point lookups without it). Writes
+accumulate in in-memory buffers (`_pending_odds`, `_pending_lines`, `_pending_ladder`) and
+`Archive().write()` appends them: each poll keeps its `observed_at`, and readers take the
+latest. Public methods: `get_ev`, `get_line` (sportsbook consensus line),
+`get_reference_line` (that, else the entry's line of record), `get_composite_under_prob`,
+`get_moneyline`, `get_total`, `get_team_market`, `get_team_market_map`, `get_line_history`,
+`get_book_line_histories`, `get_ev_history`, `get_movement`, `get_training_book_quotes`,
+`get_training_quote_inputs`, `get_ev_line_inputs`, `to_pandas`, `add_dfs`, `add_ladder`,
+`merge_player_books`, `set_team_books`, `write`.
 
-**`Scrape`** (`helpers/scraping.py`): HTTP client with ScrapeOps browser-header rotation
-and ScrapingFish proxy fallback.
+**`Scrape`** (`helpers/scraping.py`): HTTP client with ScrapeOps browser-header rotation;
+a 403/429 raises `BlockedError` (no proxy fallback).
 
 ### ML Pipeline
 
 **LightGBMLSS** for distributional regression — predicts full probability distributions.
 
-Distribution types (set per cell in `data/config/stat_meta.json`):
-- **Gamma** / **ZAGamma** — continuous stats, optional zero-inflation
-- **Negative Binomial** / **ZINB** — count stats, optional zero-inflation
-- **SkewNormal** (`skew_normal.py`) — custom PyTorch distribution; used when
-  `global_mean >= 2` in `training/pipeline.py:train_market`
+Distribution types (set per cell by `dist` in `data/config/stat_meta.json`, which always
+wins; a cell without one gets the data-driven pick in `training/pipeline.py`):
+- **SkewNormal** (`skew_normal.py`) — custom PyTorch distribution for continuous stats; the
+  data-driven pick when `global_mean >= 2`
+- **Negative Binomial** / **ZINB** — count stats, optional zero-inflation; the data-driven
+  pick otherwise
+- **DPO**, **Mixture** — set through stat_meta `dist` only
 
 **Player Comparables**: z-scored profiles → weighted BallTree KNN → comp outcomes as
-features. Weights optimized via `scripts/optimize_comp_weights.py`.
+features. Weights optimized via `src/sportstradamus/scripts/optimize_comp_weights.py`.
 
 **Feature selection**: None at training time. Per the 2026-05-27 no-filter rewire
 (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 — tree ensembles
@@ -416,15 +427,15 @@ run as **one wide row per `(league, market)` cell**; consumed by:
   `training/graduation.py:lifecycle_table()`.
 * `training.report.get_market_calibration(league, market)` — kelly's
   per-cell `{kelly_shrinkage, brier_skill_score, model_weight}` getter.
-* `training.graduation.read_gate1` → `check_graduation` /
-  `generate-ship-config` for Gate 1 ↔ Gate 2 promotion logic.
+* `training.graduation.read_gate1` → `ship graduation` /
+  `ship config` for Gate 1 ↔ Gate 2 promotion logic.
 
 `model_stats.csv` is a literal mirror written next to the parquet so the
 same numbers are browseable from VSCode without a parquet viewer; the
 parquet is authoritative on disagreement and is the only file readers
 consult.
 
-**Column groups** (one row per cell, ~50 columns):
+**Column groups** (one row per cell, ~115 columns):
 
 | Group | Columns | Owner |
 |---|---|---|
@@ -437,7 +448,7 @@ consult.
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight`, `n_authentic_validation` (sportsbook-priced validation rows; `pickem` DFS-only rows excluded), `n_blend_fit_clusters` (rows and distinct clusters behind the weight fit; below the cluster floor `model_weight` is 1.0 and the skill / Kelly columns are NaN) | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
-| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_iqr_ratio`, `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`/`g6_recent_corr` (`ratio_meanyr` SkewNormal cohort), `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
+| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_pit_ks`/`g4_pit_ks_max` (↓; `g4_iqr_ratio` reported), `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`, `g6_citl_ci_hi`, `g6_over_ci_lo` (all cells), `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
 | HP | `hp_rounds`, `hp_leaves`, `hp_lr`, `hp_min_child`, `hp_l1`, `hp_l2` | `meditate` |
 | Calibration | `cv`, `std` | `meditate` (from `stat_calibration.json`) |
 
@@ -477,20 +488,22 @@ production data.
 
 | File | Purpose |
 |------|---------|
-| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
-| `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
+| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`) |
+| `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi, book_shape}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
-| `config/prop_books.json` | List of sportsbooks consulted for player-prop consensus |
+| `config/prop_books.json` | Unused: a flat list re-exported as `helpers.books` that nothing reads (the consensus takes every non-DFS book) |
 | `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |
 
 ### Data Storage
 
 - `data/models/` — Trained LightGBMLSS model pickles
 - `data/training_data/` — Cached training matrices
-- `data/player_data/{LEAGUE}/{YEAR}/` — Historical game log CSVs
+- `data/leagues/{league}/` — game logs (`gamelog.parquet`, `teamlog.parquet`, `players.json`)
+  and correlation parquets
+- `data/player_data/` — roster seeds, MLB affinity CSVs, collector snapshots
 - `data/test_sets/` — Holdout test data
 - `creds/` — API keys (`keys.json`)

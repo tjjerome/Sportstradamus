@@ -5,11 +5,13 @@ server (continuously appending today's odds via `confer`, and history through th
 `odds-backfill` job) and a dev machine (where by-hand historical backfills run). They
 drift apart: each holds observations the other lacks.
 
-`merge-archives` reconciles them losslessly. The archive is append-only time-series
-(the same observation key recurs with different `observed_at` timestamps), so the merge
-is a **set-union of full rows** over `odds`, `lines` and `ladder`: every row in either
-database is kept, and only bit-identical duplicates collapse. No observation is ever
-dropped, and distinct timestamps for the same key both survive.
+`sportstradamus admin merge-archives` reconciles them losslessly. The archive is
+append-only time-series (the same observation key recurs with different `observed_at`
+timestamps), so the merge is a **set-union** over `odds`, `lines` and `ladder`: every
+observation in either database is kept, and only duplicates collapse. `lines` and
+`ladder` dedup on the full row; `odds` dedups on the observation identity (every column
+but the derived `under_prob` / `line` quote, whose populated value is kept). No
+observation is ever dropped, and distinct timestamps for the same key both survive.
 
 `ladder` is optional — a snapshot taken off a box predating its schema merges with the
 ladder step skipped, reported as `ladder: skipped`. It is also the expensive table
@@ -70,5 +72,7 @@ there with dev's snapshot as `--source`. Re-running on already-merged data is a 
 | `--dry-run` | Report row counts only; write nothing. |
 | `--no-backup` | Skip the pre-merge `.bak-<epoch>` copy of the target. |
 
-If the target is locked by a running cron, the command fails with guidance rather than
-waiting — run it during a quiet window or while holding the archive flock above.
+The command takes the shared archive flock itself (the lock `scripts/run_job.sh` wraps
+every cron job in), so it waits for a running cron and fails after 15 minutes. Run it
+bare: wrapped in `flock` on the same lock file, it waits out its own timeout against the
+wrapper's hold and then fails.

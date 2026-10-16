@@ -31,8 +31,9 @@ accuracy has never been verified on production data.
 git fetch origin && git log --oneline origin/devel -3
 ls docs/DEPRECATED_TRIAGE.md 2>/dev/null          # stage 1 done?
 ls src/deprecated/                                 # triage subject
-grep -rn "deferred-90" docs/*.md   # only model_improvement_track.md's retirement notes should hit
-grep -rn "roadmap_v2" docs/*.md .claude/ 2>/dev/null | grep -v archive  # drift
+# only model_improvement_track.md's retirement note and this brief should hit:
+grep -rn "deferred-90" docs/ --include=*.md | grep -v '^docs/archive/'
+grep -rn "roadmap_v2" docs/ .claude/ 2>/dev/null | grep -v archive  # drift
 ```
 
 ### Volatile product assumptions
@@ -49,45 +50,50 @@ grep -rn "roadmap_v2" docs/*.md .claude/ 2>/dev/null | grep -v archive  # drift
 - 2026-06-10 — Triage is decision-only: `docs/DEPRECATED_TRIAGE.md` records
   REVIVE / DELETE / ARCHIVE per file; deletions land only after owner review
   (archived v2 §1.6 spec).
-- 2026-06-10 — The calibration re-run needs production archive data; it is
+- 2026-06-10 — The calibration re-run needs production parlay history; it is
   owner-assisted, never faked from fixtures.
 
 ## 5. Module footprint & canonical paths
 
 Docs (`docs/`, `docs/handoffs/`), `src/deprecated/` (decisions about, not
-edits to), `src/sportstradamus/scripts/` (read/run), `pyproject.toml`
-(script-registration check only). No `sportstradamus.*` runtime modules.
+edits to), `src/sportstradamus/scripts/` (read/run),
+`src/sportstradamus/cli.py` (command-map check only). No `sportstradamus.*`
+runtime modules.
 
 ## 6. Stage plan
 
 1. **Deprecated triage** (archived v2 §1.6). For each file in
    `src/deprecated/` and each README TODO: does a live replacement exist
-   (CONTRIBUTING §Package Map)? Write a one-paragraph decision — REVIVE (with
-   target lane), DELETE (rationale), ARCHIVE (rationale) — to
-   `docs/DEPRECATED_TRIAGE.md`; remove matching README TODOs for DELETEs;
-   report counts. Known inputs: `correlation.py` and `opt_parlay.py` are
-   superseded by live code; `opt_kelley_bet.py` already revived into
-   `strategies/kelly.py` (sits in `.archived/`); `drafts/` feeds the
-   `bestball-2027` lane's stage-0 retire-vs-evolve call. Acceptance: doc
-   exists, every file covered, counts reported. 1–2 sessions. No code
-   deletion in this stage.
+   ([ARCHITECTURE.md §Package Map](../ARCHITECTURE.md#package-map))? Write a
+   one-paragraph decision — REVIVE (with target lane), DELETE (rationale),
+   ARCHIVE (rationale) — to `docs/DEPRECATED_TRIAGE.md`; remove matching
+   README TODOs for DELETEs; report counts. Known inputs: `correlation.py`
+   and `opt_parlay.py` are superseded by live code; `opt_kelley_bet.py`
+   already revived into `strategies/kelly.py` (sits in `.archived/`);
+   `drafts/` feeds the `bestball-2027` lane's stage-0 retire-vs-evolve call.
+   Acceptance: doc exists, every file covered, counts reported. 1–2
+   sessions. No code deletion in this stage.
 2. **Parlay calibration re-run** (owner-assisted). Run
-   `audit_parlay_calibration.py` against production archive data; commit the
-   real plot + CSV over the placeholder, and report PSD-repair distortion
-   stats alongside the reliability deciles (PARLAY_AUDIT.md §2.2 rider). The
+   `audit_parlay_calibration.py` on production parlay history — the
+   `data/runtime/parlay_hist/` day partitions, which reach dev through
+   `scripts/sync_from_prod.sh`, so run it after a sync; commit the real
+   plot + CSV over the placeholder, and report PSD-repair distortion stats
+   alongside the reliability deciles (PARLAY_AUDIT.md §2.2 rider). The
    populated artifacts double as the incumbent baseline
    [`parlay-dependence.md`](parlay-dependence.md) stage 4 must beat.
    Acceptance: committed artifacts derive from production data (dates + row
-   counts in the ledger line). 1 session + owner time. *If production data
-   can't be exported:* park the stage, note in ledger, move on.
+   counts in the ledger line). 1 session + owner time. *If the sync can't
+   run:* park the stage, note in ledger, move on.
 3. **Drift sweeps + recurring checks.** (a) `deferred-90` drift grep (§3
    block) — the tag is retired
-   ([`model_improvement_track.md`](model_improvement_track.md) §8);
-   only its retirement notes should match. (b) Verify `pyproject.toml`
-   script registrations match shipped CLIs. (c) Run the recurring checks and
-   record results: per-season `underdog_payouts.json` verification vs the
-   live product (archived v2 §3.2 mandate); monthly free-passer re-score
-   reminder to the model-track lane (model_improvement_track.md §6.0).
+   ([`model_improvement_track.md`](model_improvement_track.md) §6);
+   only its retirement note and this brief should match. (b) Verify the
+   `cli.py` command map matches the shipped commands and the
+   `tests/golden/fixtures/help_sportstradamus*.txt` snapshots. (c) Run the
+   recurring checks and record results: per-season `underdog_payouts.json`
+   verification vs the live product (archived v2 §3.2 mandate); monthly
+   free-passer re-score reminder to the model-track lane
+   (model_improvement_track.md §6.0).
    (d) Docs relative-link sweep across `docs/` — every relative link
    resolves; no stale paths.
    Acceptance: each check's result in the ledger. ~1 session each visit;

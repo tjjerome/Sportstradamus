@@ -200,14 +200,14 @@ Owner decisions (nothing blocks on them; each has an honest fallback in place):
 - Game-total star fill — RESOLVED 2026-09-12: gradient blend of the two teams' colours
   (same §4).
 - Team marks: skipped; player headshots → the
-  [`player-headshots`](../handoffs/player-headshots.md) lane (briefed 2026-09-12).
+  [`player-headshots`](player-headshots.md) lane (briefed 2026-09-12).
 - The commissioned logo (`docs/art_briefs/logo_guru.md`) — the `st.logo` slot needs zero
   code when the files land.
 - The optional `export-line-movement` cron + healthcheck ([OPERATIONS.md](../OPERATIONS.md));
   `prophecize` already writes the snapshot hourly.
 
 Routed debts (recorded here so no session rediscovers them; the archive, Rivals, depth,
-`market_display` and voice-bank items are the [`cleanup-pass`](../handoffs/cleanup-pass.md)
+`market_display` and voice-bank items are the [`cleanup-pass`](cleanup-pass.md)
 lane's scope since 2026-09-12, the silhouettes the
 [`constellation-art`](../handoffs/constellation-art.md) lane's):
 

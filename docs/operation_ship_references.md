@@ -2,7 +2,7 @@
 
 > **The evidence appendix for [`model_improvement_track.md`](handoffs/model_improvement_track.md):**
 > research verdicts (P0–A1.6), branch/commit refs, the critical-files map, and citations
-> [1]–[75]. Preserves the load-bearing facts from the deprecated
+> [1]–[85]. Preserves the load-bearing facts from the deprecated
 > [`gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md) /
 > [`gbdt_mean_regression_context.md`](archive/gbdt_mean_regression_context.md); full
 > prose for any item below lives in the archived docs at the line
@@ -26,7 +26,7 @@
 11. [Critical files map](#11-critical-files-map)
 12. [Per-change-type inference-path checklist](#12-per-change-type-inference-path-checklist)
 13. [Cross-league caveats](#13-cross-league-caveats)
-14. [References [1]–[48]](#14-references)
+14. [References [1]–[85]](#14-references)
 15. [Ship-75 sweep-era verdicts](#15-ship-75-sweep-era-verdicts)
 
 ---
@@ -96,7 +96,7 @@ transform.
 
 **State:** ✅ done. **Result: 6/8 NBA ZINB markets SHIP.**
 
-New `meditate --zinb-mode=hurdle` (orthogonal to `--target-strategy`;
+New `meditate --zinb-mode=hurdle` (orthogonal to `--target-normalization`;
 default `joint` byte-identical to pre-P2.B).
 [`HurdleZINB`](../src/sportstradamus/hurdle.py):
 
@@ -295,7 +295,7 @@ player feature apply, but count-family reasoning does not.
 wholesale; A2 pivots to T3 tail head (deferred behind breadth).**
 
 **Stage A1 — ICC₁ table (36 cells).** Read-only
-`scripts/icc_diagnostics.py` (console `icc-diagnostics`) writes
+`scripts/icc_diagnostics.py` (`python -m sportstradamus.scripts.icc_diagnostics`) writes
 `data/icc/{NBA,WNBA,NFL}_icc.parquet`.
 
 **Routing verdict:** 25 ambiguous, 10 eb_centering, 1 tail_extension.
@@ -487,8 +487,9 @@ lesson. The live plan-body homes are §3.4 (lever table), §6.5 (blend closed-st
 **Rework briefs.** The profit-first rework is supported by four briefs — count family (Double
 Poisson), continuous family (centered-SN), copula stage-0 (Gaussian + t-branch), and sweep UX +
 version attribution — at
-`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`, mirrored
-under `~/.claude/plans/review-the-current-state-partitioned-taco-agent-*.md`.
+`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`
+(scratch; the copula brief is committed as
+[archive/researcher_copula_stage0.md](archive/researcher_copula_stage0.md)).
 
 | Verdict | Status | Anchor |
 |---|---|---|

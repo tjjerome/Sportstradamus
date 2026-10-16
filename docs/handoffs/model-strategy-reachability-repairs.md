@@ -1,7 +1,12 @@
 # Model-strategy reachability repairs
 
-> Status: ACTIVE — recommendations 1/2/3/5 landed; awaiting the isolated targeted
-> sweeps for the three NFL acceptance cells (§7).
+> Status: ACTIVE — recommendations 1/2/3/5 landed (`b41e277a`, 2026-08-03). Sweeps
+> of the three NFL acceptance cells then ran on the repaired code (receiving and
+> rushing yards 2026-08-27, passing yards 2026-10-03), and every structural corner
+> failed on its own guard before scoring (`CalledProcessError`, slack −inf):
+> two-part on its role-support minima, affine on its probability-pool rho bounds.
+> No acceptance cell has been scored on a structural recipe; whether that closes
+> the lane is the owner's call.
 
 ## 1. Mission
 
@@ -41,7 +46,7 @@ the implementation contract materially changed.
 
 ```bash
 git status --short
-pgrep -af "[m]editate|model.strategy.(sweep|confirm)" || true
+pgrep -af "[m]editate|ship [s]weep" || true
 rg -n "holdout-blind does not support structural|not spec.is_structural" \
   src/sportstradamus/training
 rg -n "SEED_CORNERS|_known_good_corners|_incumbent_corner" \
@@ -261,5 +266,5 @@ grouping and a general structural-row stitch, mandatory sweep seeds split from
 confirm-only evidence, incumbent reconstruction through control defaults, Gate-4
 mechanism-diverse nominees; two-part artifact schema 4, affine artifact schema 2 (was
 declared 1 against a writer stamping 2 — every fresh affine artifact was being
-rejected), both structural specs implementation v2 (d4730ae) · checks ✓/✓/✓ · next:
+rejected), both structural specs implementation v2 (b41e277a) · checks ✓/✓/✓ · next:
 isolated targeted sweeps for NFL receiving, rushing, and passing yards

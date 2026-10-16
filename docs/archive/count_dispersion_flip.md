@@ -1,9 +1,15 @@
 # Lane record — count dispersion flip (R4 / Exp-3): default stays `crps`
 
-**Status: closed 2026-08-24.** The default flip is **not adopted**; `count_dispersion_objective`
-remains an opt-in per-cell pin. Context spine: CLAUDE.md,
+> Status: DONE — closed 2026-08-24. The default flip is **not adopted**;
+> `count_dispersion_objective` remains an opt-in per-cell pin. Both successor lanes (§Residue) are
+> closed too. NBA PF, walled by the single-valued `posthoc` slot, is still withheld and is now a
+> §6.3 feature pilot in [model_improvement_track.md](../handoffs/model_improvement_track.md).
+> Reopen by adding a roadmap row that points back here; §Residue lists what was left open on
+> purpose.
+
+Context spine: CLAUDE.md,
 [docs/ARCHITECTURE.md](../ARCHITECTURE.md),
-[model_improvement_track.md](model_improvement_track.md) §6.1 Rung B′.
+[model_improvement_track.md](../handoffs/model_improvement_track.md) §6.1 Rung B′.
 
 ## The question
 

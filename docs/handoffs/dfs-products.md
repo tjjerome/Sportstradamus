@@ -1,8 +1,9 @@
 # DFS Products — game lines, Ladders, alt-line hardening
 
 > Status: ACTIVE — stage 0 substantially complete (B7-P4 TAXED verified in-app; residue:
-> tax-curve sweep + owner packet); stage 1 retired; 2a startable now; 2b/2c/5 queue behind
-> sleeper-parity (roadmap §5); stage 4 owner-gated
+> tax-curve sweep + owner packet); stage 1 retired; 2a, 2b, 2c and 5 startable on their §6
+> entry checks (sleeper-parity merged 2026-07-14, `b9f8a95e`; stage 5 never interleaves with
+> parlay-dependence, roadmap §5); stage 4 owner-gated
 
 ## 1. Mission & money logic
 
@@ -19,7 +20,7 @@ downstream lane; this brief is that lane, generalized to the newer surfaces (gam
 combos, alt-line hardening) two Opus stage-0 briefs since scoped. See also
 [`PARLAY_AUDIT.md`](../PARLAY_AUDIT.md) for the incumbent `find_correlation` /
 `beam_search_parlays` audit + dispositions this lane's pricers plug into (its
-empirical-calibration run stays unpopulated in dev — production host only).
+empirical-calibration run is still open, PARLAY_AUDIT §3).
 
 ## 2. Read first (in order)
 
@@ -35,12 +36,12 @@ empirical-calibration run stays unpopulated in dev — production host only).
    R3, the dependence-estimator conventions (hierarchical Fisher-z EB, PIT extraction,
    `census_parlay_pairs.py` design) both product briefs extend rather than reinvent.
 5. [`parlay-dependence.md`](parlay-dependence.md) §5 + §7 — the sibling lane rebuilding
-   `parlay.py`/`correlation.py` internals; this lane's Stage 2/5 items queue behind it,
-   never interleave (roadmap §5.1).
+   `parlay.py`/`correlation.py` internals; this lane's stage 5 works the same files and
+   never interleaves with it (roadmap §5.1).
 6. `src/sportstradamus/strategies/underdog_pickem.py` — the orchestrator pattern to rhyme
-   with (`RecommendedEntry`, YAML emit, `pickem-build` CLI). Rivals retired 2026-09-10
-   (owner): the scraper no longer parses `rival_lines` and `underdog_pickem` no longer
-   builds a rivals variant.
+   with (`RecommendedEntry`, YAML emit, `sportstradamus bet pickem`). Rivals retired
+   2026-09-10 (owner): the scraper no longer parses `rival_lines` and `underdog_pickem` no
+   longer builds a rivals variant.
 7. `src/sportstradamus/strategies/kelly.py` — `fractional_kelly_stake` conventions
    (quarter-Kelly, 0.5% cap, shrinkage blend) every new pricer wraps, generalized to
    discrete outcome vectors per the ladders brief §A5.
@@ -67,8 +68,8 @@ ls -la src/sportstradamus/data/config/underdog_payouts.json
 # before building it a second time
 find . -iname "census_parlay_pairs.py" 2>/dev/null
 
-# sleeper-parity status — Stage 2/5 queue behind it (roadmap §5.1)
-head -3 docs/handoffs/sleeper-parity.md
+# parlay-dependence status — stage 5 never interleaves with it (roadmap §5.1)
+head -3 docs/handoffs/parlay-dependence.md
 ```
 
 ### Volatile product assumptions
@@ -152,8 +153,9 @@ relevant stage-0 capture, revise this brief in place, resume.
   both-teams-to-score) catalogued in
   [underdog_api.md §7.6](../underdog_api.md#76-team-and-game-markets).
 - **Payout tables are consumed, not owned.** UD per-season table drift is a
-  `hygiene-closeout` housekeeping item, not this lane's; Sleeper's table lives in
-  `sleeper-parity` stage 0. This lane reads whatever those lanes/stage-0 captures land.
+  `hygiene-closeout` housekeeping item, not this lane's; Sleeper's payout data live in
+  `sleeper_payouts.json`, which `sleeper-parity` owns. This lane reads whatever those
+  lanes/stage-0 captures land.
 
 ## 4. Locked decisions
 
@@ -206,7 +208,7 @@ relevant stage-0 capture, revise this brief in place, resume.
 
 ## 5. Module footprint & canonical paths
 
-Per `CONTRIBUTING.md` §Package Map; do not recreate deleted shims.
+Per `docs/ARCHITECTURE.md` §Package Map; do not recreate deleted shims.
 
 | Path | Status | Role |
 |---|---|---|
@@ -219,12 +221,13 @@ Per `CONTRIBUTING.md` §Package Map; do not recreate deleted shims.
 | `books/underdog.py` + `books/sleeper.py` (ingestion only) | conflict-free | Underdog team/game markets + budgeted alternate lines now ingested; Sleeper alt-line de-vig (Stage 2a); game-line contract/combo payload capture (Stage 0/4); **never touches `prediction/`** |
 | `data/config/stat_map.json`, payout config | conflict-free | New ingestion entries; payout tables consumed, never owned (§3) |
 | `prediction/correlation.py`, `prediction/parlay.py` | **import-only** | Every new pricer imports Σ assembly / MVN+push-MC machinery; zero edits at v1 (all stage-0 briefs confirmed this composes cleanly) |
-| `prediction/cli.py`, `persist.py` | **QUEUED** | Alt-line columns into snapshots (Stage 2c), scoring-path wiring (Stage 2b) — behind `sleeper-parity`'s declared footprint |
-| `training/correlate.py`, `prediction/correlation.py` Σ assembly | **QUEUED (Stage 5)** | Team markets / game-line legs into the correlation engine — behind `sleeper-parity`, never interleaved with `parlay-dependence` |
+| `prediction/cli.py`, `persist.py` | conflict-free | Alt-line columns into snapshots (Stage 2c), scoring-path wiring (Stage 2b) |
+| `training/correlate.py`, `prediction/correlation.py` Σ assembly | **CONFLICTED (Stage 5)** | Team markets / game-line legs into the correlation engine — never interleaved with `parlay-dependence` |
 | `tests/golden/` | conflict-free | One golden suite per new pricer, vs hand-computed cases |
 
 Serving path is touched at Stages 2b/2c/4/5 ⇒ the inference-path compatibility checklist
-applies (`operation_ship_references.md` — reference, don't restate).
+applies ([`model_improvement_track.md`](model_improvement_track.md) §7.3 — reference, don't
+restate).
 
 ## 6. Stage plan
 
@@ -257,17 +260,17 @@ in-app-only facts.
   (sleeper-parity holds `books/sleeper.py` read-only in its own lane per its §4; append a
   heads-up ledger line to `sleeper-parity.md` §10 on any Sleeper-path change). Entry: Stage 0
   Sleeper capture done.
-- **2b — `ladder` table consumption for rung-level book probs at alt lines.** Ingestion-side
-  work is free; any scoring-path edit to `prediction/cli.py` or `model_prob.py` **QUEUES**
-  behind `sleeper-parity`. Entry: `ladder` census (§3 command) confirms sufficient rung
-  density at current offers.
-- **2c — alt-line columns into snapshots** (`persist.py`). **QUEUES** behind
-  `sleeper-parity`; coordinate with `dashboard-ux` before adding any new column the
-  dashboard will read.
+- **2b — `ladder` table consumption for rung-level book probs at alt lines.** Conflict-free,
+  scoring-path edits to `prediction/cli.py` or `model_prob.py` included. Entry: `ladder`
+  census (§3 command) confirms sufficient rung density at current offers.
+- **2c — alt-line columns into snapshots** (`persist.py`). Conflict-free; check
+  [`dashboard_ux_redesign.md`](../dashboard_ux_redesign.md) §7, the UI's reading list,
+  before adding any new column the dashboard will read.
 - Acceptance: 2a — de-vigged alt lines land in the archive with a golden test; 2b — rung
   join density measured and either lands or is deferred per the kill rule; 2c — new
-  snapshot columns documented in `persist.py`'s schema comment, dashboard-ux notified.
-- Est. 1 session (2a) + 1–2 sessions each for 2b/2c once unqueued.
+  snapshot columns documented in `persist.py`'s schema comment and in
+  `dashboard_ux_redesign.md` §7.
+- Est. 1 session (2a) + 1–2 sessions each for 2b/2c.
 - Kill (2b only): ladder-table join too sparse at current offer volume to beat the
   incumbent dist-inversion path → keep dist-inversion, record verdict. 2a/2c have no kill
   condition (pure hardening); if blocked, PARK AND PIVOT per §8.
@@ -315,17 +318,17 @@ ingestion + `stat_map`/payout config + new `strategies/` module + standalone `sc
   than our consensus) → close the combo sub-lane DONE(no-ship); game-line rows stay
   dashboard-only book-implied per the `dashboard_ux_redesign.md` §8 game-line scar.
 
-**Stage 5 — Correlation-engine + snapshot integration.** **CONFLICTED** — queues entirely
-behind `sleeper-parity`; never interleave with `parlay-dependence` (roadmap §5.1).
-- Entry: `sleeper-parity` merged; if `parlay-dependence` (D3) fired first, this stage
+**Stage 5 — Correlation-engine + snapshot integration.** **CONFLICTED** — never interleave
+with `parlay-dependence` (roadmap §5.1).
+- Entry: `sleeper-parity` merged (met); if `parlay-dependence` (D3) fired first, this stage
   delivers through `parlay-dependence`'s stages instead, with this lane supplying the ρ
   design (B3's estimand + estimator) as an input, not a competing implementation.
 - Scope: team markets into `correlate.py`/`correlation.py` Σ assembly; game-line legs into
-  beam/slip scoring; snapshot artifacts flip the `dashboard-ux` scars this lane's earlier
-  stages left open.
+  beam/slip scoring; snapshot artifacts flip the `dashboard_ux_redesign.md` §8 scars this
+  lane's earlier stages left open.
 - Acceptance: held-out joint calibration on team-market pairs beats independence per the
   copula brief's estimator conventions; the `dashboard_ux_redesign.md` §8 game-line scar clears.
-- Est. 2–3 sessions once unblocked.
+- Est. 2–3 sessions.
 - If-it-fails: `parlay-dependence` replaced Σ assembly first → re-express this stage's ρ
   work on the new path (branch, not kill — the estimator design survives either way).
 

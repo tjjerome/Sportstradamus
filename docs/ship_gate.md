@@ -114,8 +114,9 @@ Gate-2 `z = 0.22`). Three one-sided legs, OR-ed, cover the failure from differen
 The recent-form and CITL legs are star-side (mean-regression deflates the stars, where recent
 form is also the cleanest yardstick); the over leg is the only bench-side check and is scoped to
 count families. Live symptom that motivated the original leg: served WNBA FGA projecting a stable
-13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research:
-`/tmp/researcher_overshrinkage_gate.md`, `/tmp/researcher_gate6_scope_and_drift.md`]
+13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research: summarized in the
+[Gate 6 design record](archive/superpowers/specs/2026-06-21-gate6-outcome-directional-legs-design.md);
+the two `/tmp` briefs it cites were never committed]
 
 **Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
 is *at least as good as* the book," so a statistical **tie passes** — we do not demand
@@ -130,9 +131,10 @@ not to manufacture ships; more breadth comes from model work, not a looser δ).
 Whether it is then **+EV to bet** the cell — and how much — is *not* the gate's job:
 that is owned downstream by the EV calc, the Kelly sizer (`kelly_shrinkage =
 clip(brier_skill_score, 0, 1)`, so a tie cell is sized to ~0 until it earns edge), and
-the 14-day live Gate-2 soak. The gate certifies **deployable** (calibrated +
-uncompressed + tie-or-better); the sizer + soak certify **profitable**. That split is
-what makes shipping a tie safe.
+the 30-day live Gate-2 window (settled count, live book BSS, side precision). The gate
+certifies **deployable** (calibrated + uncompressed + tie-or-better); the sizer sets the
+stake from measured skill, and live Gate 2 checks that skill against the book on settled
+offers. That split is what makes shipping a tie safe.
 
 **Gate 4 is whole-CDF calibration (PIT-KS), not IQR spread.** `pit_ks =
 sup|F_model − F_true|` over the predictive CDF *is* the worst-case alt-line probability
@@ -171,7 +173,7 @@ as the reported `g4_iqr_ratio`.
   Over 0.5, +2% at Over 1.5, `pit_ks ≈ 0.04` but `g4_tail_pit_ks ≈ 0.037`, i.e. ~90% of
   its deviation is in the over-tail). It is **not** a gate — the deep tail is too
   sample-starved per cell to threshold without gaming the cutoff — but it flags the
-  alt-over wobblers for the fix-queue and the live soak.
+  alt-over wobblers for the fix-queue.
 - `central50_coverage`, `central80_coverage` — central predictive-interval coverage of
   the per-row distribution; names the *direction* a KS scalar cannot. Coverage
   materially below nominal (0.50 / 0.80) ⇒ the predictive is too narrow / mislocated
@@ -262,14 +264,15 @@ them. Any other supersession keeps S1 + S2 + S3. See
 ## Serving control — default-deny via stat_meta `shipped` field
 
 `data/config/stat_meta.json` is the **canonical, hand-curated** per-cell
-record. Every cell carries `{"dist": ..., "shipped": ..., "strategy": ...}`
-where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
+record. Every cell carries `{"dist", "shipped", "target_normalization",
+"posthoc"}` plus optional knobs, where `shipped` is one of `"withheld"` /
+`"devel"` / `"main"`:
 
 - `"withheld"` — `meditate` prunes the cell's pickle so `prophecize`
   dark-outs the market (a volume denominator in `VOLUME_STATS` keeps its
   pickle for the league's projections; the `shipped` check alone darks it out).
 - `"devel"` — the production-tracking branch (`devel`) trains + ships
-  the cell. In 14-day Gate-2 soak.
+  the cell, and live Gate 2 scores it over a rolling 30-day window.
 - `"main"` — the cell also passed Gate-2 graduation; it's locked in on
   `main`.
 
@@ -279,19 +282,17 @@ one-line edit (`"withheld"` → `"devel"`). Demotion is equally manual: a
 served cell whose weekly retrain fails the fresh gates is **warned about**
 (meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
 it) but keeps serving until the human flips it back to `"withheld"` (next
-meditate prunes the pickle) or runs `ship config --branch devel --prune`. `sportstradamus ship config --branch
-main` mutates `stat_meta.json` monthly (cron via `run_job.sh
-gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
-the rest back to `"devel"`; the cron opens a PR a human merges.
-`generate-ship-config --branch devel` only validates the current state
+meditate prunes the pickle) or runs `ship config --branch devel --prune`.
+`sportstradamus ship config --branch main` mutates `stat_meta.json` monthly
+(cron via `run_job.sh gate-status`) to promote graduated cells `"devel"` →
+`"main"` and demote the rest back to `"devel"`; the cron opens a PR a human
+merges.
+`ship config --branch devel` only validates the current state
 and prints a summary — devel promotions are direct edits.
 
-**Known gap:** the graduated classifier (`training/graduation.py`) uses a
-proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window
-+ non-negative live book-BSS + neither recommended side's live precision
-below `MIN_PRECISION_SIDE` (0.50) — not the full live metric set above.
-`main` is dormant until the live aggregator produces data, so the proxy is
-acceptable for now.
+**Classifier:** `training.graduation.classify_lifecycle` applies the live
+rule in the table below after one offline precondition: a missing or
+negative Gate-1 BSS leaves the cell `not-shipped`.
 
 ---
 
@@ -306,8 +307,8 @@ Live precision and both profit sims count only sides the platform posted
 (`Boost > 0`); an unposted side was never a bet, and `Market Prob` is the bet side's
 book probability on either side, so no Under inversion is applied.
 
-Live data is dormant in dev, so the live gate fires only after `nightly.py`'s
-aggregator has produced rows for the cell.
+A cell with no row in `live_metrics_per_market.parquet`, or fewer than 200 settled
+offers in the window, stays `in-test`.
 
 Plus, when changing the deterministic-mode pipeline: the determinism gate must be
 green for every league with cached parquets

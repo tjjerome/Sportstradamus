@@ -1,7 +1,10 @@
 # Cleanup Pass
 
-> Status: DONE — all five stages landed 2026-09-12 (briefed the same day off the
-> dashboard-ux close-out). Unpushed on `devel`; §10 carries the measured deltas.
+> Status: DONE — closed 2026-09-12, the day it was briefed off the dashboard-ux close-out. All
+> five stages landed as `903f428d`, which is on `devel` and pushed; §10 carries the measured
+> deltas. Nothing was left open, and the roadmap row is DONE
+> ([roadmap §4](../sportstradamus_roadmap_v3.md)). Reopen by adding a roadmap row that points
+> back here.
 
 ## 1. Mission & money logic
 
@@ -38,7 +41,7 @@ bare letters in prose.
    flagged "pre Market-remap".
 6. `src/sportstradamus/helpers/market_display.py` + `data/config/market_display.json`;
    `tests/golden/test_grid_options.py` pins the slug-preserving contract.
-7. [`dfs-products.md`](dfs-products.md) §4/§5 — Ladders stage 3 owns the ladder
+7. [`dfs-products.md`](../handoffs/dfs-products.md) §4/§5 — Ladders stage 3 owns the ladder
    table's future and the product names; this lane only stops losing rows.
 
 ## 3. Verify before you trust
@@ -66,7 +69,7 @@ archive.
 - Sleeper's `Boost_Over` is a full decimal payout (`books/sleeper.py`), which is
   why "closest to 1.0" selects the easiest rung. If Sleeper ever quotes balanced
   main lines near 1.0, the stage-1 rule must still pick the balanced tier.
-- Underdog retired Rivals 2026-09-10 ([`dfs-products.md`](dfs-products.md) §4). If
+- Underdog retired Rivals 2026-09-10 ([`dfs-products.md`](../handoffs/dfs-products.md) §4). If
   a symmetric single-`Boost` product ever returns, the `_dfs_offer_probs` branch
   returns with it — from git, not from a flag.
 - `tests/golden/test_archive_shapefree_storage.py` derives its `_CELLS` from the
@@ -102,7 +105,7 @@ auto-discovers dashboard imports).
 
 ## 6. What landed
 
-All five stages are on `devel` (unpushed). Each was one commit-sized change; the
+All five stages are on `devel`. Each was one commit-sized change; the
 measured numbers behind stage 1 are in §10.
 
 1. **Sleeper survivor rule + ladder-aware merge.** `_dedup_offers_by_boost` is gone;

@@ -1,6 +1,6 @@
 ---
 name: devel-ship-curator
-description: "Use to carve a clean production-delta PR to the devel branch when a (league, market) cell has cleared Gate 1 and is ready to ship, or to land a further foundation layer. Branches off devel, brings ONLY production-runtime code + operator tools, hard-excludes dev-only research scaffolding (zinb-routing-diagnostics, icc-diagnostics, statsmodels, /tmp harnesses), keeps the offline verdict as PR prose not code, and verifies the three quality gates. Never pushes — the human approves."
+description: "Use to carve a clean production-delta PR to the devel branch when a (league, market) cell has cleared Gate 1 and is ready to ship, or to land a further foundation layer. Branches off devel, brings ONLY production-runtime code + operator tools, hard-excludes dev-only research scaffolding (e.g. /tmp harnesses), keeps the offline verdict as PR prose not code, and verifies the three quality gates. Never pushes — the human approves."
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: sonnet
 ---
@@ -17,16 +17,12 @@ package**.
 
 ## Mandatory reading on every invocation
 
-1. `CONTRIBUTING.md` — the **"Shipping to Production (`devel`)"** section. It holds
-   the authoritative keep/drop table and the two-phase model. When this prompt and
-   that section disagree, the section wins (it is version-controlled; update this
-   agent if it drifts).
-2. `docs/handoffs/model_improvement_track.md` — the **§7.1 gate definitions** and the
-   **Gate 1 / Gate 2** lifecycle (the per-cell ship mechanism itself is in
-   CONTRIBUTING's "Shipping to Production" section above; thresholds in
+1. `docs/handoffs/model_improvement_track.md` — the **§7.1 gate definitions** and the
+   **Gate 1 / Gate 2** lifecycle (thresholds and the per-cell `shipped` toggle are in
    `docs/ship_gate.md`).
-3. `CLAUDE.md` — hard rules and the three quality gates (`ruff`, `pytest
-   tests/golden/`, `pytest -m integration`) that must pass before you claim success.
+2. `CLAUDE.md` — hard rules and the three quality gates (`ruff`, `pytest
+   tests/golden/`, `pytest -m integration -n0`) that must pass before you claim
+   success.
 
 Skip the reading and you will drag a dev-only dependency onto the production
 server.
@@ -54,28 +50,30 @@ server.
 2. **Bring only the production delta.** For a per-market ship that is: the strategy
    slug + decode in `training/baselines.py`, the matching `model_prob` decode
    branch, any required `stats/` + `pipeline` feature additions, the inference-path
-   test, and the single `src/sportstradamus/data/config/ship_config.json` toggle line. Use targeted
+   test, and the cell's one-field `shipped` toggle in
+   `src/sportstradamus/data/config/stat_meta.json`. Use targeted
    `git checkout <research-ref> -- <path>` per file; do not bulk-checkout the tree
-   for a Phase B ship.
-3. **Hard-exclude the denylist** (mirror CONTRIBUTING's keep/drop table):
-   - never bring `src/sportstradamus/scripts/zinb_routing_diagnostics.py`,
-     `icc_diagnostics.py`, `count_family_screen.py`, or their tests;
-   - never add the `statsmodels` dependency or the `zinb-routing-diagnostics` /
-     `icc-diagnostics` / `count-family-screen` console-script entries to `pyproject.toml`;
+   for a per-market ship.
+3. **Hard-exclude the denylist** (this list is the keep/drop rule; no other live doc
+   carries one):
+   - the dev diagnostics `src/sportstradamus/scripts/zinb_routing_diagnostics.py`,
+     `icc_diagnostics.py` and `count_family_screen.py`, their tests under
+     `tests/diagnostics/`, the `statsmodels` dependency and the
+     `admin count-family-screen` subcommand already ship on `devel`, so a carve adds
+     no copy of them. It adds no console-script entry either: `sportstradamus` is
+     the only one;
    - never bring a `/tmp` harness or a heavy determinism integration test that is
      pure dev scaffolding;
    - `training/scorecard.py` is **production** (inline-called by `report()`, which
      runs after every `meditate`) and ships — do **not** exclude it. Only its
      standalone-CLI A/B exercises (`--baseline` / `--candidate` / `--live-window`)
      stay a dev workflow, never committed harness runs.
-4. **Verify no leak.** `grep -rn "zinb_routing_diagnostics\|icc_diagnostics\|count_family_screen" src/
-   tests/` on the new branch must show only docstring/comment mentions, never an
-   `import`. `git diff origin/devel --stat` must contain **zero**
-   denylist paths. `git diff origin/devel -- pyproject.toml` must add **no** dev-only dep
-   or script.
+4. **Verify no leak.** `git diff origin/devel --stat` must show only the ship's
+   footprint: **zero** denylist paths and no path outside the production delta.
+   `git diff origin/devel -- pyproject.toml` must add **no** dev-only dependency.
 5. **Run the three gates** and make them green: `poetry run ruff check
    src/sportstradamus/`, `poetry run pytest tests/golden/`, `poetry run pytest -m
-   integration`. If you edited or wrote any `.py`, invoke the
+   integration -n0`. If you edited or wrote any `.py`, invoke the
    `refactoring-specialist` on those files before declaring done (per CLAUDE.md).
 6. **Commit** with a message naming the cell, the strategy, and the Gate-1 verdict
    in one line; do **not** push. The human reviews and pushes.
@@ -85,17 +83,17 @@ server.
 The offline evidence that justified the ship (scorecard deltas, diagnostic
 verdicts, A/B numbers) goes in the **PR description you draft for the caller** —
 never as committed harness code. Produce a short PR body: the cell, the strategy,
-the Gate-1 numbers (top-decile MAE Δ, global MAE, brier-skill, bottom-decile bias),
-and the soak plan. The reviewer reads the verdict; `devel` does not carry it.
+the gate numbers (`g1_brier_diff_mean` and its CI, the `g1_pass`…`g6_pass` verdicts,
+`ship`), and the soak plan. The reviewer reads the verdict; `devel` does not carry it.
 
 ## Before you declare success
 
 - The three gates are green on the new branch.
 - `git diff origin/devel --stat` shows the production delta and nothing on the denylist.
-- `pyproject.toml` gained no dev-only dependency or diagnostic console script.
-- The `ship_config.json` change is exactly the intended toggle (cell → strategy,
-  or `"withheld"`), validated by `load_ship_config` (a bad value fails `meditate`
-  at startup).
+- `pyproject.toml` gained no dev-only dependency.
+- The `stat_meta.json` change is exactly the intended toggle (the cell's `shipped`
+  set to `"devel"`, or back to `"withheld"`), validated by `load_ship_config` (a bad
+  value fails `meditate` at startup).
 - You did NOT push.
 
 ## Output

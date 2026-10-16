@@ -6,13 +6,12 @@ the killed selection-shrink lever this lane continues), and the three research b
 `docs/archive/` (§5). Status: OPEN — waves 1–13 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
 profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–29
-and 32–66 (§2) are built or run (§4, §6), and the stored game lines of four leagues are re-read on
+and 32–68 (§2) are built or run (§4, §6), and the stored game lines of four leagues are re-read on
 the training box (§6, I6f). On production: the rebuilt MLB models and the NFL ship-15 models
-(decisions 48, 49), the NBA's same-player correlation file (65) and the 13 MLB games the gamelog
-lacked (51). On the training box only: MLB's three recomputed matrices and two retrained cells
-(ask 3), and the NHL's and the NFL's rebuilt and retrained models (asks 6, 8), whose sends wait
-on asks 32 and 33; the WNBA's repair, rebuild and retrain (asks 7, 14) follow. What is open is
-§8.
+(decisions 48, 49), the NBA's same-player correlation file (65), the 13 MLB games the gamelog lacked
+(51), MLB's two retrained cells (67) and the WNBA gamelog repair (68). On the training box only: the
+NHL's and the NFL's rebuilt and retrained models (asks 6, 8), whose sends wait on asks 32 and 33,
+and the WNBA's rebuilt matrices, whose retrain is running (ask 7). What is open is §8.
 
 ## 1. Mission & money logic
 
@@ -66,7 +65,7 @@ run.
 
 1. **Hero cohort = recommended**: edge ≥ 5 % at the platform payout, payout in (1, 2.5], with all
    posted sides as the context row. The ledger's `recommended` definition carries the same cap
-   (`realized.RECOMMENDED_PAYOUT_MAX`, pinned equal to `offer_records.MAX_FAVORED_PAYOUT`).
+   (`realized.RECOMMENDED_PAYOUT_MAX`, set to `helpers.MAX_FAVORED_PAYOUT`).
 2. **All three briefs run in parallel** (R1 trust layer, R2 parlay engine, R3 train/serve skew),
    `research-analyst` subagents, model opus, read-only.
 3. **`Trust Prob` drives recommendations, Kelly and parlay legs (I4d) only at Tier B**: walk-forward,
@@ -221,6 +220,19 @@ run.
 65. **The NBA's same-player correlation file is on production**, sent alone on 2026-10-15;
     production's copy of July held no same-player rows.
 66. **The Lab › Diagnostics CRPS panel is gone**: history has held no CRPS since June.
+67. **MLB's two retrained cells are on production** (ask 3): `batter strikeouts` and `pitcher
+    fantasy points underdog`, retrained on their recomputed matrices, went with MLB's correlation
+    files, `corr_market_summary.parquet` included, by `scripts/sync_to_prod.sh --league MLB` on
+    2026-10-16 at 00:07 UTC. The files' checksums match on both boxes. The 00:50 board run held no
+    offer in either market (the 10-16 game's lines were not yet posted), so their first scoring on
+    production is still to be read.
+68. **Production's WNBA gamelog is repaired** (asks 14 and 31), as the training box's was on
+    2026-10-15: 281 rows added at their dates (Portland's 275 of 27 games, 2026-06-24 to 09-22, and
+    the 6 of the 9 bench rows production lacked), `PDX` renamed `POR` (147 player rows and 132
+    opponent cells; team log 13 and 12) and 5,256 infinite cells set to 0 (gamelog `BLK_PCT` 4,923
+    and `FTR` 173, team log 160), on 2026-10-16 at 01:05 UTC. Every after-write check passed and a
+    second run found nothing to change; both old files are kept in
+    `~/repair-backup/P5-20261016T0105Z/`.
 
 Standing rules from CLAUDE.md apply: one module per subagent, refactoring-specialist before any push,
 the three gates once per wave, `stat_meta.json` never committed from a session.
@@ -604,8 +616,9 @@ eras.
   snapshot of every resolved leg, so its tiles do not follow the sidebar range or the page window (caption says so).
 - The low parlay all-hit rates are real, not a resolution defect: on 898,592 parlays resolved both by
   `parlay_hist` and by history outcomes, `Misses` agrees on 98.4 % and all-hit rates agree within 0.2 pp
-  in every platform × size cell (Sleeper 2-leg .115). Parlay Kelly still sizes from the raw copula
-  probability (`PARLAY_AUDIT.md` §2.6) while the selected set realizes 0.08 of priced: the parlay path's
+  in every platform × size cell (Sleeper 2-leg .115). Parlay Kelly (`Rec Bet`) sizes from the copula
+  probability, shrunk toward 1/payout by the smallest leg weight but not corrected for the joint
+  (`PARLAY_AUDIT.md` §2.6), while the selected set realizes 0.08 of priced: the parlay path's
   live-money exposure until I6.
 - R2 open questions: NFL Σ rests on 7–11 games per team (pair-type pooled tetrachoric ρ with hierarchical
   shrinkage is a pre-registered parlay-dependence research item); Underdog's modifier m for MLB / WNBA /
@@ -1053,42 +1066,49 @@ eras.
   names the market `Totals`: MLB loses 83,414 of its totals rows (15 %), the NHL 96,040 (26 %),
   the NBA 50,512 (25 %), the NFL 10,986 (14 %), the WNBA 4,552 (7 %), all from 2022-05-08 on
   (§8, ask 34).
+- Two MLB models know nothing of the postseason. `batter strikeouts` and `pitcher fantasy
+  points underdog` (retrained 2026-10-12, ask 3) lack the six playoff features (`Playoff`,
+  `SeriesWins`, `SeriesLosses`, `CanClinch`, `FacingElimination`, `Blowout`). Their matrices
+  start on 2026-03-30 and the temporal split's training 70 % ends on 08-23 and 08-10, so no
+  training row is a playoff game (the first is 09-29) and
+  `pipeline._prune_uninformative_features` drops each column as constant. Matrices that
+  start in 2025 keep them (`hits`: two values of `Playoff` in training). Serving builds the
+  columns each model lists, so nothing fails; the two cells price a playoff game as a
+  regular-season one until a retrain's training split holds a postseason.
 
 ## 8. Owner asks (one each)
 
 The owner answered every ask from 1 to 23 with yes on 2026-10-11, the two retrains of 7 and 8
 included ("retrain both now"), and asks 24 to 31 with yes on 2026-10-15. An ask stays here until
-it is built or run; it then becomes a decision in §2 and a row in §4 (decisions 43 to 66 so
+it is built or run; it then becomes a decision in §2 and a row in §4 (decisions 43 to 68 so
 far). The asks keep the numbers they were put under. Each record is in §7 or the section it
 names. Two items at the foot are the owner's own to do and need no answer. Not asked because no
 change is proposed: the parlay floor (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns
 $1 per $1 while the legs are over-read).
 
-3. **Recompute the three left-out MLB cells' features in place, then retrain the two that
-   have a model?** (Answered yes.) Built and trained on the training box on 2026-10-12, its
-   checks passed on 2026-10-15; sent with the first `--league MLB` send.
 6. **Retrain the NHL after its rebuild?** (Answered yes.) 15 matrices rebuilt, the two volume
    models and the ten dependents that have a model retrained (2026-10-15). The send waits on
    ask 32.
-7. **Retrain the WNBA now?** (Answered yes.) It follows ask 14's repair, so the new models learn
-   Portland's rows and real block ratios.
+7. **Retrain the WNBA now?** (Answered yes.) Its gamelog repair is done on both boxes (decision
+   68); the rebuilt matrices are checked and the 13-cell retrain is running (2026-10-16).
 8. **Retrain the NFL from this lane?** (Answered yes.) Rebuilt by the NFL lane's three-step
    recipe and retrained (2026-10-15). The send waits on ask 33.
-14. **Refill Portland's lost WNBA game rows?** (Answered yes, with the nine bench rows of ask
-    31.) The repair adds Portland's rows of 27 games (2026-06-24 to 09-22) and nine rows of
-    seven deep-bench players of five teams, renames `PDX` to `POR` and sets the stored
-    infinities to 0 (decision 60), on the training box and then on production.
-32. **Send the twelve NHL models, hits included?** (yes / no; recommended yes.) Eleven pass all
-    six gates, goalie fantasy points newly so. Hits fails Gate 4 and Gate 6 where it passed
-    both: its high-volume players read about 15 % low (§7). Neither gate reads the temperature,
-    and the low read is not new: the old file reads the same on its test rows, where its blend
-    with the DFS line hid it, and production's live rows read 0.844 on that file. No is
-    production keeping its NHL files of 08-29 and 09-02.
+32. **Send the twelve NHL models, hits included?** (yes / no; recommended yes.) Eleven pass all six
+    gates, goalie fantasy points newly so. Hits fails Gate 4 and Gate 6 where it passed both: its
+    high-volume players read about 15 % low (§7). Neither gate reads the temperature, and the low
+    read is not new: the old file reads the same on its test rows, where its blend with the DFS line
+    hid it, and production's live rows read 0.844 on that file. The serve checks pass (production's
+    frames hold every feature of the nine cells it logs; the sandbox probe scores 3,945 rows with
+    finite outputs). No is production keeping its NHL files of 08-29 and 09-02.
 33. **Send the 19 NFL models?** (yes / no; recommended yes.) Sixteen keep all six gates. qb yards
     and yards fail Gate 1 on their first sportsbook-priced test rows (13 and 17; before they had
     none, which passes by rule), and qb tds fails Gate 4 by a hair (0.069 against 0.063). Gate 1
-    fails at every temperature from 1 to the fitted one, and Gate 4 does not read it. On its 17
-    rows yards beats the book by 0.025 in Brier on average. No is production keeping the
+    fails at every temperature from 1 to the fitted one, and Gate 4 does not read it. On its 17 rows
+    yards beats the book by 0.025 in Brier on average. The serve checks pass: production's frames
+    hold every feature of the 14 cells it logs but the 38 the new `qb yards` file adds (the old one
+    reads 438, the new 476), which the training box's serve path builds on every row; the sandbox
+    probe drops all 51 of its made-up `rushing tds` offers as disagreeing with their even payout,
+    and with that drop lifted every cell's key outputs are finite. No is production keeping the
     ship-15 files.
 34. **Keep 2022–23 totals in the Totals book-weight fit?** (yes / no; recommended yes.) One
     word in `Archive.to_pandas` (`"Total"` to `"Totals"`) keeps the 7 to 26 % of each league's

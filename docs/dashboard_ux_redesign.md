@@ -28,7 +28,7 @@ Display copy leans mystic; internal field names do not change.
 
 | Concept | Display name |
 |---|---|
-| Model-built correlated parlay (a `Family` in `current_parlays`) | **Prophecy** |
+| Model-built correlated parlay (a row of `current_parlays`) | **Prophecy** |
 | Thesis headline for a prophecy | the prophecy's **headline** |
 | Per-leg reason string | **the case** |
 | Recommendation track record page | **Receipts** |
@@ -176,7 +176,7 @@ brief's current phase.
 The slot catalog (every slot, its placeholder, source, license, priority) is
 [docs/art_assets.md](art_assets.md); this section is the contract.
 
-- **Player assets**: headshots, owned by the [`player-headshots`](handoffs/player-headshots.md)
+- **Player assets**: headshots, owned by the [`player-headshots`](archive/player-headshots.md)
   lane — `fetch headshots` fills a gitignored per-box disk cache from the league CDNs monthly
   and a `shots` side channel carries the faces into the constellation card. A player this box
   has no file for keeps the initials disc, so a box that never runs the job renders as before.

@@ -1,9 +1,9 @@
 # Parlay Dependence — copula on PIT residuals
 
-> Status: BLOCKED (on: D3 — see roadmap v3 §7). Of D3's three inputs the stage-0 research brief is
-> **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
-> live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
-> owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
+> Status: BLOCKED (on: D3 — owner gate, roadmap v3 §7). All three D3 inputs exist: breadth (§3),
+> the stage-0 research brief (R3, [archive/researcher_copula_stage0.md](../archive/researcher_copula_stage0.md))
+> and sleeper-parity (merged to `devel` 2026-07-14, `b9f8a95e`); the census is a one-session
+> Sonnet task.
 > Premise revised (2026-10-04): the R2 brief
 > [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md) found Underdog does tax
 > same-game correlation (per-game m ≤ 1) and Sleeper bans the pairs, so parlay EV is leg EV compounded;
@@ -53,19 +53,19 @@ is Date ≥ 2026-08-31; the evidence is the R2 brief
    `parlay.py` split but the logic analysis stands.
 4. `src/sportstradamus/prediction/joint.py` — incumbent pricing (the swap
    seam, post parlay.py split): analytical `multivariate_normal.cdf` path in
-   `parlay_payout_prob`, `_nearest_psd` repair, the `legacy` flag pattern to
-   mirror. The 50K-draw MC push/flex path (`_PUSH_MC_SAMPLES`,
-   `expected_payout_with_pushes`) lives in `prediction/payouts.py`; beam
-   search stays in `prediction/parlay.py`.
+   `parlay_payout_prob`, `_nearest_psd` repair. The 50K-draw MC push/flex
+   path (`_PUSH_MC_SAMPLES`, `expected_payout_with_pushes`) lives in
+   `prediction/payouts.py`; beam search stays in `prediction/parlay.py`.
 5. `src/sportstradamus/prediction/correlation.py` — how Σ is assembled today:
-   stratified parquet lookups (correlation.py:632–638) →
-   `_build_game_corr_map` (correlation.py:120) → per-leg-pair sums in
-   `_build_correlation_matrices` (correlation.py:201).
+   `find_correlation` reads the stratified `corr_same_team` / `corr_opposing`
+   parquets → `_build_game_corr_map` → per-leg-pair sums in
+   `_build_correlation_matrices`.
 6. `src/sportstradamus/training/correlate.py` — the residual machinery to
-   REUSE: `_residualize_gamelog` 8-game rolling residualization
-   (correlate.py:45, 461), stratified same-team/opposing matrices,
-   Spearman→Pearson remap `2·sin(πρ_s/6)` (correlate.py:839), linear
-   overlap-credibility shrinkage (correlate.py:54, 678).
+   REUSE: `_residualize_gamelog` rolling residualization
+   (`ROLLING_WINDOW_GAMES` = 8), stratified same-team/opposing matrices
+   (`_stratify_team_pairs`), Spearman→Pearson remap `2·sin(πρ_s/6)` (in
+   `_correlate_teams`), linear overlap-credibility shrinkage
+   (`_shrink_correlations`, `MIN_OVERLAP_FOR_FULL_WEIGHT`).
 7. `src/sportstradamus/scripts/audit_parlay_calibration.py` — the calibration
    harness this lane must re-run; already separates copula vs independence
    gaps (`gap_copula` / `gap_indep`).
@@ -92,9 +92,9 @@ ls /tmp/researcher_*copula* docs/archive/researcher_*copula* 2>/dev/null
 # both lanes rebuild parlay.py / correlation.py internals)
 head -3 docs/handoffs/sleeper-parity.md
 
-# Stage-4 input — resolved parlay history (production host only; absent in
-# dev checkouts, see PARLAY_AUDIT.md §3)
-ls -la data/parlay_hist.parquet 2>/dev/null
+# Stage-4 input — resolved parlay history (day partitions production writes;
+# scripts/sync_from_prod.sh copies them to dev)
+ls src/sportstradamus/data/runtime/parlay_hist/ | tail -3
 ```
 
 ### Volatile product assumptions
@@ -104,8 +104,9 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   season (`docs/underdog_api.md` §6.8, §7.4); any edge in this lane lives only
   in pair types where the platform's ρ departs from the hit-event ρ at posted
   lines.
-- **Payout curves / leg caps** (`data/config/underdog_payouts.json`, Sleeper 3-leg
-  cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
+- **Payout curves / leg caps** (`data/config/underdog_payouts.json`,
+  `data/config/sleeper_payouts.json`, the Sleeper size caps in
+  `prediction/payouts.py`) feed `payout_curve_for`. On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own
   the payout tables; this lane only consumes them.
 
@@ -120,10 +121,9 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   discrete/hurdle marginals (randomized PIT). No waiver — do not use
   `.claude/.state/research_waiver` for this lane.
 - 2026-06-10 — The incumbent path stays behind a flag until the offline A/B
-  verdict; mirror the existing `legacy` flag pattern
-  (`beam_search_parlays(legacy=…)` in parlay.py, `psd_or_none` /
-  `parlay_payout_prob` in joint.py, correlation.py:554). Default stays
-  incumbent until stage 3 acceptance.
+  verdict. Default stays incumbent until stage 3 acceptance. The `legacy`
+  flag this decision named as the pattern to mirror was removed in
+  `7509b77c` (2026-08-09).
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
   pass (model_improvement_track.md §1/§8 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
@@ -132,12 +132,12 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 ## 5. Module footprint & canonical paths
 
 - `sportstradamus.prediction` — `prediction/joint.py` (pricing, sampling, PSD
-  repair — the swap seam; CONTRIBUTING §Stable Seams),
+  repair — the swap seam; docs/ARCHITECTURE.md §Stable Seams),
   `prediction/payouts.py` (payout curves, consumed not owned),
   `prediction/correlation.py` (Σ/group assembly, `find_correlation`).
 - `sportstradamus.training` — `training/correlate.py`. The residual machinery
   already lives here (`_residualize_gamelog` 8-game rolling residualization;
-  stratified same-team/opposing/cross-game matrices) — **REUSE it, don't
+  stratified same-team/opposing matrices) — **REUSE it, don't
   duplicate it**. PIT extraction extends this module or a sibling under
   `training/`, not a new parallel pipeline.
 - `src/sportstradamus/scripts/audit_parlay_calibration.py` — harness; it
@@ -147,17 +147,18 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 - `tests/golden/` — copula-vs-hand-computed joints, flag-path equivalence.
 
 Serving path is touched ⇒ the inference-path compatibility checklist applies
-([`operation_ship_references.md`](../operation_ship_references.md) — reference,
-don't restate). **File-conflict constraint:** this lane must not run while
-`sleeper-parity` is mid-flight in the same files (roadmap v3 §5.1). Editing
-outside this footprint is a stop condition (§8).
+([`model_improvement_track.md`](model_improvement_track.md) §7.3 — reference,
+don't restate). **File-conflict constraint:** this lane never interleaves with
+another lane's edits to the same files (roadmap v3 §5.1): `sleeper-parity`'s
+code merged in `b9f8a95e`, and `dfs-products` stage 5 works the same Σ
+assembly. Editing outside this footprint is a stop condition (§8).
 
 ## 6. Stage plan
 
 **Stage 0 — Research dive + data census. Research half DONE (R3); census remains.**
 - Goal: an Opus statistician's brief answering the §4 questions, plus a
   census of usable history.
-- **Research verdict (done early, Fable R3 — `/tmp/researcher_copula_stage0.md`):** Gaussian
+- **Research verdict (done early, Fable R3 — `docs/archive/researcher_copula_stage0.md`):** Gaussian
   copula default; **t-copula only as a tested branch** (adopt iff pooled exceedance-Spearman clears
   a simulated Gaussian null in both tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10,
   ν̂≤15 — never per-pair ν). EB shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type
@@ -214,9 +215,9 @@ outside this footprint is a stop condition (§8).
 **Stage 4 — Dependence diagnostic + production calibration re-run.**
 - Goal: the diagnostic (avg pairwise rank correlation of residual PITs within
   same-game groups vs under-independence) and a populated
-  `audit_parlay_calibration.py` re-run on production archive data
-  (owner-assisted; production host — dev checkouts lack
-  the `data/runtime/parlay_hist/` day partitions).
+  `audit_parlay_calibration.py` re-run on production's resolved parlay
+  history (the `data/runtime/parlay_hist/` day partitions, which
+  `scripts/sync_from_prod.sh` copies to dev).
 - Acceptance: diagnostic table committed; populated reliability artifacts
   with the new path's decile gap ≤ incumbent's.
 - Est. 1 session + owner time.

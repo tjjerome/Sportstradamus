@@ -6,9 +6,9 @@ prediction and training time. Three sources run on this framework today:
 
 | Source | CLI | League | Auth | Period key |
 |---|---|---|---|---|
-| Fantasy Points Data Suite | `fp-fetch` | NFL | cookie | game **week** |
-| Cleaning the Glass | `ctg-fetch` | NBA | session cookie | capture **date** |
-| Baseball Savant (Statcast) | `savant-fetch` | MLB | none (public) | capture **date** |
+| Fantasy Points Data Suite | `fetch fp` | NFL | cookie | game **week** |
+| Cleaning the Glass | `fetch ctg` | NBA | session cookie | capture **date** |
+| Baseball Savant (Statcast) | `fetch savant` | MLB | none (public) | capture **date** |
 
 Everything shared lives in `src/sportstradamus/collectors/`; each source is a
 thin package under it. This document is the canonical description of the
@@ -21,6 +21,7 @@ and [baseballsavant.md](baseballsavant.md).
 
 ```
 src/sportstradamus/collectors/
+  _options.py        shared click options + catalog-load helper for the command builders
   auth.py            keys.json read/write + curl→keys refresh (shared)
   transport.py       CookieClient (bearer/cookie HTTP) + auth errors
   catalog.py         EndpointSpec + load/save + {season}/{week}/{date} substitution
@@ -34,6 +35,7 @@ src/sportstradamus/collectors/
   fantasypoints/     FP_SOURCE + FP-only import-curl / login / season, column translation
   cleaningtheglass/  CTG_SOURCE (cookie, date-keyed)
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
+  headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
 ```
 
 A source is a `Source` dataclass (`cli.py`) — **data and callables, not a
@@ -41,7 +43,7 @@ subclass hierarchy**. Its fields:
 
 | Field | Meaning |
 |---|---|
-| `name`, `help` | CLI name and group help text |
+| `name`, `help` | log and progress label; group help text (the command name is the source's key in the `fetch` group in `src/sportstradamus/cli.py`) |
 | `catalog_path` | the endpoint-catalog JSON under `data/config/` |
 | `make_client(resolved_auth, sleep)` | build the HTTP client (a `CookieClient`, or a `Scrape` for public sources) |
 | `default_context(season, week)` | resolve the season/week label when the operator omits it |
@@ -52,7 +54,7 @@ subclass hierarchy**. Its fields:
 | `auth_fields` | `AuthFields` naming the keys.json slots, or `None` for a public source |
 | `env_prefix` | env-var prefix for auth overrides (`{PREFIX}_COOKIE`, …) |
 | `period_kind` | `"week"` (FP) or `"date"` (CTG/savant) — selects the command set |
-| `has_backfill`, `render_request_body`, `verify_fn` | FP-only extras (default off) |
+| `has_backfill`, `backfill_end_week`, `modes`, `default_mode`, `render_request_body`, `verify_fn`, `renew_auth` | FP-only extras (default off) |
 
 `build_source_cli(source)` returns a real `click.Group` bound at module level
 (e.g. `ctg_fetch = build_source_cli(CTG_SOURCE)`). It attaches `run`, `verify`,
@@ -65,10 +67,10 @@ with `--week`/`--mode`) or `commands_dated.py` (date, with `--date`).
 Every source exposes:
 
 ```bash
-poetry run <name>-fetch list                      # print the registered catalog
-poetry run <name>-fetch run [--dry-run] [--only …]  # fetch every endpoint, write parquets
-poetry run <name>-fetch verify …                  # confirm the parquets landed with rows
-poetry run <name>-fetch refresh-auth <curl>       # (authed sources) rotate the token/cookie
+sportstradamus fetch <fp|ctg|savant> list                        # print the registered catalog
+sportstradamus fetch <fp|ctg|savant> run [--dry-run] [--only …]  # fetch every endpoint, write parquets
+sportstradamus fetch <fp|ctg|savant> verify …                    # confirm the parquets landed with rows
+sportstradamus fetch <fp|ctg> refresh-auth <curl>                # (authed sources) rotate the token/cookie
 ```
 
 `run` is idempotent: it skips a cell whose parquet already exists non-empty, so
@@ -77,9 +79,9 @@ re-download; zero-row parquets are always retried. `--dry-run` lists what would
 be fetched, touching nothing — the capture-stub-drift guard: dry-run one date
 before any real (paid or rate-limited) run to confirm auth and the catalog.
 
-**Period kinds.** Week-keyed sources (`fp-fetch`) take `--week`/`--season` and a
-`--mode`; each snapshot is one game week. Date-keyed sources (`ctg-fetch`,
-`savant-fetch`) take `--season`/`--date` and snapshot the provider's
+**Period kinds.** Week-keyed sources (`fetch fp`) take `--week`/`--season` and a
+`--mode`; each snapshot is one game week. Date-keyed sources (`fetch ctg`,
+`fetch savant`) take `--season`/`--date` and snapshot the provider's
 already-cumulative season-to-date table, stamped by the capture date (default:
 today). Date sources do not carry `--week`, `--mode`, or `backfill` — the
 provider only serves "as of now".
@@ -185,17 +187,18 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
 
 ## Ops wiring
 
-1. **`pyproject.toml`** — add the `[tool.poetry.scripts]` entry
-   (`ctg-fetch = "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch"`).
+1. **`src/sportstradamus/cli.py`** — add the source to the `fetch` group's
+   `lazy_subcommands` (`"ctg": "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch"`).
 2. **`scripts/run_job.sh`** — add a `<name>-fetch)` case; the
    `HEALTHCHECK_URL_<NAME>_FETCH` var auto-derives.
-3. **`scripts/sync_to_prod.sh`** — the four collector dirs are pushed by an
-   **additive** pass (never `--delete`, so prod-only siblings survive). A dir
-   absent on dev is skipped. Only the models pass mirrors with `--delete`.
+3. **`scripts/sync_to_prod.sh`** — `COLLECTOR_RELS` lists the six collector dirs
+   (each source's `player_data/` and `team_data/` dir), pushed by an **additive**
+   pass (never `--delete`, so prod-only siblings survive). A dir absent on dev is
+   skipped. Only the models pass mirrors with `--delete`.
 4. **Cron.** CTG/savant are **dev-side**: run them on the dev box beside the
-   manual weekly `meditate`, then `scripts/sync_to_prod.sh` uploads the
-   snapshots. Optionally schedule them via `run_job.sh` with a
-   `HEALTHCHECK_URL_*` set.
+   manual weekly `meditate`, then a full `scripts/sync_to_prod.sh` uploads the
+   snapshots (`--league` sends none; see [OPERATIONS.md](OPERATIONS.md)).
+   Optionally schedule them via `run_job.sh` with a `HEALTHCHECK_URL_*` set.
 
 ## Recipe: add a new source
 
@@ -212,8 +215,10 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
 3. **Wire consumption.** Add the join-schema constants and override the two hooks
    on the league's `Stats` subclass, delegating to `_collector_asof_features`
    (see `stats/nba.py`). Leave the schema empty until you capture real columns.
-4. **Ops + docs.** pyproject entry, `run_job.sh` case, `sync_to_prod.sh` dir,
-   a `docs/<source>.md` cross-referencing this file, and a `<name>-fetch` case in
-   `tests/golden/test_cli_help.py` (regenerate with `REGENERATE_SNAPSHOTS=1`).
+4. **Ops + docs.** `cli.py` `fetch` entry, `run_job.sh` case, `sync_to_prod.sh`
+   dir and a `docs/<source>.md` cross-referencing this file, then regenerate the
+   help snapshots (`REGENERATE_SNAPSHOTS=1 poetry run pytest
+   tests/golden/test_cli_help.py`); the test walks the whole command tree, so
+   there is no case to add.
 5. **Probe before bulk.** `dry-run` one date, then a one-tool live fetch to
    confirm auth + parse before walking the whole catalog.

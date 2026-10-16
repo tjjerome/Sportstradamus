@@ -18,10 +18,10 @@ whenever the queue changes; git holds the history.
 4. No denominator pruning. Bookless cells (no sportsbook quote; a DFS-only cohort is `pickem`)
    ship on gates 2–6 with Gate 1 blank (owner decision 2026-09-29 superseded the coin-flip rule).
 5. ≤5 distribution types in play (ZINB, NegBin, DPO, SkewNormal direct+centered). Adding a
-   6th requires an owner ask with pilot evidence. Current standing: a 6th type is endorsed
-   in principle, contingent on the compositional-architecture smoke test (NFL end-game
-   step 4) — compound count×severity first; generic Mixture only as the fallback if the
-   compound test shows no merit. ZAGamma stays retired (dominated — fixes the wrong defect).
+   6th requires an owner ask with pilot evidence. Current standing: the endorsed 6th type is
+   the Mixture head, which sits in the sweep's continuous pool; the compound count×severity
+   smoke test the endorsement waited on showed no merit (NFL end-game step 4). ZAGamma stays
+   retired (dominated — fixes the wrong defect).
 6. The six offline ship gates are inviolable; deterministic boards rank, full-HPO confirms ship.
 7. Never push devel directly — devel-ship-curator PR, human approves. Review stat_meta diffs
    after any `--yes` confirm.
@@ -34,16 +34,14 @@ whenever the queue changes; git holds the history.
 | NBA | 18/21 | 16 | **DONE** |
 | MLB | 15/19 | 15 | **DONE** |
 | NHL | 12/15 | 12 | **DONE** |
-| NFL | 12/20 | 15 | **REOPENED** — 19/20 confirmed at ship by the fresh-lane campaign, but its seven flips are uncommitted (the owner's diff), so the committed count stays 12; passing yards is the one withheld cell; lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
+| NFL | 19/20 | 15 | **DONE** — the ship-15 campaign's seven flips committed `8dfbe48c` (2026-10-10); passing yards is the one withheld cell; lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
 
 ## In flight right now
 
-- NFL re-rolled: the 2026-09 FantasyPoints Tier 1 bump rebuilt every NFL matrix on the
-  gamelog-keyed population, so all 20 verdicts were re-earned; the honest 2026-09-26 board
-  reads 11/20 (passing yards and sacks taken out on Gate 4, receiving yards still Gate 4,
-  the two combos Gate 1 on a few dozen authentic rows). The queue, levers and owner
-  decisions live in [nfl-ship15-recovery.md](nfl-ship15-recovery.md); this file keeps the
-  standing rules and the history below.
+- Nothing for breadth: every league is at target. The NFL's open work — passing yards, still
+  withheld, and the send of the 2026-10-15 retrain — lives in
+  [nfl-ship15-recovery.md](nfl-ship15-recovery.md); this file keeps the standing rules and the
+  history below.
 
 ## NFL end-game (history — reached 20/20 on 2026-09-01; superseded by the 2026-09 rebuild)
 
@@ -57,7 +55,7 @@ whenever the queue changes; git holds the history.
    ship_config validation rejects an SN slug on a non-SN cell and validates the whole file, so
    one bad entry kills every meditate. Add golden. Flip scripts set the slug too.
 3. **Count re-run**: re-flip receptions/targets/carries (dist=ZINB **and**
-   target_normalization=none) → `model-strategy-sweep --dist-class count --league NFL
+   target_normalization=none) → `sportstradamus ship sweep --dist-class count --league NFL
    --confirm --yes` → revert unshipped flips. Board evidence stands; only the confirms were
    lost to the crash.
 4. **Yards trio** (research verdict; brief archived at
@@ -109,42 +107,30 @@ degrades low-mean counts).
 ## NHL queue (12/15 — target met)
 
 1. **saves** re-confirm — S4 unlocked its +0.011 corner (ratio_meanyr / dist_training_loss=nll
-   / direct / crps): single-cell `model-strategy-sweep --league NHL --market saves --confirm
-   --yes`.
-2. **skater fantasy** — persist the −0.230 g4-only corner (centered_additive_eb_meanyr_k10 /
-   crps / centered / nll) + `posthoc: cdf_recal_isotonic` + calibrated-HPO meditate; keep on
-   5/5 else revert. Backup: goalsAgainst count retry (−0.118).
-3. If both fail: Mixture pilot ask to owner (6th type) with full board evidence.
+   / direct / crps): single-cell `sportstradamus ship sweep --league NHL --market saves
+   --confirm --yes`.
+
+The queue's other cell, **skater fantasy**, shipped 2026-07-29 (`89874adc`), which retired its
+goalsAgainst backup and the Mixture-pilot ask that waited on both cells failing.
 
 ## MLB queue (15/19 — target met)
 
-1. **pitches thrown** re-confirm — S4 unlocked its +0.052 corner
-   (centered_additive_eb_meanyr_k10 / nll / centered / crps): single-cell sweep --confirm.
-2. Fallback: **pitching outs** manual walk of its two remaining +0.057 corners
-   (centered_additive_mean10 / crps / direct / crps, then centered_additive_eb_meanyr_k10 /
-   crps / direct / crps) — persist by hand, full-HPO meditate, keep on 5/5 else revert+prune.
-3. runs allowed is dead this wave (g1-only, book-side — calibration levers do not apply).
+Nothing queued: **pitches thrown** shipped 2026-07-30 (`f6611558`) and **runs allowed**
+2026-08-24 (`fcf86a70`), so the **pitching outs** fallback (a manual walk of its two +0.057
+corners) was not needed; pitching outs stays withheld.
 
 ## Debt / bookkeeping queue
 
-- refactoring-specialist over every touched `.py` (sweep, confirm, cli, + the upcoming
-  norm-none fix and tests) before any push/PR/review — then re-run the three gates
-  (ruff, golden, `-m integration -n0` + touch integration_green).
-- devel-ship-curator PR for the session's ship batch (~20 stat_meta flips + S4 + fixes).
-  Never push devel directly.
 - S1: drop the joint-ZINB sweep axis (0 shipping corners across all boards, best −0.166) —
   evidence complete once MLB/WNBA boards counted; one-line registry edit + pin updates.
-- Golden-suite dashboard smoke `test_lab_modifiers_pairwise_isolation_updates_stale_pair`
-  is a cross-file xdist flake (passes isolated and file-scoped) — apply xfail(strict=False)
-  treatment if it recurs at the pre-push gate.
 - Stale `stat_meta.*.bak.json` sweep backups: delete as they appear.
 - WNBA margin board at idle (target already met).
 - Ledger line + this file updated per session boundary.
 
 ## Operating laws (every session)
 
-- `pgrep -af "[m]editate|model.strategy.(sweep|confirm)"` must be empty before any
-  sweep/confirm/meditate launch.
+- `pgrep -af "[m]editate|ship [s]weep"` must be empty before any sweep/confirm/meditate
+  launch.
 - No training-code edits while any sweep/confirm chain runs.
 - `--resume` is safe on board sweeps: it reopens each cell's Optuna journal and reuses prior rows
   per row, not per cell, rejecting any whose spec/controls/matrix identity has moved.

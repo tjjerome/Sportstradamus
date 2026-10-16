@@ -55,8 +55,8 @@ the Overs are better than they are.
   market breadth, in [0, 3]); no new data; **no MLB depth term** (B1..B9 is the batting slot, not
   usage), so MLB stars top out at 2.0 on line percentile + breadth.
 - Voice: the "live analyst" register (`docs/story_voice.md`), pinned by density tests, not strings.
-- Gate 2 symmetric: either recommended side's live precision below 0.50 demotes (see §8 before you
-  push; two mandatory NFL cells demote on the dev-box read).
+- Gate 2 symmetric: either recommended side's live precision below 0.50 demotes (see §8; two
+  mandatory NFL cells demote on the dev-box read).
 - Orphan lead seeds pair with the top-edge strong leg from the other team (any other player in a
   one-sided game); the dek drops its correlation line below the ρ floor, so no false "move together".
 - Both sides' full payouts persist to history (`Payout Over`, `Payout Under`) for the argmax-EV
@@ -75,11 +75,6 @@ print("Star column:", "Star" in o.columns, "| lead columns:", {"lead", "lead_sid
 print("-EV legs with Kelly > 0:", int(((o["Model EV"] < 1) & (o["Kelly"] > 0)).sum()))
 EOF
 ```
-
-Until the first post-push `prophecize`, `current_offers` has no `Star` and the stories no `lead`
-columns; the dashboard loaders backfill both (`Star` 0.0, `lead` False), so Tonight and Games keep
-rendering on the old snapshots. A `KeyError` on `Star` in Tonight means the loader backfill in
-`dashboard/data.py` is not deployed, not that the snapshot is stale.
 
 ## 4. What landed (all on `devel`)
 
@@ -191,7 +186,7 @@ parentheses.
 Then eyeball Tonight: star games above non-star games within a tier, and the Games tab opening on
 the led story.
 
-## 8. Behaviour changes you will see (read before pushing)
+## 8. Behaviour changes you will see
 
 - **Gate 2 will demote cells on Under precision.** On the dev-box history the symmetric
   rule demotes five cells that pass on Over precision: NFL `rushing yards` (Under precision 0.39,
@@ -248,8 +243,6 @@ Open questions the data could not settle:
 
 ## 10. Owner asks (one each)
 
-1. Push `devel` (`git push origin devel`); prod self-deploys on the next job and restarts the
-   dashboard.
-2. After the first `prophecize` + `reflect`, paste the §7 block into a shell on the box and read the
+1. After the first `prophecize` + `reflect`, paste the §7 block into a shell on the box and read the
    six lines; the targets are in the parentheses.
-3. Decide on the Gate-2 demotions in §8 (keep the symmetric rule, or revert `a6d96fd8`).
+2. Decide on the Gate-2 demotions in §8 (keep the symmetric rule, or revert `a6d96fd8`).

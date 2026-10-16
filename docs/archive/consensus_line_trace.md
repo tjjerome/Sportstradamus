@@ -1068,7 +1068,7 @@ implementer; edit 3 removes a clone rather than adding one.
 | `docs/STYLE_GUIDE.md` | glossary, 501–508 | Lists PrizePicks, Underdog, Sleeper and ParlayPlay under "Book (sportsbook)"; lists the Archive read methods | Split DFS platform from sportsbook; add the method |
 | `docs/pipeline_diagrams.md` | 37 | "Archive book consensus get_line / get_ev / get_total" | No change needed |
 | `docs/handoffs/honest-receipts.md` | §7, the "Where the code stands against decision 5" bullet (~366–378) | Describes the leak as open | Revise in place to the landed state; cross-reference rather than restate |
-| `docs/handoffs/cleanup-pass.md` | 2026-09-12 log line (~179) | "real leak was `lines`" | Historical log entry; leave |
+| `docs/archive/cleanup-pass.md` | 2026-09-12 log line (~182) | "real leak was `lines`" | Historical log entry; leave |
 | `docs/merge_archives.md` | 9 | Mentions the `lines` table | No change |
 
 Per `docs/STYLE_GUIDE.md` §16, the fact "what `get_line` returns" should live in one place (the

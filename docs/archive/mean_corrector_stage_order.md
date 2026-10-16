@@ -1,11 +1,16 @@
 # Lane record — mean corrector stage order: recalibrate the pool, not its inputs
 
-Status: **closed, shipped.** NFL tds passes all six gates on a full-HPO run for the first time.
-The change is one market-agnostic rule with no per-cell branching. Four of five live `MEAN_STAGE`
-controls retain `ship`; MLB hits allowed drops Gate 4, and its re-sweep found three corners that
-ship under the new order but promoted none — the supersession baseline predates the change.
+> Status: DONE — closed 2026-08-25; the change (`f6a0d245`, `posthoc.correct_fused_mean`) is on
+> `devel`. NFL tds passes all six gates on a full-HPO run for the first time. The change is one
+> market-agnostic rule with no per-cell branching. Four of five live `MEAN_STAGE` controls retain
+> `ship`; MLB hits allowed drops Gate 4, and its re-sweep found three corners that ship under the
+> new order but promoted none — the supersession baseline predates the change (the cell has since
+> been superseded onto a `roe_mean` recipe, `31b5ae5c`). Reopen by adding a roadmap row that
+> points back here; §Residue lists what was left open on purpose, and its latent items still stand
+> in the code.
+
 Context spine: CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md),
-[model_improvement_track.md](model_improvement_track.md) §6.1 Rung A.
+[model_improvement_track.md](../handoffs/model_improvement_track.md) §6.1 Rung A.
 Research brief (pooling literature, cohort screen, per-cell counterfactuals):
 [researcher_count_blend_location.md](../archive/researcher_count_blend_location.md).
 Predecessor lane: [count_mean_calibration.md](count_mean_calibration.md).
@@ -199,7 +204,7 @@ is a one-line `stat_meta.json` edit plus a retrain; the DPO/`roe_mean` corner is
   cannot catch (NFL receiving tds serves CITL 1.639, WNBA FTM 1.156; both `devel`). Unchanged from
   the predecessor lane and still open.
 - **`_pred_cdf_pmf`'s Gamma/ZAGamma branch reads `EV`, not `Blended_EV`**
-  ([scorecard.py:1084](../../src/sportstradamus/training/scorecard.py#L1084)). Latent, not live —
+  ([scorecard.py](../../src/sportstradamus/training/scorecard.py)). Latent, not live —
   zero Gamma cells exist today — but the `EV` contract change makes it wrong rather than merely
   inconsistent. Fix it before any Gamma cell ships.
 - **`fused_loc`'s SkewNormal branch inlines `skewnormal_loc_from_mean` twice** instead of calling

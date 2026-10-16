@@ -32,8 +32,9 @@ replacement: `profit_sim.py` is load-bearing for the S3 supersede gate
 2. [`strategies/kelly.py`](../../src/sportstradamus/strategies/kelly.py) —
    sizing the policy reuses (`fractional_kelly_stake`, shrinkage blend).
 3. [`clv.py`](../../src/sportstradamus/clv.py) +
-   [`nightly.py`](../../src/sportstradamus/nightly.py) `reflect` — the
-   settlement + CLV machinery stage 2 extends.
+   [`nightly.py`](../../src/sportstradamus/nightly.py) `run` (the `reflect`
+   command) — the settlement + CLV machinery stage 2 extended
+   (`_resolve_ledger`).
 4. [`strategies/profit_sim.py`](../../src/sportstradamus/strategies/profit_sim.py)
    — read-only; the retrospective sibling whose presets inform the policy.
 5. CLAUDE.md §Production deployment — `run_job.sh` semantics (flock,
@@ -47,24 +48,24 @@ If command output contradicts brief prose, the output wins — fix in place
 
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-ls data/recommendations/ 2>/dev/null | tail -3   # pickem-build output present?
+ls data/recommendations/ 2>/dev/null | tail -3   # `bet pickem` output present?
 ls data/ledger/ 2>/dev/null                       # prior-stage artifacts
-grep -n "pickem" scripts/run_job.sh               # cron wiring state
+grep -n "ledger-commit" scripts/run_job.sh        # cron wiring state
 sportstradamus bet pickem --help                    # CLI alive
 ```
 
-Known at creation: `pickem-build` is **not** in the production crontab
-(CLAUDE.md §Production deployment lists prophecize/confer/meditate/reflect/
-close-lines/gate-status/fp-fetch only) — stage 1 adds the daily decision-time
-job; cron edits are owner-approved.
+The decision-time job is `ledger-commit` (`sportstradamus bet ledger-commit
+--run-slot {morning,afternoon}`), twice daily on the canonical schedule in
+[OPERATIONS.md](../OPERATIONS.md); `sportstradamus bet pickem` is not on that
+schedule. Cron edits are owner-approved.
 
 ### Volatile product assumptions
 
 - Underdog payout multipliers + push/void rules
   (`data/config/underdog_payouts.json`) — re-verify against the live product
   each season; settlement math inherits them.
-- Sleeper payout/push rules: `sleeper-parity` stage 4 landed 2026-07-14 (local
-  `feature/sleeper-parity`, not yet merged `devel`) — `build_candidate_universe`
+- Sleeper payout/push rules: `sleeper-parity` stage 4 landed 2026-07-14
+  (merged to `devel`, PR #85 `b9f8a95e`) — `build_candidate_universe`
   now pulls both platforms into one shared candidate pool/budget per persona;
   see `sleeper-parity.md` §10 stage-4 line for the merge-design rationale and
   two push-refund pricing bugs it fixed along the way.
@@ -85,46 +86,47 @@ job; cron edits are owner-approved.
 ## 5. Module footprint & canonical paths
 
 New `sportstradamus.strategies` module (e.g. `strategies/ledger.py`) +
-`sportstradamus.nightly` (settlement extension) + one new `pages/` view +
-`scripts/run_job.sh` job entry (owner-approved) + `tests/golden/`. Reads
-`sportstradamus.strategies.kelly` and `clv`; the dashboard page reads parquet
-snapshots only — never DuckDB (CLAUDE.md §Hard rules;
-`tests/golden/test_dashboard_no_archive_lock.py`).
+`sportstradamus.nightly` (settlement extension) + one new dashboard surface
+(`dashboard/surfaces/`) + `scripts/run_job.sh` job entry (owner-approved) +
+`tests/golden/`. Reads `sportstradamus.strategies.kelly` and `clv`; the
+dashboard surface reads parquet snapshots only — never DuckDB (CLAUDE.md
+§Hard rules; `tests/golden/test_dashboard_no_archive_lock.py`).
 
 ## 6. Stage plan
 
 0. **Policy spec v1 → D6.** Draft the reasonable-bettor policy for owner
    sign-off: max entries/day, EV floor, allowed entry sizes/variants,
    quarter-Kelly sizing via `fractional_kelly_stake` with its shrinkage blend,
-   fixed paper bankroll, one decision snapshot per day (at the daily
-   `pickem-build` run). Acceptance: owner flips D6. 1 session.
+   fixed paper bankroll, decision cadence (policy v1 settled it at two runs
+   a day, §10 Cadence). Acceptance: owner flips D6. 1 session.
    *If it stalls:* park lane `BLOCKED (on: D6)`.
 1. **Commit path.** `policy_v1` selects from the day's recommendations and
    appends to `data/ledger/entries/{date}.jsonl`: legs, lines, model probs,
    book devig, stake, policy version, git SHA, `committed_at`. Idempotent
-   (re-runs don't duplicate); wired as a daily job through `run_job.sh`
-   (owner approves crontab line). Acceptance: two consecutive live days
-   produce entries; re-run produces no dupes. 2 sessions.
+   (re-runs don't duplicate); wired as the twice-daily `ledger-commit` job
+   through `run_job.sh` (owner approves crontab lines). Acceptance: two
+   consecutive live days produce entries; re-run produces no dupes. 2 sessions.
    *If recommendations are empty on quiet days:* that's data, not failure —
    log the empty decision.
-2. **Settlement.** Extend `nightly.py:reflect`: resolve each ledger entry's
-   legs, apply push/void rules and the payout curve, join per-leg CLV via
-   `clv.fill_from_archive`, write `data/ledger/bankroll.parquet` (daily
-   series) + settled-entry parquet. Resolve the *union of distinct legs*
-   once per day and map outcomes onto every replicate entry that cites
-   them — never per entry (§10 Ensemble sizing; keeps settlement cost flat
-   across the 40-replicate ensemble). Acceptance: hand-checked settlement
-   of a known day matches; CLV populated for ≥ 90% of settled legs.
-   2 sessions.
-3. **Analytics + dashboard.** New page (parquet only): bankroll curve, ROI,
-   CLV per segment, drawdown; circuit-breaker state written to a small file
-   the daily job reads — drawdown > 20% from peak ⇒ policy halves stakes,
-   > 30% ⇒ halt new entries until owner reset (reads **replicate 0's**
-   lived drawdown, never the ensemble mean — §10 Ensemble sizing). Reports
-   each persona's ensemble-mean ROI/CLV/bankroll plus an IQR/±1 SE spread
-   band, labeled as selection-policy spread, not outcome uncertainty; a
-   one-time knee-check (ensemble-mean ROI vs `M` at `M ∈ {10,20,40,80,160}`,
-   after ~2 weeks live) validates or revises `LEDGER_REPLICATES = 40`.
+2. **Settlement.** Extend `nightly.py` `run` (the `reflect` command): resolve
+   each ledger entry's legs, apply push/void rules and the payout curve, join
+   per-leg CLV via `clv.fill_from_archive`, write
+   `data/ledger/bankroll.parquet` (daily series) + settled-entry parquet.
+   Resolve the *union of distinct legs* once per day and map outcomes onto
+   every replicate entry that cites them — never per entry (§10 Ensemble
+   sizing; keeps settlement cost flat across the 40-replicate ensemble).
+   Acceptance: hand-checked settlement of a known day matches; CLV populated
+   for ≥ 90% of settled legs. 2 sessions.
+3. **Analytics + dashboard.** New dashboard surface (parquet only): bankroll
+   curve, ROI, CLV per segment, drawdown; circuit-breaker state written to a
+   small file the `ledger-commit` job reads — drawdown > 20% from peak ⇒
+   policy halves stakes, > 30% ⇒ halt new entries until owner reset (reads
+   **replicate 0's** lived drawdown, never the ensemble mean — §10 Ensemble
+   sizing). Reports each persona's ensemble-mean ROI/CLV/bankroll plus an
+   IQR/±1 SE spread band, labeled as selection-policy spread, not outcome
+   uncertainty; a one-time knee-check (ensemble-mean ROI vs `M` at
+   `M ∈ {10,20,40,80,160}`, after ~2 weeks live) validates or revises
+   `LEDGER_REPLICATES = 40`.
    Acceptance: breaker state flips on a synthetic drawdown fixture.
    1–2 sessions.
 4. **Hindsight-proofing tests.** Golden tests: `committed_at` strictly before
@@ -144,8 +146,9 @@ loosen only via `policy_v2` with owner sign-off, never silently.
 - Owner is open to improvements on the Monte Carlo methodology — propose in a
   ledger note or dispatch `research-analyst` (Opus) for breaker-threshold /
   policy-design literature; don't improvise silent changes.
-- Timestamps UTC; one decision snapshot per day — intraday re-runs replace
-  nothing, they no-op (idempotency).
+- Timestamps UTC; two decision runs per day (morning and afternoon slots, §10
+  Cadence) — a re-run of a slot replaces nothing and adds nothing
+  (idempotency, §10 Policy v4 Retry).
 
 ## 8. Escalation & stop conditions
 

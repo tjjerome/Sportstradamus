@@ -40,7 +40,7 @@ retirement signature is HTTP 426 with body
 `{"error": {"api_code": "upgrade_required", "detail": "A new version is required to continue", ...}}`
 **[P-2]**. `Scrape.get` treats any non-200 as a retry, logs the status at DEBUG and
 returns `{}` after three attempts
-([scraping.py:121-128](../src/sportstradamus/helpers/scraping.py#L121-L128)), so the
+([scraping.py:120-136](../src/sportstradamus/helpers/scraping.py#L120-L136)), so the
 Underdog leg of `prophecize` died silently for two days. Commit `6a85f74e` moved the
 scraper to `v1/over_under_lines`, which answers today.
 
@@ -1075,7 +1075,7 @@ Each lever names where the data sits and the gate before it can be trusted.
    parsed; `american_price`, `decimal_price` and `odds.fantasy.probability` are on
    every legacy line **[P-1]**. Today `prediction/cli.py` divides a flat
    `UNDERDOG_BOOST_BASELINE` back out of the boost
-   ([prediction/cli.py:260-266](../src/sportstradamus/prediction/cli.py#L260-L266))
+   ([prediction/cli.py:266-272](../src/sportstradamus/prediction/cli.py#L266-L272))
    **[CODE]**; the explicit per-side price could replace the flat assumption. Gate:
    confirm which field settles an entry (§7.4) with one placed-and-settled pick.
 2. **Alternate lines as real ladder rungs.** `has_alternates` is true on 5,447 legacy

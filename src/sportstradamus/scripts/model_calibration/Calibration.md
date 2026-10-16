@@ -278,26 +278,11 @@ markets tend to suffer more than NegBin markets with low shape ceilings.
 
 ## 8. Open Questions
 
-### 8a. Target normalization
-Train on `Result / MeanYr` (or `Result / proj_MIN`) instead of raw `Result`. The model
-would learn *relative* deviations from historical mean rather than absolute values. After
-prediction, multiply the predicted relative deviation back by MeanYr to get the final EV.
-
-This removes scale dependence entirely. The target range becomes ~0.3–3.0 for all markets
-instead of 0–30+. The compression would still occur, but a 50% compression of a 0.3–3.0
-target is far less damaging than a 50% compression of a 5–22 target.
-
-Implementation: in `training/pipeline.py`, before building `dtrain`:
-```python
-y_train_labels_raw = y_train_labels.copy()
-mean_yr_train = X_train['MeanYr'].values
-y_train_labels = y_train_labels / np.clip(mean_yr_train, 0.1, None)
-# ... train model ...
-# At prediction time: multiply model output by MeanYr feature
-```
-
-Risk: changes the NLL gradient shape; LightGBMLSS NLL for Gamma/NegBin is no longer
-equivalent to the original. Need to verify the math still holds.
+### 8a. Target normalization — built
+Training on a normalized target is built. Each SkewNormal cell's stat_meta
+`target_normalization` names a transform in the `training/baselines.py` registry
+(`TARGET_NORMALIZATION_SLUGS`: ratio and centered-additive baselines), and `model_prob`
+decodes it. See `docs/ARCHITECTURE.md` §Modifying the Training Pipeline.
 
 ### 8b. Response function experiment
 NBA PTS uses `softplus`. The `exp` response function (standard log-link) is scale-invariant
@@ -335,5 +320,4 @@ Columns: `Result, Line, Blended_EV, EV, Gate` (ZI only), `Alpha` (Gamma/ZAGamma)
 
 Model pickles: `src/sportstradamus/data/models/NBA_{MARKET}.mdl`
 
-Keys: `model, step, stats, diagnostics, params, distribution, cv, std, temperature,
-dispersion_cal, weight, r_book, hist_gate, shape_ceiling`
+Keys: see `training/pipeline.py:_build_filedict`.

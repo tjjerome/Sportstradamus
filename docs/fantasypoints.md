@@ -1,8 +1,8 @@
 # Fantasy Points Data Suite snapshotter
 
-`fp-fetch` walks a catalog of Fantasy Points Data Suite endpoints and
-writes each tool's response to disk every week. The catalog and the
-session cookie are the only two things you maintain.
+`sportstradamus fetch fp` walks a catalog of Fantasy Points Data Suite
+endpoints and writes each tool's response to disk every week. The catalog
+and the session cookie are the only two things you maintain.
 
 The API is `fantasypointsdata.com/api/nfl/{tool}` — a GET per tool, filters
 in the query string, and a bare JSON array of flat rows back. The columns it
@@ -345,7 +345,8 @@ playoff folders `week_19..22`).
 
 ## Weekly cron
 
-On the production box (see `CLAUDE.md` for the full crontab):
+On the production box (see [OPERATIONS.md](OPERATIONS.md) for the full
+crontab):
 
 ```cron
 0 10 * * 3   /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
@@ -469,8 +470,8 @@ Keep it that way: never restore a legacy-era week beside current ones.
 
 ## Adding new endpoints later
 
-Re-run `fp-fetch import-curl` whenever Fantasy Points adds a new tool
-you want snapshotted. Existing catalog entries are untouched.
+Re-run `sportstradamus fetch fp import-curl` whenever Fantasy Points adds
+a new tool you want snapshotted. Existing catalog entries are untouched.
 
 Then give the kind a `FILE_KINDS` entry and recipes that read its new-schema
 names (`tests/fixtures/fantasypoints_tool_columns.json` pins the vocabulary the

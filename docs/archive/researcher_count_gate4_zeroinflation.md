@@ -630,6 +630,6 @@ ever be enrolled; the S2 stationarity leg is the veto that keeps this from becom
 
 *Repo-internal evidence referenced above (not literature):* `docs/ship_gate.md`;
 `docs/handoffs/model_improvement_track.md` §6.1, §6.6, §7.3, §8.1, §8.2;
-`docs/handoffs/count_dispersion_flip.md`; memories `[[p2_hurdle_zinb_verdict]]`,
+`docs/archive/count_dispersion_flip.md`; memories `[[p2_hurdle_zinb_verdict]]`,
 `[[project_b1_ztnb_rescope]]`, `[[rung_c_whole_cdf_recal]]`, `[[proxy_goodhart_under_search]]`,
 `[[deterministic_ab_g4_oversell]]`, `[[ledger_ship_is_matrix_scoped]]`.

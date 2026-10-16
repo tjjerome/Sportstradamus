@@ -11,8 +11,8 @@ morning:
   sportstradamus confer          # pull today's lines
   sportstradamus prophecize      # score + write dashboard snapshots
 
-weekly (or when model accuracy drops):
-  sportstradamus meditate        # retrain stale models
+weekly, on the dev box (or when model accuracy drops):
+  sportstradamus meditate        # retrain stale models, then scripts/sync_to_prod.sh
 ```
 
 League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
@@ -53,7 +53,7 @@ stays invisible.
 30 8,11,14,17,20 * * * <repo-dir>/scripts/run_job.sh confer
 55 8 * * *             <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
 55 14 * * *            <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
-0 1 * * 5              <repo-dir>/scripts/run_job.sh meditate
+# 0 1 * * 5            <repo-dir>/scripts/run_job.sh meditate   # off: models train dev-side (below)
 0 2 * * *              <repo-dir>/scripts/run_job.sh reflect
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
 0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
@@ -67,7 +67,7 @@ stays invisible.
 | `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
-| `meditate` | Fri 1am | retrain models |
+| `meditate` | off on prod | retrain models — runs dev-side weekly; `scripts/sync_to_prod.sh` sends the results (below) |
 | `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
@@ -137,10 +137,10 @@ header), and their snapshots
 (snapshots additive, never `--delete`). The models mirror skips
 `data/models/prior/`: the superseded model files a retrain keeps stay on the box
 that trained them (`training/prior_models.py` in
-[ARCHITECTURE.md](ARCHITECTURE.md)). When training runs dev-side this way,
-prod's `meditate` cron line stays commented out — the two workflows overwrite
+[ARCHITECTURE.md](ARCHITECTURE.md)). Training runs dev-side this way, so prod's
+`meditate` cron line stays commented out — the two workflows would overwrite
 each other's models and serving artifacts.
-Both are `run_job.sh` cases, so scheduling either (with a
+Both collectors are `run_job.sh` cases, so scheduling either (with a
 `HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
 See [data_collectors.md](data_collectors.md).
 
@@ -237,10 +237,11 @@ Quick checks when collection or serving looks wrong:
 - **Poisoned odds rows**: `sportstradamus admin sweep-runaway-odds`
   (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
   `fit_book_weights` refits off the cleaned archive.
-- **Withheld cell still serving**: `meditate` prunes withheld pickles weekly (a
-  volume denominator in `VOLUME_STATS` keeps its pickle and serves nothing, no
-  warning); a missed run leaves stale pickles that `model_prob` now refuses with a
-  "withheld but pickle on disk" warning. To prune immediately:
+- **Withheld cell still serving**: the dev box's `meditate` prunes withheld
+  pickles, and the next full `scripts/sync_to_prod.sh` removes them from prod
+  (`--league` never deletes); a volume denominator in `VOLUME_STATS` keeps its
+  pickle and serves nothing, no warning. A pickle still on disk is refused by
+  `model_prob` with a "withheld but pickle on disk" warning. To prune immediately:
   `poetry run python -c "from sportstradamus.helpers.io import prune_model_pickle; print(prune_model_pickle('WNBA','PRA'))"`
 - **Served cell failing fresh gates**: `meditate` only warns (SHIP-GATE
   WARNINGS table at the end of the run) — demotion is manual: flip the cell to
@@ -252,11 +253,11 @@ Quick checks when collection or serving looks wrong:
   that run out (`stats.load_live_leagues`): its lines are archived, the other
   leagues are scored, and the run exits 1 once its snapshots are written. It is not
   scored on the cached gamelog, because the day's schedule arrives only with an
-  update. `pickem-build` drops the league the same way and only logs it.
+  update. `bet pickem` drops the league the same way and only logs it.
 - **Whole league unfit to serve** (retrain in flight, schema break): prefix the
   cron line with `SPORTSTRADAMUS_HOLD_LEAGUES=NFL` (comma-separated for several).
   `league_is_live` then reports the league idle, so `prophecize` and
-  `pickem-build` skip it while still archiving its DFS lines; `confer` and
+  `bet pickem` skip it while still archiving its DFS lines; `confer` and
   `close-lines` are unaffected. Clear it by removing the prefix — effective next
   tick, nothing to deploy. The hold also stops the league's gamelog `update()` in
   those two jobs; the nightly `reflect` job still runs it, so the gamelog stays

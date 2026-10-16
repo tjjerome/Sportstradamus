@@ -1,8 +1,8 @@
 # Cleaning the Glass snapshotter
 
-`ctg-fetch` snapshots Cleaning the Glass NBA advanced tables to date-stamped
-parquets that `StatsNBA` folds into player/team features. It runs on the shared
-collector framework — see [data_collectors.md](data_collectors.md) for the CLI
+`sportstradamus fetch ctg` snapshots Cleaning the Glass NBA advanced tables to
+date-stamped parquets that `StatsNBA` folds into player/team features. It runs on the
+shared collector framework — see [data_collectors.md](data_collectors.md) for the CLI
 surface (`run`/`verify`/`list`/`refresh-auth`), the idempotent skip-if-on-disk
 behavior, the mid-run token-refresh flow, and the strict-`<` leakage rule. This
 page covers only what is CTG-specific.
@@ -44,7 +44,7 @@ The catalog ships empty (`data/config/cleaningtheglass_endpoints.json` = `[]`).
 Add one entry per table from a real authenticated capture — **do not invent
 column names**. Name each spec `player_<tool>` or `team_<tool>` so it routes to
 `player_data/` / `team_data/` (e.g. `player_usage`, `team_four_factors`). The
-generic `import-curl` path is not attached to `ctg-fetch`; hand-add entries to
+generic `import-curl` path is not attached to `fetch ctg`; hand-add entries to
 the JSON, each an `EndpointSpec` (`name`, `url`, optional `params`/`method`,
 `response_format`), using `{season}` where CTG's URL takes the season.
 
@@ -79,5 +79,7 @@ rebuilds the matrix cache.
 
 ## Sync to production
 
-CTG collection is dev-side: run `ctg-fetch` on the dev box, then
-`scripts/sync_to_prod.sh` pushes the snapshots up (additive, never `--delete`).
+CTG collection is dev-side: run `sportstradamus fetch ctg run` on the dev box, then a
+full `scripts/sync_to_prod.sh` pushes the snapshots up (additive, never `--delete`).
+`--league` sends no snapshots, and a full sync carries every league's models and
+serving files — see [OPERATIONS.md](OPERATIONS.md).
