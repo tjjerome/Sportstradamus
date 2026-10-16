@@ -61,8 +61,7 @@ git-ignored — see [SECURITY.md](SECURITY.md) for the credential layout):
 {
   "odds_api_plus": "<your key>",
   "odds_api": "<your key>",
-  "scrapeops": "<your key>",
-  "scrapingfish": "<any value>"
+  "scrapeops": "<your key>"
 }
 ```
 
@@ -71,7 +70,6 @@ git-ignored — see [SECURITY.md](SECURITY.md) for the credential layout):
 | `odds_api_plus` | [The Odds API](https://the-odds-api.com) | The key `confer` polls with: player-prop lines and game lines from the major sportsbooks, paced by the credit governor (`odds_api_budget.json`) |
 | `odds_api` | [The Odds API](https://the-odds-api.com) | Fallback key `confer --close-lines` switches to when the plus key runs out; read at import, so it must be present |
 | `scrapeops` | [ScrapeOps](https://scrapeops.io) | Realistic browser-header rotation (free tier available) |
-| `scrapingfish` | [ScrapingFish](https://scrapingfish.com) | Read when `Scrape()` is built but unused since the proxy path was archived; any placeholder value works |
 
 Then run the pipeline once, in order:
 

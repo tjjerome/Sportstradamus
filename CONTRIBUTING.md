@@ -51,7 +51,7 @@ cp tests/ci_fixtures/data/*.json src/sportstradamus/data/config/
 The creds stub is just empty strings:
 
 ```json
-{"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "",
+{"odds_api": "", "odds_api_plus": "", "scrapeops": "",
  "fantasypoints_email": "", "fantasypoints_password": "",
  "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}
 ```

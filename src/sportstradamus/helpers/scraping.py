@@ -43,11 +43,9 @@ class Scrape:
     """
 
     def __init__(self):
-        """Load API keys. Headers are fetched on first use."""
+        """Load the ScrapeOps key. Headers are fetched on first use."""
         with (pkg_resources.files(creds) / "keys.json").open() as f:
-            _keys = json.load(f)
-        self.apikey = _keys["scrapingfish"]
-        self._scrapeops_key = _keys["scrapeops"]
+            self._scrapeops_key = json.load(f)["scrapeops"]
         self._headers = None
         self._header = None
         self._weights = None
