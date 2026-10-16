@@ -358,7 +358,7 @@ MANDATORY_SWEEP_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
 # Corners with an independent full-HPO six-gate pass, kept so the sweep can seed a cell with a
 # known-good recipe instead of rediscovering it and so confirmation can nominate it directly.
 # Registry validates each against its spec's grid at import. NFL passing TDs:
-# docs/handoffs/model_improvement_track.md, the 2026-07-20 NFL popular-market re-baseline.
+# docs/archive/nfl_popular_market_rebaseline_2026-07-20.md.
 CONFIRM_EVIDENCE_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     (
         "NFL",
