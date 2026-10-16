@@ -10,8 +10,8 @@ and 32–68 (§2) are built or run (§4, §6), and the stored game lines of four
 the training box (§6, I6f). On production: the rebuilt MLB models and the NFL ship-15 models
 (decisions 48, 49), the NBA's same-player correlation file (65), the 13 MLB games the gamelog lacked
 (51), MLB's two retrained cells (67) and the WNBA gamelog repair (68). On the training box only: the
-NHL's and the NFL's rebuilt and retrained models (asks 6, 8), whose sends wait on asks 32 and 33,
-and the WNBA's rebuilt matrices, whose retrain is running (ask 7). What is open is §8.
+NHL's, the NFL's and the WNBA's rebuilt and retrained models (asks 6, 8, 7), whose sends wait on
+asks 32, 33 and 35. What is open is §8.
 
 ## 1. Mission & money logic
 
@@ -1090,7 +1090,8 @@ $1 per $1 while the legs are over-read).
    models and the ten dependents that have a model retrained (2026-10-15). The send waits on
    ask 32.
 7. **Retrain the WNBA now?** (Answered yes.) Its gamelog repair is done on both boxes (decision
-   68); the rebuilt matrices are checked and the 13-cell retrain is running (2026-10-16).
+   68); the 18 matrices rebuilt and checked, `MIN` and the 13 dependents that have a model
+   retrained (2026-10-16). The send waits on ask 35.
 8. **Retrain the NFL from this lane?** (Answered yes.) Rebuilt by the NFL lane's three-step
    recipe and retrained (2026-10-15). The send waits on ask 33.
 32. **Send the twelve NHL models, hits included?** (yes / no; recommended yes.) Eleven pass all six
@@ -1113,6 +1114,17 @@ $1 per $1 while the legs are over-read).
 34. **Keep 2022–23 totals in the Totals book-weight fit?** (yes / no; recommended yes.) One
     word in `Archive.to_pandas` (`"Total"` to `"Totals"`) keeps the 7 to 26 % of each league's
     totals rows dated before 2023-05-03 (§7); the weights refit at each league's next `meditate`.
+35. **Send the 14 WNBA models?** (yes / no; recommended yes.) Twelve pass all six gates; before the
+    retrain thirteen did. PA fails Gate 1 where it passed: on its 857 sportsbook-priced test rows
+    its Brier is 0.0042 worse than the book's on average, with an upper bound of 0.0094 against the
+    0.005 tie margin (Brier skill +0.006 before, −0.011 now). Its test rows now run to 2026-10-09
+    (they ended 2026-08-30 before), and the temperature is not the cause: PA's Platt step refits on
+    the same validation rows and takes up any temperature in full, and Gate 1 fails at every
+    temperature from 1 to the fitted 1.40. RA fails Gate 1 as it did before. The serve checks pass
+    (serving accepts 14 of 14 files; production's frames hold every feature of the 8 cells it logs;
+    the sandbox probe scores all 14 cells, 1,398 rows, with finite outputs). Yes sends them with the
+    game-line copy, in the first gap after the answer: production's board already holds offers for
+    the 10-17 game. No is production keeping its WNBA files of 09-02 and 09-17.
 
 The owner's own, no answer needed:
 
