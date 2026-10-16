@@ -110,7 +110,7 @@ def register_plotly_template() -> None:
         layout={
             "paper_bgcolor": "rgba(0,0,0,0)",
             "plot_bgcolor": "rgba(0,0,0,0)",
-            "font": {"family": "IBM Plex Sans", "color": "#E6E9EF", "size": 12},
+            "font": {"family": "IBM Plex Mono", "color": "#E6E9EF", "size": 12},
             "colorway": [
                 "#2E6BE6",
                 "#1F9D55",

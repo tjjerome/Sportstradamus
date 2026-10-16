@@ -48,7 +48,7 @@ MIN_PER_TEAM = 6  # both halves populated — the floors scale with the cap, 4 +
 MAX_PER_PLAYER = 2  # one hot player's five markets must not own the map
 
 CAPTION_TOP_K = 5  # captions for the slip plus the five biggest candidates; the rest hover
-_CHAR_WIDTH_EM = 0.6  # IBM Plex Sans average advance — plotly cannot measure text server-side
+_CHAR_WIDTH_EM = 0.6  # IBM Plex Mono's fixed advance — plotly cannot measure text server-side
 _LINE_HEIGHT_EM = 1.25  # a caption is one line — plotly's single-line box at font_px
 # A hairline between a caption and the glyph it labels: an abutting box differs
 # from the glyph's edge by an ulp and the strict overlap test rejects the star's
