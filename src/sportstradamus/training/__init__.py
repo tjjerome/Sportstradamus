@@ -9,7 +9,6 @@ from sportstradamus.training.calibration import (
     fit_blend_weight,
     fit_book_weights,
     fit_model_weight,
-    select_distribution,
 )
 from sportstradamus.training.cli import meditate
 from sportstradamus.training.correlate import correlate
@@ -28,5 +27,4 @@ __all__ = [
     "meditate",
     "report",
     "see_features",
-    "select_distribution",
 ]

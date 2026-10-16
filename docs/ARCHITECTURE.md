@@ -105,7 +105,7 @@ Sportstradamus/
 | `cli.py` | `meditate` click command — orchestrator: validates per-cell ship config, loads/updates each league's `Stats`, loops markets calling `train_market` |
 | `pipeline.py` | `train_market(league, market, ...)` — the full per-market training loop: matrix load, distribution selection, target normalization, Optuna search, LightGBMLSS fit, dispersion calibration, temperature scaling, calibration-method selection, evaluation, model save |
 | `baselines.py` | Target-normalization strategy registry for the SkewNormal branch — slug → forward transform + decode pair |
-| `calibration.py` | `fit_book_weights`, `fit_model_weight`, `select_distribution`, blending slugs |
+| `calibration.py` | `fit_book_weights`, `fit_model_weight`, blending slugs |
 | `posthoc.py` | Per-cell calibration-method selector, fit on the validation split and reapplied at inference |
 | `labels.py` | `over_label` — the over/under outcome label every fit, metric and ship gate shares (a push is ½) |
 | `group_conditional_cdf/` | Structural calibration methods (group-conditional CDF maps: affine, two-part) |
