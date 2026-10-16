@@ -145,7 +145,7 @@ bit-identity. Determinism gate has parallel hurdle assertion.
 | # | Deliverable | Where |
 |---|---|---|
 | 0.1 | `compute_book_brier_skill_score` (book as reference, not chance) | [analysis.py](../src/sportstradamus/analysis.py) — 8 unit tests, hand-ref within 1e-6 |
-| 0.2 | `_compute_live_metrics` Step 6 in `nightly.py`; writes `data/live_metrics_per_market.parquet` (locked 10-col / 2-window schema) | [nightly.py](../src/sportstradamus/nightly.py) — 6 round-trip tests |
+| 0.2 | `_compute_live_metrics` Step 6 in `nightly.py`; writes `data/runtime/live_metrics_per_market.parquet` (locked 10-col / 2-window schema) | [nightly.py](../src/sportstradamus/nightly.py) — 6 round-trip tests |
 | 0.3 | `scorecard --live-window N` + `_history_to_eval_frame` + per-league `_load_league_stats_lookup` | [training/scorecard.py](../src/sportstradamus/training/scorecard.py) — 8 new tests |
 | 0.4 | `check_graduation` CLI: joins Gate 1 × Gate 2, `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted} | [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) — 11 tests, 7 parametrized |
 | 0.5 | `backfill_live_metrics` — walks history backwards, day-precision dedup | [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) — 5 tests |

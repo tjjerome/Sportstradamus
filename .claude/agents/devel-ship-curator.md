@@ -54,7 +54,7 @@ server.
 2. **Bring only the production delta.** For a per-market ship that is: the strategy
    slug + decode in `training/baselines.py`, the matching `model_prob` decode
    branch, any required `stats/` + `pipeline` feature additions, the inference-path
-   test, and the single `data/ship_config.json` toggle line. Use targeted
+   test, and the single `src/sportstradamus/data/config/ship_config.json` toggle line. Use targeted
    `git checkout <research-ref> -- <path>` per file; do not bulk-checkout the tree
    for a Phase B ship.
 3. **Hard-exclude the denylist** (mirror CONTRIBUTING's keep/drop table):

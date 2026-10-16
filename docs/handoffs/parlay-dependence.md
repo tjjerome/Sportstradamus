@@ -104,7 +104,7 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   season (`docs/underdog_api.md` §6.8, §7.4); any edge in this lane lives only
   in pair types where the platform's ρ departs from the hit-event ρ at posted
   lines.
-- **Payout curves / leg caps** (`data/underdog_payouts.json`, Sleeper 3-leg
+- **Payout curves / leg caps** (`data/config/underdog_payouts.json`, Sleeper 3-leg
   cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own
   the payout tables; this lane only consumes them.
@@ -216,7 +216,7 @@ outside this footprint is a stop condition (§8).
   same-game groups vs under-independence) and a populated
   `audit_parlay_calibration.py` re-run on production archive data
   (owner-assisted; production host — dev checkouts lack
-  `data/parlay_hist.parquet`).
+  the `data/runtime/parlay_hist/` day partitions).
 - Acceptance: diagnostic table committed; populated reliability artifacts
   with the new path's decile gap ≤ incumbent's.
 - Est. 1 session + owner time.

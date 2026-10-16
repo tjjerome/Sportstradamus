@@ -121,7 +121,7 @@ a method's projected lift justifies its build cost.
   read as descriptive only), produced by `zinb-routing-diagnostics`.
 - `scorecard` decile tables / run log — top-decile-MAE A/B output, the
   ship/kill gate harness.
-- `src/sportstradamus/data/model_stats.parquet` — the per-market diagnostics
+- `src/sportstradamus/data/training/model_stats.parquet` — the per-market diagnostics
   (`brier_skill_score`, `kelly_shrinkage`, shape ratios, calibration).
 - `icc-diagnostics` output — per-market ICC / between-vs-within variance.
 - `src/sportstradamus/data/test_sets/` — deterministic held-out splits.

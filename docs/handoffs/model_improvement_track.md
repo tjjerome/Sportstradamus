@@ -1463,7 +1463,7 @@ most axes. The session's job at this stage is the **D5 decision packet** for the
    3/4/6 over resolved history): are profitable cells currently locked out that tightening would
    lock out harder? Never tighten on aesthetics.
 3. **Live-drift readiness.** By D5 the Gate-2 soak archive should hold months of live per-cell
-   metrics (`data/live_metrics_per_market.parquet`, 7d/30d windows) — report whether
+   metrics (`data/runtime/live_metrics_per_market.parquet`, 7d/30d windows) — report whether
    drift/regime detection (e.g., league-wide 3PA trends) is signal-worthy yet.
 4. **Branch-ladder question.** Ship-75 ships per-cell from research → devel via the curator. If
    Ship-90's tightened gates need a more disciplined staging pipeline, the `devel-foundation`

@@ -26,7 +26,7 @@ ground truth:
 the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-06-19._
+_Last updated: 2026-10-15._
 
 ---
 
@@ -37,11 +37,15 @@ with an **offline** check at research→devel and a **live** check at devel→ma
 
 |  | research → devel (offline) | devel → main (live) |
 |---|---|---|
-| **Set first baseline** | The **6 gates** below | **Profitability:** positive Kelly-sized ROI on settled data |
-| **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | **≥ +0.5% ROI vs the incumbent on live data for ≥ 2 weeks** |
+| **Set first baseline** | The **6 gates** below | **Live Gate 2:** ≥ 200 settled offers in 30 days, live book BSS ≥ 0, neither side's live precision below 0.50 |
+| **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | No separate live rule |
 
-A served model that drifts back outside any of its track's bounds is **withheld and
-re-enters the set-baseline track** for a fresh baseline (drift monitor).
+Realized money is never a live threshold: no model is promoted, demoted or withheld on
+realized ROI (owner rule, 2026-10-04). A served cell that fails a gate on a later retrain
+is flagged, not withheld: `meditate`'s post-run table and `sportstradamus ship config --branch
+devel` list it (`training.graduation.served_cells_failing_ship`), and the cull is the
+owner's. For `main`, the monthly `gate-status` job regenerates `stat_meta.json` from live
+graduation (`training.graduation`) and opens a PR for a human to merge.
 
 ---
 
@@ -275,7 +279,7 @@ one-line edit (`"withheld"` → `"devel"`). Demotion is equally manual: a
 served cell whose weekly retrain fails the fresh gates is **warned about**
 (meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
 it) but keeps serving until the human flips it back to `"withheld"` (next
-meditate prunes the pickle) or runs `ship config --branch devel --prune`. `generate-ship-config --branch
+meditate prunes the pickle) or runs `ship config --branch devel --prune`. `sportstradamus ship config --branch
 main` mutates `stat_meta.json` monthly (cron via `run_job.sh
 gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
 the rest back to `"devel"`; the cron opens a PR a human merges.
@@ -295,17 +299,15 @@ acceptable for now.
 
 | Case | Threshold | Where |
 |---|---|---|
-| **No incumbent in main** | ≥ 200 settled offers in the 30-day graduation window, live `book_bss ≥ 0`, and neither side's live precision below `MIN_PRECISION_SIDE` (0.50). No realized-money threshold: models are never promoted, demoted or withheld on realized ROI (owner rule, 2026-10-04); `profit_sim_yield` / `profit_sim_kelly_yield` in `data/live_metrics_per_market.parquet` are display-only | `nightly.py` writes the parquet; `check_graduation._classify_lifecycle` reads `n_settled`, `gate2_book_bss` and the side precisions |
-| **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `stat_meta.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
+| **No incumbent in main** | ≥ 200 settled offers in the 30-day graduation window, live `book_bss ≥ 0`, and neither side's live precision below `MIN_PRECISION_SIDE` (0.50). No realized-money threshold: models are never promoted, demoted or withheld on realized ROI (owner rule, 2026-10-04); `profit_sim_yield` / `profit_sim_kelly_yield` in `data/runtime/live_metrics_per_market.parquet` are display-only | `nightly.py` writes the parquet; `training.graduation.classify_lifecycle` reads `n_settled`, `gate2_book_bss` and the side precisions |
+| **Incumbent in main** | No separate rule: nothing compares a challenger with the incumbent on live data, and live ROI is never a threshold | — |
 
 Live precision and both profit sims count only sides the platform posted
 (`Boost > 0`); an unposted side was never a bet, and `Market Prob` is the bet side's
 book probability on either side, so no Under inversion is applied.
 
-A cell that drifts outside its set-baseline bounds is **withheld and re-enters the
-set-baseline track** (drift monitor; the prior pickle stays archived under
-`data/old_models/` for one-pull revert). Live data is dormant in dev, so the live
-gate fires only after `nightly.py`'s aggregator has produced rows for the cell.
+Live data is dormant in dev, so the live gate fires only after `nightly.py`'s
+aggregator has produced rows for the cell.
 
 Plus, when changing the deterministic-mode pipeline: the determinism gate must be
 green for every league with cached parquets

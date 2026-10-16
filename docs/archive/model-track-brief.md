@@ -1,6 +1,6 @@
 # Model Track — Ship-75 → Ship-90
 
-> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md),
+> **ARCHIVED — superseded by [`../handoffs/model_improvement_track.md`](../handoffs/model_improvement_track.md),
 > which absorbs this brief's session mechanics (→ §11.5), stage plan (→ §7), verify block
 > (→ §2), and ledger (→ §12). The roadmap v3 §4 lane row points there now.**
 
@@ -9,7 +9,7 @@
 ## 1. Mission & money logic
 
 Get ≥ 75% of each covered league's markets past the five offline ship gates and
-into live soak ([`operation_ship_75.md`](../operation_ship_75.md) §North Star:
+into live soak ([`operation_ship_75.md`](operation_ship_75.md) §North Star:
 NBA ≥ 16/21, WNBA ≥ 14/18, NFL ≥ 15/20 — NFL is the binding league), then take
 the Ship-90 rung when gate D5 fires. This is the **lead lane**: calibrated full
 predictive distributions are the input every decision engine consumes, breadth

@@ -378,7 +378,7 @@ order:
 3. **Target normalization** — SkewNormal targets pass through the
    `training/baselines.py` strategy named by the cell's
    `target_normalization` slug (decode happens in `model_prob`)
-4. **Hyperparameter search** — Optuna via `hyperparams.tune_hyperparameters`,
+4. **Hyperparameter search** — Optuna via `hyperparams.run_hyper_opt`,
    warm-seeded from the previous pickle's best params when one exists
 5. **Model fit** — `LightGBMLSS.fit`
 6. **Dispersion calibration** — CRPS-loss scalar minimization on the

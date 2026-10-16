@@ -216,7 +216,7 @@ the led story.
 
 Monitoring the research brief asked for; nothing is wired, nothing is yours to do now:
 
-- A `quote` split (quoted / unquoted / fallback) in `realized._offers_by_split`, so `book_rate` stops
+- A `quote` split (quoted / unquoted / fallback) in `realized.by_split`, so `book_rate` stops
   pooling sportsbook and payout-implied anchors (that pooling is why the 90d "book" read 0.586
   against 0.504 realized).
 - The selection residual per league × side: `hit_rate − book_rate` and a trailing-30d λ_sel with its

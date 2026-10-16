@@ -1,6 +1,6 @@
 # Operation Ship 75
 
-> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md)
+> **ARCHIVED — superseded by [`../handoffs/model_improvement_track.md`](../handoffs/model_improvement_track.md)
 > (the consolidated model-track home of record: lever stack → §5–§7, per-league path → §8,
 > failure protocol → §9, research holes → §10, verification → §11).** Status claims and
 > per-cell counts below are stale and non-normative. Retained for the full lever-stack prose
@@ -9,8 +9,8 @@
 
 > **Home of record for the model-research push to 75% breadth.** Research verdicts,
 > citations, and the inference-path checklist live in
-> [`operation_ship_references.md`](operation_ship_references.md). Current gate
-> thresholds live in [`ship_gate.md`](ship_gate.md). The next-rung stub is
+> [`operation_ship_references.md`](../operation_ship_references.md). Current gate
+> thresholds live in [`ship_gate.md`](../ship_gate.md). The next-rung stub is
 > [`operation_ship_90.md`](operation_ship_90.md). Rewritten clean on 2026-06-03 after the
 > Gate-4 PIT-KS redefinition reset the board, and amended continuously since; prior revisions
 > are recoverable from git history (`git show 5c4a335:docs/operation_ship_75.md`).

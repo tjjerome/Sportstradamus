@@ -305,7 +305,7 @@ no conversation context, so the handoff prompt is the entire briefing.
    the prompt must inherit. The brief template is
    `.claude/handoff-template.md`.
 4. The lane's home-of-record docs per the brief's §2 — for the model track
-   that is `docs/model_improvement_track.md` (§2 ground truth, §11
+   that is `docs/handoffs/model_improvement_track.md` (§2 ground truth, §11
    verification / inference-path checklist, §9 failure protocol, the target
    stage's body and its acceptance and if-it-fails branch).
 5. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md` for
