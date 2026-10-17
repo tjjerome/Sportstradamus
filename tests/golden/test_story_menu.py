@@ -24,6 +24,7 @@ from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.parlay import GameArrays, GameScoringContext, leg_market_map
 from sportstradamus.prediction.payouts import payout_curve_for
 from sportstradamus.prediction.stories import menu as menu_mod
+from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 from sportstradamus.prediction.stories.menu import (
     _MENU_EDGE_FLOOR,
@@ -656,5 +657,39 @@ def test_dek_is_deterministic_and_reads_core_correlation():
     assert dek
     assert "0.45" in dek  # the 2-leg core's mean pairwise rho, slot-formatted :.2f
     # The anchor's form/matchup clauses render only if offer_index keeps the
-    # "Avg 5"/"DVPOA" facts — Player0 (max p_model) is the dek's subject.
+    # "Avg 5"/"DVPOA" facts — Player0 is the Over lead and the max-p_model leg,
+    # so it is the dek's subject either way.
     assert "Player0" in dek
+
+
+def test_led_story_dek_is_about_its_lead():
+    """A led story's dek names its lead and nobody else; an unled story keeps the
+    highest-conviction anchor.
+
+    Each led cluster borrows the other team's leg, so both led stories price the
+    pair {Player0, Player1}. Player1's Under carries the higher ``p_model``, so an
+    anchor picked on conviction alone would make the Over-led dek about Player1.
+    """
+    corr = _block_diag_corr([2, 2], 0.4)
+    sctx, offers = _ctx(
+        [0.55, 0.70, 0.60, 0.66],
+        corr,
+        teams=["AAA", "BBB"] * 2,
+        bets=["Over", "Under", "Over", "Over"],
+    )
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    stories = out.drop_duplicates("story_id")
+    named = {
+        (row["lead_side"], row["lead_player"]): set(re.findall(r"Player\d", row["dek"]))
+        for _, row in stories.iterrows()
+    }
+    assert set(named) == {("Over", "Player0"), ("Under", "Player1"), ("", "")}
+    assert len(stories) == 3
+    for (side, lead), players in named.items():
+        if lead:
+            assert players <= {lead}, (side, lead, players)
+    assert named[("Over", "Player0")] == {"Player0"}
+    assert named[("", "")] == {"Player3"}
+    over_dek = stories.set_index("lead_side").loc["Over", "dek"]
+    above_for = why_bank()["dek"]["form"]["above_for"]
+    assert any(v.format(p="Player0", dev="2", line="5.5") in over_dek for v in above_for)

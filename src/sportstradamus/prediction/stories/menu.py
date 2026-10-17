@@ -372,9 +372,9 @@ def _story_prose(
     The headline renders from the legs the two presets share, so a player it
     names is on whichever preset loads; disjoint presets (rare) render from
     the union and blank rather than name a player only one side carries. A
-    led story's headline is routed to ``lead_player`` (``""`` for an unled
-    one). ``index`` is the game's ``offer_index`` for the dek; ``seen`` dedupes
-    headlines across the (platform, date) slate.
+    led story's headline and dek are routed to ``lead_player`` (``""`` for an
+    unled one). ``index`` is the game's ``offer_index`` for the dek; ``seen``
+    dedupes headlines across the (platform, date) slate.
     """
     per_sub = [
         [lower_leg(sctx.bet_df[i], stat_by_label) for i in sub["bet_id"]] for sub in (builder, moon)
@@ -388,7 +388,7 @@ def _story_prose(
     variants, vi, subject = thesis_variants(
         enrich_legs(parsed, offers), ctxs, lead=lead_player or None
     )
-    dek = story_dek(core, sctx, index)
+    dek = story_dek(core, sctx, index, lead_player)
     named = subject.get("p")
     if named and any(named not in {leg["player"] for leg in legs} for legs in per_sub):
         return "", dek
