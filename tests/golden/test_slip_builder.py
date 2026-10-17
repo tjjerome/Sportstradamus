@@ -28,6 +28,7 @@ from sportstradamus.dashboard.components.slip_builder import (
 )
 from sportstradamus.dashboard.components.slip_state import _LEGS, _legs_from_records
 from sportstradamus.leg_schema import build_leg
+from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 
 
 def _offer(player, market, bet, line, game, team, platform, kelly):
@@ -278,3 +279,20 @@ def test_slip_shrinkage_reads_a_legs_cell_under_the_leagues_own_market_name(monk
     # A leg saved while the board's Stat copied its Market holds the board's name in both.
     assert slip_shrinkage([build_leg(skater)]) == 0.4
     assert slip_shrinkage([build_leg(guard), build_leg(wing)]) == 0.25
+
+
+def test_slip_shrinkage_without_a_cell_is_the_no_evidence_prior(monkeypatch):
+    # No stats, a stats frame without the leg's cell, and a cell whose skill is unmeasured all
+    # read as "no evidence": the Kelly prior that stakes near zero, never full trust.
+    leg = build_leg(_board_row("Wing", "PTS", "NBA", "Underdog"))
+    columns = ["league", "market", "kelly_shrinkage"]
+    for cells in (
+        pd.DataFrame(),
+        pd.DataFrame([("NHL", "assists", 0.4)], columns=columns),
+        pd.DataFrame([("NBA", "PTS", float("nan"))], columns=columns),
+    ):
+        monkeypatch.setattr(
+            "sportstradamus.dashboard.components.slip_builder.load_model_stats",
+            lambda cells=cells: cells,
+        )
+        assert slip_shrinkage([leg]) == NO_EVIDENCE_SHRINKAGE

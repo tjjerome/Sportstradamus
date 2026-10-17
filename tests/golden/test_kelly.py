@@ -90,6 +90,13 @@ def test_resolve_neither_logs_debug_and_returns_unmeasured_prior(caplog, monkeyp
     assert any("fallback" in rec.message for rec in caplog.records)
 
 
+def test_resolve_nan_live_below_the_segment_floor_is_no_evidence():
+    # clv.get_segment_calibration hands back (nan, n) under CLV_SEGMENT_MIN_N; that n must
+    # not turn the NaN into live evidence.
+    out = resolve_shrinkage(training_bss=float("nan"), live_bss=float("nan"), live_n=5)
+    assert out == NO_EVIDENCE_SHRINKAGE
+
+
 # --------------------------------------------------------------------------- #
 # joint_kelly_portfolio
 
@@ -208,12 +215,14 @@ def test_resolution_chain_via_fractional_kelly_stake():
     assert 0.0 < s < 0.1
 
 
-def test_no_evidence_cell_resolves_to_unmeasured_prior_with_fallback_source(monkeypatch):
-    """A cell with no model_stats row (NaN training BSS) and no CLV segment
-    (n=0) must land on the ``"fallback"`` rung at shrinkage 0.0 — not 1.0,
-    which handed full trust to exactly the cells with no evidence.
+def test_no_evidence_cell_resolves_to_unmeasured_prior_with_fallback_source(tmp_path, monkeypatch):
+    """A cell with no model_stats row (NaN training BSS) lands on the ``"fallback"``
+    rung whether its CLV segment is absent or thinner than ``CLV_SEGMENT_MIN_N`` —
+    not on 1.0, which handed full trust to exactly the cells with no evidence.
     """
     import importlib
+
+    import pandas as pd
 
     from sportstradamus import clv
     from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
@@ -222,17 +231,29 @@ def test_no_evidence_cell_resolves_to_unmeasured_prior_with_fallback_source(monk
     # the submodule attribute — go through sys.modules so the patch lands on the
     # module resolve_market_shrinkage's lazy from-import reads.
     report_mod = importlib.import_module("sportstradamus.training.report")
-
-    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (1.0, 0))
     monkeypatch.setattr(
         report_mod,
         "get_market_calibration",
         lambda league, market: {"brier_skill_score": float("nan")},
     )
+    segments = tmp_path / "clv_segments.parquet"
+    monkeypatch.setattr(clv, "_segments_parquet_path", lambda: segments)
 
-    shrinkage, source = resolve_market_shrinkage("WNBA", "PTS")
-    assert source == "fallback"
-    assert shrinkage == NO_EVIDENCE_SHRINKAGE
+    assert resolve_market_shrinkage("WNBA", "PTS") == (NO_EVIDENCE_SHRINKAGE, "fallback")
+
+    pd.DataFrame(
+        [
+            {
+                "League": "WNBA",
+                "Market": "PTS",
+                "Platform": "Underdog",
+                "n": 5,
+                "market_clv": 0.1,
+                "frac_beat_close": 1.0,
+            }
+        ]
+    ).to_parquet(segments, index=False)
+    assert resolve_market_shrinkage("WNBA", "PTS") == (NO_EVIDENCE_SHRINKAGE, "fallback")
 
 
 def test_fallback_source_entry_stakes_zero():

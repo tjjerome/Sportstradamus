@@ -25,6 +25,7 @@ from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
     MAX_FRACTION_OF_BANKROLL,
+    NO_EVIDENCE_SHRINKAGE,
     fractional_kelly_stake,
     resolve_shrinkage,
 )
@@ -229,11 +230,12 @@ def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float
     Leg ``market`` is the raw platform name (a ``stat_map[platform]`` key);
     ``cell_market`` gives the cell key (``REB``, ``BLST``, …) that
     ``resolve_market_shrinkage`` resolves against. Combo / H2H names with no
-    mapping are skipped; a parlay with none left falls back to full trust.
+    mapping are skipped; a parlay with none left has no cell to vouch for it and
+    sizes on the no-evidence prior.
     """
     cells = {cell_market(league, platform, leg["market"]) for leg in row["legs"]} - {None}
     if not cells:
-        return 1.0, "fallback"
+        return NO_EVIDENCE_SHRINKAGE, "fallback"
     return min((resolve_market_shrinkage(league, cell) for cell in cells), key=lambda r: r[0])
 
 
