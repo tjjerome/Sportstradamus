@@ -26,7 +26,7 @@ from sportstradamus.helpers import (
     get_odds,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING, DecodedParams, predictive_std
-from sportstradamus.helpers.io import model_pickle_path
+from sportstradamus.helpers.io import model_pickle_path, resolve_model_version
 from sportstradamus.helpers.training_quotes import AUTHENTIC, DFS_PLATFORM_BOOKS
 from sportstradamus.scripts.tail_information import information_rows
 from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY
@@ -73,7 +73,6 @@ _KNOBS = (
     "posthoc",
     "posthoc_blob",
     "pit_recal_blob",
-    "model_version",
 )
 
 # The prototype rebuilt P to 1e-13 on every cell; past 1e-6 the chain is not the pickle's.
@@ -254,12 +253,15 @@ def price_cell(
     """
     league, slug = path.stem.split("_", 1)
     market = slug.replace("-", " ")
+    pickle_path = model_pickle_path(league, market)
     try:
-        with model_pickle_path(league, market).open("rb") as infile:
+        with pickle_path.open("rb") as infile:
             filedict = pickle.load(infile)
     except FileNotFoundError:
         raise CellExcludedError("no model pickle") from None
     knobs = {key: filedict[key] for key in _KNOBS}
+    # The stamp serving writes on the cell's legs; a pre-stamp pickle gets its legacy hash.
+    knobs["model_version"] = resolve_model_version(str(pickle_path), filedict)
     dist = knobs["distribution"]
     if dist not in _FAMILY_COLUMNS:
         raise CellExcludedError(f"{dist} is not replayed")

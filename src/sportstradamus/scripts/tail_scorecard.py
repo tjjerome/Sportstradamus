@@ -13,7 +13,9 @@ the information test (``tail_information``). Spec:
 A training-time diagnostic and acceptance input for the NFL lane (I6d), tail
 recalibration (I6c, any rank-2 calibration change) and the version-age test (I6g); never a
 ship gate, and nothing here demotes or withholds a model. Every input is read-only, the
-archive opened ``read_only``; the one write is the sandbox CSV at ``--out``.
+archive opened ``read_only``; the writes are the sandbox CSV at ``--out`` and the per-cell
+sidecar at ``--parquet`` (``TAIL_SCORECARD_PATH``), the read graduation shows beside the
+gates.
 
 Known optimism: test rows carry training-matrix features, and three measured skews
 (serve-path parity, in-game quotes in the enriched game lines, MLB's retrain-day comp
@@ -25,6 +27,7 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -35,7 +38,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, platform_payout
-from sportstradamus.helpers.io import read_history
+from sportstradamus.helpers.io import TAIL_SCORECARD_PATH, read_history
 from sportstradamus.prediction.offer_records import (
     _MAX_CONFIDENCE,
     SCORED_RECORD_COLS,
@@ -43,7 +46,7 @@ from sportstradamus.prediction.offer_records import (
     finalize_records,
 )
 from sportstradamus.realized import cohort_summary, settled_offers
-from sportstradamus.scripts.tail_information import DAY_RESAMPLES, information_table
+from sportstradamus.scripts.tail_information import DAY_RESAMPLES, information_table, key_rng
 from sportstradamus.scripts.tail_pricing import (
     SCORED_PLATFORMS,
     CellExcludedError,
@@ -51,6 +54,7 @@ from sportstradamus.scripts.tail_pricing import (
     price_cell,
 )
 from sportstradamus.spiderLogger import logger
+from sportstradamus.training.graduation import DESCRIPTIVE_MIN_SELECTED
 from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
 
 TEST_SETS_DIR = Path(str(pkg_resources.files(data) / "test_sets"))
@@ -66,13 +70,12 @@ _ONE_SIDED_TOL = 0.02
 _BASELINE_BEFORE_MOVE = 1.78
 _BASELINE_MOVED_AT = pd.Timestamp("2026-10-05 12:00")
 
-# Below this many selected legs a gap is descriptive only (spec section 6, Power).
-DESCRIPTIVE_MIN_SELECTED = 100
-
 # Spec section 6 (reproduction line): a version's first four served days against the rest.
 FRESH_VERSION_DAYS = 3
 
-_BOOTSTRAP_SEED = 0  # fixed so a rerun on the same inputs prints the same CIs
+# Paired with each scope key's crc32 (``key_rng``), so a --league run reproduces the full
+# run's CIs for its keys.
+_BOOTSTRAP_SEED = 0
 
 # |Line - served mean| in served SDs (spec section 6 splits).
 _Z_BANDS = [0, 0.25, 0.5, 0.75, 1.0, 1.5, np.inf]
@@ -114,6 +117,25 @@ _HEADLINE_COLUMNS = [
     "live_gap_hi",
     "descriptive",
 ]
+# The sidecar's `market` is the cell's market name (the reader's join key), so the headline's
+# book read moves aside.
+_SIDECAR_RENAMES = {"market": "market_read"}
+_SIDECAR_COLUMNS = [
+    "league",
+    "market",
+    "model_version",
+    *(_SIDECAR_RENAMES.get(column, column) for column in _HEADLINE_COLUMNS),
+    "computed_at",
+    "window_start",
+    "window_end",
+]
+# The summary's split rows leave these blank, so the cell rows arrive float / object.
+_SIDECAR_DTYPES = {
+    "test_rows": "int64",
+    "rung_rows": "int64",
+    "live_n": "int64",
+    "descriptive": bool,
+}
 
 
 def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -296,7 +318,6 @@ def _summarize(
     trained: pd.DataFrame,
     live: pd.DataFrame,
     cells: pd.DataFrame,
-    rng: np.random.Generator,
 ) -> pd.DataFrame:
     """One row per scope (overall, league, cell), and per split band above cell level.
 
@@ -307,6 +328,7 @@ def _summarize(
     scopes = [("overall", "all"), *(("league", lg) for lg in leagues)]
     records = []
     for scope, key in [*scopes, *(("cell", cell) for cell in cells["cell"])]:
+        rng = key_rng(_BOOTSTRAP_SEED, key)
         tail = _in_scope(selected, scope, key)
         training_tail = _in_scope(trained, scope, key)
         live_legs = _in_scope(live, scope, key)
@@ -341,6 +363,44 @@ def _summarize(
                 for band, group in legs.groupby(bands)
             ]
     return pd.DataFrame(records)
+
+
+def _cell_sidecar(
+    summary: pd.DataFrame, windows: pd.DataFrame, knobs: dict[str, dict], start: str
+) -> pd.DataFrame:
+    """One row per cell for ``TAIL_SCORECARD_PATH``, the gap read graduation shows beside the gates.
+
+    The cell rows' headline columns under the cell's ``league`` and ``market`` (the training
+    cell's names, so the headline's book read is ``market_read``), the ``model_version``
+    serving stamps on its legs, the scored window (``start`` to the cell's last rung date)
+    and a tz-naive UTC ``computed_at`` like the live-metrics frame.
+    """
+    rows = summary[summary["scope"].eq("cell") & summary["split"].eq("all")]
+    identity = windows.rename(
+        columns={"cell": "key", "League": "league", "Market": "market", "Date": "window_end"}
+    )
+    sidecar = rows[_HEADLINE_COLUMNS].rename(columns=_SIDECAR_RENAMES).merge(identity, on="key")
+    sidecar = sidecar.assign(
+        model_version=[knobs[cell]["model_version"] for cell in sidecar["key"]],
+        computed_at=pd.Timestamp(datetime.now(UTC)).tz_localize(None),
+        window_start=start,
+    )
+    return sidecar[_SIDECAR_COLUMNS].astype(_SIDECAR_DTYPES)
+
+
+def _write_sidecar(sidecar: pd.DataFrame, path: Path) -> None:
+    """Upsert by cell: a --league run replaces its own cells' rows and keeps every other row.
+
+    A cell this run did not score keeps its last read (``computed_at`` dates it), so a
+    partial run never blanks the graduation read's tail columns.
+    """
+    if path.exists():
+        existing = pd.read_parquet(path)
+        rescored = pd.MultiIndex.from_frame(existing[["league", "market"]]).isin(
+            pd.MultiIndex.from_frame(sidecar[["league", "market"]])
+        )
+        sidecar = pd.concat([existing[~rescored], sidecar], ignore_index=True)
+    sidecar.to_parquet(path, index=False)
 
 
 def _history_since(start: str) -> pd.DataFrame:
@@ -403,12 +463,19 @@ def _print_tables(
     show_default=True,
     help="Sandbox CSV of every scope and split; never model_stats.parquet.",
 )
-def main(leagues: tuple[str, ...], archive: Path, out: Path) -> None:
+@click.option(
+    "--parquet",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=TAIL_SCORECARD_PATH,
+    help="One row per cell for the graduation read beside the gates; a --league run "
+    "replaces only its cells (default: data/training/tail_scorecard.parquet).",
+)
+def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> None:
     """Replay the live recommendation rule on held-out test rows at the ladder's DFS rungs.
 
     A training-time diagnostic, never a ship gate. Prints the selected-tail gap per cell,
     league and overall beside the live gap over the same window, then the information test,
-    and writes every scope and split to OUT.
+    and writes every scope and split to OUT and one row per cell to PARQUET.
     """
     con = open_archive(archive)
     first_rung_date = con.execute(
@@ -458,9 +525,8 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path) -> None:
     )
     live = live[live["Date"].le(live["Date End"])]
 
-    rng = np.random.default_rng(_BOOTSTRAP_SEED)
-    summary = _summarize(rungs, selected, trained, live, pd.DataFrame(cells), rng)
-    information = information_table(pd.concat(informative, ignore_index=True), rng)
+    summary = _summarize(rungs, selected, trained, live, pd.DataFrame(cells))
+    information = information_table(pd.concat(informative, ignore_index=True), _BOOTSTRAP_SEED)
     skipped = pd.DataFrame(
         {
             "scope": "cell",
@@ -470,8 +536,9 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path) -> None:
         }
     )
     pd.concat([summary, information, skipped], ignore_index=True).to_csv(out, index=False)
+    _write_sidecar(_cell_sidecar(summary, windows, knobs, start), parquet)
 
     _print_tables(summary, information, overround)
     for cell, reason in excluded.items():
         print(f"excluded {cell}: {reason}")
-    print(f"wrote {out}")
+    print(f"wrote {out} and {parquet}")

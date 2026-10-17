@@ -7,6 +7,9 @@
 (c) The archive is opened read-only, and the rung, consensus and decision-time quote reads
     take the right rows from it.
 (d) The per-side boosts read back off stored rung prices are the ones the archive encoded.
+(e) The sidecar parquet row of a cell is its CSV headline row under the cell's identity,
+    and a partial run's write keeps the rows of the leagues it did not score.
+(f) A cell's CIs are the same whether it is summarized alone or beside another cell.
 
 Self-contained: a few real test-set rows per cell with the knobs copied out of its pickle
 (never the booster), a synthetic slate fixture, and a scratch DuckDB file.
@@ -37,6 +40,10 @@ from sportstradamus.scripts.tail_pricing import (
 )
 from sportstradamus.scripts.tail_scorecard import (
     _BASELINE_MOVED_AT,
+    _HEADLINE_COLUMNS,
+    _cell_sidecar,
+    _summarize,
+    _write_sidecar,
     replay_live_rule,
     side_boosts,
 )
@@ -475,3 +482,156 @@ def test_archive_opens_read_only(tmp_path, monkeypatch):
     assert row["p_decision"] == pytest.approx(0.55)
     assert row["p_training"] == pytest.approx(0.60)
     assert row["y"] == 1.0
+
+
+def _scorecard_frames(cell: str, league: str, market: str, seed: int) -> tuple[pd.DataFrame, ...]:
+    """``_summarize``'s five inputs for one cell: 12 settled legs over 6 days, fixed by ``seed``."""
+    rng = np.random.default_rng(seed)
+    n = 12
+    win_prob = rng.uniform(0.55, 0.85, n)
+    hit = rng.uniform(size=n) < win_prob - 0.15
+    legs = pd.DataFrame(
+        {
+            "League": league,
+            "Market": market,
+            "cell": cell,
+            "Date": np.repeat([f"2026-09-{day:02d}" for day in range(10, 16)], 2),
+            "Line": 4.5,
+            "Test Line": 4.5,
+            "consensus": 4.5,
+            "Projection": 5.0,
+            "served_sd": 2.0,
+            "QuoteAuthenticity": "authentic",
+            "n_books": 1,
+            "Bet": np.where(rng.uniform(size=n) < 0.5, "Over", "Under"),
+            "Win Prob": win_prob,
+            "Market Prob": win_prob - 0.05,
+            "Hit": hit,
+            "Payout": 1.8,
+            "Unit": hit * 1.8 - 1,
+            "Payout Source": np.where(rng.uniform(size=n) < 0.7, "posted", "assumed"),
+            "Version Age": np.where(rng.uniform(size=n) < 0.5, "days 0-3", "days 4+"),
+        }
+    )
+    rungs = legs[["League", "Market", "cell", "Date", "Line"]].assign(
+        Actual=rng.integers(0, 10, n).astype(float), p_serving=rng.uniform(0.3, 0.7, n)
+    )
+    cells = pd.DataFrame([{"cell": cell, "League": league, "test_rows": n, "recon_err": 1e-9}])
+    return rungs, legs, legs, legs, cells
+
+
+def _stack(*frame_sets: tuple[pd.DataFrame, ...]) -> tuple[pd.DataFrame, ...]:
+    return tuple(pd.concat(frames, ignore_index=True) for frames in zip(*frame_sets, strict=True))
+
+
+_KNOBS_BY_CELL = {
+    "NFL_receptions": {"model_version": "20261001.none.0badf00d"},
+    "MLB_total-bases": {"model_version": "legacy.1234567890"},
+}
+
+
+def _two_cell_sidecar() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A two-league summary and its sidecar frame, built the way ``main`` builds them."""
+    rungs, selected, trained, live, cells = _stack(
+        _scorecard_frames("NFL_receptions", "NFL", "receptions", seed=1),
+        _scorecard_frames("MLB_total-bases", "MLB", "total bases", seed=2),
+    )
+    summary = _summarize(rungs, selected, trained, live, cells)
+    windows = rungs.groupby(["League", "Market", "cell"], as_index=False)["Date"].max()
+    return summary, _cell_sidecar(summary, windows, _KNOBS_BY_CELL, "2026-09-01")
+
+
+def test_sidecar_row_is_the_cells_headline_row_under_its_identity(tmp_path):
+    summary, sidecar = _two_cell_sidecar()
+    path = tmp_path / "tail_scorecard.parquet"
+
+    _write_sidecar(sidecar, path)
+    sidecar = pd.read_parquet(path)
+
+    headline_as_written = [
+        "scope",
+        "key",
+        "test_rows",
+        "rung_rows",
+        "n",
+        "read",
+        "hit",
+        "market_read",
+        "gap",
+        "gap_lo",
+        "gap_hi",
+        "bulk_gap",
+        "training_gap",
+        "posted_share",
+        "live_n",
+        "live_gap",
+        "live_gap_lo",
+        "live_gap_hi",
+        "descriptive",
+    ]
+    assert list(sidecar.columns) == [
+        "league",
+        "market",
+        "model_version",
+        *headline_as_written,
+        "computed_at",
+        "window_start",
+        "window_end",
+    ]
+    # The summary also holds the overall, league and split rows; only the cells go out.
+    headline = summary[summary["scope"].eq("cell") & summary["split"].eq("all")]
+    assert len(sidecar) == len(headline) == 2
+    pd.testing.assert_frame_equal(
+        sidecar[headline_as_written]
+        .rename(columns={"market_read": "market"})
+        .reset_index(drop=True),
+        headline[_HEADLINE_COLUMNS].reset_index(drop=True),
+        check_dtype=False,  # the summary's split rows blank the counts and the flag
+    )
+    # Pinned for the reader through the parquet round trip: integer counts, a bool flag.
+    assert sidecar.dtypes[["test_rows", "rung_rows", "n", "live_n"]].eq("int64").all()
+    assert sidecar["descriptive"].dtype == bool
+    row = sidecar.set_index("key").loc["MLB_total-bases"]
+    assert (row["league"], row["market"]) == ("MLB", "total bases")
+    assert row["model_version"] == "legacy.1234567890"
+    assert (row["window_start"], row["window_end"]) == ("2026-09-01", "2026-09-15")
+    assert sidecar["computed_at"].dt.tz is None
+    since = pd.Timestamp.now(tz="UTC").tz_localize(None) - sidecar["computed_at"]
+    assert since.abs().max() < pd.Timedelta(minutes=1)
+
+
+def test_sidecar_write_keeps_the_leagues_a_partial_run_did_not_score(tmp_path):
+    path = tmp_path / "tail_scorecard.parquet"
+    _, both = _two_cell_sidecar()
+    _write_sidecar(both, path)
+    # A --league MLB run: its cell read again, under a retrained pickle.
+    rescored = both[both["league"].eq("MLB")].assign(
+        gap=lambda frame: frame["gap"] + 0.1, model_version="20261101.none.0badf00d"
+    )
+
+    _write_sidecar(rescored, path)
+
+    got = pd.read_parquet(path)
+    assert got["key"].tolist() == ["NFL_receptions", "MLB_total-bases"]
+    pd.testing.assert_frame_equal(
+        got.iloc[[0]].reset_index(drop=True), both[both["league"].eq("NFL")].reset_index(drop=True)
+    )
+    pd.testing.assert_frame_equal(
+        got.iloc[[1]].reset_index(drop=True), rescored.reset_index(drop=True)
+    )
+
+
+def test_cell_ci_is_the_same_alone_and_beside_another_cell():
+    receptions = _scorecard_frames("NFL_receptions", "NFL", "receptions", seed=1)
+    carries = _scorecard_frames("NFL_carries", "NFL", "carries", seed=2)
+
+    alone = _summarize(*receptions)
+    beside = _summarize(*_stack(receptions, carries))
+
+    def cell_row(summary: pd.DataFrame) -> pd.Series:
+        return summary[summary["scope"].eq("cell") & summary["key"].eq("NFL_receptions")].iloc[0]
+
+    one, two = cell_row(alone), cell_row(beside)
+    assert one["gap_lo"] < one["gap_hi"]  # a real interval, so the equality below pins something
+    for column in ("gap", "gap_lo", "gap_hi", "live_gap", "live_gap_lo", "live_gap_hi"):
+        assert one[column] == two[column], column

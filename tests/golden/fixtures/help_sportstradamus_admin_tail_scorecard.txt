@@ -5,7 +5,8 @@ Usage: sportstradamus admin tail-scorecard [OPTIONS]
 
   A training-time diagnostic, never a ship gate. Prints the selected-tail gap
   per cell, league and overall beside the live gap over the same window, then
-  the information test, and writes every scope and split to OUT.
+  the information test, and writes every scope and split to OUT and one row per
+  cell to PARQUET.
 
 Options:
   --league TEXT   Score only these leagues (repeatable). Default: every test
@@ -14,4 +15,7 @@ Options:
                   $SPORTSTRADAMUS_ARCHIVE_DB or archive/archive.duckdb).
   --out FILE      Sandbox CSV of every scope and split; never
                   model_stats.parquet.  [default: /tmp/tail_scorecard.csv]
+  --parquet FILE  One row per cell for the graduation read beside the gates; a
+                  --league run replaces only its cells (default:
+                  data/training/tail_scorecard.parquet).
   --help          Show this message and exit.
