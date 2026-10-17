@@ -5,7 +5,9 @@
 (Tonight and Games rows), [docs/ship_gate.md](../ship_gate.md) (Gate 2), and the research brief
 [docs/archive/researcher_selection_shrink.md](../archive/researcher_selection_shrink.md).
 Status: OPEN — every workstream is live on `devel`; the lead rule of §5 and the Tonight card without
-its side arrow landed 2026-10-10. The live read is §7.
+its side arrow landed 2026-10-10; the dek about the lead's own leg, with no clause against its bet,
+landed 2026-10-17 (`STORIES_VERSION` p6). The live read is §7; the measured after-numbers, the
+options for what a lead rule cannot reach and the side-rule record are in §11.
 
 ## 1. Mission & money logic
 
@@ -93,6 +95,8 @@ EOF
 | `0212ca65` | `lead._pick_sides`: Over leads fill toward half of each date's games (§5) | story `lead` flags, Tonight, Games |
 | `31a70732` | why/dek clauses read the defense (`gives`/`takes`) and the bet (`above_for` … `below_against`); `bank_cell` resolves `mistakes` before any `production` fallback | offer Why text, story deks |
 | `6fc2dbd4` … `c1354dfe`, `0450274f` | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
+| `eea99c05` | `why.story_dek` anchors a led story's dek on the lead's own leg (an unled story keeps the highest-conviction leg) | story deks |
+| `6792d763` | the dek says a form or matchup read only when it backs the lead's bet; the two `dek.form` against branches leave the bank; `STORIES_VERSION` p6 | story deks |
 
 Untouched on purpose: `strategies/profit_sim.py`, `strategies/_ledger_*.py` (sim-bettor lane),
 `analysis._add_kelly_columns` and the flat −110 grading in Receipts — both since fixed by the
@@ -114,6 +118,14 @@ and rounds up; an Over-only game counts toward it. The games with the brightest 
 (`star`) take Over first, ties by tip, then by game key. A platform with no story led on the game's
 side shows its other one, so both platforms show the same side whenever both offer it. Tonight's
 headline and the Games default story read that `lead` flag.
+
+The dek (the line under a story's headline) is about the lead's own leg: `why.story_dek` takes the
+lead player the menu routes the headline to and anchors the form, matchup and lineup clauses on
+that leg (`_dek_anchor`); an unled story keeps the core's highest-`Win Prob` leg. A dek says a form
+or matchup read only when it backs the bet (`_anchor_clauses` skips the `*_against` form branches
+and a matchup opposing the side), so a led story never argues against its own bet; the per-offer
+Why keeps both reads. Before this, the anchor was the highest-`Win Prob` leg of the core, so on the
+10-15 board 28 of 36 Over-led stories carried a dek about an Under leg.
 
 ## 6. Research verdict: the selection-shrink lever is KILLED
 
@@ -198,7 +210,8 @@ the led story.
 - **Board Kelly reads 0** on every leg paying ≤ 1× or > 2.5× (61 MLB Underdog Unders on the first
   slate were −EV with Kelly 3.5–40 and ranked first everywhere). Tooltip updated.
 - **Every persisted headline reshuffled once** (`STORIES_VERSION` p5); `user_slips.parquet` keeps its
-  frozen text.
+  frozen text. Every persisted dek reshuffled once more at p6 (2026-10-17), when the dek moved to
+  the lead's leg and dropped the clauses against its bet.
 - **CLV flipped sign on every Under segment** at the first `reflect` after the landing (NFL Under
   beat-close ≈ 68%, not 31%); pick'em CLV shrinkage reads the bet-side value.
 - **Live metrics moved** on the dev-box history of the landing: MLB home runs' Kelly yield left the
