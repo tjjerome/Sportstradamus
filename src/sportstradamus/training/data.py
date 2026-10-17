@@ -25,8 +25,12 @@ _MIN_ARCHIVED_FOR_MEDIAN_LINE: int = 5
 _MIN_POS_ARCHIVED_FOR_MEDIAN: int = 20
 
 # Minimum reference-set size before histogram-matching weights are trusted;
-# below this the reference is treated as empty and uniform weights are used.
+# below this the reference is treated as empty, so a row's weight is its own bin's density.
 _MIN_HISTOGRAM_REFERENCE: int = 20
+
+# Floor on a bin's removal weight, so every row stays drawable: rng.choice(replace=False, p=p)
+# raises when fewer than `size` entries of p are nonzero.
+_MIN_REMOVAL_WEIGHT: float = 1e-8
 
 # Rides through trim_matrix marking the rows appended since the matrix was last trimmed. Cached
 # rows were clipped when they were new; re-clipping them against bounds that move with the
@@ -41,7 +45,8 @@ def _histogram_weights(
 
     Returns probability array aligned to values. Rows whose bin density
     exceeds the reference density are more likely to be removed.
-    Falls back to uniform weights when reference data is insufficient.
+    With fewer than ``min_reference`` reference values the reference counts
+    as empty, so each row's probability follows the density of its own bin.
     """
     if len(values) == 0:
         return np.array([])
@@ -55,10 +60,10 @@ def _histogram_weights(
     else:
         ref_counts = np.zeros_like(counts)
 
-    diff = np.clip(counts - ref_counts, 1e-8, None)
+    diff = np.clip(counts - ref_counts, _MIN_REMOVAL_WEIGHT, None)
     p = np.zeros(len(values))
-    for j, a in enumerate(bins[:-1]):
-        p[values >= a] = diff[j]
+    for lower_edge, weight in zip(bins[:-1], diff, strict=True):
+        p[values >= lower_edge] = weight
     return p / np.sum(p)
 
 
@@ -123,7 +128,6 @@ def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows, rng):
         p = _histogram_weights(more.values, ref.values)
         chopping_block = more.index
 
-    n = min(n, len(chopping_block))
     cut = rng.choice(chopping_block, n, replace=False, p=p)
     M.drop(cut, inplace=True)
     return M
@@ -170,9 +174,9 @@ def trim_matrix(
     )
 
     if "Player position" in M.columns:
-        for i in M["Player position"].unique():
+        for position in M["Player position"].unique():
             M = _balance_lines(
-                M, M["Player position"] == i, archived_mask, overall_target, min_rows, rng
+                M, M["Player position"] == position, archived_mask, overall_target, min_rows, rng
             )
     else:
         M = _balance_lines(
