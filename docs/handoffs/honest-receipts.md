@@ -503,8 +503,13 @@ inside its group; §8 restates each open one as a plain question.
      and `feature-parity --versions` re-serves the logged legs through it offline.
      Primary statistic: fresh (version days 0–3) minus aged (days 4+) recommended gap, day-clustered,
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
-     difference between versions. Confirmed → retrain every 3–4 days. Null → KILL: the MLB pattern
-     was calendar or regression to the mean.
+     difference between versions. Decision rule (fixed 2026-10-17, before the first read): the
+     primary test is one-sided at α = 0.05 (fresh overstates less than aged), read only with at
+     least 5 fresh and 10 aged game days and 300 recommended legs per arm; NHL about 10-29 (the
+     campaign's retrain of ~10-18 against the 10-15 prior copies), NBA about 11-05 (its first
+     version change since 08-29; opener 10-20). Confirmed → a 3–4-day retrain cadence lane. A
+     null paired same-leg difference → KILL: the MLB pattern was calendar or regression to the
+     mean. No cadence change before the read.
   3. **I6f as-of alignment of training's archive inputs.** The pre-game cutoff for game lines is
      built for every game ingested from now on, on both boxes: `_enrich_team_markets` takes each
      sportsbook's newest Moneyline and Totals quote stamped at or before 15:00 UTC on the game date
