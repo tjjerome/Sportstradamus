@@ -79,11 +79,9 @@ def _offer_case(row: pd.Series) -> str:
     return sentence[0].upper() + sentence[1:] + "."
 
 
-def _val(row: pd.Series, col: str) -> float | None:
-    if col not in row.index:
-        return None
-    v = row[col]
-    return None if pd.isna(v) else float(v)
+def _num(row: Mapping, col: str) -> float | None:
+    v = row.get(col)
+    return None if v is None or pd.isna(v) else float(v)
 
 
 def _text(row: Mapping, col: str) -> str:
@@ -127,13 +125,13 @@ def _form_clause(row: pd.Series) -> str:
     ``model_prob`` when ``H2HPlayed == 0``), so an exact 0.0 H2H is dropped
     rather than read as "even with the line".
     """
-    avg5, line = _val(row, "Avg 5"), _val(row, "Line")
+    avg5, line = _num(row, "Avg 5"), _num(row, "Line")
     if avg5 is None or line is None:
         return ""
     clause = _why_variant(row, "form", _form_branch(avg5, row.get("Bet"))).format(
         dev=f"{abs(avg5):g}", line=f"{line:g}", pronoun=_pronoun(row)
     )
-    h2h = _val(row, "Avg H2H")
+    h2h = _num(row, "Avg H2H")
     if h2h is not None and abs(h2h) >= _FORM_AT_LINE:
         h2h_branch = "above" if h2h > 0 else "below"
         tail = _why_variant(row, "form_h2h", h2h_branch).format(dev=f"{abs(h2h):g}")
@@ -143,7 +141,7 @@ def _form_clause(row: pd.Series) -> str:
 
 def _matchup_clause(row: pd.Series) -> str:
     """What the defense does with the stat, true on either side: the edge clause names the bet."""
-    dvpoa = _val(row, "DVPOA")
+    dvpoa = _num(row, "DVPOA")
     if dvpoa is None or abs(dvpoa) < _DVPOA_NOTE_FLOOR:
         return ""
     return _why_variant(row, "matchup", "gives" if dvpoa > 0 else "takes")
@@ -185,7 +183,7 @@ def _edge_clause(row: pd.Series) -> str:
     > 1.0 is +EV); when no consensus book exists those two are equal and the
     clause is dropped.
     """
-    model_p, book_p = _val(row, "Win Prob"), _val(row, "Market Prob")
+    model_p, book_p = _num(row, "Win Prob"), _num(row, "Market Prob")
     if book_p is not None and model_p is not None:
         gap = model_p - book_p
         if abs(gap) < _EDGE_CLAUSE_FLOOR:
@@ -200,7 +198,7 @@ def _edge_clause(row: pd.Series) -> str:
 
 
 def _ev_clause(row: pd.Series) -> str:
-    model_ev, book_ev = _val(row, "Model EV"), _val(row, "Market EV")
+    model_ev, book_ev = _num(row, "Model EV"), _num(row, "Market EV")
     if model_ev is None:
         return ""
     if book_ev is None or abs(model_ev - book_ev) < _EV_GAP_FLOOR:
@@ -218,10 +216,10 @@ def story_dek(
     Built from the legs shared by both of the story's presets, so it stays
     valid whichever mode chip is active. ``index`` is ``legs.offer_index`` of
     the offers frame, built once per game by the menu. A led story's dek is
-    about ``lead_player``'s own leg; an unled one (``""``) keeps the core's
-    highest-conviction leg, like its headline. Clause-guarded and
-    empty-safe — a sub-2-leg core carries no cluster clause and missing offer
-    facts drop their clauses; everything deterministic via the md5 rotation.
+    about ``lead_player``'s own leg, like its headline; an unled one (``""``)
+    keeps the core's highest-conviction leg. Clause-guarded and empty-safe — a
+    sub-2-leg core carries no cluster clause and missing offer facts drop their
+    clauses; everything deterministic via the md5 rotation.
     """
     # The label reads the display Market, so the seed needs no platform map to
     # resolve the slug lower_leg carries for enrich_legs.
@@ -254,18 +252,18 @@ def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
     bank = why_bank()["dek"]
     bet = match.get("Bet")
     clauses = []
-    avg5, line = match.get("Avg 5"), match.get("Line")
-    if avg5 is not None and line is not None and not pd.isna(avg5) and not pd.isna(line):
-        branch = _form_branch(float(avg5), bet)
+    avg5, line = _num(match, "Avg 5"), _num(match, "Line")
+    if avg5 is not None and line is not None:
+        branch = _form_branch(avg5, bet)
         if not branch.endswith("_against"):
             clauses.append(
                 _pick(bank["form"][branch], f"dek.form|{seed_tail}").format(
-                    p=player, dev=f"{abs(float(avg5)):g}", line=f"{float(line):g}"
+                    p=player, dev=f"{abs(avg5):g}", line=f"{line:g}"
                 )
             )
-    dvpoa = match.get("DVPOA")
-    if dvpoa is not None and not pd.isna(dvpoa) and abs(float(dvpoa)) >= _DVPOA_NOTE_FLOOR:
-        gives = float(dvpoa) > 0
+    dvpoa = _num(match, "DVPOA")
+    if dvpoa is not None and abs(dvpoa) >= _DVPOA_NOTE_FLOOR:
+        gives = dvpoa > 0
         if gives == (bet == "Over"):
             branch = "gives" if gives else "takes"
             clauses.append(
