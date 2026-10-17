@@ -186,8 +186,11 @@ def test_quote_split_reads_fallback_before_the_sportsbook_quote():
         assert _one(out, split="quote", key=key)["n"] == 1
 
 
-def test_recommended_edge_matches_the_story_menu_floor():
-    assert RECOMMENDED_EDGE_MIN == menu._MENU_EDGE_FLOOR
+def test_recommended_floor_sits_above_the_story_menu_floor():
+    """Since 2026-10-17 the story menu admits 0.03 edges while Receipts and the paper
+    ledger keep counting "recommended" from 0.05, so a story leg can be bettable only."""
+    assert RECOMMENDED_EDGE_MIN == 0.05
+    assert menu._MENU_EDGE_FLOOR < RECOMMENDED_EDGE_MIN
 
 
 def test_30_day_window_drops_older_offers():

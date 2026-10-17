@@ -7,7 +7,8 @@ generator). Pins the owner-locked acceptance criteria: ≤5 correlation-cluster
 stories per game, no-signal games yield nothing, the two objectives are the true
 argmaxes, the play-type cap holds, platforms are independent, the EV is the
 real copula scorer (not a reimplementation), and each side's most prominent
-strong leg leads a story that ranks ahead of the unled ones.
+strong leg leads a story that ranks ahead of the unled ones. An Over leads only
+in a shootout or a blowout.
 """
 
 from __future__ import annotations
@@ -133,6 +134,11 @@ def _ctx(
     return sctx, offers
 
 
+def _context_frame(*games, date="2026-06-12", shape="shootout"):
+    """Context frame giving each game one script; a shootout by default, so an Over may lead."""
+    return pd.DataFrame([{"League": "NBA", "Game": g, "Date": date, "shape": shape} for g in games])
+
+
 def _block_diag_corr(block_sizes, rho):
     """A correlation matrix of independent ρ-blocks (each block = one cluster)."""
     n = sum(block_sizes)
@@ -181,7 +187,7 @@ def test_edge_floor_excludes_weak_leg():
 
 def test_kelly_zero_leg_is_never_strong():
     # A sub-1x or deep-alt payout zeroes Kelly, so the leg can't seed or join a story
-    # even at twice the edge floor.
+    # even well above the edge floor.
     sctx, _offers = _ctx([0.70, 0.66], np.eye(2), edges=[1.10, 1.30], kellys=[0.0, 0.25])
     assert menu_mod._strong_legs(sctx) == {1: 1.30}
 
@@ -226,7 +232,7 @@ def test_each_side_leads_a_story_and_led_stories_rank_first():
         bets=["Over"] * 3 + ["Under"] * 3 + ["Over"] * 2,
         stars=[2.0, 0.0, 0.0, 0.0, 2.5, 0.0, 0.0, 0.0],
     )
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     moon = out[out["objective"] == "moon"].set_index("story_id")
     assert moon.index.tolist() == ["AAA/BBB#0", "AAA/BBB#1", "AAA/BBB#2"]
     # Led stories first, ordered between themselves by Moon EV; the unled story
@@ -261,7 +267,7 @@ def test_led_story_headline_is_routed_to_its_lead(monkeypatch):
         teams=["AAA", "BBB"] * 2,
         bets=["Over", "Over", "Under", "Under"],
     )
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["lead_side"].tolist() == ["Under", "Under", "Over", "Over"]
     assert leads == ["Player2", "Player0"]  # rank order: the richer Under-led story first
 
@@ -274,14 +280,14 @@ def test_orphan_lead_pairs_with_the_top_edge_leg_from_the_other_team():
     sctx, offers = _ctx(
         probs, np.eye(4), teams=["AAA", "BBB", "BBB", "AAA"], edges=edges, stars=stars
     )
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["story_id"].nunique() == 1
     assert out["lead_player"].unique().tolist() == ["Player0"]
     for legs in out["legs"]:
         assert {leg["player"] for leg in legs} == {"Player0", "Player2"}
     # One-sided game: any other player qualifies, so the top edge wins outright.
     sctx, offers = _ctx(probs, np.eye(4), teams=["AAA"] * 4, edges=edges, stars=stars)
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["story_id"].nunique() == 1
     for legs in out["legs"]:
         assert {leg["player"] for leg in legs} == {"Player0", "Player3"}
@@ -307,7 +313,7 @@ def test_under_lead_survives_a_fully_correlated_pool():
         ([0, 1, 2, 3, 4], "Over", "Player0"),
         ([5], "Under", "Player5"),
     ]
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     stories = out.drop_duplicates("story_id").set_index("lead_side")
     assert stories["lead_player"].to_dict() == {"Over": "Player0", "Under": "Player5"}
     for legs in out[out["lead_side"] == "Under"]["legs"]:
@@ -329,7 +335,7 @@ def test_same_team_led_cluster_borrows_an_other_team_leg():
         teams=["AAA", "BBB", "BBB", "BBB", "BBB"],
         bets=["Over", "Over", "Under", "Under", "Under"],
     )
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert set(out["lead_side"]) == {"Over", "Under"}
     under = out[out["lead_side"] == "Under"]
     assert under["story_id"].nunique() == 1
@@ -362,7 +368,9 @@ def test_one_lead_per_menu_and_the_brighter_over_lead_takes_the_over():
     early, offers_early = game("ZZZ/YYY", "2026-10-03T17:00:00Z")
     late, offers_late = game("AAA/BBB", "2026-10-03T20:00:00Z", stars=[2.0, 0.0, 0.0, 0.0])
     offers = pd.concat([offers_early, offers_late], ignore_index=True)
-    out = build_game_stories([late, early], offers, pd.DataFrame(), None)
+    out = build_game_stories(
+        [late, early], offers, _context_frame("AAA/BBB", "ZZZ/YYY", date="2026-10-03"), None
+    )
     assert out["lead"].dtype == bool
     menus = out[out["lead"]].groupby(["platform", "Date", "Game"])
     assert menus["story_id"].nunique().eq(1).all()
@@ -399,7 +407,7 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     # high-prob pair compounds (Builder) while the wider set shoots the moon.
     corr = _block_diag_corr([3], 0.1)
     sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     builder = out[out["objective"] == "builder"].iloc[0]
     moon = out[out["objective"] == "moon"].iloc[0]
 
@@ -507,7 +515,42 @@ def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier()
 
 
 def test_edge_floor_value_is_owner_locked():
-    assert _MENU_EDGE_FLOOR == 0.05
+    assert _MENU_EDGE_FLOOR == 0.03
+
+
+def test_strong_legs_admit_an_edge_from_the_floor():
+    """The owner's 0.03 floor in behavior: a 0.04 edge seeds a story, a 0.02 edge never does."""
+    sctx, _offers = _ctx([0.66, 0.66], np.eye(2), edges=[1.04, 1.02])
+    assert menu_mod._strong_legs(sctx) == {0: 1.04}
+
+
+@pytest.mark.parametrize(
+    ("shape", "led"),
+    [
+        ("shootout", {"Over", "Under"}),
+        ("blowout", {"Over", "Under"}),
+        ("grind", {"Under", ""}),
+        ("coinflip", {"Under", ""}),
+        ("even", {"Under", ""}),
+        (None, {"Under", ""}),
+    ],
+)
+def test_an_over_leads_only_a_shootout_or_a_blowout(shape, led):
+    """Owner rule (2026-10-17): an Over-led story exists only in a game whose script runs
+    hot or lopsided. A grind, a coinflip, an unquoted game ("even") or a game with no
+    context row leads on its Under alone; its Over legs still ride in an unled story."""
+    sctx, offers = _ctx(
+        [0.66, 0.65, 0.70, 0.69],
+        _block_diag_corr([2, 2], 0.4),
+        teams=["AAA", "BBB"] * 2,
+        bets=["Over", "Over", "Under", "Under"],
+    )
+    context = pd.DataFrame() if shape is None else _context_frame("AAA/BBB", shape=shape)
+    out = build_game_stories([sctx], offers, context, None)
+    assert set(out["lead_side"]) == led
+    if "Over" not in led:
+        unled_legs = [leg for legs in out.loc[out["lead_side"] == "", "legs"] for leg in legs]
+        assert ("Player0", "Over") in {(leg["player"], leg["bet"]) for leg in unled_legs}
 
 
 def _row_players(legs: list[dict]) -> list[str]:
@@ -550,7 +593,7 @@ def test_unled_single_team_cluster_in_two_team_game_emits_no_story():
     # (Player2); the unled BBB cluster has no such recourse and emits nothing.
     corr = _block_diag_corr([2, 2], 0.4)
     sctx, offers = _ctx([0.66, 0.65, 0.64, 0.63], corr, teams=["AAA", "AAA", "BBB", "BBB"])
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["story_id"].nunique() == 1
     assert out["lead_side"].eq("Over").all()
     team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
@@ -650,8 +693,8 @@ def test_dek_is_deterministic_and_reads_core_correlation():
     corr = np.eye(2)
     corr[0, 1] = corr[1, 0] = 0.45
     sctx, offers = _ctx([0.62, 0.60], corr)
-    first = build_game_stories([sctx], offers, pd.DataFrame(), None)
-    second = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    first = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
+    second = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert first["dek"].tolist() == second["dek"].tolist()
     dek = first["dek"].iloc[0]
     assert dek
@@ -677,7 +720,7 @@ def _led_pair_stories() -> pd.DataFrame:
         teams=["AAA", "BBB"] * 2,
         bets=["Over", "Under", "Over", "Over"],
     )
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     return out.drop_duplicates("story_id")
 
 

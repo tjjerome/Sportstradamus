@@ -5,6 +5,7 @@ columns only (rank-1 depth, median-line percentile, market breadth; no MLB depth
 term), each side's lead seed is its most prominent strong leg, and the slate
 pass flags exactly one story per menu. Over leads fill toward half of each
 date's games, rounded up, the games with the brightest Over-led story first.
+The 2026-10-17 shape rule: an Over seeds a lead only in a shootout or a blowout.
 """
 
 from __future__ import annotations
@@ -178,13 +179,28 @@ def _legs(*legs):
     ],
 )
 def test_lead_seeds_tie_breaks(legs, seeds):
-    assert lead_seeds(*_legs(*legs)) == seeds
+    assert lead_seeds(*_legs(*legs), "shootout") == seeds
 
 
 def test_lead_seeds_omits_a_side_with_no_strong_leg():
     edge, bet_df, star_of = _legs(("Up", "Over", 1.20, 1.0), ("Weak", "Under", 1.02, 2.9))
     del edge[1]  # under the menu's edge floor, so the caller never marks it strong
-    assert lead_seeds(edge, bet_df, star_of) == {"Over": 0}
+    assert lead_seeds(edge, bet_df, star_of, "blowout") == {"Over": 0}
+
+
+@pytest.mark.parametrize(
+    ("shape", "seeds"),
+    [
+        ("shootout", {"Over": 0, "Under": 1}),
+        ("blowout", {"Over": 0, "Under": 1}),
+        ("grind", {"Under": 1}),
+        ("coinflip", {"Under": 1}),
+        ("even", {"Under": 1}),
+    ],
+)
+def test_an_over_seed_needs_a_shootout_or_a_blowout(shape, seeds):
+    edge, bet_df, star_of = _legs(("Up", "Over", 1.40, 3.0), ("Down", "Under", 1.10, 0.0))
+    assert lead_seeds(edge, bet_df, star_of, shape) == seeds
 
 
 def _stories(*stories):

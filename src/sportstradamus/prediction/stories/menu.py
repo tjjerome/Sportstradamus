@@ -13,9 +13,10 @@ starting parlays over its cluster's legs (legs may be shared):
 
 Ranked on edge alone the menu opens every game on a role player's Under (the
 highest-probability leg on DFS x.5 lines), so two stories per game are *led*:
-one grows from the most prominent strong Over and one from the most prominent
-strong Under (``lead.lead_seeds``), the lead sits in both presets, led stories
-rank first, and ``lead.assign_leads`` flags the one each menu headlines.
+one grows from the most prominent strong Over (only in a shootout or a blowout,
+``lead.OVER_LEAD_SHAPES``) and one from the most prominent strong Under
+(``lead.lead_seeds``), the lead sits in both presets, led stories rank first,
+and ``lead.assign_leads`` flags the one each menu headlines.
 
 Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Subsets
 are enumerated but scored in two phases (``pricing``) — a cheap independent-joint
@@ -48,9 +49,10 @@ from sportstradamus.prediction.stories.pricing import independent, score_subset,
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
-# A leg qualifies as a story seed when its per-$1 model EV clears this edge — the
-# same 0.05 the unit-thesis gate and per-offer "why" already use.
-_MENU_EDGE_FLOOR: float = 0.05
+# A leg qualifies as a story seed when its per-$1 model EV clears this edge. 0.05 until
+# 2026-10-17, when the owner lowered it to admit more Over-led stories (story-balance.md
+# §11, option B); the Receipts cohort floor (realized.RECOMMENDED_EDGE_MIN) stayed at 0.05.
+_MENU_EDGE_FLOOR: float = 0.03
 # Two strong legs join a cluster when |rho| over their pair clears this; matches
 # the display-correlation floor in correlation.py.
 _CLUSTER_RHO_FLOOR: float = 0.05
@@ -133,7 +135,8 @@ def _stories_for_game(
     for i in edge:
         rec = sctx.bet_df[i]
         stars[i] = index.get((rec["Player"], rec["Bet"], rec["Line"]), {}).get("Star", 0.0)
-    seeds = lead_seeds(edge, sctx.bet_df, stars)
+    ctx = ctxs.get(sctx.game)
+    seeds = lead_seeds(edge, sctx.bet_df, stars, ctx.shape if ctx else "even")
     order = sorted(edge, key=lambda i: -edge[i])
     scored = []
     for cluster, side, lead in _cluster_strong_legs(order, sctx, seeds):

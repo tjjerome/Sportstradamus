@@ -6,8 +6,8 @@ at its platform payout (``helpers.platform_payout``), keeps only sides the platf
 posted (a ``Boost == 0`` side was never a bet), counts an offer once per platform (the
 same prop on Underdog and Sleeper is two bets), counts a prop whose line moved only at
 the lines still posted when it was last scored (games from ``COUNT_ONCE_FROM``; earlier
-games count every line posted) and flags ``Recommended`` by the one definition the story
-menu shares. ``window``, ``by_split``, ``cohort_summary``, ``worst_month`` and
+games count every line posted) and flags ``Recommended`` by the one rule Receipts and the
+paper ledger share. ``window``, ``by_split``, ``cohort_summary``, ``worst_month`` and
 ``calibration_summary`` slice and aggregate that frame; nightly persists
 ``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). Pure.
 """
@@ -25,8 +25,9 @@ from sportstradamus.helpers import MAX_FAVORED_PAYOUT, platform_payout
 REALIZED_WINDOWS: tuple[int, ...] = (30, 90)
 # From this game date an early closing stamp is released pre-game, so Scored At is the last scoring.
 COUNT_ONCE_FROM = pd.Timestamp("2026-10-09")
-# The owner-locked story / "why" edge floor. Pinned equal to menu._MENU_EDGE_FLOOR by test
-# rather than imported, since that constant is private to the story menu.
+# The Receipts and paper-ledger "recommended" edge floor. It equalled the story menu's floor
+# until 2026-10-17, when the menu dropped to 0.03 (menu._MENU_EDGE_FLOOR) and this one stayed, so
+# the realized cohort and the even-pick bettor read the same rule across that change.
 RECOMMENDED_EDGE_MIN: float = 0.05
 # The menu's Kelly cap: the menu never shows a leg paying more (Kelly is 0 there), so the
 # recommended cohort stops where the menu does.
