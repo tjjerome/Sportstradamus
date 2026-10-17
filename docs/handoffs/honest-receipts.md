@@ -553,8 +553,9 @@ inside its group; §8 restates each open one as a plain question.
      then three stored cells read a worse calibration error under the new label, all inside the
      gate's .075 (NFL `qb tds` .015 → .063, NFL targets .000 → .060, WNBA TOV .020 → .033), and
      `model_stats.parquet` mixes the two labels from the first `meditate` after the change until
-     every cell has retrained. Still open: `step` passed to SkewNormal `get_odds` in
-     `_step_compute_test_probabilities` and `_step_calibrate_temperature`. I6b is optional: align
+     every cell has retrained. `step` reaches SkewNormal `get_odds` in `_step_compute_test_probabilities` and
+     `_step_calibrate_temperature` since 2026-10-17 (`lever-t`, df0b8a7c); a SkewNormal cell's
+     test-set `P` and temperature move at its next retrain. I6b is optional: align
      training's non-authentic fusion to serving, never the reverse.
   5. **I6d NFL at-market information** (research; no method is guaranteed). Order: after I6e's parity
      repair, and after the NFL count quote is levelled (`ev` and `under_prob` disagree, which
