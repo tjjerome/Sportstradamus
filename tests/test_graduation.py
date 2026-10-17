@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.realized import RECOMMENDED_EDGE_MIN
 from sportstradamus.training.graduation import (
+    DESCRIPTIVE_MIN_SELECTED,
     MIN_PRECISION_SIDE,
     classify_lifecycle,
     free_passer_cells,
@@ -16,7 +18,11 @@ from sportstradamus.training.graduation import (
     lifecycle_table,
     read_gate1,
     read_gate2,
+    read_tail,
+    tail_state,
 )
+
+TAIL_COLS = ["tail_n", "tail_gap", "tail_gap_hi", "live_n", "live_gap", "live_gap_hi", "tail_state"]
 
 
 @pytest.mark.parametrize(
@@ -243,3 +249,125 @@ def test_read_gate2_back_fills_precision_columns_for_old_parquets(tmp_path):
     assert "precision_under_live" in df.columns
     assert df["precision_over_live"].isna().all()
     assert df["precision_under_live"].isna().all()
+
+
+@pytest.mark.parametrize(
+    ("n", "gap_hi", "expected"),
+    [
+        (DESCRIPTIVE_MIN_SELECTED - 1, 0.0, "thin"),
+        (math.nan, 0.0, "thin"),
+        (DESCRIPTIVE_MIN_SELECTED, RECOMMENDED_EDGE_MIN - 0.001, "honest"),
+        (DESCRIPTIVE_MIN_SELECTED, RECOMMENDED_EDGE_MIN, "overstated"),
+    ],
+)
+def test_tail_state_at_the_bar(n, gap_hi, expected):
+    """Decision D2: the bar is strict on both sides (n below the floor, gap_hi below the edge)."""
+    assert tail_state(n, gap_hi) == expected
+
+
+def _seed_tail_scorecard(path):
+    """The scorecard's cell rows: `market` is the cell name; `market_read` is the read it
+    reports under the headline `market` column, carried here to show it is never joined."""
+    rows = [
+        # (league, market, n, gap, gap_hi, live_n, live_gap, live_gap_hi)
+        ("NBA", "PTS", 150, 0.080, 0.110, 60, 0.030, 0.090),  # overstated; graduated by the gates
+        ("NBA", "FG3M", 40, 0.120, 0.300, np.nan, np.nan, np.nan),  # thin
+        ("WNBA", "PTS", 200, 0.020, 0.040, 20, 0.010, 0.200),  # honest; not-shipped by the gates
+    ]
+    frame = pd.DataFrame(
+        rows,
+        columns=["league", "market", "n", "gap", "gap_hi", "live_n", "live_gap", "live_gap_hi"],
+    )
+    frame["scope"] = "cell"
+    frame["key"] = frame["league"] + "/" + frame["market"]
+    frame["read"] = 0.60
+    frame["hit"] = frame["read"] - frame["gap"]
+    frame["market_read"] = 0.58
+    frame["descriptive"] = frame["n"] < DESCRIPTIVE_MIN_SELECTED
+    frame["model_version"] = "20261010.1"
+    frame["computed_at"] = pd.Timestamp("2026-10-17")
+    frame.to_parquet(path, engine="pyarrow", index=False)
+
+
+def _seed_live_gap(path):
+    rows = [
+        # (league, market, live_n, live_gap, live_gap_lo, live_gap_hi)
+        ("NBA", "PTS", 90, 0.050, 0.010, 0.095),  # also in the scorecard: the nightly wins
+        ("NFL", "carries", 30, 0.000, -0.050, 0.020),  # no scorecard row
+    ]
+    frame = pd.DataFrame(
+        rows, columns=["league", "market", "live_n", "live_gap", "live_gap_lo", "live_gap_hi"]
+    )
+    frame["computed_at"] = pd.Timestamp("2026-10-17")
+    frame["window_days"] = np.int16(30)
+    frame.to_parquet(path, engine="pyarrow", index=False)
+
+
+def test_read_tail_prefers_the_nightly_live_half(tmp_path):
+    tail = tmp_path / "tail_scorecard.parquet"
+    live = tmp_path / "live_gap_per_cell.parquet"
+    _seed_tail_scorecard(tail)
+    _seed_live_gap(live)
+    df = read_tail(tail, live)
+    assert set(df.columns) == {"league", "market", *TAIL_COLS}
+    rows = df.set_index(["league", "market"])
+    pts = rows.loc[("NBA", "PTS")]
+    assert (pts["tail_n"], pts["tail_gap"], pts["tail_gap_hi"]) == (150, 0.08, 0.11)
+    assert (pts["live_n"], pts["live_gap"], pts["live_gap_hi"]) == (90, 0.05, 0.095)
+    # Only the scorecard holds WNBA/PTS, so its own live half stands.
+    assert rows.loc[("WNBA", "PTS"), "live_gap"] == 0.01
+    # Only the nightly holds NFL/carries: live columns present, no offline read.
+    assert rows.loc[("NFL", "carries"), "live_n"] == 30
+    assert math.isnan(rows.loc[("NFL", "carries"), "tail_n"])
+    assert dict(rows["tail_state"]) == {
+        ("NBA", "PTS"): "overstated",
+        ("NBA", "FG3M"): "thin",
+        ("WNBA", "PTS"): "honest",
+        ("NFL", "carries"): "thin",
+    }
+
+
+def test_read_tail_missing_sidecars_keep_every_column(tmp_path):
+    live = tmp_path / "live_gap_per_cell.parquet"
+    _seed_live_gap(live)
+    neither = read_tail(tmp_path / "no_tail.parquet", tmp_path / "no_live.parquet")
+    assert neither.empty
+    assert set(neither.columns) == {"league", "market", *TAIL_COLS}
+    nightly_only = read_tail(tmp_path / "no_tail.parquet", live)
+    assert len(nightly_only) == 2
+    assert nightly_only["tail_gap"].isna().all()
+    assert nightly_only["live_gap"].tolist() == [0.05, 0.0]
+    assert nightly_only["tail_state"].eq("thin").all()
+
+
+def test_lifecycle_table_joins_the_tail_read_without_moving_states(tmp_path):
+    """The tail read rides the lifecycle frame as monitor columns; it never gates."""
+    ms = tmp_path / "model_stats.parquet"
+    lm = tmp_path / "live.parquet"
+    tail = tmp_path / "tail_scorecard.parquet"
+    live = tmp_path / "live_gap_per_cell.parquet"
+    _seed_model_stats(ms)
+    _seed_live_metrics(lm)
+    _seed_tail_scorecard(tail)
+    _seed_live_gap(live)
+    bare = lifecycle_table(
+        ms, lm, tail_path=tmp_path / "no_tail.parquet", live_gap_path=tmp_path / "no_live.parquet"
+    )
+    joined = lifecycle_table(ms, lm, tail_path=tail, live_gap_path=live)
+    assert joined["lifecycle_state"].tolist() == bare["lifecycle_state"].tolist()
+    rows = joined.set_index(["league", "market"])
+    # An overstated tail does not demote a graduated cell, nor an honest one promote.
+    assert rows.loc[("NBA", "PTS"), ["lifecycle_state", "tail_state"]].tolist() == [
+        "graduated",
+        "overstated",
+    ]
+    assert rows.loc[("WNBA", "PTS"), ["lifecycle_state", "tail_state"]].tolist() == [
+        "not-shipped",
+        "honest",
+    ]
+    assert rows.loc[("NBA", "PTS"), "live_gap"] == 0.05
+    assert rows.loc[("NBA", "PTS"), "tail_gap_hi"] == 0.11
+    # Without either sidecar every tail column is still there, empty.
+    assert set(TAIL_COLS) <= set(bare.columns)
+    assert bare[TAIL_COLS].isna().all().all()
+    assert len(bare) == len(joined) == 3

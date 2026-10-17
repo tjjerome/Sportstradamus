@@ -177,8 +177,9 @@ Do not undo that work:
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
   pre-computed parquet snapshots only (`data/runtime/`: `history.parquet`, the
   `parlay_hist/` day partitions, the `current_*` snapshots, `profit_sim_summary`,
-  `calibration_summary`, `live_metrics_per_market` and its own `user_slips`;
-  `data/training/model_stats.parquet`; each league's `gamelog.parquet` and
+  `calibration_summary`, `live_metrics_per_market`, `live_gap_per_cell` and its own
+  `user_slips`; `data/training/model_stats.parquet` and `tail_scorecard.parquet`;
+  each league's `gamelog.parquet` and
   `corr_market_summary.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
