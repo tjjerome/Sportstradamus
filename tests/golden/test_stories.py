@@ -207,7 +207,7 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p5"
+    assert STORIES_VERSION == "p6"
 
 
 def test_thesis_exact_strings():
@@ -692,27 +692,38 @@ def test_why_rotation_deterministic():
 
 
 def test_matchup_clause_reads_the_defense_on_an_under():
-    """The matchup says what the defense does with the stat, true on either side of the
-    bet; naming the side is the edge clause's job."""
+    """The per-offer matchup says what the defense does with the stat, true on either
+    side of the bet (naming the side is the edge clause's job); the dek says it only
+    when it backs the bet."""
     bank = why_bank()
-    for dvpoa, branch in ((-0.10, "takes"), (0.10, "gives")):
+    for dvpoa, branch, in_dek in ((-0.10, "takes", True), (0.10, "gives", False)):
         facts = {"DVPOA": dvpoa, "Bet": "Under"}
         assert _matchup_clause(pd.Series(facts)) in bank["why"]["matchup"][branch]
-        (dek_clause,) = _anchor_clauses("Joel Embiid", facts, _DATE)
-        assert dek_clause in {v.format(p="Joel Embiid") for v in bank["dek"]["matchup"][branch]}
+        dek_clauses = _anchor_clauses("Joel Embiid", facts, _DATE)
+        if in_dek:
+            (dek_clause,) = dek_clauses
+            assert dek_clause in {v.format(p="Joel Embiid") for v in bank["dek"]["matchup"][branch]}
+        else:
+            assert dek_clauses == []
 
 
 def test_form_clause_is_bet_factual():
     """An Under on a player running above the line reads as form cutting against it,
-    and one on a player running below it as form backing it."""
+    and one on a player running below it as form backing it; the dek carries only
+    the backing read."""
     bank = why_bank()
-    for avg5, branch in ((2.0, "above_against"), (-2.0, "below_for")):
+    for avg5, branch, in_dek in ((2.0, "above_against", False), (-2.0, "below_for", True)):
         facts = {"Avg 5": avg5, "Line": 30.5, "Bet": "Under"}
         why = {v.format(dev="2", line="30.5", pronoun="his") for v in bank["why"]["form"][branch]}
         assert _form_clause(pd.Series(facts)) in why
-        dek = {v.format(p="Joel Embiid", dev="2", line="30.5") for v in bank["dek"]["form"][branch]}
-        (dek_clause,) = _anchor_clauses("Joel Embiid", facts, _DATE)
-        assert dek_clause in dek
+        dek_clauses = _anchor_clauses("Joel Embiid", facts, _DATE)
+        if in_dek:
+            (dek_clause,) = dek_clauses
+            assert dek_clause in {
+                v.format(p="Joel Embiid", dev="2", line="30.5") for v in bank["dek"]["form"][branch]
+            }
+        else:
+            assert dek_clauses == []
 
 
 # Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a

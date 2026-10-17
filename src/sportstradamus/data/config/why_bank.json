@@ -218,14 +218,6 @@
         "the over starts from a last 5 that put {p} {dev} above the {line} line",
         "{p} carries {dev} of cushion on the {line} line into the over"
       ],
-      "above_against": [
-        "{p} runs {dev} past the {line} line across the last 5, a trend the under bets against",
-        "the under faces {p}'s last 5 averaging {dev} above the {line} line",
-        "{p}'s last 5 cut against the under, {dev} clear of the {line} line",
-        "form sides against the under as {p} runs {dev} past the {line} line",
-        "the under asks {p} to miss the {line} line the last 5 cleared by {dev}",
-        "{p} carries {dev} of cushion on the {line} line that the under has to erase"
-      ],
       "below_for": [
         "{p} runs {dev} short of the {line} line across the last 5, a trend the under rides",
         "the under has {p}'s last 5 averaging {dev} below the {line} line",
@@ -233,14 +225,6 @@
         "form sides with the under as {p} runs {dev} short of the {line} line",
         "the under starts from a last 5 that left {p} {dev} below the {line} line",
         "{p} carries a {dev} deficit to the {line} line into the under"
-      ],
-      "below_against": [
-        "{p} runs {dev} short of the {line} line across the last 5, a trend the over bets against",
-        "the over faces {p}'s last 5 averaging {dev} below the {line} line",
-        "{p}'s last 5 cut against the over, {dev} shy of the {line} line",
-        "form sides against the over as {p} runs {dev} short of the {line} line",
-        "the over asks {p} to clear the {line} line the last 5 missed by {dev}",
-        "{p} carries a {dev} deficit to the {line} line that the over has to erase"
       ],
       "at_line": [
         "{p} lands right at a {line} line across the last 5",

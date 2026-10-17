@@ -42,10 +42,12 @@ names swapped.
 7. **Bet words** (over, overs, under, unders) stay banned outside `mistakes` cells, and inside
    them only the flipped word may appear (an `Over` mistakes cell may say "under", never
    "over"). The live phrase "takes over" carries the bet word, so it fits only an `Under`
-   mistakes cell; everywhere else pick another live phrase. The `dek.form` branches of `why_bank.json` (`above_for` … `below_against`) are
-   bet-relative, so each may name only its own side ("a trend the under rides"); the
-   `dek.matchup` branches (`gives`, `takes`) read the defense, true on either side, and name
-   neither.
+   mistakes cell; everywhere else pick another live phrase. The `dek.form` branches of
+   `why_bank.json` (`above_for`, `below_for`, `at_line`) are bet-relative, so each may name only
+   its own side ("a trend the under rides"); the `dek.matchup` branches (`gives`, `takes`) read
+   the defense, true on either side, and name neither. A story's dek says a form or matchup
+   read only when it backs the lead's bet; the per-offer `why.form` branches keep the
+   against reads.
 8. **`{g}` is a matchup label, never an opponent** ("against {g}" is banned). A locative
    `{g}` renders as the home city: the engine rewrites it when one of *in, at, to, into,
    through, from, across, around, inside, onto, within, near* precedes it or one of

@@ -662,13 +662,13 @@ def test_dek_is_deterministic_and_reads_core_correlation():
     assert "Player0" in dek
 
 
-def test_led_story_dek_is_about_its_lead():
-    """A led story's dek names its lead and nobody else; an unled story keeps the
-    highest-conviction anchor.
+def _led_pair_stories() -> pd.DataFrame:
+    """One story per story_id on a slate led on both sides by the pair {Player0, Player1}.
 
-    Each led cluster borrows the other team's leg, so both led stories price the
-    pair {Player0, Player1}. Player1's Under carries the higher ``p_model``, so an
-    anchor picked on conviction alone would make the Over-led dek about Player1.
+    Each led cluster borrows the other team's leg, so both led stories price that
+    pair; Player1's Under carries the higher ``p_model``. Every offer runs 2.0 above
+    its line in a matchup that gives the stat (``_ctx``), so those facts back an
+    Over and cut against an Under.
     """
     corr = _block_diag_corr([2, 2], 0.4)
     sctx, offers = _ctx(
@@ -678,7 +678,14 @@ def test_led_story_dek_is_about_its_lead():
         bets=["Over", "Under", "Over", "Over"],
     )
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
-    stories = out.drop_duplicates("story_id")
+    return out.drop_duplicates("story_id")
+
+
+def test_led_story_dek_is_about_its_lead():
+    """A led story's dek names its lead and nobody else; an unled story keeps the
+    highest-conviction anchor, which an anchor picked on conviction alone would
+    make the Over-led dek's subject too (Player1)."""
+    stories = _led_pair_stories()
     named = {
         (row["lead_side"], row["lead_player"]): set(re.findall(r"Player\d", row["dek"]))
         for _, row in stories.iterrows()
@@ -693,3 +700,12 @@ def test_led_story_dek_is_about_its_lead():
     over_dek = stories.set_index("lead_side").loc["Over", "dek"]
     above_for = why_bank()["dek"]["form"]["above_for"]
     assert any(v.format(p="Player0", dev="2", line="5.5") in over_dek for v in above_for)
+
+
+def test_led_story_dek_never_argues_against_its_bet():
+    """An Under lead running above the line in a matchup that gives the stat gets
+    neither the form nor the matchup clause: the dek keeps the cluster read and
+    names nobody (the per-offer Why keeps both reads, see test_stories)."""
+    under_dek = _led_pair_stories().set_index("lead_side").loc["Under", "dek"]
+    assert "0.40" in under_dek
+    assert not re.findall(r"Player\d", under_dek)

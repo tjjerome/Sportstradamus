@@ -246,21 +246,31 @@ def _cluster_clause(core_bet_ids: Sequence[int], sctx, seed_tail: str) -> list[s
 
 
 def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
-    """Form, matchup, and lineup dek clauses for the core's anchor leg, each fact-guarded."""
+    """Form, matchup, and lineup dek clauses for the anchor leg, each fact-guarded.
+
+    Only a read that backs the bet is said here: form running against it and a
+    matchup opposing it stay on the per-offer Why, never in a story's dek.
+    """
     bank = why_bank()["dek"]
+    bet = match.get("Bet")
     clauses = []
     avg5, line = match.get("Avg 5"), match.get("Line")
     if avg5 is not None and line is not None and not pd.isna(avg5) and not pd.isna(line):
-        branch = _form_branch(float(avg5), match.get("Bet"))
-        clauses.append(
-            _pick(bank["form"][branch], f"dek.form|{seed_tail}").format(
-                p=player, dev=f"{abs(float(avg5)):g}", line=f"{float(line):g}"
+        branch = _form_branch(float(avg5), bet)
+        if not branch.endswith("_against"):
+            clauses.append(
+                _pick(bank["form"][branch], f"dek.form|{seed_tail}").format(
+                    p=player, dev=f"{abs(float(avg5)):g}", line=f"{float(line):g}"
+                )
             )
-        )
     dvpoa = match.get("DVPOA")
     if dvpoa is not None and not pd.isna(dvpoa) and abs(float(dvpoa)) >= _DVPOA_NOTE_FLOOR:
-        branch = "gives" if float(dvpoa) > 0 else "takes"
-        clauses.append(_pick(bank["matchup"][branch], f"dek.matchup|{seed_tail}").format(p=player))
+        gives = float(dvpoa) > 0
+        if gives == (bet == "Over"):
+            branch = "gives" if gives else "takes"
+            clauses.append(
+                _pick(bank["matchup"][branch], f"dek.matchup|{seed_tail}").format(p=player)
+            )
     lineup_clause = _dek_lineup_clause(player, match, seed_tail)
     if lineup_clause:
         clauses.append(lineup_clause)

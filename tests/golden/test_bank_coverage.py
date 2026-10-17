@@ -753,9 +753,7 @@ _WHY_SLOTS = {
     ("why", "lineup_usual", "slot_only"): {"slot"},
     ("dek", "cluster", None): {"n", "rho"},
     ("dek", "form", "above_for"): {"p", "dev", "line"},
-    ("dek", "form", "above_against"): {"p", "dev", "line"},
     ("dek", "form", "below_for"): {"p", "dev", "line"},
-    ("dek", "form", "below_against"): {"p", "dev", "line"},
     ("dek", "form", "at_line"): {"p", "line"},
     ("dek", "matchup", "gives"): {"p"},
     ("dek", "matchup", "takes"): {"p"},
@@ -777,13 +775,17 @@ def test_why_bank_branch_inventory_and_slots():
 def test_why_bank_side_words_follow_the_branch():
     """A bet-relative form branch implies one side (above_for and below_against are
     Overs), so its prose may name that side, never the other. Matchup branches read
-    the defense, true on either side, so they name neither."""
+    the defense, true on either side, so they name neither. The dek carries no
+    against branch: a story's dek never argues against its own bet."""
     bank = why_bank()
     over_branches = {"above_for", "below_against"}
+    assert set(bank["dek"]["form"]) == {"above_for", "below_for", "at_line"}
     for section in ("why", "dek"):
-        for branch in ("above_for", "above_against", "below_for", "below_against"):
+        for branch, variants in bank[section]["form"].items():
+            if branch == "at_line":
+                continue
             wrong_side = _UNDER_WORD_RE if branch in over_branches else _OVER_WORD_RE
-            for variant in bank[section]["form"][branch]:
+            for variant in variants:
                 assert not wrong_side.search(variant), (section, branch, variant)
         for branch, variants in bank[section]["matchup"].items():
             for variant in variants:
