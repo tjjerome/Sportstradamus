@@ -304,7 +304,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Family build — count wall + shape-bound | **Both families BUILT + wired end-to-end** (§6.6): Double Poisson (`DPO`) in the count sweep (`ZINB ∪ NegBin ∪ DPO`, 16 corners/cell) and centered-SN behind the `sn_param` axis (SkewNormal 24 corners/cell); full-cohort screen routes 15 DP-mandatory / 8 hurdle / 18 plain-NB of 41 count cells. The pilots have reported and both families ship; derive which cells from `stat_meta.json` (`dist: DPO`; `sn_param: centered` on a SkewNormal cell). SHASH stays unbuilt (§6.6 build order, step 3) | R1/R2 briefs; §6.6 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — the hurdle engages only where a cell pins `zinb_mode: hurdle` on `dist: ZINB` (`use_hurdle` in `pipeline.train_market`); the field is inert on a NegBin or DPO cell. Derive the cell list from `stat_meta.json` | refs §4 |
 | Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A). **Killed for the NFL star lean as built**: it is fit on outcome-trimmed validation rows, so it deepens that lean (+0.037 → +0.069 in simulation); re-test only after lever T | refs §8; [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md) |
-| Outcome-blind matrix trim (lever T: drop the `Result` quantile band in `training/data.py:trim_matrix`, make `_balance_over_under` outcome-blind) | **Research-gated GO for NFL, owner yes pending** — the band deletes unquoted star games above the 95th percentile (truncation bias); 43 served cells across five leagues are capped. Acceptance, kill triggers and dates in the NFL brief | [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); brief `~/backups/sportstradamus/2026-10-16-under-lean/part2/researcher_star_lean.md` |
+| Outcome-blind matrix trim (lever T: the `Result` quantile band and `_balance_over_under` removed from `training/data.py:trim_matrix`) | **Built 2026-10-17 on `lever-t`, owner yes pending before `devel`; per-league verdicts pending** — the band deleted unquoted star games above the 95th percentile (truncation bias); 43 served cells across five leagues are capped. Acceptance, kill triggers and dates in the NFL brief | [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); brief `~/backups/sportstradamus/2026-10-16-under-lean/part2/researcher_star_lean.md` |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
 | Post-hoc scale/dispersion (joint `(c, skew_cal)` vs PIT-KS) | **Shipped** — route 1a-hybrid; Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells) | §6.1 Rung B |
 | Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt — narrowed** (§6.3 M-1). Pilots WNBA STL + NBA PF; NFL volume cells are **not** feature-starved (485 candidate cols) — their negative BSS is target-shape, not features, so NFL runs 1–2 falsification pilots only, routing the rest to §6.6/§6.1 | `[[nfl_volume_cells_feature_mature]]` |
@@ -1898,10 +1898,10 @@ justification to `.claude/.state/research_waiver`.
   find the live-soak demotion criterion misaligned with app-line profit; the finding is a decision
   packet against `graduation.py`, never a session edit (§4, 2026-06-10).
 
-- **#13 — Outcome-selected training and test rows (the matrix trim): research-gated GO for NFL,
-  2026-10-17.** `training/data.py:trim_matrix` keeps a new unquoted row only inside the matrix's
-  5–95 % `Result` band (quoted rows exempt), so stars' big games leave both the training and the
-  test rows: truncation bias that no gate or post-hoc corrector can see, because they grade
+- **#13 — Outcome-selected training and test rows (the matrix trim): lever T built 2026-10-17 on
+  `lever-t`, verdicts pending.** Until then `training/data.py:trim_matrix` kept a new unquoted row
+  only inside the matrix's 5–95 % `Result` band (quoted rows exempt), so stars' big games left
+  both the training and the test rows: truncation bias that no gate or post-hoc corrector can see, because they grade
   against the trimmed outcomes. 43 served cells across five leagues are capped (NFL 14, NBA 13,
   NHL 9, WNBA 5, MLB 2); the program-wide under-dispersion may be partly manufactured by it (test
   with g4 PIT on quoted against unquoted rows). Lever T, its acceptance, kill triggers and dates:

@@ -384,7 +384,7 @@ on every board and need nothing. Interceptions is the owner's lowest-priority ce
    rows only; re-trimming the current caches with nothing new returns them unchanged (fantasy
    prizepicks was −859 a pass, receptions −273, NBA PTS −17; tds still gives back 60 rows to the
    floor-bounded balancing above 20,000, by design). Golden pin
-   `tests/golden/test_trim_matrix_retrim.py`. The rows already lost return only with a rebuild;
+   `tests/golden/test_trim_matrix.py`. The rows already lost return only with a rebuild;
    none was run.
 3. **Combo quote history — a monthly job buys it from each credit cycle's leftover.** Owner's call
    of 2026-10-09. The hole is the same on dev and on prod: sportsbook quotes for the two combos
@@ -641,12 +641,13 @@ shared code: 43 served cells across five leagues are capped (NFL 14, NBA 13, NHL
 2; NBA FTM 97 % unquoted with a cap of 6 against 15.18, NHL hits 4 against 8); the NHL `hits`
 star under-read and the WNBA lean fit the same mechanism (inferred, untested).
 
-**Proposal: lever T, outcome-blind trimming, NFL first.** Owner says yes before it reaches
-`devel`. Remove the `Result` quantile band from `trim_matrix`; make `_balance_over_under`
-outcome-blind (it drops rows by the `MeanYr`-weighted over/under rate and drops pushes; with the
-trimmed rows back, targets and yards pass the 20,000-row floor and their unquoted over-rates,
-targets 0.528 against 0.437, would make the balancing delete star Over games); keep the line clip
-and the line balancing. About 20 lines in one shared function. Every NFL cell retrains, because
+**Lever T, outcome-blind trimming: built 2026-10-17 on branch `lever-t`; the owner's yes comes
+before it reaches `devel`.** `trim_matrix` lost the `Result` quantile band and
+`_balance_over_under` (every line of it read the outcome: the `MeanYr`-weighted over/under rate
+and the push drop; with the trimmed rows back, targets and yards pass the 20,000-row floor and
+their unquoted over-rates, targets 0.528 against 0.437, would have made it delete star Over
+games); the line clip and the line balancing stay. Pinned by `tests/golden/test_trim_matrix.py`.
+Every NFL cell retrains, because
 the rebuild is league-wide; the expected movers are targets, yards, both fantasy cells, receiving
 and rushing yards, receptions and carries. Retrain: the NFL cold rebuild per
 [docs/MODEL_LIFECYCLE.md](../MODEL_LIFECYCLE.md) § Rebuilding (6 to 10 h), then

@@ -8,12 +8,7 @@ import pandas as pd
 from sportstradamus.helpers.training_quotes import SYNTHETIC
 from sportstradamus.stats.base import SEASON_MAX_DAYS
 
-# Quantile bounds for outlier removal on raw results.  Bottom and top 5%
-# are trimmed to eliminate data-entry errors and near-impossible outcomes.
-_RESULT_OUTLIER_LOW: float = 0.05
-_RESULT_OUTLIER_HIGH: float = 0.95
-
-# Same bounds applied to the line distribution when archived data is sparse.
+# Quantile bounds for the line clip when archived data is sparse.
 _LINE_CLIP_LOW: float = 0.05
 _LINE_CLIP_HIGH: float = 0.95
 
@@ -25,20 +20,17 @@ _MIN_ARCHIVED_FOR_CLIP: int = 50
 _MIN_ARCHIVED_FRACTION_FOR_CLIP: float = 0.10
 
 # Minimum archived rows required before an archived-derived line target is trusted
-# over the full-data fallback: overall median, over/under balancing, per-position
-# median, and the archived over-rate target respectively.
+# over the full-data fallback: overall median and per-position median respectively.
 _MIN_ARCHIVED_FOR_MEDIAN_LINE: int = 5
-_MIN_ARCHIVED_FOR_BALANCE: int = 10
 _MIN_POS_ARCHIVED_FOR_MEDIAN: int = 20
-_MIN_ARCHIVED_FOR_OVER_TARGET: int = 20
 
 # Minimum reference-set size before histogram-matching weights are trusted;
 # below this the reference is treated as empty and uniform weights are used.
 _MIN_HISTOGRAM_REFERENCE: int = 20
 
 # Rides through trim_matrix marking the rows appended since the matrix was last trimmed. Cached
-# rows already survived the Result band, the line clip and the push drop when they were new;
-# re-applying those steps to them cut a fresh slice of the unquoted tail on every append.
+# rows were clipped when they were new; re-clipping them against bounds that move with the
+# population cut a fresh slice of the unquoted tail on every append.
 _NEW_ROW_COLUMN: str = "__NewRow"
 
 
@@ -137,45 +129,6 @@ def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows, rng):
     return M
 
 
-def _balance_over_under(M: pd.DataFrame, min_rows: int, rng) -> pd.DataFrame:
-    pushes = M.loc[M["Result"] == M["Line"]].copy()
-    push_rate = pushes["Archived"].sum() / M["Archived"].sum()
-    M = M.loc[M["Result"] != M["Line"]].copy()
-
-    archived_no_push = M["Archived"] == 1
-    if archived_no_push.sum() >= _MIN_ARCHIVED_FOR_OVER_TARGET:
-        target = (M.loc[archived_no_push, "Result"] > M.loc[archived_no_push, "Line"]).mean()
-    else:
-        target = (M["Result"] > M["Line"]).mean()
-
-    balance = (M["Result"] > M["Line"]).mean()
-    budget = max(len(M) - min_rows, 0)
-    n = min(2 * int(np.abs(target - balance) * len(M)), budget)
-
-    if n > 0:
-        if balance < target:
-            chopping_block = M.loc[(M["Archived"] != 1) & (M["Result"] < M["Line"])].index
-            p = (1 / M.loc[chopping_block, "MeanYr"].clip(0.1)).to_numpy()
-            p = p / np.sum(p)
-        else:
-            chopping_block = M.loc[(M["Archived"] != 1) & (M["Result"] > M["Line"])].index
-            p = (M.loc[chopping_block, "MeanYr"].clip(0.1)).to_numpy()
-            p = p / np.sum(p)
-
-        n = min(n, len(chopping_block))
-        cut = rng.choice(chopping_block, n, replace=False, p=p)
-        M.drop(cut, inplace=True)
-
-    n = int(push_rate * len(M)) - pushes["Archived"].sum()
-    chopping_block = pushes.loc[(pushes["Archived"] == 0) & pushes[_NEW_ROW_COLUMN]].index
-    n = np.clip(n, None, len(chopping_block))
-    if n > 0:
-        cut = rng.choice(chopping_block, n, replace=False)
-        pushes.drop(cut, inplace=True)
-
-    return pd.concat([M, pushes]).sort_values("Date")
-
-
 def trim_matrix(
     M: pd.DataFrame,
     min_rows: int = 7500,
@@ -183,17 +136,16 @@ def trim_matrix(
     *,
     new_rows: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Remove data quality issues and prepare matrix for modeling.
+    """Clip lines to the market's range and balance the line distribution across positions.
 
-    Trims outlier results, clips lines to a realistic range, balances
-    the line distribution across positions, and balances over/under
-    proportions.  All removal steps respect min_rows so that sparse-
-    archive markets are not destroyed.
+    Every step reads the line, never the outcome: selecting rows on ``Result`` truncated the
+    unquoted tail (stars' big games) and biased the fit (nfl-ship15-recovery.md §11). The
+    balancing respects ``min_rows`` so sparse-archive markets are not destroyed.
 
     ``new_rows`` is a boolean mask over ``M.index`` marking the rows appended since the
-    matrix was last trimmed (``None``: every row). The outlier trim, the line clip and the
-    push drop apply only to those rows, so re-trimming a cached matrix with nothing new
-    returns it unchanged; the two balancing steps still see every row.
+    matrix was last trimmed (``None``: every row). The line clip applies only to those rows,
+    so re-trimming a cached matrix with nothing new returns it unchanged; the balancing still
+    sees every row.
     """
     warnings.simplefilter("ignore", UserWarning)
     M = M.assign(**{_NEW_ROW_COLUMN: True if new_rows is None else new_rows})
@@ -206,15 +158,6 @@ def trim_matrix(
         rng = np.random.default_rng(seed)
 
     M = _rebase_days_into_season(M)
-
-    M = M.loc[
-        (
-            (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
-            & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
-        )
-        | (M["Archived"] == 1)
-        | ~M[_NEW_ROW_COLUMN]
-    ].copy()
 
     archived_mask = M["Archived"] == 1
     n_archived = archived_mask.sum()
@@ -236,8 +179,4 @@ def trim_matrix(
             M, pd.Series(True, index=M.index), archived_mask, overall_target, min_rows, rng
         )
 
-    if n_archived >= _MIN_ARCHIVED_FOR_BALANCE:
-        M = _balance_over_under(M, min_rows, rng)
-    else:
-        M = M.sort_values("Date")
-    return M.drop(columns=_NEW_ROW_COLUMN)
+    return M.sort_values("Date").drop(columns=_NEW_ROW_COLUMN)

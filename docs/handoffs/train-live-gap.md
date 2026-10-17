@@ -5,8 +5,8 @@
 [nfl-ship15-recovery.md](nfl-ship15-recovery.md) §11 (lever T's acceptance and kill triggers),
 [MODEL_LIFECYCLE.md](../MODEL_LIFECYCLE.md) § Rebuilding a league's matrices from scratch, memory
 notes `research_verdicts_ledger`, `nfl_star_lean_bookless_cells`, `nfl_cold_matrix_rebuild_blocked`.
-Opened 2026-10-17: why are training metrics and realized profits so far apart? The next session
-builds lever T (§2, §4 step 1).
+Opened 2026-10-17: why are training metrics and realized profits so far apart? Lever T is built
+on branch `lever-t` (2026-10-17); §4 carries the program state.
 
 ## 1. Measured
 
@@ -60,6 +60,9 @@ leg; no model-free engine.
    to A5 and kill triggers K1 to K3 are in nfl-ship15 §11; A1 is
    `tests/diagnostics/test_star_lean.py` from xfail to XPASS. The retrained models wait for the
    owner's yes before `devel` and production. Then the other leagues, each at its own rebuild.
+   State 2026-10-17: built on `lever-t` (`tests/golden/test_trim_matrix.py` pins it); one cold
+   rebuild and one retrain each for NFL, NBA and NHL this weekend; WNBA and MLB at their 2027
+   preseason.
 2. Make the offline gate population the live one: a per-cell selected-tail column (read minus hit,
    day-block interval) in `model_stats.parquet`, read by the sweep's selection and by
    `ship graduation`. Pre-register its bar.
