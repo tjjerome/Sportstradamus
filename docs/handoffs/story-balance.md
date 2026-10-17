@@ -6,8 +6,9 @@
 [docs/archive/researcher_selection_shrink.md](../archive/researcher_selection_shrink.md).
 Status: OPEN — every workstream is live on `devel`; the lead rule of §5 and the Tonight card without
 its side arrow landed 2026-10-10; the dek about the lead's own leg, with no clause against its bet,
-landed 2026-10-17 (`STORIES_VERSION` p6). The live read is §7; the measured after-numbers, the
-options for what a lead rule cannot reach and the side-rule record are in §11.
+landed 2026-10-17 (`STORIES_VERSION` p6), and so did the owner's two rules of 2026-10-17: the story
+floor at 0.03 and an Over lead only in a shootout or a blowout (§5, §11). The live read is §7; the
+measured boards, the option still open and the side-rule record are in §11.
 
 ## 1. Mission & money logic
 
@@ -41,16 +42,21 @@ CLV carried an extra Under sign flip (390k stored rows wrong-signed); Gate 2 dem
 precision only while 52% of Under history rows were never posted on the platform yet counted. All
 four are fixed (§4). The model lever the brief would have justified was researched and **killed** (§6).
 So the lane's money logic is: stop lying to the owner, stop ranking −EV and deep-alt legs first, and
-let the stories balance by construction at the unchanged 0.05 edge floor rather than by pretending
-the Overs are better than they are.
+let the stories balance by construction at the story floor (0.05 then, 0.03 since 2026-10-17) rather
+than by pretending the Overs are better than they are.
 
 ## 2. Locked decisions (owner)
 
 - Model scope: diagnostic + guardrails now; the selection lever research-gated (it was, and it died).
-- Balance: Over leads fill toward half of each date's games (§5), at the unchanged
-  `_MENU_EDGE_FLOOR` (0.05); the top-EV story stays in the menu, often behind the led ones (median
-  cost ≈ 0.05 EV on the first slate; accepted). The rule chooses which story leads a game. It does
-  not change the legs inside stories: that pool is the models', and no balanced leg mix is promised.
+- Balance: Over leads fill toward half of each date's games (§5) at `_MENU_EDGE_FLOOR`, 0.03 since
+  2026-10-17 (0.05 before; the Receipts and paper-ledger cohort floor `RECOMMENDED_EDGE_MIN` stays at
+  0.05, so a story leg can be bettable only); the top-EV story stays in the menu, often behind the
+  led ones (median cost ≈ 0.05 EV on the first slate; accepted). The rule chooses which story leads a
+  game. It does not change the legs inside stories: that pool is the models', and no balanced leg mix
+  is promised.
+- An Over leads a game only when its script is a shootout or a blowout (`lead.OVER_LEAD_SHAPES`,
+  owner 2026-10-17): a grind, a coinflip or an unquoted game leads on its Under, and its Over legs
+  ride only in unled stories, so a story never sells an Over against its own game read.
 - Tonight shows the lead story's headline with no side mark. Where the two platforms lead a game on
   different sides, the card takes the higher-EV lead.
 - Star: computed prominence from the snapshot alone (`Star` = rank-1 depth label + line percentile +
@@ -97,6 +103,7 @@ EOF
 | `6fc2dbd4` … `c1354dfe`, `0450274f` | all five voice banks rewritten to the live-analyst register; `STORIES_VERSION` p5 (every persisted headline reshuffles once; `user_slips` headlines stay frozen); density pins in `test_bank_coverage.py` | every headline |
 | `eea99c05` | `why.story_dek` anchors a led story's dek on the lead's own leg (an unled story keeps the highest-conviction leg) | story deks |
 | `6792d763` | the dek says a form or matchup read only when it backs the lead's bet; the two `dek.form` against branches leave the bank; `STORIES_VERSION` p6 | story deks |
+| `9a0ea6bb` | `_MENU_EDGE_FLOOR` 0.05 → 0.03 (option B, §11) with `RECOMMENDED_EDGE_MIN` staying 0.05; `lead_seeds` takes the game's shape, so an Over seed comes only in a shootout or a blowout (`OVER_LEAD_SHAPES`, §5) | story legs, Over-led stories, leads, Tonight |
 
 Untouched on purpose: `strategies/profit_sim.py`, `strategies/_ledger_*.py` (sim-bettor lane),
 `analysis._add_kelly_columns` and the flat −110 grading in Receipts — both since fixed by the
@@ -106,8 +113,11 @@ honest-receipts lane ([honest-receipts.md](honest-receipts.md): Kelly at the pla
 ## 5. How the balance works
 
 `attach_prominence` scores every offer row once per `prophecize`. In the menu, `_strong_legs` keeps
-legs with `Model EV − 1 ≥ 0.05` **and** `Kelly > 0` (so no −EV leg and no payout above 2.5× can seed
-or join a story). `lead_seeds` picks, per side, the strong leg with the highest `(Star, Model EV)`.
+legs with `Model EV − 1 ≥ 0.03` **and** `Kelly > 0` (so no −EV leg and no payout above 2.5× can seed
+or join a story). `lead_seeds` picks, per side, the strong leg with the highest `(Star, Model EV)`;
+the Over seed exists only when the game's shape (`GameCtx.shape`, from the league-relative total and
+the moneyline margin) is `shootout` or `blowout`, so a grind, a coinflip or an unquoted game has no
+Over-led story and its Over legs ride only in unled ones.
 The Over-led cluster grows first, then the Under-led one, then the old greedy clusters; a lead whose
 cluster prices nothing borrows one leg and is priced once more. `_best_subsets` only enumerates
 subsets containing the lead, so Builder and Moon stay true argmaxes with the lead inside. Led stories
@@ -180,7 +190,7 @@ leads.insert(0, "games", s.groupby("Date")["Game"].nunique())
 print(leads.to_string())
 legs = pd.DataFrame([dict(l, story=r.story_id) for r in s.itertuples() for l in r.legs])
 edge = legs["win_prob"] * platform_payout(legs["boost"], legs["platform"]) - 1
-print("story legs below the floor or with Kelly <= 0:", int(((edge < 0.05) | (legs["kelly"] <= 0)).sum()), "(want 0)")
+print("story legs below the floor or with Kelly <= 0:", int(((edge < 0.03) | (legs["kelly"] <= 0)).sum()), "(want 0)")
 print("-EV offers with Kelly > 0:", int(((o["Model EV"] < 1) & (o["Kelly"] > 0)).sum()), "| payout > 2.5 with Kelly > 0:",
       int(((platform_payout(o["Boost"], o["Platform"]) > 2.5) & (o["Kelly"] > 0)).sum()), "(want 0, 0)")
 r = pd.read_parquet(R + "realized_by_side.parquet")
@@ -264,9 +274,7 @@ Open questions the data could not settle:
 
 1. Decide on the Gate-2 demotions in §8 (keep the symmetric rule, or revert `a6d96fd8`).
 2. The no-lead Tonight card (§11, option A): yes or no.
-3. The lower story floor (§11, option B): no is the recommendation; a yes names 0.03 or 0.0 and
-   whether the Receipts "recommended" floor moves with it.
-4. The star-lean lever: [nfl-ship15-recovery.md](nfl-ship15-recovery.md) §11 names the lever, the
+3. The star-lean lever: [nfl-ship15-recovery.md](nfl-ship15-recovery.md) §11 names the lever, the
    cells, the retrain and the date; one yes.
 
 ## 11. After the rule: measured boards, what a lead rule cannot reach, the side-rule record
@@ -321,11 +329,26 @@ the admitted legs run about two Unders per Over. Cost on production history (09-
 prop once, Kelly > 0, day-block CIs): the 0.03 to 0.05 band returned −8.7 % per pick [−13.0, −3.9]
 on 1,545 legs against −9.0 % [−12.8, −5.5] for today's ≥ 0.05 band on 4,648; its Overs alone
 −7.0 % [−17.8, +4.8] on 371. No band makes money, so the floor is not a money lever either way.
-Recipe: line 53 from 0.05 to 0.03 (or 0.0); two golden pins move with it
-(`test_story_menu.py::test_edge_floor_value_is_owner_locked`,
-`test_realized_by_side.py::test_recommended_edge_matches_the_story_menu_floor`), and
-`RECOMMENDED_EDGE_MIN` in `realized.py` must equal the floor, so the Receipts "recommended" cohort
-moves with it. Recommendation: no.
+Taken by the owner on 2026-10-17 at 0.03 (`9a0ea6bb`), with `RECOMMENDED_EDGE_MIN` left at 0.05 so
+the Receipts cohort and the paper ledger's even-pick bettor (its four-week read falls due about
+2026-11-02) keep one rule across the change; `test_realized_by_side.py` pins the split. Coupling
+them later is one constant plus a restored equality pin. In the same push the owner's shape rule
+landed (same commit, §5). Measured on the three saved boards (`replay_shape.py` and its output in
+`~/backups/sportstradamus/2026-10-16-under-lean/part4/`), saved board → both rules:
+
+| Board | Over-led headlines / menus | Games with no Over-led story | Tonight cards on an Over-led story | Over-led stories in a cold game (games) |
+|---|---|---|---|---|
+| 10-08 | 22 / 55 → 12 / 56 | 10 → 21 of 29 | 11 → 6 | 13 → 0 |
+| 10-15 | 24 / 50 → 17 / 52 | 7 → 17 of 29 | 15 → 9 | 11 → 0 |
+| 10-16 | 21 / 38 → 15 / 46 | 3 → 17 of 26 | 13 → 8 | 11 → 0 |
+
+The shape rule binds and the floor adds: at 0.03 alone the Over-led headlines would have risen to
+25 / 27 / 23, and the floor admits 10 / 14 / 16 Over legs and 28 / 33 / 45 Under legs below 0.05
+(three NHL games gain a story on 10-16, none Over-led). Under both rules an Over leads 8 of the
+11, 12 of the 14 and all 9 hot-shaped games (shootout or blowout) and none of the rest, so the
+Over-led share of menus falls from 40–55 % to 21–33 %; the EV the headline gives up falls with it
+(mean 0.09 / 0.16 / 0.08 → 0.03 / 0.05 / 0.04). Most menus reshuffle (39 of 55, 39 of 50,
+32 of 38) because the admitted legs change the clusters.
 
 **Record, not a task: `offer_index` keys.** `legs.offer_index` keys on (player, side, line) with no
 market. Lead keys matching two or more markets: 27 / 22 / 14 on the three boards, with the lead's
