@@ -2297,6 +2297,7 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
             "SkewNormal",
             sigma=decoded["sn_sigma_test"],
             skew_alpha=decoded["sn_alpha_test"],
+            step=step,
             gate=gate_test,
         )
     elif dist == "Mixture":

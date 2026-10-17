@@ -18,6 +18,7 @@ from scipy import stats
 from sportstradamus.prediction.model_prob import _apply_cdf_recal_over
 from sportstradamus.training import pipeline, posthoc
 from sportstradamus.training.pipeline import (
+    _build_y_proba_raw,
     _step_calibrate_dispersion,
     _step_calibrate_temperature,
     _step_compute_test_probabilities,
@@ -268,4 +269,11 @@ def test_skewnormal_probabilities_price_pushes_at_the_cell_step(monkeypatch):
     monkeypatch.setattr(pipeline, "get_odds", recording_get_odds)
     _step_compute_test_probabilities(fused, calibrated, splits, {}, "SkewNormal", 0.5)
     _step_calibrate_temperature(fused, calibrated, splits, {}, "SkewNormal", 0.5)
-    assert steps_seen == [0.5, 0.5]
+    decoded = {
+        "ev": fused["weighted_mean"],
+        "gate_test": fused["gate_blend_test"],
+        "sn_sigma_test": base["sn_sigma_blend_test"],
+        "sn_alpha_test": base["sn_alpha_blend_test"],
+    }
+    _build_y_proba_raw(splits["B_test"], decoded, "SkewNormal", 0.5)
+    assert steps_seen == [0.5, 0.5, 0.5]
