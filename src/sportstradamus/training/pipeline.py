@@ -3167,6 +3167,7 @@ def _step_compute_test_probabilities(
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_test"],
             skew_alpha=calibrated["sn_alpha_blend_test"],
+            step=step,
             gate=fused["gate_blend_test"],
         )
     elif dist == "Mixture":
@@ -3220,6 +3221,7 @@ def _step_calibrate_temperature(
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_val"],
             skew_alpha=calibrated["sn_alpha_blend_val"],
+            step=step,
             gate=fused["gate_blend_val"],
         )
     elif dist == "Mixture":
