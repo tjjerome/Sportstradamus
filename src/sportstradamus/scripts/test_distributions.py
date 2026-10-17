@@ -220,8 +220,10 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
 
     over_probs = 1 - under_probs
     pred_over = (over_probs > 0.5).astype(int)
-    actual_over = (y_true >= lines).astype(int)
-    conf_mask = np.maximum(under_probs, over_probs) > 0.54
+    actual_over = (y_true > lines).astype(int)
+    # A result on the line pushes: neither an Over nor an Under, so it leaves the graded rows
+    # the way training's accuracy column uses settled rows only.
+    conf_mask = (np.maximum(under_probs, over_probs) > 0.54) & (y_true != lines)
 
     if conf_mask.sum() > 10:
         results["accuracy"] = float(np.mean(pred_over[conf_mask] == actual_over[conf_mask]))

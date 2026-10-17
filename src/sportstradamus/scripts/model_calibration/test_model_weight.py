@@ -133,6 +133,29 @@ def fit_dispersion_on_raw_model(data):
     return c_opt, d
 
 
+def _accuracy(under, data):
+    """Directional accuracy on the confident settled rows, and the share of rows graded.
+
+    A result on the line pushes: neither an Over nor an Under, so it leaves the graded
+    rows the way training's accuracy column uses settled rows only.
+    """
+    under = np.clip(under, 0, 1)
+    over = 1 - under
+    y_class = (data["result"] > data["line"]).astype(int)
+    y_pred = (over > 0.5).astype(int)
+    mask = (np.maximum(over, under) > 0.54) & (data["result"] != data["line"])
+    acc = np.mean(y_class[mask] == y_pred[mask]) if mask.sum() > 0 else np.nan
+    return acc, mask.mean()
+
+
+def _brier(under, data):
+    """Brier score of P(over) on the settled rows; a push is dropped, not scored as 0 or 1."""
+    settled = data["result"] != data["line"]
+    over = 1 - np.clip(under, 0, 1)
+    y_class = (data["result"] > data["line"]).astype(float)
+    return np.mean((over[settled] - y_class[settled]) ** 2)
+
+
 def eval_accuracy(w, data, use_dispersion_cal=False):
     """Compute accuracy at a given model weight."""
     dist = data["dist"]
@@ -160,13 +183,7 @@ def eval_accuracy(w, data, use_dispersion_cal=False):
         weighted_mean = alpha_blend / beta_blend
         under = get_odds(data["line"], weighted_mean, dist, alpha=alpha_blend, gate=gate_blend)
 
-    under = np.clip(under, 0, 1)
-    over = 1 - under
-    y_class = (data["result"] >= data["line"]).astype(int)
-    y_pred = (over > 0.5).astype(int)
-    mask = np.maximum(over, under) > 0.54
-    acc = np.mean(y_class[mask] == y_pred[mask]) if mask.sum() > 0 else np.nan
-    return acc, mask.mean()
+    return _accuracy(under, data)
 
 
 def objective_nll(w, data, clamp=-20):
@@ -296,10 +313,7 @@ def objective_brier(w, data):
         weighted_mean = alpha_blend / beta_blend
         under = get_odds(data["line"], weighted_mean, dist, alpha=alpha_blend, gate=gate_blend)
 
-    under = np.clip(under, 0, 1)
-    over = 1 - under
-    y_class = (data["result"] >= data["line"]).astype(float)
-    return np.mean((over - y_class) ** 2)
+    return _brier(under, data)
 
 
 def sweep_weights(data, objectives, w_range=np.linspace(0.05, 0.9, 50)):
@@ -380,13 +394,7 @@ def eval_accuracy_2w(w_mean, w_shape, data):
             )
         under = get_odds(data["line"], blended_mean, dist, alpha=blended_alpha, gate=gate_blend)
 
-    under = np.clip(under, 0, 1)
-    over = 1 - under
-    y_class = (data["result"] >= data["line"]).astype(int)
-    y_pred = (over > 0.5).astype(int)
-    mask = np.maximum(over, under) > 0.54
-    acc = np.mean(y_class[mask] == y_pred[mask]) if mask.sum() > 0 else np.nan
-    return acc, mask.mean()
+    return _accuracy(under, data)
 
 
 def objective_brier_2w(params, data):
@@ -427,10 +435,7 @@ def objective_brier_2w(params, data):
             )
         under = get_odds(data["line"], blended_mean, dist, alpha=blended_alpha, gate=gate_blend)
 
-    under = np.clip(under, 0, 1)
-    over = 1 - under
-    y_class = (data["result"] >= data["line"]).astype(float)
-    return np.mean((over - y_class) ** 2)
+    return _brier(under, data)
 
 
 def objective_nll_2w(params, data, clamp=-20):
