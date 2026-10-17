@@ -66,17 +66,16 @@ def test_nfl_top_line_quartile_under_read_matches_outcomes():
     # Message only: today's gap CI holds 0, so a CI clause could never fail.
     days = top.groupby("Date")[["resid", "one", "Blended_EV", "Result"]].sum().to_numpy()
     picks = np.random.default_rng(7).integers(0, len(days), (N_BOOT, len(days)))
-    boot = days[picks].sum(axis=1)
-    gap_lo, gap_hi = np.percentile(boot[:, 0] / boot[:, 1], [2.5, 97.5])
-    ratio_lo, ratio_hi = np.percentile(boot[:, 2] / boot[:, 3], [2.5, 97.5])
+    resid, count, ev, out = days[picks].sum(axis=1).T
+    gap_lo, gap_hi = np.percentile(resid / count, [2.5, 97.5])
+    ratio_lo, ratio_hi = np.percentile(ev / out, [2.5, 97.5])
     cells = top.groupby("cell").agg(
         n=("resid", "size"), gap=("resid", "mean"), ev=("Blended_EV", "sum"), out=("Result", "sum")
     )
     cells["ratio"] = cells["ev"] / cells["out"]
-    message = (
+    assert gap <= MAX_GAP and ratio >= MIN_RATIO, (
         f"top-tier gap {gap:+.3f} [{gap_lo:+.3f}, {gap_hi:+.3f}] (max {MAX_GAP:+.3f}); "
         f"ratio {ratio:.3f} [{ratio_lo:.3f}, {ratio_hi:.3f}] (min {MIN_RATIO:.2f}); "
         f"{len(top)} rows over {dates} dates; day-block 95 % CIs\n"
         + cells[["n", "gap", "ratio"]].round(3).to_string()
     )
-    assert gap <= MAX_GAP and ratio >= MIN_RATIO, message
