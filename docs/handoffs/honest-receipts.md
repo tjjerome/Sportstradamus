@@ -413,8 +413,10 @@ Three grading rules the cleanup pass's style review found, none reached today:
 `analysis._resolve_leg` grades a leg whose realized value is NaN as a hit (no NaN sits in the
 78 served market columns of the training box's gamelogs); a `" vs. "` parlay leg is graded on
 the sum of its two players where its offer row is graded on their difference (no matchup offer
-is scraped); and `underdog_pickem._parlay_shrinkage` gives a parlay whose legs all lack a cell
-mapping full trust, where Kelly's own no-evidence case gets 0.01.
+is scraped); and, until 2026-10-17 (`train-live-gap-tools`), `underdog_pickem._parlay_shrinkage`
+gave a parlay whose legs all lack a cell mapping full trust, `clv.get_segment_calibration` gave a
+segment under 20 legs full trust, and the slip builder gave a slip with no `model_stats` cell full
+trust; all three now size on Kelly's no-evidence prior (0.01).
 
 ## 5. Research program (three briefs, `research-analyst`, model opus, read-only)
 
