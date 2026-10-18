@@ -476,17 +476,21 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
     league and overall beside the live gap over the same window, then the information test,
     and writes every scope and split to OUT and one row per cell to PARQUET.
     """
+    paths = sorted(
+        path
+        for path in TEST_SETS_DIR.glob("*.csv")
+        if not leagues or path.stem.split("_", 1)[0] in leagues
+    )
+    if not paths:
+        raise click.BadParameter(
+            f"no test set for league {', '.join(leagues) or '(any)'}", param_hint="--league"
+        )
     con = open_archive(archive)
     first_rung_date = con.execute(
         "SELECT min(game_date) FROM ladder WHERE list_contains($platforms, book)",
         {"platforms": list(SCORED_PLATFORMS)},
     ).fetchone()[0]
     start = str(first_rung_date)
-    paths = sorted(
-        path
-        for path in TEST_SETS_DIR.glob("*.csv")
-        if not leagues or path.stem.split("_", 1)[0] in leagues
-    )
     priced, knobs, cells, informative, excluded = [], {}, [], [], {}
     for path in tqdm(paths, desc="pricing cells"):
         try:

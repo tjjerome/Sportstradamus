@@ -749,3 +749,21 @@ def test_a_league_with_every_cell_excluded_reports_the_exclusions_and_exits_clea
         ["cell", "NBA_zzz", "excluded", "no model pickle"]
     ]
     assert not parquet.exists()
+
+
+def test_a_league_filter_that_matches_no_test_set_is_a_usage_error(tmp_path, monkeypatch):
+    """`--league mlb` (test sets are `MLB_*.csv`) must fail loud, not write an empty CSV."""
+    test_sets = tmp_path / "test_sets"
+    test_sets.mkdir()
+    (test_sets / "NBA_zzz.csv").write_text("Player,Date,Line,Result,P\n")
+    monkeypatch.setattr("sportstradamus.scripts.tail_scorecard.TEST_SETS_DIR", test_sets)
+    archive = tmp_path / "archive.duckdb"
+    archive.write_bytes(b"")
+
+    result = CliRunner().invoke(
+        main, ["--league", "nba", "--archive", str(archive), "--out", str(tmp_path / "out.csv")]
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "no test set for league nba" in result.output
+    assert not (tmp_path / "out.csv").exists()
