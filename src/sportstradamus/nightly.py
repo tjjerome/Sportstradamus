@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import clv, data
+from sportstradamus import clv, data, realized
 from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
@@ -52,12 +52,7 @@ from sportstradamus.helpers.io import (
     write_user_slips,
 )
 from sportstradamus.helpers.parlay_modifiers import fold_overlay
-from sportstradamus.realized import (
-    calibration_summary,
-    compute_realized_by_side,
-    settled_offers,
-    window,
-)
+from sportstradamus.realized import calibration_summary, compute_realized_by_side, settled_offers
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
 from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
@@ -446,7 +441,7 @@ def recommended_gap_by_cell(
         qualifies.
     """
     now_ts = pd.Timestamp(now).tz_localize(None)
-    recent = window(offers, window_days, now_ts)
+    recent = realized.window(offers, window_days, now_ts)
     recent = recent[recent["Recommended"]]
     rows = []
     for (league, market), cell in recent.groupby(["League", "Market"]):

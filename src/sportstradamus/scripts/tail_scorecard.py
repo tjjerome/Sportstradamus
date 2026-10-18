@@ -27,7 +27,6 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import logging
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -382,7 +381,7 @@ def _cell_sidecar(
     sidecar = rows[_HEADLINE_COLUMNS].rename(columns=_SIDECAR_RENAMES).merge(identity, on="key")
     sidecar = sidecar.assign(
         model_version=[knobs[cell]["model_version"] for cell in sidecar["key"]],
-        computed_at=pd.Timestamp(datetime.now(UTC)).tz_localize(None),
+        computed_at=pd.Timestamp.now("UTC").tz_localize(None),
         window_start=start,
     )
     return sidecar[_SIDECAR_COLUMNS].astype(_SIDECAR_DTYPES)
