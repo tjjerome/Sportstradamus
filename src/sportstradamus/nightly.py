@@ -7,7 +7,8 @@ Runs after games finish to:
 4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
-7. Persist the realized-by-side, profit-sim and calibration summaries; fold the modifier overlay
+7. Persist the realized-by-side, live-gap, profit-sim and calibration summaries; fold the
+   modifier overlay
 
 Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
 ``docs/OPERATIONS.md``.
@@ -23,7 +24,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import clv, data
+from sportstradamus import clv, data, realized
 from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
@@ -37,6 +38,7 @@ from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
+    LIVE_GAP_PATH,
     LIVE_METRICS_PATH,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
@@ -53,6 +55,7 @@ from sportstradamus.helpers.parlay_modifiers import fold_overlay
 from sportstradamus.realized import calibration_summary, compute_realized_by_side, settled_offers
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
+from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
 
 logger = get_logger("reflect")
 
@@ -85,6 +88,29 @@ LIVE_METRICS_COLUMNS = (
     "profit_sim_yield",
     "profit_sim_kelly_yield",
 )
+# live_gap_per_cell.parquet, the live half of the selected-tail read
+# (docs/handoffs/train-live-gap.md): the recommended cohort's (read - hit) per cell.
+LIVE_GAP_COLUMNS = (
+    "league",
+    "market",
+    "computed_at",
+    "window_days",
+    "live_n",
+    "live_gap",
+    "live_gap_lo",
+    "live_gap_hi",
+)
+# Pinned so a run with nothing recommended writes the same parquet schema as a full one.
+_LIVE_GAP_DTYPES = {
+    "league": "object",
+    "market": "object",
+    "computed_at": "datetime64[ns]",
+    "window_days": "int16",
+    "live_n": "int64",
+    **dict.fromkeys(["live_gap", "live_gap_lo", "live_gap_hi"], "float64"),
+}
+# Fixed bootstrap seed: reruns on the same history print the same intervals.
+_LIVE_GAP_SEED = 0
 # Minimum offers needed in a window before _top_decile_mae returns a value;
 # below this, the top decile would be a single row and the metric is noise.
 _TOP_DECILE_MIN_OFFERS = 10
@@ -398,6 +424,50 @@ def _precompute_realized_by_side(history):
     )
 
 
+def recommended_gap_by_cell(
+    offers: pd.DataFrame, *, window_days: int, now: datetime, rng: np.random.Generator
+) -> pd.DataFrame:
+    """The recommended cohort's read minus hit per (league, market) over a trailing window.
+
+    Over the ``Recommended`` rows of ``realized.window(offers, window_days, now)``:
+    ``live_n`` counts them, ``live_gap`` is the mean of ``Win Prob - Hit`` (the chosen
+    side's read minus what happened, so positive reads high) and ``live_gap_lo`` /
+    ``live_gap_hi`` its 95% day-block bootstrap interval, resampling game dates whole so
+    one slate's shared swing is not counted as independent legs. A cell with no
+    recommended settled row in the window is absent. ``computed_at`` is ``now``, tz-naive.
+
+    Returns:
+        ``LIVE_GAP_COLUMNS`` in order, one row per cell; empty, same dtypes, when nothing
+        qualifies.
+    """
+    now_ts = pd.Timestamp(now).tz_localize(None)
+    recent = realized.window(offers, window_days, now_ts)
+    recent = recent[recent["Recommended"]]
+    rows = []
+    for (league, market), cell in recent.groupby(["League", "Market"]):
+        gap, lo, hi = _bootstrap_mean_ci_clustered(
+            (cell["Win Prob"] - cell["Hit"]).to_numpy(), cell["Date"].to_numpy(), rng
+        )
+        rows.append((league, market, now_ts, window_days, len(cell), gap, lo, hi))
+    return pd.DataFrame(rows, columns=LIVE_GAP_COLUMNS).astype(_LIVE_GAP_DTYPES)
+
+
+def _precompute_live_gap(history):
+    window_days = max(LIVE_METRICS_WINDOWS)
+    gaps = recommended_gap_by_cell(
+        settled_offers(history),
+        window_days=window_days,
+        now=datetime.now(UTC),
+        rng=np.random.default_rng(_LIVE_GAP_SEED),
+    )
+    _atomic_write_parquet(gaps, LIVE_GAP_PATH)
+    high, low = (gaps["live_gap_lo"] > 0).sum(), (gaps["live_gap_hi"] < 0).sum()
+    logger.info(
+        f"Live gap: wrote {len(gaps)} cell rows to {LIVE_GAP_PATH.name}; "
+        f"{window_days}d recommended read runs high in {high} cells, low in {low}"
+    )
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -431,6 +501,7 @@ def run(league, skip_update, history_only, log_level):
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
     _warn_calibration_divergence(metrics)
     _precompute_realized_by_side(history)
+    _precompute_live_gap(history)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)

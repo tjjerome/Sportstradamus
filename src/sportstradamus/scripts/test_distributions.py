@@ -14,7 +14,7 @@ Preprocessing:
 Metrics:
 - NLL on test set (absolute space)
 - ev_meanyr_corr vs result_meanyr_corr (compression diagnostic)
-- Accuracy / Over% at >0.54 confidence
+- Accuracy / Over% on rows where the likelier side beats CONFIDENCE_CUTOFF (ties excluded)
 """
 
 import json
@@ -31,7 +31,7 @@ from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.model import LightGBMLSS
 from scipy.special import logit
 from scipy.stats import gamma as gamma_dist
-from scipy.stats import lognorm, nbinom
+from scipy.stats import lognorm, nbinom, skewnorm
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
@@ -79,6 +79,12 @@ MARKETS = {
 }
 
 EPSILON = 0.01  # Clip value for zeros in continuous distributions
+
+# Accuracy and Over% grade a row only when its likelier side beats this; training's
+# _MODE_CONFIDENCE_THRESHOLD (training/pipeline.py) is the same 0.54.
+CONFIDENCE_CUTOFF = 0.54
+# Accuracy and Over% need more graded rows than this; a thinner slice is noise, so NaN.
+MIN_GRADED_ROWS = 10
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -187,12 +193,33 @@ def make_global_start_values(dist_label, y_train_norm):
 
 
 def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
-    """Compute over/under accuracy metrics in absolute space."""
+    """Grade the Over/Under calls of a fitted distribution against the results.
+
+    Values with units (ev, y_true, lines, the SkewNormal scale) are absolute, not
+    MeanYr-normalized.
+
+    Args:
+        ev: Model mean per row.
+        y_true: Realized result per row.
+        lines: Book line per row.
+        sigma_or_shape: The family's dispersion in its own terms: sigma for LogNormal and
+            ZALN, alpha (shape) for Gamma and ZAGamma, r for NegBin, and a
+            ``(scale, alpha_skew)`` pair for SkewNormal.
+        dist_type: "LogNormal", "ZALN", "Gamma", "ZAGamma", "NegBin" or "SkewNormal".
+        gate: Per-row zero-inflation probability; used by ZALN and ZAGamma only.
+
+    Returns:
+        Dict of ``model_ev_mean``, ``result_mean``, ``n_total`` (all rows), ``n_confident``
+        (rows graded) and, over the graded rows, ``accuracy`` and ``over_pct`` (share of Over
+        calls). Those last two are NaN unless more than ``MIN_GRADED_ROWS`` rows are graded.
+
+    Raises:
+        ValueError: If ``dist_type`` is not one of the families above.
+    """
     results = {}
     results["model_ev_mean"] = float(np.mean(ev))
     results["result_mean"] = float(np.mean(y_true))
 
-    # Compute P(under line)
     if dist_type in ("LogNormal", "ZALN"):
         sigma = sigma_or_shape
         mu_param = np.log(np.clip(ev, 1e-9, None)) - sigma**2 / 2
@@ -204,14 +231,12 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
         under_probs = gamma_dist.cdf(lines, alpha, scale=ev / alpha)
         if gate is not None and dist_type == "ZAGamma":
             under_probs = gate + (1 - gate) * under_probs
-    elif dist_type in ("NegBin",):
+    elif dist_type == "NegBin":
         r = sigma_or_shape
         p = r / (r + np.clip(ev, 1e-9, None))
         under_probs = nbinom.cdf(lines, r, p)
     elif dist_type == "SkewNormal":
         scale, alpha_skew = sigma_or_shape
-        from scipy.stats import skewnorm
-
         delta = alpha_skew / np.sqrt(1 + alpha_skew**2)
         loc_sn = ev - scale * delta * np.sqrt(2 / np.pi)
         under_probs = skewnorm.cdf(lines, alpha_skew, loc=loc_sn, scale=scale)
@@ -220,10 +245,12 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
 
     over_probs = 1 - under_probs
     pred_over = (over_probs > 0.5).astype(int)
-    actual_over = (y_true >= lines).astype(int)
-    conf_mask = np.maximum(under_probs, over_probs) > 0.54
+    actual_over = (y_true > lines).astype(int)
+    # A result on the line is a push, neither an Over nor an Under, so it is not graded
+    # (training's accuracy column also uses settled rows only).
+    conf_mask = (np.maximum(under_probs, over_probs) > CONFIDENCE_CUTOFF) & (y_true != lines)
 
-    if conf_mask.sum() > 10:
+    if conf_mask.sum() > MIN_GRADED_ROWS:
         results["accuracy"] = float(np.mean(pred_over[conf_mask] == actual_over[conf_mask]))
         results["over_pct"] = float(np.mean(pred_over[conf_mask]))
     else:
@@ -419,8 +446,6 @@ def run_experiment(
             scale_abs = scale
 
         metrics = compute_metrics(ev, y_t, lines, (scale_abs, alpha_skew), "SkewNormal")
-
-        from scipy.stats import skewnorm
 
         nll_vals = -skewnorm.logpdf(y_t, alpha_skew, loc=loc_abs, scale=scale_abs)
         metrics["nll"] = float(np.mean(np.clip(nll_vals, -20, 20)))

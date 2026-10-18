@@ -7,6 +7,9 @@
 (c) The archive is opened read-only, and the rung, consensus and decision-time quote reads
     take the right rows from it.
 (d) The per-side boosts read back off stored rung prices are the ones the archive encoded.
+(e) The sidecar parquet row of a cell is its CSV headline row under the cell's identity,
+    and a partial run's write keeps the rows of the leagues it did not score.
+(f) A cell's CIs are the same whether it is summarized alone or beside another cell.
 
 Self-contained: a few real test-set rows per cell with the knobs copied out of its pickle
 (never the booster), a synthetic slate fixture, and a scratch DuckDB file.
@@ -22,13 +25,14 @@ import duckdb
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, archive
 from sportstradamus.helpers.archive import _dfs_offer_probs
 from sportstradamus.prediction import offer_records
 from sportstradamus.prediction.offer_records import book_over_prob, finalize_records
 from sportstradamus.realized import RECOMMENDED_EDGE_MIN, RECOMMENDED_PAYOUT_MAX
-from sportstradamus.scripts.tail_information import information_rows
+from sportstradamus.scripts.tail_information import information_rows, information_table
 from sportstradamus.scripts.tail_pricing import (
     RECONSTRUCTION_TOL,
     ladder_rungs,
@@ -37,6 +41,11 @@ from sportstradamus.scripts.tail_pricing import (
 )
 from sportstradamus.scripts.tail_scorecard import (
     _BASELINE_MOVED_AT,
+    _HEADLINE_COLUMNS,
+    _cell_sidecar,
+    _summarize,
+    _write_sidecar,
+    main,
     replay_live_rule,
     side_boosts,
 )
@@ -214,6 +223,25 @@ def test_reconstruction_rebuilds_the_persisted_probability(cell):
     # A 10% temperature error must trip the check, or the tolerance pins nothing.
     perturbed = knobs | {"temperature": knobs["temperature"] * 1.1}
     assert reconstruction_error(rows, perturbed) > RECONSTRUCTION_TOL
+
+
+def test_reconstruction_prices_at_the_pickles_step():
+    # Training prices its test set at the pickle's step, as serving does, so a SkewNormal cell
+    # with half-unit pushes on integer lines reconstructs only at that step.
+    knobs, csv = _CELLS["NFL_receptions"]
+    knobs = knobs | {"step": 0.5}
+    rows = pd.read_csv(io.StringIO(csv))
+    rows["Line"] = [3.0, 6.0, 2.0, 1.0, 2.0]
+    rows["P"] = [
+        0.45390696754351045,
+        0.38056567858181106,
+        0.4815375307564612,
+        0.5697316617054369,
+        0.3974099258209855,
+    ]
+
+    assert reconstruction_error(rows, knobs) <= RECONSTRUCTION_TOL
+    assert reconstruction_error(rows, knobs | {"step": 1.0}) > RECONSTRUCTION_TOL
 
 
 _LEAGUE, _MARKET = "MLB", "total bases"
@@ -475,3 +503,267 @@ def test_archive_opens_read_only(tmp_path, monkeypatch):
     assert row["p_decision"] == pytest.approx(0.55)
     assert row["p_training"] == pytest.approx(0.60)
     assert row["y"] == 1.0
+
+
+def _scorecard_frames(cell: str, league: str, market: str, seed: int) -> tuple[pd.DataFrame, ...]:
+    """``_summarize``'s five inputs for one cell: 12 settled legs over 6 days, fixed by ``seed``."""
+    rng = np.random.default_rng(seed)
+    n = 12
+    win_prob = rng.uniform(0.55, 0.85, n)
+    hit = rng.uniform(size=n) < win_prob - 0.15
+    legs = pd.DataFrame(
+        {
+            "League": league,
+            "Market": market,
+            "cell": cell,
+            "Date": np.repeat([f"2026-09-{day:02d}" for day in range(10, 16)], 2),
+            "Line": 4.5,
+            "Test Line": 4.5,
+            "consensus": 4.5,
+            "Projection": 5.0,
+            "served_sd": 2.0,
+            "QuoteAuthenticity": "authentic",
+            "n_books": 1,
+            "Bet": np.where(rng.uniform(size=n) < 0.5, "Over", "Under"),
+            "Win Prob": win_prob,
+            "Market Prob": win_prob - 0.05,
+            "Hit": hit,
+            "Payout": 1.8,
+            "Unit": hit * 1.8 - 1,
+            "Payout Source": np.where(rng.uniform(size=n) < 0.7, "posted", "assumed"),
+            "Version Age": np.where(rng.uniform(size=n) < 0.5, "days 0-3", "days 4+"),
+        }
+    )
+    rungs = legs[["League", "Market", "cell", "Date", "Line"]].assign(
+        Actual=rng.integers(0, 10, n).astype(float), p_serving=rng.uniform(0.3, 0.7, n)
+    )
+    cells = pd.DataFrame([{"cell": cell, "League": league, "test_rows": n, "recon_err": 1e-9}])
+    return rungs, legs, legs, legs, cells
+
+
+def _stack(*frame_sets: tuple[pd.DataFrame, ...]) -> tuple[pd.DataFrame, ...]:
+    return tuple(pd.concat(frames, ignore_index=True) for frames in zip(*frame_sets, strict=True))
+
+
+_KNOBS_BY_CELL = {
+    "NFL_receptions": {"model_version": "20261001.none.0badf00d"},
+    "MLB_total-bases": {"model_version": "legacy.1234567890"},
+}
+
+
+def _two_cell_sidecar() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A two-league summary and its sidecar frame, built the way ``main`` builds them."""
+    rungs, selected, trained, live, cells = _stack(
+        _scorecard_frames("NFL_receptions", "NFL", "receptions", seed=1),
+        _scorecard_frames("MLB_total-bases", "MLB", "total bases", seed=2),
+    )
+    summary = _summarize(rungs, selected, trained, live, cells)
+    windows = rungs.groupby(["League", "Market", "cell"], as_index=False)["Date"].max()
+    return summary, _cell_sidecar(summary, windows, _KNOBS_BY_CELL, "2026-09-01")
+
+
+def test_sidecar_row_is_the_cells_headline_row_under_its_identity(tmp_path):
+    summary, sidecar = _two_cell_sidecar()
+    path = tmp_path / "tail_scorecard.parquet"
+
+    _write_sidecar(sidecar, path)
+    sidecar = pd.read_parquet(path)
+
+    headline_as_written = [
+        "scope",
+        "key",
+        "test_rows",
+        "rung_rows",
+        "n",
+        "read",
+        "hit",
+        "market_read",
+        "gap",
+        "gap_lo",
+        "gap_hi",
+        "bulk_gap",
+        "training_gap",
+        "posted_share",
+        "live_n",
+        "live_gap",
+        "live_gap_lo",
+        "live_gap_hi",
+        "descriptive",
+    ]
+    assert list(sidecar.columns) == [
+        "league",
+        "market",
+        "model_version",
+        *headline_as_written,
+        "computed_at",
+        "window_start",
+        "window_end",
+    ]
+    # The summary also holds the overall, league and split rows; only the cells go out.
+    headline = summary[summary["scope"].eq("cell") & summary["split"].eq("all")]
+    assert len(sidecar) == len(headline) == 2
+    pd.testing.assert_frame_equal(
+        sidecar[headline_as_written]
+        .rename(columns={"market_read": "market"})
+        .reset_index(drop=True),
+        headline[_HEADLINE_COLUMNS].reset_index(drop=True),
+        check_dtype=False,  # the summary's split rows blank the counts and the flag
+    )
+    # Pinned for the reader through the parquet round trip: integer counts, a bool flag.
+    assert sidecar.dtypes[["test_rows", "rung_rows", "n", "live_n"]].eq("int64").all()
+    assert sidecar["descriptive"].dtype == bool
+    row = sidecar.set_index("key").loc["MLB_total-bases"]
+    assert (row["league"], row["market"]) == ("MLB", "total bases")
+    assert row["model_version"] == "legacy.1234567890"
+    assert (row["window_start"], row["window_end"]) == ("2026-09-01", "2026-09-15")
+    assert sidecar["computed_at"].dt.tz is None
+    since = pd.Timestamp.now(tz="UTC").tz_localize(None) - sidecar["computed_at"]
+    assert since.abs().max() < pd.Timedelta(minutes=1)
+
+
+def test_sidecar_write_keeps_the_leagues_a_partial_run_did_not_score(tmp_path):
+    path = tmp_path / "tail_scorecard.parquet"
+    _, both = _two_cell_sidecar()
+    _write_sidecar(both, path)
+    # A --league MLB run: its cell read again, under a retrained pickle.
+    rescored = both[both["league"].eq("MLB")].assign(
+        gap=lambda frame: frame["gap"] + 0.1, model_version="20261101.none.0badf00d"
+    )
+
+    _write_sidecar(rescored, path)
+
+    got = pd.read_parquet(path)
+    assert got["key"].tolist() == ["NFL_receptions", "MLB_total-bases"]
+    pd.testing.assert_frame_equal(
+        got.iloc[[0]].reset_index(drop=True), both[both["league"].eq("NFL")].reset_index(drop=True)
+    )
+    pd.testing.assert_frame_equal(
+        got.iloc[[1]].reset_index(drop=True), rescored.reset_index(drop=True)
+    )
+
+
+def test_cell_ci_is_the_same_alone_and_beside_another_cell():
+    receptions = _scorecard_frames("NFL_receptions", "NFL", "receptions", seed=1)
+    carries = _scorecard_frames("NFL_carries", "NFL", "carries", seed=2)
+
+    alone = _summarize(*receptions)
+    beside = _summarize(*_stack(receptions, carries))
+
+    def cell_row(summary: pd.DataFrame) -> pd.Series:
+        return summary[summary["scope"].eq("cell") & summary["key"].eq("NFL_receptions")].iloc[0]
+
+    one, two = cell_row(alone), cell_row(beside)
+    assert one["gap_lo"] < one["gap_hi"]  # a real interval, so the equality below pins something
+    for column in ("gap", "gap_lo", "gap_hi", "live_gap", "live_gap_lo", "live_gap_hi"):
+        assert one[column] == two[column], column
+
+
+def _information_frame(cell: str, league: str, seed: int) -> pd.DataFrame:
+    """Rows shaped like ``information_rows``: 6 game days, 20 props each, prices that move."""
+    from scipy.special import logit
+    from scipy.stats import poisson
+
+    rng = np.random.default_rng(seed)
+    n = 120
+    mean = rng.uniform(3, 8, n)
+    line = np.round(mean) + 0.5
+    result = rng.poisson(mean).astype(float)
+    frame = pd.DataFrame(
+        {
+            "cell": cell,
+            "League": league,
+            "Date": np.repeat(pd.date_range("2026-09-10", periods=6), n // 6),
+            "Line": line,
+            "Result": result,
+            "y": (result > line).astype(float),
+            "EV": mean + rng.normal(0, 0.5, n),
+            "consensus": mean + rng.normal(0, 0.7, n),
+            "Book_EV": mean + rng.normal(0, 0.7, n),
+        }
+    )
+    for name, column in (("model", "EV"), ("decision", "consensus"), ("training", "Book_EV")):
+        p_over = np.clip(poisson.sf(np.floor(line), frame[column]), 0.05, 0.95)
+        frame[f"p_{name}"] = p_over
+        frame[f"logit_{name}"] = logit(p_over)
+    return frame
+
+
+def test_information_cell_ci_is_the_same_alone_and_beside_another_cell():
+    receptions = _information_frame("NFL_receptions", "NFL", seed=1)
+    carries = _information_frame("NFL_carries", "NFL", seed=2)
+
+    alone = information_table(receptions, seed=0)
+    beside = information_table(pd.concat([receptions, carries], ignore_index=True), seed=0)
+
+    def cell_rows(table: pd.DataFrame) -> pd.DataFrame:
+        rows = table[table["scope"].eq("cell") & table["key"].eq("NFL_receptions")]
+        return rows.set_index("band").sort_index()
+
+    one, two = cell_rows(alone), cell_rows(beside)
+    assert list(one.index) == ["decision", "training"]
+    assert (one["lin_b_model_lo"] < one["lin_b_model_hi"]).all()  # a real interval
+    assert (one["ll_gain_lo"] < one["ll_gain_hi"]).all()
+    pd.testing.assert_frame_equal(one, two)
+
+
+def test_a_league_with_every_cell_excluded_reports_the_exclusions_and_exits_clean(
+    tmp_path, monkeypatch
+):
+    """NBA before its season: every test row predates the first ladder rung, or a cell has no
+    pickle. The run must list why each cell sat out and write the sandbox CSV, not trace back
+    on an empty concat, and it must leave the sidecar alone (nothing was scored)."""
+    for switch in ("SPORTSTRADAMUS_ARCHIVE_DB", "SPORTSTRADAMUS_ARCHIVE_READ_ONLY"):
+        monkeypatch.setenv(switch, "")
+    archive = tmp_path / "archive.duckdb"
+    with duckdb.connect(str(archive)) as writer:
+        for table, rows in (("ladder", _LADDER_CSV), ("odds", _ODDS_CSV)):
+            (tmp_path / f"{table}.csv").write_text(rows)
+            writer.execute(
+                f"CREATE TABLE {table} AS SELECT 'NFL' AS league, 'receptions' AS market, * "
+                f"FROM read_csv('{tmp_path / table}.csv')"
+            )
+    test_sets = tmp_path / "test_sets"
+    test_sets.mkdir()
+    (test_sets / "NBA_zzz.csv").write_text("Player,Date,Line,Result,P\n")
+    monkeypatch.setattr("sportstradamus.scripts.tail_scorecard.TEST_SETS_DIR", test_sets)
+    out, parquet = tmp_path / "scorecard.csv", tmp_path / "sidecar.parquet"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--league",
+            "NBA",
+            "--archive",
+            str(archive),
+            "--out",
+            str(out),
+            "--parquet",
+            str(parquet),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "excluded NBA_zzz: no model pickle" in result.output
+    written = pd.read_csv(out)
+    assert written[["scope", "key", "split", "note"]].values.tolist() == [
+        ["cell", "NBA_zzz", "excluded", "no model pickle"]
+    ]
+    assert not parquet.exists()
+
+
+def test_a_league_filter_that_matches_no_test_set_is_a_usage_error(tmp_path, monkeypatch):
+    """`--league mlb` (test sets are `MLB_*.csv`) must fail loud, not write an empty CSV."""
+    test_sets = tmp_path / "test_sets"
+    test_sets.mkdir()
+    (test_sets / "NBA_zzz.csv").write_text("Player,Date,Line,Result,P\n")
+    monkeypatch.setattr("sportstradamus.scripts.tail_scorecard.TEST_SETS_DIR", test_sets)
+    archive = tmp_path / "archive.duckdb"
+    archive.write_bytes(b"")
+
+    result = CliRunner().invoke(
+        main, ["--league", "nba", "--archive", str(archive), "--out", str(tmp_path / "out.csv")]
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "no test set for league nba" in result.output
+    assert not (tmp_path / "out.csv").exists()

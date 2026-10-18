@@ -122,6 +122,12 @@ def test_the_caption_counts_the_games_that_cleared_the_line(monkeypatch):
     assert "last 5 vs line · 4/5 over" in sparks["Star|Points|Over"]
 
 
+def test_the_caption_reads_a_game_on_the_line_as_a_push_not_an_over(monkeypatch):
+    # Star's 22 lands on a line of 22: three games cleared it, one tied, one fell short.
+    sparks = _sparks(_pool({"Player": "Star", "Line": 22.0}), monkeypatch)
+    assert "last 5 vs line · 3/5 over" in sparks["Star|Points|Over"]
+
+
 def test_a_short_gamelog_captions_the_games_it_has(monkeypatch):
     sparks = _sparks(_pool({"Player": "Bench", "Line": 3.5}), monkeypatch)
     assert "last 1 vs line · 1/1 over" in sparks["Bench|Points|Over"]

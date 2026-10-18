@@ -45,7 +45,7 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.history_schema import DECISION_COLS, PREDICTION_KEY, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.stories.context import ctxs_from_frame
-from sportstradamus.realized import settled_offers
+from sportstradamus.realized import last_scored_lines, settled_offers
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -152,8 +152,8 @@ def _load_history_cached(path: Path, mtime: float) -> pd.DataFrame:
     itself, so ``path`` isn't touched in the body beyond keying the cache.
     """
     # The decision-time columns are research inputs no page reads, except Scored At, by
-    # which settled_offers counts a moved prop once; dropping the rest keeps the cached
-    # frame flat (errors="ignore": parquets written before they existed).
+    # which realized.last_scored_lines counts a moved prop once; dropping the rest keeps the
+    # cached frame flat (errors="ignore": parquets written before they existed).
     history = read_history().drop(
         columns=[col for col in DECISION_COLS if col != "Scored At"], errors="ignore"
     )
@@ -600,7 +600,7 @@ def get_filtered_history(
     date_range: tuple | None = None,
     min_model_p: float | None = None,
 ) -> pd.DataFrame:
-    """Annotate offer outcomes and apply sidebar filters.
+    """Annotate offer outcomes, keep each prop at its last scoring and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
     Line, Boost, Platform, Bet, Win Prob, Market Prob, Result, Hit, Model EV, Market EV, Kelly.
@@ -609,6 +609,9 @@ def get_filtered_history(
     if df.empty:
         return df
 
+    # Ahead of the drops: with a pushed last line gone, an older line of the prop would read
+    # as its last scoring and count in its place.
+    df = df.loc[last_scored_lines(df)]
     df = df.dropna(subset=["Result"])
     df = df.loc[df["Result"] != "Push"]
 

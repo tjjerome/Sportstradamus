@@ -6,6 +6,8 @@ Covers the per-segment Kelly shrinkage getter and the segments parquet
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -60,28 +62,43 @@ def test_persist_segments_writes_parquet(_isolated_segments_parquet):
     assert row["frac_beat_close"] == pytest.approx(1.0)
 
 
-def test_get_segment_calibration_returns_fallback_when_missing(
-    _isolated_segments_parquet,
-):
-    # No parquet on disk yet.
-    shrink, n = clv.get_segment_calibration("NBA", "points")
-    assert shrink == 1.0
-    assert n == 0
-
-
-def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
+def _write_segment(path, *, n, frac_beat_close, market="points"):
     pd.DataFrame(
         [
             {
                 "League": "NBA",
-                "Market": "points",
+                "Market": market,
                 "Platform": "Underdog",
-                "n": 40,
+                "n": n,
                 "market_clv": 0.05,
-                "frac_beat_close": 0.75,
+                "frac_beat_close": frac_beat_close,
             }
         ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
+    ).to_parquet(path, index=False)
+
+
+def test_get_segment_calibration_without_a_segment_is_nan(_isolated_segments_parquet):
+    # No parquet on disk yet. The NaN is what resolve_shrinkage reads as "missing"; the old
+    # 1.0 read as full trust in a cell nothing had measured.
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == 0
+
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.75, market="rebounds")
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == 0
+
+
+def test_get_segment_calibration_below_the_floor_is_nan_with_its_n(_isolated_segments_parquet):
+    _write_segment(_isolated_segments_parquet, n=clv.CLV_SEGMENT_MIN_N - 1, frac_beat_close=1.0)
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == clv.CLV_SEGMENT_MIN_N - 1
+
+
+def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.75)
     shrink, n = clv.get_segment_calibration("NBA", "points")
     # 0.75 → 2*(0.75-0.5) = 0.5
     assert shrink == pytest.approx(0.5)
@@ -89,18 +106,7 @@ def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
 
 
 def test_get_segment_calibration_clamps_below_half(_isolated_segments_parquet):
-    pd.DataFrame(
-        [
-            {
-                "League": "NBA",
-                "Market": "points",
-                "Platform": "Underdog",
-                "n": 40,
-                "market_clv": -0.05,
-                "frac_beat_close": 0.30,
-            }
-        ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.30)
     shrink, n = clv.get_segment_calibration("NBA", "points")
     assert shrink == 0.0
     assert n == 40

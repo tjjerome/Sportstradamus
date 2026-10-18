@@ -150,9 +150,10 @@ def test_movement_summary_prints_the_fair_line_at_hundredths():
     assert summary == "Fair 20.12 → 20.99 (+0.86) · line held at 20.5"
 
 
-def test_form_counts_hits_at_or_above_the_line():
+def test_form_counts_the_games_that_cleared_the_line():
     assert "2/5 over 13.5" in form_svg([12, 8, 15, 9, 20], 13.5)
-    assert "1/1 over 3" in form_svg([3], 3)
+    # A game on the line pushes, so it is not an over.
+    assert "0/1 over 3" in form_svg([3], 3)
 
 
 def test_form_draws_a_bar_per_game_and_never_a_trace():
@@ -216,6 +217,7 @@ def test_form_games_all_on_the_line_keep_the_bare_rule():
     svg = form_svg([3, 3], 3)
     assert not _rects(svg)
     assert "<line" in svg
+    assert "0/2 over 3" in svg
 
 
 def test_points_span_the_box_and_stay_inside_it():

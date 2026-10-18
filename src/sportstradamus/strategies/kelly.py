@@ -41,10 +41,10 @@ MAX_FRACTION_OF_BANKROLL: float = 0.005
 # book's own implied line — exactly zero edge, so the bet is skipped, not staked.
 SHRINKAGE_FLOOR: float = 0.0
 
-# A cell below the blend-fit cluster floor has no measured skill, but "unmeasured"
-# is not "measured worthless" — serving still runs those cells at model_weight 1.0.
-# Price them at the median shrinkage of the cells that DO carry evidence, so they
-# enter on a typical prior instead of being rejected for lacking a measurement.
+# A cell with no measured skill (below the blend-fit cluster floor, or a CLV segment
+# too thin to read) stakes near zero until a measurement exists: serving still runs
+# those cells at model_weight 1.0, so a full-trust default would stake the unmeasured
+# cells hardest.
 NO_EVIDENCE_SHRINKAGE: float = 0.01
 
 # CLV-segment leg count below which live BSS is ignored; the segment is
@@ -103,7 +103,7 @@ def resolve_shrinkage(
     if has_live:
         return _clip01(live_bss)
 
-    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking zero")
+    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking near zero")
     return NO_EVIDENCE_SHRINKAGE
 
 

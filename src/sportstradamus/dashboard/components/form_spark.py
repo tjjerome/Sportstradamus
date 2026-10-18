@@ -53,10 +53,11 @@ def form_sparks(pool: pd.DataFrame) -> dict[str, str]:
                 continue
             values = games[stat].tolist()
             line = float(offer["Line"])
-            hits = sum(v >= line for v in values)
+            # A game on the line pushes, so it is not an over.
+            overs = sum(v > line for v in values)
             sparks[corr_key(offer)] = (
                 f"{form_svg(values, line)}"
-                f"<span>last {len(values)} vs line · {hits}/{len(values)} over</span>"
+                f"<span>last {len(values)} vs line · {overs}/{len(values)} over</span>"
             )
     return sparks
 

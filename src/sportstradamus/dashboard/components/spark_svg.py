@@ -202,14 +202,15 @@ def form_svg(values: Sequence[float], line: float) -> str:
     question at ten games (``deep_dive_charts.history_chart``).
 
     A card whose games all landed exactly on the line has no deviation to draw and keeps
-    the bare rule, the way an unmoved line does in :func:`movement_svg`.
+    the bare rule, the way an unmoved line does in :func:`movement_svg`; those games
+    pushed, so the title counts none of them as over.
     """
     deviations = [float(v) - line for v in values]
     if not deviations:
         return ""
-    hits = sum(1 for deviation in deviations if deviation >= 0)
+    overs = sum(1 for deviation in deviations if deviation > 0)
     reach = max(abs(deviation) for deviation in deviations)
     body = _rule(_HEIGHT / 2, theme.BORDER)
     if reach:
         body += _bars(deviations, reach)
-    return _svg(body, f"{hits}/{len(deviations)} over {line:.10g}")
+    return _svg(body, f"{overs}/{len(deviations)} over {line:.10g}")

@@ -76,8 +76,9 @@ def test_hero_shows_the_reconciled_recommended_cohort(monkeypatch, tmp_path):
     posted = cohort_summary(offers)
 
     hero = _hero_text(at)
-    # B's line moved twice before its game and M was last scored on an unposted side. Every
-    # line counted would read 10 recommended legs, so the loader has to carry Scored At.
+    # B's line moved twice before its game, M was last scored on an unposted side and N's last
+    # line pushed. Every line counted would read 12 recommended legs, so the loader has to
+    # carry Scored At.
     assert "across 7 recommended legs" in hero
     assert (
         f"{recommended['units']:+,.0f} units across {recommended['n']:,} recommended legs" in hero

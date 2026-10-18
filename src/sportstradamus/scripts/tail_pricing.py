@@ -26,7 +26,7 @@ from sportstradamus.helpers import (
     get_odds,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING, DecodedParams, predictive_std
-from sportstradamus.helpers.io import model_pickle_path
+from sportstradamus.helpers.io import model_pickle_path, resolve_model_version
 from sportstradamus.helpers.training_quotes import AUTHENTIC, DFS_PLATFORM_BOOKS
 from sportstradamus.scripts.tail_information import information_rows
 from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY
@@ -73,14 +73,10 @@ _KNOBS = (
     "posthoc",
     "posthoc_blob",
     "pit_recal_blob",
-    "model_version",
 )
 
 # The prototype rebuilt P to 1e-13 on every cell; past 1e-6 the chain is not the pickle's.
 RECONSTRUCTION_TOL = 1e-6
-
-# Training prices its test set without passing step, so get_odds runs at its default.
-TRAINING_STEP = 1.0
 
 _RUNG_SQL = """
 WITH rung AS (
@@ -159,21 +155,21 @@ def _training_weight(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
 
 
 def serve(
-    rows: pd.DataFrame, knobs: dict, w_row: np.ndarray, ev_book: np.ndarray, step: float
+    rows: pd.DataFrame, knobs: dict, w_row: np.ndarray, ev_book: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Re-serve test rows from their persisted model-only parameters at each row's ``Line``.
 
     The pickle's chain in serving order: ``fused_loc`` at per-row model weight ``w_row``
     against book base mean ``ev_book``, ``correct_fused_mean``, the dispersion / skew
-    calibration (DPO phi capped at its ceiling), ``get_odds`` at ``step``, the whole-CDF
-    recal, temperature, then a PROB_STAGE posthoc. Training and serving differ only in
-    ``w_row``, ``ev_book`` and ``step``.
+    calibration (DPO phi capped at its ceiling), ``get_odds`` at the pickle's ``step``,
+    the whole-CDF recal, temperature, then a PROB_STAGE posthoc. Training and serving
+    differ only in ``w_row`` and ``ev_book``.
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
         distribution's mean and SD with its zero-inflation gate folded in.
     """
-    dist, cv = knobs["distribution"], knobs["cv"]
+    dist, cv, step = knobs["distribution"], knobs["cv"], knobs["step"]
     slug, blob, shape_cal = knobs["posthoc"], knobs["posthoc_blob"], knobs["dispersion_cal"]
     ev_model = rows["EV"].to_numpy(float)
     line = rows["Line"].to_numpy(float)
@@ -229,11 +225,11 @@ def serve(
 def reconstruction_error(rows: pd.DataFrame, knobs: dict) -> float:
     """Max |P_rebuilt - P| over test rows re-served under the training convention.
 
-    Training blends with ``_training_weight`` against ``Book_EV`` at get_odds' default step;
+    Training blends with ``_training_weight`` against ``Book_EV`` at the pickle's step;
     NaN (a row the chain cannot price) counts as a failure.
     """
     rebuilt, _, _ = serve(
-        rows, knobs, _training_weight(rows, knobs), rows["Book_EV"].to_numpy(float), TRAINING_STEP
+        rows, knobs, _training_weight(rows, knobs), rows["Book_EV"].to_numpy(float)
     )
     return float(np.max(np.abs(rebuilt - rows["P"].to_numpy(float))))
 
@@ -254,12 +250,15 @@ def price_cell(
     """
     league, slug = path.stem.split("_", 1)
     market = slug.replace("-", " ")
+    pickle_path = model_pickle_path(league, market)
     try:
-        with model_pickle_path(league, market).open("rb") as infile:
+        with pickle_path.open("rb") as infile:
             filedict = pickle.load(infile)
     except FileNotFoundError:
         raise CellExcludedError("no model pickle") from None
     knobs = {key: filedict[key] for key in _KNOBS}
+    # The stamp serving writes on the cell's legs; a pre-stamp pickle gets its legacy hash.
+    knobs["model_version"] = resolve_model_version(str(pickle_path), filedict)
     dist = knobs["distribution"]
     if dist not in _FAMILY_COLUMNS:
         raise CellExcludedError(f"{dist} is not replayed")
@@ -297,14 +296,10 @@ def price_cell(
     authentic = priced["QuoteAuthenticity"].eq(AUTHENTIC)
     serving_book = priced["Book_EV"].where(authentic, priced["EV"]).to_numpy(float)
     priced["p_serving"], priced["Projection"], priced["served_sd"] = serve(
-        priced, knobs, np.full(len(priced), knobs["weight"]), serving_book, knobs["step"]
+        priced, knobs, np.full(len(priced), knobs["weight"]), serving_book
     )
     priced["p_training"] = serve(
-        priced,
-        knobs,
-        _training_weight(priced, knobs),
-        priced["Book_EV"].to_numpy(float),
-        TRAINING_STEP,
+        priced, knobs, _training_weight(priced, knobs), priced["Book_EV"].to_numpy(float)
     )[0]
     priced["Market Projection"] = priced["Book_EV"].where(authentic)
     diag = {"cell": path.stem, "League": league, "test_rows": len(rows), "recon_err": error}

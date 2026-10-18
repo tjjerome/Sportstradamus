@@ -12,6 +12,7 @@ import pytest
 
 from sportstradamus import clv
 from sportstradamus.strategies._pickem_emit import emit_yaml
+from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
     _filter_parlays,
@@ -315,7 +316,7 @@ def test_parlay_shrinkage_unmapped_markets_fall_back(monkeypatch):
         lambda league, market: pytest.fail(f"unmapped market resolved: {market}"),
     )
     row = pd.Series(_parlay([("A vs. B", "H2H Points")]))
-    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (1.0, "fallback")
+    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (NO_EVIDENCE_SHRINKAGE, "fallback")
 
 
 def test_parlay_shrinkage_sleeper_uses_sleeper_stat_map(monkeypatch):
@@ -333,7 +334,7 @@ def test_parlay_shrinkage_sleeper_uses_sleeper_stat_map(monkeypatch):
     assert up._parlay_shrinkage(row, "WNBA", "Sleeper") == (0.5, "training")
     assert calls == ["REB"]
     # The same raw name under the Underdog map resolves to nothing -> fallback.
-    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (1.0, "fallback")
+    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (NO_EVIDENCE_SHRINKAGE, "fallback")
 
 
 def stub_cell_trust(monkeypatch, cells):
@@ -347,7 +348,7 @@ def stub_cell_trust(monkeypatch, cells):
         "get_market_calibration",
         lambda league, market: {"brier_skill_score": cells.get((league, market), float("nan"))},
     )
-    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (1.0, 0))
+    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (float("nan"), 0))
 
 
 def test_parlay_shrinkage_asks_a_cells_trust_under_the_leagues_own_market_name(monkeypatch):

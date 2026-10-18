@@ -9,7 +9,8 @@ the lines still posted when it was last scored (games from ``COUNT_ONCE_FROM``; 
 games count every line posted) and flags ``Recommended`` by the one rule Receipts and the
 paper ledger share. ``window``, ``by_split``, ``cohort_summary``, ``worst_month`` and
 ``calibration_summary`` slice and aggregate that frame; nightly persists
-``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). Pure.
+``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). ``last_scored_lines``
+is the count-once mask alone, for the dashboard's filter to take before it drops pushes. Pure.
 """
 
 from datetime import UTC, datetime
@@ -93,6 +94,28 @@ def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
     )
 
 
+def last_scored_lines(history: pd.DataFrame) -> pd.Series:
+    """Boolean mask over ``history``: the rows at the lines its props still held when last scored.
+
+    A prop (``Date, Player, Market, Platform``) dated ``COUNT_ONCE_FROM`` or later keeps the
+    rows carrying the latest ``Scored At`` among its rows in ``history``: rungs posted side by
+    side share that stamp and stay separate legs; a line the platform moved off drops out, as
+    does an unstamped row beside a stamped one. A prop never stamped, a frame with no
+    ``Scored At`` column and every earlier game keep each row. Take it over every row of a
+    prop before any other drop: with a pushed, unsettled or unposted last line gone, an older
+    line reads as the last scoring and counts in its place.
+    """
+    # tail_scorecard's replayed test rows were never scored live and carry no stamp column.
+    if "Scored At" not in history.columns:
+        return pd.Series(True, index=history.index)
+    last_scored = history.groupby(_PROP_KEY)["Scored At"].transform("max")
+    return (
+        (pd.to_datetime(history["Date"]) < COUNT_ONCE_FROM)
+        | history["Scored At"].eq(last_scored)
+        | last_scored.isna()
+    )
+
+
 def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
     """One row per settled offer the platform posted, priced at its platform payout.
 
@@ -106,12 +129,8 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
     quote, else ``"unquoted"``). Empty input comes back empty with those columns.
 
     A prop (``Date, Player, Market, Platform``) dated ``COUNT_ONCE_FROM`` or later counts
-    only at the lines still posted when it was last scored: the rows carrying the latest
-    ``Scored At`` among every row of the prop handed in, unposted and unsettled ones
-    included. Rungs posted side by side share that stamp and stay separate legs; a line
-    the platform moved off drops out, as does an unstamped row beside a stamped one. A
-    prop never stamped, a frame with no ``Scored At`` column and every earlier game keep
-    each posted line.
+    only at the lines still posted when it was last scored: :func:`last_scored_lines` over
+    every row of the prop handed in, unposted and unsettled ones included.
 
     Args:
         history: Flat prediction history (``history_schema.HISTORY_COLS``), ``Actual``
@@ -128,17 +147,8 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
         & settled["Bet"].notna()
         & settled["Win Prob"].notna()
         & (settled["Boost"] > 0)
+        & last_scored_lines(settled)
     )
-    # tail_scorecard's replayed test rows were never scored live and carry no stamp column.
-    if "Scored At" in settled.columns:
-        # Over every row, not only the posted and settled ones: when the last scoring is
-        # of a side the platform never posted, the older line is gone all the same.
-        last_scored = settled.groupby(_PROP_KEY)["Scored At"].transform("max")
-        keep &= (
-            (pd.to_datetime(settled["Date"]) < COUNT_ONCE_FROM)
-            | settled["Scored At"].eq(last_scored)
-            | last_scored.isna()
-        )
     offers = settled[keep].drop_duplicates(subset=_OFFER_KEY)
     payout = platform_payout(offers["Boost"], offers["Platform"])
     # Derived, not annotate's Hit: that column is absent when no row resolved.

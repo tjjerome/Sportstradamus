@@ -21,6 +21,8 @@ market reference, like the NFL count quotes, contaminates it.
 
 from __future__ import annotations
 
+import zlib
+
 import duckdb
 import numpy as np
 import pandas as pd
@@ -65,6 +67,11 @@ WITH quotes AS (
 )
 SELECT rid, 1 - avg(under_prob) AS p_decision FROM quotes GROUP BY rid
 """
+
+
+def key_rng(seed: int, key: str) -> np.random.Generator:
+    """One generator per scope key, so a partial run's CIs for a key match the full run's."""
+    return np.random.default_rng([seed, zlib.crc32(key.encode())])
 
 
 def information_rows(
@@ -118,7 +125,7 @@ def information_rows(
     )
 
 
-def information_table(info: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+def information_table(info: pd.DataFrame, seed: int) -> pd.DataFrame:
     """b_model with day-clustered CIs and the model term's log-loss gain, per scope.
 
     One row per (scope, key, reference) for each cell clearing ``INFO_MIN_ROWS`` and
@@ -128,7 +135,7 @@ def information_table(info: pd.DataFrame, rng: np.random.Generator) -> pd.DataFr
 
     Args:
         info: ``information_rows`` frames with ``cell`` and ``League``.
-        rng: Drives every day resample.
+        seed: Seeds one generator per scope key (``key_rng``) for its day resamples.
 
     Returns:
         ``scope``, ``key``, ``split`` (``"information"``), ``band`` (the reference),
@@ -166,6 +173,7 @@ def information_table(info: pd.DataFrame, rng: np.random.Generator) -> pd.DataFr
         if rows.empty or (scope == "cell" and key not in fits):
             records.append(counts)
             continue
+        rng = key_rng(seed, key)
         records += [
             counts | {"band": reference, **_estimates(rows, reference, rng)}
             for reference in _REFERENCE_LINES

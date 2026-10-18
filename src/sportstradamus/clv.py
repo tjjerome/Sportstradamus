@@ -420,23 +420,21 @@ def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
     time gets full credit. ``n`` is the number of resolved legs in the
     segment, surfaced for the Kelly blending ramp.
 
-    Returns ``(1.0, 0)`` when the segment has fewer than
-    :data:`CLV_SEGMENT_MIN_N` legs or no parquet exists. The
-    ``shrinkage=1.0`` fallback means "no information, don't shrink".
+    The shrinkage is NaN — what ``kelly.resolve_shrinkage`` reads as "no live
+    evidence" — when no parquet exists, the segment is absent (``n`` is 0) or it
+    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). Never
+    ``1.0`` there: that reads as full trust in exactly the cells nothing has measured.
     """
-    path = _segments_parquet_path()
-    if not path.exists():
-        return 1.0, 0
     try:
-        seg_df = pd.read_parquet(path)
+        seg_df = pd.read_parquet(_segments_parquet_path())
     except (OSError, ValueError):
-        return 1.0, 0
+        return np.nan, 0
     rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
     if rows.empty:
-        return 1.0, 0
+        return np.nan, 0
     n = int(rows["n"].sum())
     if n < CLV_SEGMENT_MIN_N:
-        return 1.0, n
+        return np.nan, n
     weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
     shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
     return shrinkage, n

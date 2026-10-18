@@ -3,8 +3,10 @@
 Receipts prices ``cohort_summary`` over the windowed posted frame and its recommended cohort;
 nightly persists ``compute_realized_by_side``. Over one hand-built history (both platforms,
 an unposted side, a push, an alt line, a payout past the cap, a ``book_fallback`` row, one prop
-on both platforms, one whose line moved and one last scored on an unposted side) the two agree
-for every ledger window and cohort. ``HISTORY`` and ``NOW`` also feed the Receipts render tests.
+on both platforms, one whose line moved, one last scored on an unposted side and one whose last
+line pushed) the two agree for every ledger window and cohort, and the page's filter
+(``dashboard.data.get_filtered_history``) hands ``settled_offers`` the legs the raw history
+does. ``HISTORY`` and ``NOW`` also feed the Receipts render tests.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
+from sportstradamus.dashboard.data import get_filtered_history
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.realized import (
     COUNT_ONCE_FROM,
@@ -49,13 +52,17 @@ _ROWS = [
     # The same prop on both platforms: two offers.
     ("A", "NBA", "2026-09-30", "PTS", 20.5, "Over", "Underdog", 1.0, 0.62, 0.55, 18.0),
     ("A", "NBA", "2026-09-30", "PTS", 20.5, "Over", "Sleeper", 1.75, 0.62, 0.55, 18.0),
-    # B's line moved twice before its game, and M's moved onto a side the platform never
-    # posted. Their last value is the run that scored the line; no other row was stamped.
+    # B's line moved twice before its game, M's moved onto a side the platform never posted
+    # and N's last line pushed. Their last value is the run that scored the line; no other
+    # row was stamped.
     ("B", "NBA", _GAME, "REB", 10.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[0]),
     ("B", "NBA", _GAME, "REB", 9.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[1]),
     ("B", "NBA", _GAME, "REB", 8.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 6.0, _RUNS[2]),
     ("M", "NBA", _GAME, "PTS", 20.5, "Over", "Sleeper", 1.75, 0.62, 0.55, 18.0, _RUNS[1]),
     ("M", "NBA", _GAME, "PTS", 21.5, "Over", "Sleeper", 0.0, 0.62, 0.55, 18.0, _RUNS[2]),
+    ("N", "NBA", _GAME, "AST", 6.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 5.0, _RUNS[0]),
+    ("N", "NBA", _GAME, "AST", 5.5, "Under", "Sleeper", 1.75, 0.64, 0.52, 5.0, _RUNS[1]),
+    ("N", "NBA", _GAME, "AST", 5.0, "Under", "Sleeper", 1.75, 0.64, 0.52, 5.0, _RUNS[2]),
     # C rides an alt line and D is book-priced (both stamped below).
     ("C", "NBA", "2026-09-20", "PTS", 30.5, "Under", "Underdog", 0.8, 0.8, 0.7, 33.0),
     ("D", "WNBA", "2026-09-15", "PTS", 18.5, "Over", "Underdog", 1.0, 0.61, 0.6, 15.0),
@@ -84,8 +91,8 @@ HISTORY = (
 )
 
 # Who each window and cohort holds: A twice (one offer per platform); B once, at the last
-# of its three lines; G (unposted), H (push) and M (last scored on an unposted side) never;
-# E (payout 3.0) and F (edge 3%) bettable only; K past 90 days.
+# of its three lines; G (unposted), H (push), M (last scored on an unposted side) and N (last
+# line pushed) never; E (payout 3.0) and F (edge 3%) bettable only; K past 90 days.
 _MEMBERS = {
     (30, "recommended"): ["A", "A", "B", "C", "D"],
     (30, "bettable"): ["A", "A", "B", "C", "D", "E", "F"],
@@ -125,3 +132,21 @@ def test_the_two_platform_prop_counts_as_two_offers():
     prop = offers[offers["Player"] == "A"]
     assert sorted(prop["Platform"]) == ["Sleeper", "Underdog"]
     assert prop["Recommended"].all()
+
+
+def _legs(offers: pd.DataFrame) -> list[tuple]:
+    return list(zip(offers["Player"], offers["Platform"], offers["Line"], strict=True))
+
+
+def test_the_page_filter_hands_settled_offers_the_legs_of_the_raw_history():
+    # Pushes dropped ahead of the count-once rule would hand over N's 5.5, an older line of
+    # a prop whose last line pushed, and the page would count a leg the ledger never does.
+    page = settled_offers(get_filtered_history(HISTORY))
+    assert _legs(page) == _legs(settled_offers(HISTORY))
+    assert "N" not in set(page["Player"])
+
+
+def test_the_page_filter_keeps_a_moved_prop_at_its_last_line_only():
+    filtered = get_filtered_history(HISTORY)
+    moved = filtered[filtered["Player"].isin(["B", "N"])]
+    assert list(zip(moved["Player"], moved["Line"], strict=True)) == [("B", 8.5)]
