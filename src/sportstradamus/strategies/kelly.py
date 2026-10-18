@@ -103,7 +103,7 @@ def resolve_shrinkage(
     if has_live:
         return _clip01(live_bss)
 
-    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking zero")
+    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking near zero")
     return NO_EVIDENCE_SHRINKAGE
 
 
