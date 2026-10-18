@@ -26,11 +26,11 @@ on branch `lever-t` (2026-10-17); §4 carries the program state.
 
 ## 2. Lever T: the outcome trim
 
-`training/data.py:trim_matrix` keeps a row only if its `Result` lies inside the cell's 5th to
-95th percentile (`_RESULT_OUTLIER_LOW` / `_HIGH`), unless the row carries a sportsbook quote
-(`Archived == 1`). In a book-less cell (DFS-only `pickem` rows) the top 5 % of outcomes leave
-training and the test set. Stars produce most of them, so the model learns a capped
-distribution: its mean on a high line runs low, P(Under) reads high, and the gates grade the same
+Until lever T (`lever-t`, 2026-10-17) `training/data.py:trim_matrix` kept a row only if its
+`Result` lay inside the cell's 5th to 95th percentile (`_RESULT_OUTLIER_LOW` / `_HIGH`), unless
+the row carried a sportsbook quote (`Archived == 1`). In a book-less cell (DFS-only `pickem`
+rows) the top 5 % of outcomes left training and the test set. Stars produce most of them, so the
+model learned a capped distribution: its mean on a high line runs low, P(Under) reads high, and the gates grade the same
 truncated rows and pass. Quoted rows never trim, so the lean survives only where no quote blends
 it out. 43 served cells are capped (NFL 14, NBA 13, NHL 9, WNBA 5, MLB 2; NBA FTM at 6 against
 15.18, NHL hits at 4 against 8); NHL hits and WNBA fit the mechanism (inferred, untested).

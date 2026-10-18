@@ -49,7 +49,12 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_zi,
 )
-from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR, _dp_mu_from_mean
+from sportstradamus.helpers.distributions import (
+    _DP_PHI_CEILING,
+    _DP_PHI_FLOOR,
+    LOGIT_CLIP_EPS,
+    _dp_mu_from_mean,
+)
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.hurdle import HurdleZINB
@@ -2292,6 +2297,7 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
             "SkewNormal",
             sigma=decoded["sn_sigma_test"],
             skew_alpha=decoded["sn_alpha_test"],
+            step=step,
             gate=gate_test,
         )
     elif dist == "Mixture":
@@ -3157,12 +3163,17 @@ def _step_compute_test_probabilities(
     dist: str,
     step,
 ) -> np.ndarray:
-    """Compute ``y_proba_no_filt`` (Nx2) for the test set after dispersion calibration."""
-    B_test = splits["B_test"]
+    """Compute ``y_proba_no_filt`` (Nx2) for the test set after dispersion calibration.
+
+    Columns are ``[P(under), P(over)]``, before temperature scaling. SkewNormal and the Gamma
+    families pass the cell's ``step`` so an integer-line push is priced under the same bin
+    width ``model_prob`` serves.
+    """
+    line = splits["B_test"]["Line"].to_numpy()
     weighted_mean = fused["weighted_mean"]
     if dist == "SkewNormal":
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_test"],
@@ -3172,24 +3183,24 @@ def _step_compute_test_probabilities(
         )
     elif dist == "Mixture":
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             mix=calibrated["mix_blend_test"],
         )
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             r=calibrated["r_test"],
             gate=fused["gate_blend_test"],
         )
     elif dist == "DPO":
-        under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, phi=calibrated["phi_test"])
+        under = get_odds(line, weighted_mean, dist, phi=calibrated["phi_test"])
     else:
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             alpha=calibrated["alpha_blend"],
@@ -3202,6 +3213,11 @@ def _step_compute_test_probabilities(
     return np.array([under, 1 - under]).transpose()
 
 
+# Search interval for the temperature T in expit(logit(p) / T). T >= 1 can only flatten an
+# over-probability toward 0.5, never sharpen it.
+_TEMPERATURE_BOUNDS: tuple[float, float] = (1.0, 10.0)
+
+
 def _step_calibrate_temperature(
     fused: dict,
     calibrated: dict,
@@ -3209,14 +3225,22 @@ def _step_calibrate_temperature(
     decoded: dict,
     dist: str,
     step,
-) -> tuple[float, np.ndarray, float]:
-    """Fit temperature ``T_opt`` on validation, return calibrated val probs + model_calib."""
+) -> tuple[float, np.ndarray, float, np.ndarray]:
+    """Fit temperature ``T_opt`` on the validation split.
+
+    Returns:
+        ``(T_opt, val_calibrated, model_calib, y_class_val)``: ``T_opt`` within
+        ``_TEMPERATURE_BOUNDS``, the temperature-scaled over-probability of each validation
+        row, ``model_calib`` = 1 - Brier of those, and the push-aware over labels (a push is
+        0.5) the Brier is scored against.
+    """
     B_validation = splits["B_validation"]
     y_class_val = over_label(splits["y_validation"]["Result"], B_validation["Line"])
+    line = B_validation["Line"].to_numpy()
 
     if dist == "SkewNormal":
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean_val"],
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_val"],
@@ -3226,7 +3250,7 @@ def _step_calibrate_temperature(
         )
     elif dist == "Mixture":
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean_val"],
             dist,
             mix=calibrated["mix_blend_val"],
@@ -3237,7 +3261,7 @@ def _step_calibrate_temperature(
         _gate_val = fused["gate_blend_val"] if dist in ("ZINB", "ZAGamma") else None
         _phi_val = calibrated["phi_blend_val"] if dist == "DPO" else None
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean"],
             dist,
             alpha=_alpha_val,
@@ -3248,14 +3272,13 @@ def _step_calibrate_temperature(
         )
     # §6.1 Rung C: temperature calibrates the SERVED over-prob, so fit it on the warped CDF.
     val_raw_under = apply_cdf_recal(calibrated.get("pit_recal_blob"), val_raw_under)
-    val_raw_over_clipped = np.clip(1 - val_raw_under, 1e-6, 1 - 1e-6)
+    val_raw_over_clipped = np.clip(1 - val_raw_under, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS)
     val_logits = logit(val_raw_over_clipped)
-    result_ts = minimize_scalar(
+    T_opt = minimize_scalar(
         lambda T: _brier_temperature_loss(T, val_logits, y_class_val),
-        bounds=(1.0, 10.0),
+        bounds=_TEMPERATURE_BOUNDS,
         method="bounded",
-    )
-    T_opt = result_ts.x
+    ).x
     val_calibrated = apply_temperature(1 - val_raw_under, T_opt)
     model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
     return T_opt, val_calibrated, model_calib, y_class_val

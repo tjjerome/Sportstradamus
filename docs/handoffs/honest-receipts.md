@@ -505,8 +505,13 @@ inside its group; §8 restates each open one as a plain question.
      and `feature-parity --versions` re-serves the logged legs through it offline.
      Primary statistic: fresh (version days 0–3) minus aged (days 4+) recommended gap, day-clustered,
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
-     difference between versions. Confirmed → retrain every 3–4 days. Null → KILL: the MLB pattern
-     was calendar or regression to the mean.
+     difference between versions. Decision rule (fixed 2026-10-17, before the first read): the
+     primary test is one-sided at α = 0.05 (fresh overstates less than aged), read only with at
+     least 5 fresh and 10 aged game days and 300 recommended legs per arm; NHL about 10-29 (the
+     campaign's retrain of ~10-18 against the 10-15 prior copies), NBA about 11-05 (its first
+     version change since 08-29; opener 10-20). Confirmed → a 3–4-day retrain cadence lane. A
+     null paired same-leg difference → KILL: the MLB pattern was calendar or regression to the
+     mean. No cadence change before the read.
   3. **I6f as-of alignment of training's archive inputs.** The pre-game cutoff for game lines is
      built for every game ingested from now on, on both boxes: `_enrich_team_markets` takes each
      sportsbook's newest Moneyline and Totals quote stamped at or before 15:00 UTC on the game date
@@ -555,8 +560,9 @@ inside its group; §8 restates each open one as a plain question.
      then three stored cells read a worse calibration error under the new label, all inside the
      gate's .075 (NFL `qb tds` .015 → .063, NFL targets .000 → .060, WNBA TOV .020 → .033), and
      `model_stats.parquet` mixes the two labels from the first `meditate` after the change until
-     every cell has retrained. Still open: `step` passed to SkewNormal `get_odds` in
-     `_step_compute_test_probabilities` and `_step_calibrate_temperature`. I6b is optional: align
+     every cell has retrained. `step` reaches SkewNormal `get_odds` in `_step_compute_test_probabilities` and
+     `_step_calibrate_temperature` since 2026-10-17 (`lever-t`, df0b8a7c); a SkewNormal cell's
+     test-set `P` and temperature move at its next retrain. I6b is optional: align
      training's non-authentic fusion to serving, never the reverse.
   5. **I6d NFL at-market information** (research; no method is guaranteed). Order: after I6e's parity
      repair, and after the NFL count quote is levelled (`ev` and `under_prob` disagree, which
