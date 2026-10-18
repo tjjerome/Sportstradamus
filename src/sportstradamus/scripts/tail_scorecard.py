@@ -37,7 +37,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, platform_payout
-from sportstradamus.helpers.io import TAIL_SCORECARD_PATH, read_history
+from sportstradamus.helpers.io import TAIL_SCORECARD_PATH, _atomic_write_parquet, read_history
 from sportstradamus.prediction.offer_records import (
     _MAX_CONFIDENCE,
     SCORED_RECORD_COLS,
@@ -399,7 +399,7 @@ def _write_sidecar(sidecar: pd.DataFrame, path: Path) -> None:
             pd.MultiIndex.from_frame(sidecar[["league", "market"]])
         )
         sidecar = pd.concat([existing[~rescored], sidecar], ignore_index=True)
-    sidecar.to_parquet(path, index=False)
+    _atomic_write_parquet(sidecar, path)
 
 
 def _history_since(start: str) -> pd.DataFrame:

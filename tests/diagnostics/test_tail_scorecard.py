@@ -31,7 +31,7 @@ from sportstradamus.helpers.archive import _dfs_offer_probs
 from sportstradamus.prediction import offer_records
 from sportstradamus.prediction.offer_records import book_over_prob, finalize_records
 from sportstradamus.realized import RECOMMENDED_EDGE_MIN, RECOMMENDED_PAYOUT_MAX
-from sportstradamus.scripts.tail_information import information_rows
+from sportstradamus.scripts.tail_information import information_rows, information_table
 from sportstradamus.scripts.tail_pricing import (
     RECONSTRUCTION_TOL,
     ladder_rungs,
@@ -635,3 +635,51 @@ def test_cell_ci_is_the_same_alone_and_beside_another_cell():
     assert one["gap_lo"] < one["gap_hi"]  # a real interval, so the equality below pins something
     for column in ("gap", "gap_lo", "gap_hi", "live_gap", "live_gap_lo", "live_gap_hi"):
         assert one[column] == two[column], column
+
+
+def _information_frame(cell: str, league: str, seed: int) -> pd.DataFrame:
+    """Rows shaped like ``information_rows``: 6 game days, 20 props each, prices that move."""
+    from scipy.special import logit
+    from scipy.stats import poisson
+
+    rng = np.random.default_rng(seed)
+    n = 120
+    mean = rng.uniform(3, 8, n)
+    line = np.round(mean) + 0.5
+    result = rng.poisson(mean).astype(float)
+    frame = pd.DataFrame(
+        {
+            "cell": cell,
+            "League": league,
+            "Date": np.repeat(pd.date_range("2026-09-10", periods=6), n // 6),
+            "Line": line,
+            "Result": result,
+            "y": (result > line).astype(float),
+            "EV": mean + rng.normal(0, 0.5, n),
+            "consensus": mean + rng.normal(0, 0.7, n),
+            "Book_EV": mean + rng.normal(0, 0.7, n),
+        }
+    )
+    for name, column in (("model", "EV"), ("decision", "consensus"), ("training", "Book_EV")):
+        p_over = np.clip(poisson.sf(np.floor(line), frame[column]), 0.05, 0.95)
+        frame[f"p_{name}"] = p_over
+        frame[f"logit_{name}"] = logit(p_over)
+    return frame
+
+
+def test_information_cell_ci_is_the_same_alone_and_beside_another_cell():
+    receptions = _information_frame("NFL_receptions", "NFL", seed=1)
+    carries = _information_frame("NFL_carries", "NFL", seed=2)
+
+    alone = information_table(receptions, seed=0)
+    beside = information_table(pd.concat([receptions, carries], ignore_index=True), seed=0)
+
+    def cell_rows(table: pd.DataFrame) -> pd.DataFrame:
+        rows = table[table["scope"].eq("cell") & table["key"].eq("NFL_receptions")]
+        return rows.set_index("band").sort_index()
+
+    one, two = cell_rows(alone), cell_rows(beside)
+    assert list(one.index) == ["decision", "training"]
+    assert (one["lin_b_model_lo"] < one["lin_b_model_hi"]).all()  # a real interval
+    assert (one["ll_gain_lo"] < one["ll_gain_hi"]).all()
+    pd.testing.assert_frame_equal(one, two)
