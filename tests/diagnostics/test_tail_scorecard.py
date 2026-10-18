@@ -223,6 +223,25 @@ def test_reconstruction_rebuilds_the_persisted_probability(cell):
     assert reconstruction_error(rows, perturbed) > RECONSTRUCTION_TOL
 
 
+def test_reconstruction_prices_at_the_pickles_step():
+    # Training prices its test set at the pickle's step, as serving does, so a SkewNormal cell
+    # with half-unit pushes on integer lines reconstructs only at that step.
+    knobs, csv = _CELLS["NFL_receptions"]
+    knobs = knobs | {"step": 0.5}
+    rows = pd.read_csv(io.StringIO(csv))
+    rows["Line"] = [3.0, 6.0, 2.0, 1.0, 2.0]
+    rows["P"] = [
+        0.45390696754351045,
+        0.38056567858181106,
+        0.4815375307564612,
+        0.5697316617054369,
+        0.3974099258209855,
+    ]
+
+    assert reconstruction_error(rows, knobs) <= RECONSTRUCTION_TOL
+    assert reconstruction_error(rows, knobs | {"step": 1.0}) > RECONSTRUCTION_TOL
+
+
 _LEAGUE, _MARKET = "MLB", "total bases"
 _REPLAY_KNOBS = {
     "distribution": "NegBin",

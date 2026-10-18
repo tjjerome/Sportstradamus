@@ -78,9 +78,6 @@ _KNOBS = (
 # The prototype rebuilt P to 1e-13 on every cell; past 1e-6 the chain is not the pickle's.
 RECONSTRUCTION_TOL = 1e-6
 
-# Training prices its test set without passing step, so get_odds runs at its default.
-TRAINING_STEP = 1.0
-
 _RUNG_SQL = """
 WITH rung AS (
     SELECT k.rid, l.book AS platform, l.line, arg_max(l.p_over, l.observed_at) AS p_dfs,
@@ -166,7 +163,7 @@ def serve(
     against book base mean ``ev_book``, ``correct_fused_mean``, the dispersion / skew
     calibration (DPO phi capped at its ceiling), ``get_odds`` at ``step``, the whole-CDF
     recal, temperature, then a PROB_STAGE posthoc. Training and serving differ only in
-    ``w_row``, ``ev_book`` and ``step``.
+    ``w_row`` and ``ev_book``.
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
@@ -228,11 +225,11 @@ def serve(
 def reconstruction_error(rows: pd.DataFrame, knobs: dict) -> float:
     """Max |P_rebuilt - P| over test rows re-served under the training convention.
 
-    Training blends with ``_training_weight`` against ``Book_EV`` at get_odds' default step;
+    Training blends with ``_training_weight`` against ``Book_EV`` at the pickle's step;
     NaN (a row the chain cannot price) counts as a failure.
     """
     rebuilt, _, _ = serve(
-        rows, knobs, _training_weight(rows, knobs), rows["Book_EV"].to_numpy(float), TRAINING_STEP
+        rows, knobs, _training_weight(rows, knobs), rows["Book_EV"].to_numpy(float), knobs["step"]
     )
     return float(np.max(np.abs(rebuilt - rows["P"].to_numpy(float))))
 
@@ -306,7 +303,7 @@ def price_cell(
         knobs,
         _training_weight(priced, knobs),
         priced["Book_EV"].to_numpy(float),
-        TRAINING_STEP,
+        knobs["step"],
     )[0]
     priced["Market Projection"] = priced["Book_EV"].where(authentic)
     diag = {"cell": path.stem, "League": league, "test_rows": len(rows), "recon_err": error}
