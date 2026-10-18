@@ -216,20 +216,20 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
         # Use the resolved (post-mutation) config to decide what to prune. A volume
         # denominator is never pruned (prune_model_pickle's rule), so it is never listed.
         config = load_ship_config(branch=branch, path=meta_path)
-        withheld = [
+        prunable = [
             (league, market)
-            for league in ALL_MARKETS
-            for market in ALL_MARKETS[league]
+            for league, markets in ALL_MARKETS.items()
+            for market in markets
             if config.get(league, {}).get(market, WITHHELD) == WITHHELD
             and market not in VOLUME_STATS[league]
             and model_pickle_path(league, market).exists()
         ]
         if dry_run:
-            for league, market in withheld:
+            for league, market in prunable:
                 click.echo(f"  would prune {league}/{market}")
-            click.echo(f"# (dry-run) {len(withheld)} withheld pickle(s) left in place")
+            click.echo(f"# (dry-run) {len(prunable)} withheld pickle(s) left in place")
         else:
-            pruned = sum(prune_model_pickle(league, market) for league, market in withheld)
+            pruned = sum(prune_model_pickle(league, market) for league, market in prunable)
             click.echo(f"pruned {pruned} withheld pickles")
 
 
