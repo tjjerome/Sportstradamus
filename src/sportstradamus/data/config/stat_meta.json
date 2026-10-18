@@ -417,7 +417,7 @@
         },
         "powerPlayPoints": {
             "dist": "NegBin",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "prob_recal_isotonic",
             "zinb_mode": "hurdle",
