@@ -48,22 +48,18 @@ GRADUATION_WINDOW_DAYS = 30
 # check is skipped only for that side, not the whole cell.
 MIN_PRECISION_SIDE = 0.50
 # Below this many selected (recommended) legs in the offline replay the selected-tail gap is
-# descriptive only (train-live-gap spec section 6, Power); the scorecard flags the same bar.
+# descriptive only (docs/archive/researcher_train_serve_skew.md section 6, Power); the
+# scorecard flags the same bar.
 DESCRIPTIVE_MIN_SELECTED = 100
+_LIVE_GAP_COLUMNS = ["live_n", "live_gap", "live_gap_hi"]
 # The selected-tail read, one row per cell. The frame carries these dtypes whether or not
 # either sidecar exists, so the lifecycle left-join and the dashboard's float formatting see
 # the same columns on every run.
 _TAIL_COLUMNS = {
     "league": "object",
     "market": "object",
-    "tail_n": "float64",
-    "tail_gap": "float64",
-    "tail_gap_hi": "float64",
-    "live_n": "float64",
-    "live_gap": "float64",
-    "live_gap_hi": "float64",
+    **dict.fromkeys(["tail_n", "tail_gap", "tail_gap_hi", *_LIVE_GAP_COLUMNS], "float64"),
 }
-_LIVE_GAP_COLUMNS = ["live_n", "live_gap", "live_gap_hi"]
 
 
 def _is_nan_like(x: object) -> bool:

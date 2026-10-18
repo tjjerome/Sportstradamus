@@ -161,13 +161,7 @@ def distribution_frame(
     else:
         xs, vals = _discrete_curve(dist, ev, std, params, recal_blob)
         y_title = "Probability"
-    df_pdf = pd.DataFrame(
-        {
-            "x": xs,
-            "P": vals,
-            "Side": _side(xs, line),
-        }
-    )
+    df_pdf = pd.DataFrame({"x": xs, "P": vals, "Side": _side(xs, line)})
     return df_pdf, y_title, is_continuous
 
 
