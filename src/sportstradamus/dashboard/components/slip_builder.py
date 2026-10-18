@@ -66,17 +66,17 @@ _LEG_PANEL_HEIGHT = 150
 
 
 def slip_shrinkage(legs: Sequence[Mapping]) -> float:
-    """Worst-cell kelly_shrinkage across the slip's legs; the no-evidence prior when none has one."""
+    """Worst-cell kelly_shrinkage across the slip's legs; the no-evidence prior if none has one."""
     stats = load_model_stats()
     if stats.empty or "kelly_shrinkage" not in stats.columns:
         return NO_EVIDENCE_SHRINKAGE
-    vals = []
+    shrinkages = []
     for leg in legs:
         market = leg_cell_market(leg)
         cell = stats.loc[(stats["league"] == leg["league"]) & (stats["market"] == market)]
         if not cell.empty and pd.notna(cell.iloc[0]["kelly_shrinkage"]):
-            vals.append(float(cell.iloc[0]["kelly_shrinkage"]))
-    return min(vals) if vals else NO_EVIDENCE_SHRINKAGE
+            shrinkages.append(float(cell.iloc[0]["kelly_shrinkage"]))
+    return min(shrinkages, default=NO_EVIDENCE_SHRINKAGE)
 
 
 def _active_lenses(

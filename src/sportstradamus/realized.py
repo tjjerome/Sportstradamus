@@ -6,11 +6,11 @@ at its platform payout (``helpers.platform_payout``), keeps only sides the platf
 posted (a ``Boost == 0`` side was never a bet), counts an offer once per platform (the
 same prop on Underdog and Sleeper is two bets), counts a prop whose line moved only at
 the lines still posted when it was last scored (games from ``COUNT_ONCE_FROM``; earlier
-games count every line posted; ``last_scored_lines`` is that mask on its own, for the
-dashboard's filter to take before it drops pushes) and flags ``Recommended`` by the one rule
-Receipts and the paper ledger share. ``window``, ``by_split``, ``cohort_summary``,
-``worst_month`` and ``calibration_summary`` slice and aggregate that frame; nightly persists
-``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). Pure.
+games count every line posted) and flags ``Recommended`` by the one rule Receipts and the
+paper ledger share. ``window``, ``by_split``, ``cohort_summary``, ``worst_month`` and
+``calibration_summary`` slice and aggregate that frame; nightly persists
+``compute_realized_by_side`` (``helpers.io.REALIZED_BY_SIDE_PATH``). ``last_scored_lines``
+is the count-once mask alone, for the dashboard's filter to take before it drops pushes. Pure.
 """
 
 from datetime import UTC, datetime

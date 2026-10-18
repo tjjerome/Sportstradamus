@@ -422,14 +422,11 @@ def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
 
     The shrinkage is NaN — what ``kelly.resolve_shrinkage`` reads as "no live
     evidence" — when no parquet exists, the segment is absent (``n`` is 0) or it
-    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). A
-    ``1.0`` here once read as full trust in exactly the cells nothing had measured.
+    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). Never
+    ``1.0`` there: that reads as full trust in exactly the cells nothing has measured.
     """
-    path = _segments_parquet_path()
-    if not path.exists():
-        return np.nan, 0
     try:
-        seg_df = pd.read_parquet(path)
+        seg_df = pd.read_parquet(_segments_parquet_path())
     except (OSError, ValueError):
         return np.nan, 0
     rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
