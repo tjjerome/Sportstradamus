@@ -562,7 +562,8 @@ bound to.
 
 ## 11. The star lean: NFL P(Under) runs high on the top quarter of lines
 
-[story-balance.md](story-balance.md) §6 found NFL Unders overconfident and called it a training
+The story-balance lane (closed 2026-10-18; its records in [honest-receipts.md](honest-receipts.md) §7)
+found NFL Unders overconfident and called it a training
 problem. The 2026-10-16 read confirms it, locates it and pins the bar a fix must clear. Scripts,
 outputs and the full write-up: `~/backups/sportstradamus/2026-10-16-under-lean/part2/`
 (`REPORT.md`, every number tagged measured or inferred). "Gap" is model P(Under) minus the realized
@@ -641,24 +642,22 @@ shared code: 43 served cells across five leagues are capped (NFL 14, NBA 13, NHL
 2; NBA FTM 97 % unquoted with a cap of 6 against 15.18, NHL hits 4 against 8); the NHL `hits`
 star under-read and the WNBA lean fit the same mechanism (inferred, untested).
 
-**Lever T, outcome-blind trimming: built 2026-10-17 on branch `lever-t`; the owner's yes comes
-before it reaches `devel`.** `trim_matrix` lost the `Result` quantile band and
+**Lever T, outcome-blind trimming: landed 2026-10-18.** `trim_matrix` lost the `Result` quantile band and
 `_balance_over_under` (every line of it read the outcome: the `MeanYr`-weighted over/under rate
 and the push drop; with the trimmed rows back, targets and yards pass the 20,000-row floor and
 their unquoted over-rates, targets 0.528 against 0.437, would have made it delete star Over
 games); the line clip and the line balancing stay. Pinned by `tests/golden/test_trim_matrix.py`.
-Every NFL cell retrains, because
-the rebuild is league-wide; the expected movers are targets, yards, both fantasy cells, receiving
-and rushing yards, receptions and carries. Retrain: the NFL cold rebuild per
-[docs/MODEL_LIFECYCLE.md](../MODEL_LIFECYCLE.md) § Rebuilding (6 to 10 h), then
-`sportstradamus meditate --league NFL --force` (about 1.75 h on the 10-15 retrain), then
-`scripts/sync_to_prod.sh --league NFL`. The brief's decision table sets the other levers aside:
-the post-fusion mean corrector (fit on trimmed outcomes; worse as built; re-test only after T),
-recency weighting (killed for this lean), a top-line-quartile scorecard column (a monitor, not an
-objective, until weekly reads agree with live), `prob_recal_book_citl` (moot; quoted rows read
-−0.001), the pick'em line as a mean prior (barred by the owner's rule on DFS lines) and
-offered-population training (killed). The NFL rebuild fixes no other league; each league's own
-rebuild carries the same change when its turn comes (§7.4 of the model-improvement track).
+The code change alone changes nothing: the trimmed rows were gone from the cached matrices, so each
+in-season league was cold-rebuilt from its game logs and the odds archive and retrained once, on
+2026-10-18 (NFL, NBA, NHL; recipes, timings and row counts in
+`~/backups/sportstradamus/2026-10-17-train-live-gap/REPORT.md` §3). WNBA and MLB carry the change at
+their 2027 preseason rebuilds (§7.4 of the model-improvement track); until then their unquoted-heavy
+cells keep the cap. The brief's decision table set the other levers aside: the post-fusion mean
+corrector (fit on trimmed outcomes; worse as built; re-test only after T), recency weighting (killed
+for this lean), a top-line-quartile scorecard column (a monitor, not an objective, until weekly reads
+agree with live; built as the selected-tail instrument, honest-receipts §6 E), `prob_recal_book_citl`
+(moot; quoted rows read −0.001), the pick'em line as a mean prior (barred by the owner's rule on DFS
+lines) and offered-population training (killed).
 
 **Acceptance, pre-registered; copy today's NFL test sets aside before the retrain.** A1 the
 pinned xfail test flips to XPASS (projected gap +0.008 to −0.003, ratio 0.999 to 1.016). A2 on the
@@ -676,12 +675,30 @@ yes re-runs the sweep and confirm walk on those two cells. The brief also propos
 test beside the pinned one: assert on the quoted cohort with its CI, and compute the ratio
 gate-aware (the base `Blended_EV` on 10 gated cells reads 0.965 where the honest figure is 0.929).
 
-**Dates.** Offline verdict about 2026-10-20 on a yes by 10-18. Default send 2026-11-05, after the
-story lane's 11-04 fair-window reads, so those stay single-version; a send on acceptance (about
-10-21) is possible if a mixed-version 11-04 read is accepted. First live read of the new versions
-about 2026-12-03. What T does and does not do: it removes a mechanical Under tilt and creates no
+**Verdicts (2026-10-18; lane folder `~/backups/sportstradamus/2026-10-17-train-live-gap/`, `REPORT.md`
+§4, every number tagged).** Read the paired numbers (rows both test sets hold) for the tilt and the
+pooled ones for the information gap: a test set trimmed on outcome cannot grade a trim fix, so the
+after sets' restored big games (NFL 71 top-tier rows at ratio 0.61, NBA 29 at 0.851) make the pooled
+gap grow while the tilt falls. NFL: A1 paired served gap +0.034 → +0.004, ratio 0.977 → 1.008 (the
+pooled xfail stays red at +0.033 for the reason above; the marker stays until the owner drops it); A2
+quoted top tier +0.059 → +0.037 (pass); A3 paired ΔP authentic +0.009, synthetic +0.041; A4 selected-
+tail hit 0.496 → 0.531 and top-tier Under share 0.973 → 0.943 (pass); A5 four gate flips explained;
+no kill trigger. Book-less cells moved as predicted (fantasy points underdog ratio 0.808 → 0.860,
+targets 0.813 → 0.882, yards 0.915 → 1.004); quoted cells ±2 %. NBA (first retrain since 08-29):
+paired +0.017 → −0.016 on 186 rows; seven book-less cells moved 8–33 %. NHL: pooled top-tier
+−0.041 → −0.033; `hits` ratio 0.877 → 1.015 and it passes g4 and g6 (0.108 → 0.018, 0.928 → 1.064), so
+its deferred pull was dropped; `powerPlayPoints` newly fails g6 (CITL CI hi 1.030 → 0.955) and was
+pulled. Pulled on fresh gates (owner rule 10-18, eight cells): NBA PTS, PA, FG3A; NFL qb yards; WNBA
+PA, RA; MLB pitcher fantasy points underdog; NHL powerPlayPoints. Live paired read the day of the
+send (418 NFL player-games logged under 10-15 and re-scored under 10-18 at the quote line): top-tier
+P(Under) 0.624 → 0.583, rest −0.004; the recommended-leg Under share on the first board did not fall
+(side and threshold layers, honest-receipts §7).
+
+**Dates.** Sent 2026-10-18 on the owner's "send all models as they are finished" (NFL and NBA 13:04
+CDT by `sync_to_prod.sh --league`, NHL 14:41 by a full sync), so the story lane's 11-04 fair reads are
+mixed-version. Live reads: the paired instrument (`admin feature-parity --versions` on the serve log)
+now; settled rows weekly (`admin tail-scorecard`, Receipts); I6g NHL about 10-29, NBA about 11-05
+(honest-receipts §6). What T does and does not do: it removes a mechanical Under tilt and creates no
 balance. Projected top-tier picks go from 95 % Unders to 83 to 90 % (inferred); the rest is the
 information gap at the line (the line's encompassing coefficient +0.43 [+0.33, +0.57], measured).
-Today's top selected Unders hit 0.517 against a break-even of about 0.536, so removing the tilt
-removes losing legs. Near-equal Over/Under is the story lane's presentation rule, not a
-calibration property.
+Near-equal Over/Under is the story lane's presentation rule, not a calibration property.

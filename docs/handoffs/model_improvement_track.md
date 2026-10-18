@@ -304,7 +304,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Family build — count wall + shape-bound | **Both families BUILT + wired end-to-end** (§6.6): Double Poisson (`DPO`) in the count sweep (`ZINB ∪ NegBin ∪ DPO`, 16 corners/cell) and centered-SN behind the `sn_param` axis (SkewNormal 24 corners/cell); full-cohort screen routes 15 DP-mandatory / 8 hurdle / 18 plain-NB of 41 count cells. The pilots have reported and both families ship; derive which cells from `stat_meta.json` (`dist: DPO`; `sn_param: centered` on a SkewNormal cell). SHASH stays unbuilt (§6.6 build order, step 3) | R1/R2 briefs; §6.6 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — the hurdle engages only where a cell pins `zinb_mode: hurdle` on `dist: ZINB` (`use_hurdle` in `pipeline.train_market`); the field is inert on a NegBin or DPO cell. Derive the cell list from `stat_meta.json` | refs §4 |
 | Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A). **Killed for the NFL star lean as built**: it is fit on outcome-trimmed validation rows, so it deepens that lean (+0.037 → +0.069 in simulation); re-test only after lever T | refs §8; [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md) |
-| Outcome-blind matrix trim (lever T: the `Result` quantile band and `_balance_over_under` removed from `training/data.py:trim_matrix`) | **Built 2026-10-17 on `lever-t`, owner yes pending before `devel`; per-league verdicts pending** — the band deleted unquoted star games above the 95th percentile (truncation bias); 43 served cells across five leagues are capped. Acceptance, kill triggers and dates in the NFL brief | [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); brief `~/backups/sportstradamus/2026-10-16-under-lean/part2/researcher_star_lean.md` |
+| Outcome-blind matrix trim (lever T: the `Result` quantile band and `_balance_over_under` removed from `training/data.py:trim_matrix`) | **Landed 2026-10-18: NFL, NBA and NHL rebuilt and retrained once each on the outcome-blind trim and sent the same day; WNBA and MLB carry it at their 2027 preseason rebuilds** — the band had deleted unquoted star games above the 95th percentile (truncation bias). Paired top-tier served gap on shared test rows: NFL +0.034 → +0.004, NBA +0.017 → −0.016, NHL −0.041 → −0.033; book-less cells' top-tier means moved 8–33 %, quoted cells ±2 %; eight cells pulled on fresh gates. Verdicts, pulls and the pre-registered acceptance in the NFL brief | [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); brief `~/backups/sportstradamus/2026-10-16-under-lean/part2/researcher_star_lean.md` |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
 | Post-hoc scale/dispersion (joint `(c, skew_cal)` vs PIT-KS) | **Shipped** — route 1a-hybrid; Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells) | §6.1 Rung B |
 | Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt — narrowed** (§6.3 M-1). Pilots WNBA STL + NBA PF; NFL volume cells are **not** feature-starved (485 candidate cols) — their negative BSS is target-shape, not features, so NFL runs 1–2 falsification pilots only, routing the rest to §6.6/§6.1 | `[[nfl_volume_cells_feature_mature]]` |
@@ -1791,7 +1791,8 @@ justification to `.claude/.state/research_waiver`.
   Reopen rules from R3's hand-back: re-test price-blind tail recalibration once the scorecard
   holds twice today's 1,615 selected rows; the booster-window KILL reopens if NBA or NHL shows
   information decaying with distance from the training cutoff. Build order and the not-to-build
-  list: [honest-receipts.md](honest-receipts.md) §6.
+  list: [honest-receipts.md](honest-receipts.md) §6. The selected-tail instrument landed 2026-10-18 as monitor columns, never a gate
+  (honest-receipts §6 E: sidecar parquet, live half, `tail_state` against the 0.05 edge floor).
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
@@ -1898,15 +1899,16 @@ justification to `.claude/.state/research_waiver`.
   find the live-soak demotion criterion misaligned with app-line profit; the finding is a decision
   packet against `graduation.py`, never a session edit (§4, 2026-06-10).
 
-- **#13 — Outcome-selected training and test rows (the matrix trim): lever T built 2026-10-17 on
-  `lever-t`, verdicts pending.** Until then `training/data.py:trim_matrix` kept a new unquoted row
+- **#13 — Outcome-selected training and test rows (the matrix trim): lever T landed
+  2026-10-18.** Until then `training/data.py:trim_matrix` kept a new unquoted row
   only inside the matrix's 5–95 % `Result` band (quoted rows exempt), so stars' big games left
   both the training and the test rows: truncation bias that no gate or post-hoc corrector can see, because they grade
   against the trimmed outcomes. 43 served cells across five leagues are capped (NFL 14, NBA 13,
   NHL 9, WNBA 5, MLB 2); the program-wide under-dispersion may be partly manufactured by it (test
-  with g4 PIT on quoted against unquoted rows). Lever T, its acceptance, kill triggers and dates:
-  [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); each league's own rebuild carries the
-  change (§7.4). Read §3.1 with a caveat for unquoted-heavy cells until then.
+  with g4 PIT on quoted against unquoted rows). Lever T's verdicts, acceptance and kill triggers:
+  [nfl-ship15-recovery.md §11](nfl-ship15-recovery.md); NFL, NBA and NHL were rebuilt on it
+  2026-10-18, WNBA and MLB follow at their 2027 preseason rebuilds (§7.4). Read §3.1 with a caveat
+  for those two leagues' unquoted-heavy cells until then.
 
 **Resolved (one-liners; detail in [`../operation_ship_references.md`](../operation_ship_references.md)):**
 post-hoc scale moves PIT-KS without breaking g1/g5, but only under the right normalization and

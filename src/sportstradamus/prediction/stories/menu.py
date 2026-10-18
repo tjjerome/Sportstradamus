@@ -50,8 +50,9 @@ from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
 # A leg qualifies as a story seed when its per-$1 model EV clears this edge. 0.05 until
-# 2026-10-17, when the owner lowered it to admit more Over-led stories (story-balance.md
-# §11, option B); the Receipts cohort floor (realized.RECOMMENDED_EDGE_MIN) stayed at 0.05.
+# 2026-10-17, when the owner lowered it to admit more Over-led stories (the story-balance
+# lane's option B, honest-receipts.md §7); the Receipts cohort floor
+# (realized.RECOMMENDED_EDGE_MIN) stayed at 0.05.
 _MENU_EDGE_FLOOR: float = 0.03
 # Two strong legs join a cluster when |rho| over their pair clears this; matches
 # the display-correlation floor in correlation.py.
@@ -126,9 +127,7 @@ def _stories_for_game(
     # Whole-game gate: only when the model's edge is entirely one-sided may a story
     # be a single-team preset (the user completes it with a satellite leg). A game
     # with edge on both teams still requires both-teams presets.
-    require_both = (
-        len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
-    )
+    require_both = len({team for i in edge if (team := sctx.bet_df[i].get("Team"))}) >= 2
     stat_by_label = leg_market_map(sctx.league, sctx.platform)
     index = offer_index(offers)
     stars = {}
@@ -141,17 +140,10 @@ def _stories_for_game(
     scored = []
     for cluster, side, lead in _cluster_strong_legs(order, sctx, seeds):
         priced = _price_cluster(
-            cluster,
-            side,
-            lead,
-            seeds.get(side),
-            order,
-            sctx,
-            stat_by_label,
-            require_both=require_both,
+            cluster, seeds.get(side), order, sctx, stat_by_label, require_both=require_both
         )
         if priced is not None:
-            scored.append(priced)
+            scored.append((*priced, side, lead))
     # Led stories first, between themselves by Moon EV; then the rest by EV.
     scored.sort(
         key=lambda s: (s[3] == "", -s[2]["model_ev"], -max(edge[i] for i in s[0]), s[2]["bet_id"])
@@ -313,19 +305,18 @@ def _best_subsets(
 
 def _price_cluster(
     cluster: list[int],
-    side: str,
-    lead: str,
     seed: int | None,
     order: Sequence[int],
     sctx: GameScoringContext,
     stat_by_label: dict,
     *,
     require_both: bool,
-) -> tuple[list[int], dict, dict, str, str] | None:
-    """One cluster's (Builder, Moon) pair tagged with its lead, or ``None`` if neither prices.
+) -> tuple[list[int], dict, dict] | None:
+    """One cluster's (Builder, Moon) pair and the cluster priced, or ``None`` if neither prices.
 
     A lead whose cluster prices nothing around it (alone, or one-team in a
-    two-team game) borrows a leg from ``order`` and is priced once more.
+    two-team game) borrows a leg from ``order`` and is priced once more, so the
+    returned cluster then carries that leg.
     """
     builder, moon = _best_subsets(
         cluster, sctx, stat_by_label, require_both_teams=require_both, must_include=seed
@@ -339,7 +330,7 @@ def _price_cluster(
             )
     if builder is None:
         return None
-    return cluster, builder, moon, side, lead
+    return cluster, builder, moon
 
 
 def _row(sctx: GameScoringContext, objective: str, sub: Mapping, story: Mapping) -> dict:

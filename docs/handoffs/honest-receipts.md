@@ -1,8 +1,9 @@
 # Lane brief — honest receipts: one pricing truth, three research verdicts, model-side repairs
 
 **Read first:** CLAUDE.md, [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [docs/ship_gate.md](../ship_gate.md)
-(Gate 2 and the devel → main row), [story-balance.md](story-balance.md) §1 and §6 (the ledger fixes and
-the killed selection-shrink lever this lane continues), and the three research briefs in
+(Gate 2 and the devel → main row), the killed selection-shrink lever this lane continues
+([researcher_selection_shrink.md](../archive/researcher_selection_shrink.md); the story-balance lane
+closed 2026-10-18, its records in §7), and the three research briefs in
 `docs/archive/` (§5). Status: OPEN — waves 1–15 are on `devel` (§4); all three briefs returned (R1
 KILL, R2 DONE, R3 DONE; §5); the tail scorecard (E) is built; the consensus sanity check found no
 profit in the sportsbook consensus at the platforms' real payouts (§7); the owner's decisions 7–29
@@ -45,7 +46,8 @@ The owner's constraints are binding and shape every stage here: **no model is pu
 withheld on realized money; no model-free engine; research first (Opus subagents); one honest report.**
 Reporting was fixed first (§4) so every later step is judged by one honest number. Three briefs then
 measured the candidate fixes (§5). Shrinking to the sportsbook consensus was already killed
-(story-balance §6). A learned, selection-aware probability layer was killed by R1: once the layer sees
+(the story-balance lane, 2026-10-03; [researcher_selection_shrink.md](../archive/researcher_selection_shrink.md)).
+A learned, selection-aware probability layer was killed by R1: once the layer sees
 the platform price, the served probability adds nothing out of sample, so the layer would be the
 model-free engine the owner ruled out. R2 found the parlay pricer sound and the legs at fault. R3 found
 that train/serve skews in the calibration chain and the quotes are worth at most 0.7 pp of the 12.5 pp
@@ -131,7 +133,7 @@ of the close-out report.
 27. **The Tonight card shows no side arrow, and a date's Over leads fill toward half of its
     games.** The rule picks which story leads a game. The legs inside a story are the models',
     so no balanced leg mix is promised. Where the platforms lead a game on different sides the
-    card keeps the higher-EV lead ([story-balance.md](story-balance.md) §2, §5).
+    card keeps the higher-EV lead (`prediction/stories/lead._pick_sides`).
 28. **49ers and 76ers games get their game lines again**: a team name is matched under one
     spelling on both sides, in every league. Past games stay at the default line (decision 36).
 29. **The MLB profile defect is fixed now, not in the off-season**: the fix, then a cold rebuild
@@ -367,7 +369,7 @@ nowhere on the page.
 | 8 | `cf0f374e` | A new NBA or WNBA season starts on last season's rosters (decision 26): `Stats._roster_player_df` falls back to last season's (player by player since decision 37), `nba._roster_seed_path` reads the newest earlier seed file, and one `_merge_season_roster` adds a team the season lacks (production's WNBA 2026 roster held 6 of 15 teams) |
 | 8 | `f3713b95` | A pre-season game is never priced (decision 26): `prediction/scoring._in_season_markets` drops an offer dated before the feed's opening night, after it is archived |
 | 9 | `d35a8aa3` | The Tonight card shows the lead story's headline with no side arrow (decision 27); `narrative.game_lead_side` retired to `src/deprecated/` |
-| 9 | `0212ca65` | Over leads fill toward half of each date's games (decision 27): `stories/lead._pick_sides` ([story-balance.md](story-balance.md) §5) |
+| 9 | `0212ca65` | Over leads fill toward half of each date's games (decision 27): `stories/lead._pick_sides` (its docstring) |
 | 9 | `0039f100` | 49ers and 76ers games get their game lines (decision 28): `moneylines._TEAM_ABBR` folds the config's team names the way the odds feed's are folded |
 | 9 | `d19a597b` | A close is read under the league's own market name (decision 32): `clv._fill_one_group`, `clv._row_movement` and the ledger's `join_clv` fold through `helpers.archive_market`; history's `Market` is unchanged |
 | 9 | `439bbd34` | The Underdog scrape raises when a full feed holds no even pick (decision 33): `UD_EVEN_PICK_MIN_LINES`, `UNDERDOG_EVEN_PICK_MULTIPLIER` |
@@ -506,7 +508,7 @@ inside its group; §8 restates each open one as a plain question.
      difference between versions. Decision rule (fixed 2026-10-17, before the first read): the
      primary test is one-sided at α = 0.05 (fresh overstates less than aged), read only with at
      least 5 fresh and 10 aged game days and 300 recommended legs per arm; NHL about 10-29 (the
-     campaign's retrain of ~10-18 against the 10-15 prior copies), NBA about 11-05 (its first
+     10-18 retrain, on prod since 10-18 14:41 CDT, against the 10-15 prior copies), NBA about 11-05 (its first
      version change since 08-29; opener 10-20). Confirmed → a 3–4-day retrain cadence lane. A
      null paired same-leg difference → KILL: the MLB pattern was calendar or regression to the
      mean. No cadence change before the read.
@@ -584,11 +586,22 @@ inside its group; §8 restates each open one as a plain question.
   model-only forecast against the market at the decision-time and training-time references, cell
   fixed effects). It never bets a side history shows was not posted; a side history never priced
   pays 1 / (price × overround) and is flagged `assumed`, so the `posted` row of the payout split is
-  the clean read. It scores 32 of 91 test sets today (MLB 14, NFL 13, WNBA 5): 30 predate the
-  columns the re-serve needs (`Book_EV` and the family's model-only parameters; 18 NBA, 11 NHL and
-  WNBA FGA, until a retrain re-dumps them), 13 have no pickle and 16 have no ladder rung in the
-  window. Readers: I6c, I6d and I6g, as an acceptance input. It routes to training, never to
-  demotion, and becomes a sweep objective only after four weekly runs agree with live per cell.
+  the clean read. The 2026-10-18 retrains re-dumped the NFL, NBA and NHL test sets with
+  the columns the re-serve needs (`Book_EV` and the family's model-only parameters); WNBA FGA and
+  the cells with no pickle stay excluded, and a league whose test rows all predate the first
+  Underdog or Sleeper rung (2026-08-30; NBA before its season) scores nothing and exits clean.
+  Since 2026-10-18 the read is also an instrument: `--parquet` writes one row per cell to
+  `data/training/tail_scorecard.parquet` (model version, window, the headline gap and its CI, per-key
+  seeded CIs so a `--league` run reproduces the full run's), `nightly` writes the live half per cell
+  to `data/runtime/live_gap_per_cell.parquet` (recommended cohort, 30 days, count-once, day-block CI),
+  and `training/graduation.lifecycle_table` joins both as monitor columns for `ship graduation` and
+  the training lab with `tail_state`: `thin` under 100 selected legs, `honest` when the gap's CI
+  upper bound sits under `realized.RECOMMENDED_EDGE_MIN` (0.05), `overstated` otherwise (above the
+  floor the overstatement eats the whole edge). Never a gate; dev-side files, not in the prod sync.
+  Cadence: every Monday into the lane folder (`~/backups/sportstradamus/2026-10-17-train-live-gap/`);
+  it becomes a sweep objective only after four consecutive weekly runs agree with live per cell
+  (Spearman ρ ≥ 0.5 over at least 10 scorable cells), then an owner packet. Readers: I6c, I6d and
+  I6g, as an acceptance input. It routes to training, never to demotion.
 - **Repairs found on the way — built (decisions 15, 16, 22, 23).** None moves a served
   probability.
   1. **A closing price waits for the game.** The nightly `reflect` used to give every history row
@@ -622,6 +635,13 @@ inside its group; §8 restates each open one as a plain question.
      and compares against it. It compared the checkout's last move, so after a deploy that
      touched dashboard code or a config file every job restarted the dashboard until the next
      deploy (26 restarts in one day).
+  5. **A result on the line is a push wherever it is shown or graded** (2026-10-18). The History
+     tab colour, the PMF shading and the "k/n over" count in `dashboard/components/deep_dive_charts.py`
+     and `form_spark.py` counted a tie as a hit; the two research scripts (`scripts/test_distributions.py`,
+     `scripts/model_calibration/test_model_weight.py`) graded ties as Overs. Live grading was already
+     strict; training labels a push as half an Over (I6a) and every cell retrained on 2026-10-18 carries it.
+  6. **The Receipts page filter counts a prop once before it drops pushes** (2026-10-18). It dropped
+     pushes first, so a pushed last line let an older line of the same prop count.
 
 Rollout per [model_improvement_track.md](model_improvement_track.md) §6.10: replay-validate in the
 fixed profit sim, then A/B live through the D6 sim-bettor ledger. I5a-1, I6c and an I6g cadence change
@@ -1133,12 +1153,60 @@ eras.
   columns each model lists, so nothing fails; the two cells price a playoff game as a
   regular-season one until a retrain's training split holds a postseason.
 
+**From the story-balance lane (closed 2026-10-18; its brief is deleted, these are its records).**
+Mechanics live in `prediction/stories/lead.py` and `menu.py`; the killed selection-shrink lever in
+[researcher_selection_shrink.md](../archive/researcher_selection_shrink.md); boards, replays and the
+side-rule read, each with a tagged `REPORT.md`, in `~/backups/sportstradamus/2026-10-16-under-lean/`
+(`part1b/` boards, `part3/` side rule, `part4/` shape rule); the star lean it found is fixed by lever T
+([nfl-ship15-recovery.md §11](nfl-ship15-recovery.md)).
+
+- Decisions the lane took (owner, 2026-10-17; commits `9a0ea6bb`, `ff7fc5e2`): the story floor
+  `menu._MENU_EDGE_FLOOR` is 0.03 (option B) while `realized.RECOMMENDED_EDGE_MIN` stays 0.05, so the
+  Receipts cohort and the paper ledger's even-pick bettor keep one rule (`test_realized_by_side.py` pins
+  the split; coupling them later is one constant plus a restored equality pin); an Over leads only a
+  shootout or a blowout (`lead.OVER_LEAD_SHAPES`). Cost read behind the floor (production history 09-16
+  to 10-15, Kelly > 0, day-block CIs): the 0.03–0.05 band returned −8.7 % per pick [−13.0, −3.9] on
+  1,545 legs against −9.0 % [−12.8, −5.5] for the ≥ 0.05 band on 4,648; no band makes money, so the
+  floor is not a money lever either way.
+- Monitoring the brief asked for, none wired: a `quote` split (quoted / unquoted / fallback) in
+  `realized.by_split`, so `book_rate` stops pooling sportsbook and payout-implied anchors (the pooling
+  is why the 90d "book" read 0.586 against 0.504 realized); the selection residual per league × side
+  (`hit_rate − book_rate` and a trailing-30d λ_sel with its day-clustered CI; reopen the shrink only
+  when the CI lower bound clears 0); Gate 2 cannot see this failure (its precision uses all posted
+  `Bet` rows), the realized ledger is its only monitor.
+- Pre-registered trigger for lowering `MAX_FAVORED_PAYOUT` to 2.0: two consecutive monthly 30d reads in
+  which the recommended 2.0–2.5 band's ROI sits ≥ 5 pp below the 1.5–2.0 band on both sides (30d gap
+  at close: 6.6 pp Over, 9.0 pp Under; 90d: 5.1 and 0.2). Owner packet, not a session flip.
+- Open questions the data could not settle: honest market-anchored probabilities recommend about 1 %
+  of a day's legs, so whether the `recommended` label and the 0.05 floor should keep firing on
+  unproven claimed edge is a product call; unquoted legs (64 % of the cohort) get full trust and
+  requiring a quote makes ROI worse (−1.6 pp), the larger lever by count; a sportsbook alt-line quote
+  at the rung, if the archive holds one, would beat the shape decode as `Market Prob` for rung payouts;
+  NBA/WNBA depth labels rank minutes within team × position, so a true star can lose a seed to a role
+  player on the first slates (re-weight `depth` in `stories/lead.py`, owner call); `legs._stat_category`
+  maps the "Goals Against" display name to `scoring` while the `goalsAgainst` slug reads `mistakes`
+  (the slug path fires); re-run the selection-shrink walk-forward about 2026-11-01 within one book
+  regime and with NBA in sample.
+- Records, not tasks: `legs.offer_index` keys on (player, side, line) with no market, so a lead key
+  can match two markets (27 / 22 / 14 on the three saved boards; the lead's own market came first in
+  all but a Sleeper-finds-Underdog case); the side rule (showing the argmax-EV side) never flips a
+  recommended leg and only adds legs that lost 18.8 % per pick on 11 game days, fair read 2026-11-04;
+  the lead rule meets its half target on every saved date but one, and three gaps it cannot reach are
+  games with no Over-led story on either platform (10 / 7 / 3), a platform lacking the Over-led story
+  in a game given to Over (4 / 1 / 4 menus) and a Tonight card quoting an Under-led story in such a
+  game (3 / 1 / 0).
+
 ## 8. Owner asks (one each)
 
 The owner answered every ask from 1 to 23 with yes on 2026-10-11, the two retrains of 7 and 8
 included ("retrain both now"), asks 24 to 31 with yes on 2026-10-15, and asks 32 to 35 here and 36
 to 39 of the close-out report with yes on 2026-10-16. Each became a decision in §2 and a row in §4
-(decisions 43 to 76). No ask is open. Not asked because no change is proposed: the parlay floor
+(decisions 43 to 76). Two asks carried from the story-balance lane (closed 2026-10-18) are open: (a) the Gate-2
+demotions, keep the symmetric rule or revert `a6d96fd8`; (b) option A, a no-lead Tonight card, whose
+headline is the game's shape and quotes no bet when no story row of the game has `lead_side == "Over"`
+(10 of 29 cards on 10-08, 7 of 31 on 10-15, 3 of 31 on 10-16; cost none in money; recipe: the
+headline branch of `dashboard/surfaces/tonight.py` with its own bank line). The lane's third ask, the
+star-lean lever, closed with lever T on 2026-10-18. Not asked because no change is proposed: the parlay floor
 (`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while the legs are over-read).
 
 The owner's own, no answer needed:
