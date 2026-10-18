@@ -261,7 +261,7 @@
         },
         "qb yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none",
             "dist_training_loss": "crps",
@@ -549,7 +549,7 @@
         },
         "PA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "prob_recal_platt",
             "hpo_selection": "calibrated",
@@ -581,7 +581,7 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "prob_recal_isotonic",
             "hpo_selection": "calibrated",
@@ -686,7 +686,7 @@
         },
         "pitcher fantasy points underdog": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none",
             "dist_training_loss": "nll",
