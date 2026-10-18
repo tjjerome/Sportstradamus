@@ -498,6 +498,22 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
         cells.append(diag)
         informative.append(info)
     con.close()
+    skipped = pd.DataFrame(
+        {
+            "scope": "cell",
+            "key": list(excluded),
+            "split": "excluded",
+            "note": list(excluded.values()),
+        }
+    )
+    for cell, reason in excluded.items():
+        print(f"excluded {cell}: {reason}")
+    # A league before its season (every test row older than the first ladder rung) scores
+    # nothing; the sidecar keeps its other leagues' rows.
+    if not priced:
+        skipped.to_csv(out, index=False)
+        print(f"no cell scored; wrote {out}")
+        return
 
     history = _history_since(start)
     live_sides = history.drop_duplicates(_RUNG_KEY)[[*_RUNG_KEY, "Bet", "Boost"]]
@@ -526,18 +542,8 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
 
     summary = _summarize(rungs, selected, trained, live, pd.DataFrame(cells))
     information = information_table(pd.concat(informative, ignore_index=True), _BOOTSTRAP_SEED)
-    skipped = pd.DataFrame(
-        {
-            "scope": "cell",
-            "key": list(excluded),
-            "split": "excluded",
-            "note": list(excluded.values()),
-        }
-    )
     pd.concat([summary, information, skipped], ignore_index=True).to_csv(out, index=False)
     _write_sidecar(_cell_sidecar(summary, windows, knobs, start), parquet)
 
     _print_tables(summary, information, overround)
-    for cell, reason in excluded.items():
-        print(f"excluded {cell}: {reason}")
     print(f"wrote {out} and {parquet}")

@@ -25,6 +25,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, archive
 from sportstradamus.helpers.archive import _dfs_offer_probs
@@ -44,6 +45,7 @@ from sportstradamus.scripts.tail_scorecard import (
     _cell_sidecar,
     _summarize,
     _write_sidecar,
+    main,
     replay_live_rule,
     side_boosts,
 )
@@ -702,3 +704,48 @@ def test_information_cell_ci_is_the_same_alone_and_beside_another_cell():
     assert (one["lin_b_model_lo"] < one["lin_b_model_hi"]).all()  # a real interval
     assert (one["ll_gain_lo"] < one["ll_gain_hi"]).all()
     pd.testing.assert_frame_equal(one, two)
+
+
+def test_a_league_with_every_cell_excluded_reports_the_exclusions_and_exits_clean(
+    tmp_path, monkeypatch
+):
+    """NBA before its season: every test row predates the first ladder rung, or a cell has no
+    pickle. The run must list why each cell sat out and write the sandbox CSV, not trace back
+    on an empty concat, and it must leave the sidecar alone (nothing was scored)."""
+    for switch in ("SPORTSTRADAMUS_ARCHIVE_DB", "SPORTSTRADAMUS_ARCHIVE_READ_ONLY"):
+        monkeypatch.setenv(switch, "")
+    archive = tmp_path / "archive.duckdb"
+    with duckdb.connect(str(archive)) as writer:
+        for table, rows in (("ladder", _LADDER_CSV), ("odds", _ODDS_CSV)):
+            (tmp_path / f"{table}.csv").write_text(rows)
+            writer.execute(
+                f"CREATE TABLE {table} AS SELECT 'NFL' AS league, 'receptions' AS market, * "
+                f"FROM read_csv('{tmp_path / table}.csv')"
+            )
+    test_sets = tmp_path / "test_sets"
+    test_sets.mkdir()
+    (test_sets / "NBA_zzz.csv").write_text("Player,Date,Line,Result,P\n")
+    monkeypatch.setattr("sportstradamus.scripts.tail_scorecard.TEST_SETS_DIR", test_sets)
+    out, parquet = tmp_path / "scorecard.csv", tmp_path / "sidecar.parquet"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--league",
+            "NBA",
+            "--archive",
+            str(archive),
+            "--out",
+            str(out),
+            "--parquet",
+            str(parquet),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "excluded NBA_zzz: no model pickle" in result.output
+    written = pd.read_csv(out)
+    assert written[["scope", "key", "split", "note"]].values.tolist() == [
+        ["cell", "NBA_zzz", "excluded", "no model pickle"]
+    ]
+    assert not parquet.exists()
