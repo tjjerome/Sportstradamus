@@ -487,6 +487,8 @@ inside its group; §8 restates each open one as a plain question.
   value returns ≥ 1. I5's own acceptance = priced payout equals the quote on owner-captured slips
   (one Power, one Flex, one stacked same-game pair) and the ledger settles at it.
 - **I6 model information and train/serve alignment — R3's build order (§5), opened by decision 13.**
+  The follow-on investigation (the stale 70 % boosters, the first-to-pass gate selection, the count
+  cells' book leg, the disagreement band) is the `live-gap-2` lane ([live-gap-2.md](live-gap-2.md)).
   None pulls or demotes a model. `pipeline.py` is over 5,000 lines: extract helpers, never grow it.
   Retrains go through `meditate` and the existing gates unchanged.
   1. **I6e serve-time feature log + parity monitor — built** (no retrain, no served probability
@@ -1203,8 +1205,10 @@ side-rule read, each with a tagged `REPORT.md`, in `~/backups/sportstradamus/202
 The owner answered every ask from 1 to 23 with yes on 2026-10-11, the two retrains of 7 and 8
 included ("retrain both now"), asks 24 to 31 with yes on 2026-10-15, and asks 32 to 35 here and 36
 to 39 of the close-out report with yes on 2026-10-16. Each became a decision in §2 and a row in §4
-(decisions 43 to 76). Two asks carried from the story-balance lane (closed 2026-10-18) are open: (a) the Gate-2
-demotions, keep the symmetric rule or revert `a6d96fd8`; (b) option A, a no-lead Tonight card, whose
+(decisions 43 to 76). Two asks carried from the story-balance lane (closed 2026-10-18): (a) the Gate-2
+demotions, keep the symmetric rule or revert `a6d96fd8` — answered 2026-10-21: a Gate-2 verdict never removes a
+cell from `devel`, it only holds promotion to `main` until the cell passes (ship_gate.md), so the symmetric rule
+stays as the promotion bar; (b) open, option A, a no-lead Tonight card, whose
 headline is the game's shape and quotes no bet when no story row of the game has `lead_side == "Over"`
 (10 of 29 cards on 10-08, 7 of 31 on 10-15, 3 of 31 on 10-16; cost none in money; recipe: the
 headline branch of `dashboard/surfaces/tonight.py` with its own bank line). The lane's third ask, the

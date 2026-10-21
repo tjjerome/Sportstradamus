@@ -278,7 +278,10 @@ record. Every cell carries `{"dist", "shipped", "target_normalization",
 
 This is **default-deny**: only cells the human explicitly promotes
 (`shipped` ≠ `"withheld"`) serve. Promoting a Gate-1 passer is a
-one-line edit (`"withheld"` → `"devel"`). Demotion is equally manual: a
+one-line edit (`"withheld"` → `"devel"`). A live Gate-2 verdict (`demoted`
+in `ship graduation`) never removes a cell from `devel`: it only holds the
+cell's promotion to `main` until the cell passes (owner, 2026-10-21).
+Demotion from `devel` is equally manual: a
 served cell whose weekly retrain fails the fresh gates is **warned about**
 (meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
 it) but keeps serving until the human flips it back to `"withheld"` (next
