@@ -51,8 +51,8 @@ if TYPE_CHECKING:
     from sportstradamus.stats.base import Stats
 
 FEATURE_LOG_KEY = ["League", "Market", "Platform", "Player", "Date"]
-# One weekly retrain cycle plus the 14 days prior model files are kept, with slack.
-FEATURE_LOG_RETENTION_DAYS = 30
+# Keep a season, so research can re-score each served model version on its own logged legs.
+FEATURE_LOG_RETENTION_DAYS = 400
 
 
 def upsert_feature_log(
