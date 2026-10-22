@@ -577,9 +577,11 @@ inside its group; §8 restates each open one as a plain question.
 
   **Not to build** (each measured; brief §5 and §7): w = 1 serving for unquoted rows; price-blind or
   distance-conditional recalibration as a gap fix; rung admission as a gap lever (it is a volume
-  lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change; any trust
-  layer or fixed scalar shrink toward the book; the DFS main line as a book leg for unquoted legs
-  (owner decision 5, §2).
+  lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change (R3
+  measured no decay of the booster's information; the gain from refitting the booster on all rows is
+  a different lever, untested by R3 and decided by [live-gap-2](live-gap-2.md) H1); any trust layer or
+  fixed scalar shrink toward the book; the DFS main line as a book leg for unquoted legs (owner
+  decision 5, §2).
 - **E tail scorecard — built** (`sportstradamus admin tail-scorecard`; `scripts/tail_scorecard.py`
   with `tail_pricing.py` and `tail_information.py`, tests under `-m diagnostics`; spec = R3 brief
   §6). It re-serves every held-out test row at each Underdog and Sleeper rung the archive `ladder`
@@ -602,7 +604,7 @@ inside its group; §8 restates each open one as a plain question.
   the training lab with `tail_state`: `thin` under 100 selected legs, `honest` when the gap's CI
   upper bound sits under `realized.RECOMMENDED_EDGE_MIN` (0.05), `overstated` otherwise (above the
   floor the overstatement eats the whole edge). Never a gate; dev-side files, not in the prod sync.
-  Cadence: every Monday into the lane folder (`~/backups/sportstradamus/2026-10-17-train-live-gap/`);
+  Cadence: every Monday into the live-gap-2 lane folder (`~/backups/sportstradamus/2026-10-21-live-gap-2/live/`);
   it becomes a sweep objective only after four consecutive weekly runs agree with live per cell
   (Spearman ρ ≥ 0.5 over at least 10 scorable cells), then an owner packet. Readers: I6c, I6d and
   I6g, as an acceptance input. It routes to training, never to demotion.
