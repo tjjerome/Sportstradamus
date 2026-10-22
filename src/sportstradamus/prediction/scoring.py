@@ -1,10 +1,11 @@
 """Offer matching and distributional scoring.
 
-:func:`process_offers` is the outer loop: it iterates over every
-league/market pair in the scraped offer dict, calls :func:`match_offers`
-to build a feature matrix, hands it to :func:`model_prob` for
-distributional scoring, and finally passes all scored offers through
-:func:`find_correlation` to annotate correlations and build parlays.
+:func:`process_offers` is the outer loop: it archives every league/market pair
+in the scraped offer dict, scores each league one game date at a time
+(:func:`_match_league_offers`), and finally passes all scored offers through
+:func:`find_correlation` to annotate correlations and build parlays. A market's
+feature matrix comes from :func:`match_offers` and is scored by :func:`model_prob`,
+or by :func:`book_fallback_prob` when the matrix comes back empty.
 
 :func:`match_offers` loads the model pickle's ``expected_columns`` list
 and slices the ``Stats.get_stats`` output down to the schema the model
@@ -208,27 +209,27 @@ def match_offers(offers, league, market, platform, stat_data, date):
             file exists.
     """
     market = normalize_market(league, market, platform)
-    if market in stat_data.gamelog.columns:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            playerStats = stat_data.get_stats(market, offers, date)
-            if playerStats.empty:
-                return playerStats
-
-            filename = "_".join([league, market]).replace(" ", "-")
-            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-            if not filepath.is_file():
-                return pd.DataFrame()
-            with open(filepath, "rb") as infile:
-                expected_cols = pickle.load(infile)["expected_columns"]
-            playerStats = playerStats.reindex(columns=expected_cols)
-
-            # Training's matrix ends the same way: a 0-target game makes yards per target infinite.
-            return (
-                playerStats[~playerStats.index.duplicated(keep="first")]
-                .fillna(0)
-                .infer_objects(copy=False)
-                .replace([np.inf, -np.inf], 0)
-            )
-    else:
+    if market not in stat_data.gamelog.columns:
         return pd.DataFrame()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        playerStats = stat_data.get_stats(market, offers, date)
+        if playerStats.empty:
+            return playerStats
+
+        filename = "_".join([league, market]).replace(" ", "-")
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if not filepath.is_file():
+            return pd.DataFrame()
+        with open(filepath, "rb") as infile:
+            expected_cols = pickle.load(infile)["expected_columns"]
+        playerStats = playerStats.reindex(columns=expected_cols)
+
+        # Training's matrix ends the same way: a 0-target game makes yards per target infinite.
+        return (
+            playerStats[~playerStats.index.duplicated(keep="first")]
+            .fillna(0)
+            .infer_objects(copy=False)
+            .replace([np.inf, -np.inf], 0)
+        )

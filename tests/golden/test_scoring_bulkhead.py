@@ -49,6 +49,13 @@ class _ArchiveRecorder:
         return sorted({offer["Market"] for _, _, batch in self.calls for offer in batch})
 
 
+@pytest.fixture(autouse=True)
+def recorder(monkeypatch):
+    """Every test archives into a recorder, never the real DuckDB."""
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    return scoring.archive
+
+
 class _Pbar:
     def __init__(self):
         self.count = 0
@@ -97,10 +104,7 @@ def _nba_markets():
     return _dated_markets(("A", "PTS", _DATE), ("B", "REB", _DATE), ("C", "REB", _DATE))
 
 
-def test_one_market_crash_costs_only_that_market(monkeypatch, caplog):
-    recorder = _ArchiveRecorder()
-    monkeypatch.setattr(scoring, "archive", recorder)
-
+def test_one_market_crash_costs_only_that_market(monkeypatch, caplog, recorder):
     def score(offers, league, market, book, stat_data, date):
         if market == "PTS":
             raise ValueError("unservable cell")
@@ -121,9 +125,7 @@ def test_one_market_crash_costs_only_that_market(monkeypatch, caplog):
     assert "NBA PTS not scored" in caplog.text
 
 
-def test_feature_prep_crash_costs_only_that_leagues_scoring(monkeypatch, caplog):
-    recorder = _ArchiveRecorder()
-    monkeypatch.setattr(scoring, "archive", recorder)
+def test_feature_prep_crash_scores_nothing_but_keeps_every_capture(monkeypatch, caplog, recorder):
     monkeypatch.setattr(scoring, "_score_market", lambda *args: [{"scored": True}])
     pbar = _Pbar()
     stats = {"NBA": _StatsStub(depth_error=KeyError("proj carries loc"))}
@@ -137,9 +139,7 @@ def test_feature_prep_crash_costs_only_that_leagues_scoring(monkeypatch, caplog)
     assert "NBA features unavailable" in caplog.text
 
 
-def test_inactive_league_is_archived_but_not_scored(monkeypatch):
-    recorder = _ArchiveRecorder()
-    monkeypatch.setattr(scoring, "archive", recorder)
+def test_inactive_league_is_archived_but_not_scored(monkeypatch, recorder):
     monkeypatch.setattr(scoring, "_score_market", lambda *args: [{"scored": True}])
     pbar = _Pbar()
 
@@ -155,9 +155,7 @@ def _score_every_offer(offers, league, market, book, stat_data, date):
     return [{"Player": offer["Player"], "Market": market} for offer in offers]
 
 
-def test_preseason_offers_are_archived_but_never_scored(monkeypatch, caplog):
-    recorder = _ArchiveRecorder()
-    monkeypatch.setattr(scoring, "archive", recorder)
+def test_preseason_offers_are_archived_but_never_scored(monkeypatch, caplog, recorder):
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 13))
     pbar = _Pbar()
@@ -174,7 +172,6 @@ def test_preseason_offers_are_archived_but_never_scored(monkeypatch, caplog):
 
 
 def test_opening_night_offers_are_scored(monkeypatch):
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 12))
 
@@ -185,9 +182,7 @@ def test_opening_night_offers_are_scored(monkeypatch):
     assert [record["Player"] for record in scored] == ["A", "B", "C"]
 
 
-def test_a_market_keeps_only_its_in_season_offers(monkeypatch):
-    recorder = _ArchiveRecorder()
-    monkeypatch.setattr(scoring, "archive", recorder)
+def test_a_market_keeps_only_its_in_season_offers(monkeypatch, recorder):
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 12))
     markets = _nba_markets()
@@ -201,7 +196,6 @@ def test_a_market_keeps_only_its_in_season_offers(monkeypatch):
 
 
 def test_an_offer_with_no_date_is_never_dropped_as_preseason(monkeypatch):
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     monkeypatch.setattr(scoring.odds_budget, "season_opener", lambda league: date(2026, 9, 13))
     markets = _nba_markets()
@@ -216,7 +210,6 @@ def test_feature_prep_gets_each_players_earliest_dated_offer(monkeypatch):
     """Features are one row a player, built for his earlier game, so depth and volume
     have to be prepared for that game too.
     """
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     later = "2026-09-13"
     markets = _nba_markets()
@@ -237,7 +230,6 @@ def test_each_game_date_is_one_pass_in_date_order(monkeypatch):
     ``base_profile`` rebuilds the profile whenever the date moves, so a call at another
     date inside a pass would leave its scoring on wiped depth and volume columns.
     """
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     today = date.today()
     later = today + timedelta(days=3)
@@ -271,7 +263,6 @@ def test_a_player_is_scored_in_every_market_in_his_earliest_pass(monkeypatch):
         handed[market, date] = [(offer["Player"], offer["Date"]) for offer in offers]
         return []
 
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", score)
     today = date.today()
     later = today + timedelta(days=3)
@@ -292,7 +283,6 @@ def test_a_player_is_scored_in_every_market_in_his_earliest_pass(monkeypatch):
 
 def test_past_and_undated_offers_are_built_as_of_today(monkeypatch):
     """A past date would build the row from the realized game; no date has no other day."""
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -309,7 +299,6 @@ def test_past_and_undated_offers_are_built_as_of_today(monkeypatch):
 
 
 def test_a_feature_prep_crash_costs_only_its_dates_pass(monkeypatch, caplog):
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     today = date.today()
     later = today + timedelta(days=3)
@@ -325,7 +314,6 @@ def test_a_feature_prep_crash_costs_only_its_dates_pass(monkeypatch, caplog):
 
 
 def test_mlb_prepares_pitcher_volume_in_every_pass(monkeypatch):
-    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
     monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
     today = date.today()
     later = today + timedelta(days=1)
