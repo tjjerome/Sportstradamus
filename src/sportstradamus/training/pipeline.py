@@ -2734,7 +2734,7 @@ def _step_persist_artifacts(
         mdl_filepath = mdl_dir / f"{filename}.mdl"
     # Before either write, so a failure to keep the outgoing model leaves the old test set and
     # the old model a matched pair.
-    keep_prior_model(mdl_filepath)
+    keep_prior_model(mdl_filepath, Path(str(csv_filepath)))
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
 

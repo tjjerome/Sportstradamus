@@ -1,15 +1,17 @@
-"""Pins for the prior-model store ``meditate`` keeps for the version-age test.
+"""Pins for the prior-model store ``meditate`` keeps for offline re-reads of each served version.
 
-A retrain overwrites ``data/models/{LEAGUE}_{MARKET}.mdl``; ``training.prior_models`` first
-copies the outgoing file to ``models/prior/`` under the ``Model Version`` it stamped on its
-legs. These pins hold what the offline re-serve depends on: one prior file per version
-stamp (through a confirm walk's retries too), nothing kept for a first save or a sandbox
-output, a prune that counts from the day a model was superseded, and a ``prior/`` directory
-the served-model scan never reads.
+A retrain overwrites ``data/models/{LEAGUE}_{MARKET}.mdl`` and its test set;
+``training.prior_models`` first copies the outgoing model to ``models/prior/`` and gzips the
+outgoing test set to ``test_sets/prior/``, both under the ``Model Version`` it stamped on its
+legs. These pins hold what the offline re-serve depends on: one prior model and test set per
+version stamp (through a confirm walk's retries too), a test-set copy that holds the outgoing
+CSV, nothing kept for a first save or a sandbox output, a prune that counts from the day a model
+was superseded, and a ``prior/`` directory the served-model scan never reads.
 """
 
 from __future__ import annotations
 
+import gzip
 import importlib
 import importlib.resources as pkg_resources
 import os
@@ -83,11 +85,16 @@ def test_first_save_keeps_nothing(models_dir):
     _save_model(OUTGOING)
 
     assert (models_dir / "NBA_PTS.mdl").is_file()
-    assert not (models_dir / "prior").exists()
+    assert not list(models_dir.parent.rglob("prior"))
 
 
-def test_overwrite_keeps_the_outgoing_model_under_its_version_stamp(models_dir):
+def test_overwrite_keeps_the_outgoing_model_and_test_set_under_its_version_stamp(models_dir):
+    test_set = models_dir.parent / "test_sets" / "NBA_PTS.csv"
     _save_model(OUTGOING)
+    # The save site dumps the same CSV for every version; a distinct outgoing dump tells a
+    # copy of the old test set from a copy of the one the incoming save writes over it.
+    outgoing_csv = b"P,Result\n0.4,1.0\n"
+    test_set.write_bytes(outgoing_csv)
     _save_model(INCOMING)
 
     kept = list((models_dir / "prior").iterdir())
@@ -95,6 +102,9 @@ def test_overwrite_keeps_the_outgoing_model_under_its_version_stamp(models_dir):
     assert pickle.loads(kept[0].read_bytes())["model_version"] == OUTGOING
     served = pickle.loads((models_dir / "NBA_PTS.mdl").read_bytes())
     assert served["model_version"] == INCOMING
+    kept_test_sets = list((test_set.parent / "prior").iterdir())
+    assert [path.name for path in kept_test_sets] == [f"NBA_PTS__{OUTGOING}.csv.gz"]
+    assert gzip.decompress(kept_test_sets[0].read_bytes()) == outgoing_csv
 
 
 @pytest.mark.parametrize(
@@ -102,15 +112,31 @@ def test_overwrite_keeps_the_outgoing_model_under_its_version_stamp(models_dir):
     [{"model_version": "20260917.ratio_meanyr.0afa433e"}, {"cv": 0.9}],
     ids=["stamped", "pre-stamp"],
 )
-def test_prior_file_is_named_for_the_model_version_stamped_on_served_legs(models_dir, filedict):
+def test_prior_files_are_named_for_the_model_version_stamped_on_served_legs(models_dir, filedict):
     served = models_dir / "NFL_rushing-tds.mdl"
     served.write_bytes(pickle.dumps(filedict))
+    test_set = models_dir.parent / "test_sets" / "NFL_rushing-tds.csv"
+    test_set.parent.mkdir()
+    test_set.write_text("Result\n1.0\n")
 
-    prior_models.keep_prior_model(served)
+    prior_models.keep_prior_model(served, test_set)
 
     version = resolve_model_version(str(served), filedict)
     kept = [path.name for path in (models_dir / "prior").iterdir()]
     assert kept == [f"NFL_rushing-tds__{version}.mdl"]
+    kept_test_sets = [path.name for path in (test_set.parent / "prior").iterdir()]
+    assert kept_test_sets == [f"NFL_rushing-tds__{version}.csv.gz"]
+
+
+def test_model_whose_test_set_was_never_dumped_is_kept_alone(models_dir):
+    served = models_dir / "NBA_PTS.mdl"
+    served.write_bytes(pickle.dumps({"model_version": OUTGOING}))
+
+    prior_models.keep_prior_model(served, models_dir.parent / "test_sets" / "NBA_PTS.csv")
+
+    kept = [path.name for path in (models_dir / "prior").iterdir()]
+    assert kept == [f"NBA_PTS__{OUTGOING}.mdl"]
+    assert not list(models_dir.parent.rglob("*.csv.gz"))
 
 
 def test_prune_counts_from_supersession_and_drops_only_expired_files(models_dir):
@@ -121,19 +147,34 @@ def test_prune_counts_from_supersession_and_drops_only_expired_files(models_dir)
     expired = prior_models.PRIOR_MODEL_RETENTION_DAYS + 1
     served = models_dir / "NBA_PTS.mdl"
     served.write_bytes(pickle.dumps({"model_version": OUTGOING}))
-    # Trained long ago, superseded only now: the kept copy must still get its full window.
+    test_set = models_dir.parent / "test_sets" / "NBA_PTS.csv"
+    test_set.parent.mkdir()
+    test_set.write_text("Result\n1.0\n")
+    # Trained long ago, superseded only now: the kept copies must still get their full window.
     backdate(served, expired)
-    prior_dir = models_dir / "prior"
-    prior_dir.mkdir()
-    for name, days in {"NBA_REB__expired.mdl": expired, "NBA_AST__recent.mdl": expired - 2}.items():
-        (prior_dir / name).write_bytes(b"prior")
-        backdate(prior_dir / name, days)
+    backdate(test_set, expired)
+    model_prior_dir = models_dir / "prior"
+    test_set_prior_dir = test_set.parent / "prior"
+    priors = {
+        model_prior_dir / "NBA_REB__expired.mdl": expired,
+        model_prior_dir / "NBA_AST__recent.mdl": expired - 2,
+        test_set_prior_dir / "NBA_REB__expired.csv.gz": expired,
+        test_set_prior_dir / "NBA_AST__recent.csv.gz": expired - 2,
+    }
+    for path, days in priors.items():
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b"prior")
+        backdate(path, days)
 
-    prior_models.keep_prior_model(served)
+    prior_models.keep_prior_model(served, test_set)
 
-    assert sorted(path.name for path in prior_dir.iterdir()) == [
+    assert sorted(path.name for path in model_prior_dir.iterdir()) == [
         "NBA_AST__recent.mdl",
         f"NBA_PTS__{OUTGOING}.mdl",
+    ]
+    assert sorted(path.name for path in test_set_prior_dir.iterdir()) == [
+        "NBA_AST__recent.csv.gz",
+        f"NBA_PTS__{OUTGOING}.csv.gz",
     ]
 
 
@@ -151,22 +192,29 @@ def test_sandbox_overwrites_keep_nothing(models_dir, monkeypatch, tmp_path):
 
 def test_confirm_walk_retries_keep_one_file_per_version_stamp(models_dir, tmp_path):
     served = models_dir / "NBA_PTS.mdl"
+    test_set = tmp_path / "test_sets" / "NBA_PTS.csv"
     _save_model(OUTGOING)
-    incumbent_backup = tmp_path / "incumbent.mdl"
-    shutil.copy2(served, incumbent_backup)
+    incumbent_backup = tmp_path / "incumbent_backup"
+    incumbent_backup.mkdir()
+    for artifact in (served, test_set):
+        shutil.copy2(artifact, incumbent_backup / artifact.name)
     for nominee in ("20260924.none.cccccccc", INCOMING):
         _save_model(nominee)
-        # A held nominee: the walk copies the incumbent back without going through the save site.
-        shutil.copy2(incumbent_backup, served)
+        # A held nominee: the walk copies the incumbent's model and test set back without going
+        # through the save site.
+        for artifact in (served, test_set):
+            shutil.copy2(incumbent_backup / artifact.name, artifact)
 
     kept = [path.name for path in (models_dir / "prior").iterdir()]
     assert kept == [f"NBA_PTS__{OUTGOING}.mdl"]
+    kept_test_sets = [path.name for path in (test_set.parent / "prior").iterdir()]
+    assert kept_test_sets == [f"NBA_PTS__{OUTGOING}.csv.gz"]
 
 
 def test_report_reads_served_models_only(models_dir, monkeypatch):
     served = models_dir / "NBA_PTS.mdl"
     served.write_bytes(pickle.dumps({"model_version": OUTGOING, "cv": 0.5}))
-    prior_models.keep_prior_model(served)
+    prior_models.keep_prior_model(served, models_dir.parent / "test_sets" / "NBA_PTS.csv")
     incoming = {"model_version": INCOMING, "cv": 0.9}
     served.write_bytes(pickle.dumps(incoming))
     reported = {}
