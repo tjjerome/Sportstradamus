@@ -135,7 +135,7 @@ recalibration, the post-fusion mean corrector as built.
 [docs/archive/researcher_live_gap_2.md](../archive/researcher_live_gap_2.md) pre-registers the statistics,
 populations and Holm family that §3 pins.
 
-**4.2 Instrumentation push (subagent-driven, one module per subagent; ships to `devel` in a job gap):**
+**4.2 Instrumentation push (subagent-driven, one module per subagent): on `devel` (37b5c449):**
 
 | item | where | status |
 |---|---|---|
