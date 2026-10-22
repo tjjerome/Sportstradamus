@@ -1200,6 +1200,12 @@ def model_prob(
     )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
     _sanitize_model_ev(offer_df, dist)
+    # Read before the blend, which rewrites Projection and the shape columns in place.
+    offer_df["Standalone Prob"] = _model_over_and_push(
+        offer_df, dist, cv, step, offer_df["Projection"].to_numpy()
+    )[0]
+    offer_df["Skew Cal"] = skew_cal
+    offer_df["Hist Gate"] = hist_gate
     offer_df["Model Weight"] = model_weight
     base_mean = _blend_with_book(
         offer_df, dist, model_weight, cv, hist_gate, league, market, posthoc_slug, posthoc_blob
@@ -1325,6 +1331,7 @@ def book_fallback_prob(
     offer_df["Projection"] = offer_df["Market Projection"]
     # The fallback serve is the weight-0 blend, so the model's share is 0, not unknown.
     offer_df["Model Weight"] = 0.0
+    offer_df["Hist Gate"] = hist_gate or 0.0
 
     return finalize_records(
         offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION

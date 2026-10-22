@@ -103,6 +103,11 @@ SCORED_RECORD_COLS = [
     "Model PIT Recal",
     "Books STD",
     "Model Weight",
+    "Standalone Prob",
+    "Served Skew",
+    "Skew Cal",
+    "Hist Gate",
+    "Market Prob Implied",
     "Quote Source",
     "Quote Authenticity",
     "Quote Books",
@@ -231,6 +236,10 @@ def finalize_records(
         "Defense position",
         "Moneyline",
         "Books STD",
+        # Decision-time columns the model path sets; NaN wherever a caller leaves one unset.
+        "Standalone Prob",
+        "Skew Cal",
+        "Hist Gate",
     ):
         if _col not in offer_df.columns:
             offer_df[_col] = np.nan
@@ -249,6 +258,9 @@ def finalize_records(
 
     offer_df["Win Prob"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
     offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
+    offer_df["Standalone Prob"] = offer_df["Standalone Prob"].where(
+        offer_df["Bet"] == "Over", 1 - offer_df["Standalone Prob"]
+    )
 
     if "Boost" in offer_df.columns:
         offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
@@ -269,6 +281,7 @@ def finalize_records(
         1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"]
     )
     unquoted = offer_df["Market EV"].isna()
+    offer_df["Market Prob Implied"] = unquoted
     # Post-conversion Boost_Over/Boost_Under are full decimal odds on every platform, so
     # the payout-implied probability of the chosen side is the platform's own price for
     # the leg — the only price available when no book quoted it.
@@ -332,6 +345,8 @@ def finalize_records(
     offer_df["Dist"] = dist
     offer_df["CV"] = cv
     offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
+    # Its own name: a "Model Skew" record would reach the snapshot, which keeps that column NaN.
+    offer_df["Served Skew"] = offer_df.get("Model Skew", np.nan)
     offer_df["Temperature"] = temperature
     offer_df["Disp Cal"] = dispersion_cal
     offer_df["Step"] = step

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.helpers import get_odds
+from sportstradamus.helpers import config, get_odds
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.distributions import (
     UNDERDOG_BOOST_BASELINE,
@@ -364,6 +364,44 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
     assert by_player["A vs. B"]["Market Prob"] == pytest.approx(implied)
     # A quoted probability is never overwritten by the payout-implied one.
     assert by_player["Quoted Twin"]["Market Prob"] == pytest.approx(0.62)
+    assert {player: r["Market Prob Implied"] for player, r in by_player.items()} == {
+        "Near Miss": True,
+        "Quoted Twin": False,
+        "A vs. B": True,
+    }
+    # This caller sets none of the model path's decision columns, so they read NaN.
+    model_cols = ["Standalone Prob", "Served Skew", "Skew Cal", "Hist Gate"]
+    assert pd.DataFrame(records)[model_cols].isna().all(axis=None)
+
+
+_ZERO_RATE = 0.3
+
+
+@pytest.mark.parametrize(
+    ("dist", "cv", "line", "hist_gate"),
+    [("SkewNormal", 0.2, 24.5, 0.0), ("ZINB", 0.5, 1.5, _ZERO_RATE)],
+)
+def test_fallback_row_records_its_decode_gate_and_no_model_columns(
+    archive, monkeypatch, dist, cv, line, hist_gate
+):
+    """A book quote priced the row and no model did, so the model's own columns read NaN.
+
+    ``Hist Gate`` is the gate the fallback decode read: the cell's zero rate on a
+    zero-inflated family, none on SkewNormal, whose book leg is ungated.
+    """
+    _patch_cell(monkeypatch, dist, cv)
+    monkeypatch.setattr(config, "stat_zi", {_LEAGUE: {_MARKET: _ZERO_RATE}})
+    _insert_odds(archive, "Star Guard", "fanduel", 0.60, line)
+
+    served = pd.DataFrame(
+        mp.book_fallback_prob(
+            [_offer("Star Guard", line)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        )
+    )
+
+    assert served["Market Prob Implied"].tolist() == [False]
+    assert served[["Standalone Prob", "Served Skew", "Skew Cal"]].isna().all(axis=None)
+    assert served["Hist Gate"].tolist() == [hist_gate]
 
 
 def _model_book_leg(offer_df):

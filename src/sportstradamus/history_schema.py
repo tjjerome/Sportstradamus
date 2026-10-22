@@ -87,6 +87,18 @@ DECISION_COLS = [
     "Quote Books",
     "Quote Line",
     "Quote Observed At",
+    # P(chosen side) from the model alone, before the book blend and all calibration.
+    "Standalone Prob",
+    # The skew of the SkewNormal served, Skew Cal included; Model Param holds its sigma.
+    "Served Skew",
+    # The skew shift added after the blend (skew_cal; reset to 0.0 with a diverged fit).
+    "Skew Cal",
+    # The runtime zero-rate gate no pickle records: stat_zi where the serve reads it, else 0.
+    "Hist Gate",
+    # True when no sportsbook priced the leg and Market Prob is the payout-implied price.
+    "Market Prob Implied",
+    # Scored At of the run that first wrote the key; a key older than this column stays NaN.
+    "First Scored At",
 ]
 
 HISTORY_COLS = (

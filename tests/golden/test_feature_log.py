@@ -3,7 +3,9 @@
 ``prediction/feature_log.py`` records what each model was fed, so train/serve parity can
 be checked and a leg re-scored offline under another model file. The log sits on the
 serving path, so the last tests drive the real ``model_prob``: every scored player is
-logged, and a log that cannot be written costs no prediction.
+logged, and a log that cannot be written costs no prediction. The same harness pins what a
+scored record keeps for an offline replay: the model's own price beside the served one, and
+a SkewNormal price rebuilt from its row.
 """
 
 from __future__ import annotations
@@ -21,13 +23,14 @@ import pyarrow.parquet as pq
 import pytest
 
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote, TrainingQuote
-from sportstradamus.prediction import book_quotes, feature_log, offer_records
+from sportstradamus.prediction import book_quotes, feature_log, offer_records, persist
 from sportstradamus.prediction.feature_log import (
     FEATURE_LOG_KEY,
     FEATURE_LOG_RETENTION_DAYS,
     prune_feature_log,
     upsert_feature_log,
 )
+from sportstradamus.scripts import feature_parity
 from sportstradamus.stats.base import Stats
 
 # The package __init__ re-exports the model_prob *function*, shadowing the submodule.
@@ -294,19 +297,22 @@ def _predict(_filedict, _market, _stat_data, player_stats, *_args) -> pd.DataFra
     )
 
 
-def _score(monkeypatch, tmp_path, also_next_day=()) -> pd.DataFrame:
+def _score(
+    monkeypatch, tmp_path, also_next_day=(), *, filedict=None, predict=_predict, stat_zi=None
+) -> pd.DataFrame:
     """Serve three NBA BLK offers through the real ``model_prob``; return its records.
 
     A player named in ``also_next_day`` is offered again a day later, listed last.
+    ``filedict`` and ``predict`` default to the NegBin pickle and its booster stand-in.
     """
     pickle_path = tmp_path / "NBA_BLK.mdl"
     with open(pickle_path, "wb") as outfile:
-        pickle.dump(_FILEDICT, outfile)
+        pickle.dump(filedict or _FILEDICT, outfile)
     stub_archive = _StubArchive()
     monkeypatch.setattr(mp, "model_pickle_path", lambda _league, _market: str(pickle_path))
     monkeypatch.setattr(mp, "stat_meta", {})
-    monkeypatch.setattr(mp, "stat_zi", {})
-    monkeypatch.setattr(mp, "_build_prob_params", _predict)
+    monkeypatch.setattr(mp, "stat_zi", stat_zi or {})
+    monkeypatch.setattr(mp, "_build_prob_params", predict)
     monkeypatch.setattr(book_quotes, "archive", stub_archive)
     monkeypatch.setattr(offer_records, "archive", stub_archive)
     offers = [
@@ -378,6 +384,99 @@ def test_model_prob_logs_each_scored_player(log_dir, monkeypatch, tmp_path):
     assert logged["Quote Observed At"].tolist() == [pd.Timestamp(_OBSERVED_AT)] * 3
     np.testing.assert_allclose(logged["Quote Over Prob"], 1 - _BOOK_UNDER)
     assert served["Player"].tolist() == _PLAYERS
+
+
+@pytest.mark.parametrize(("weight", "temperature"), [(0.6, 1.0), (1.0, 1.5), (1.0, 1.0)])
+def test_standalone_prob_is_the_models_own_price_of_the_chosen_side(
+    weight, temperature, log_dir, monkeypatch, tmp_path
+):
+    """The offline replay of the logged outputs at the offer line; only Win Prob is blended."""
+    filedict = _FILEDICT | {"weight": weight, "temperature": temperature}
+    served = _score(monkeypatch, tmp_path, filedict=filedict)
+
+    outputs = _read(log_dir, "NBA_BLK").set_index("Player").loc[served["Player"]]
+    over = feature_parity.over_probability(outputs, filedict, served["Line"])
+    np.testing.assert_allclose(
+        served["Standalone Prob"], np.where(served["Bet"] == "Over", over, 1 - over)
+    )
+    # A book blend or a temperature moves the served price; with neither the two agree.
+    unmoved = weight == 1.0 and temperature == 1.0
+    np.testing.assert_array_equal(
+        np.isclose(served["Standalone Prob"], served["Win Prob"]), [unmoved] * len(served)
+    )
+    assert (served["Hist Gate"] == 0).all()
+    assert (served["Skew Cal"] == 0).all()
+    assert served["Served Skew"].isna().all()
+
+
+_SN_FILEDICT = _FILEDICT | {
+    "distribution": "SkewNormal",
+    "cv": 0.5,
+    "step": 0.5,
+    "weight": 0.7,
+    "dispersion_cal": 1.25,
+    "skew_cal": 0.4,
+}
+_SN_ZERO_RATE = 0.2
+_RECORD_DECISION_COLS = [
+    "Standalone Prob",
+    "Served Skew",
+    "Skew Cal",
+    "Hist Gate",
+    "Market Prob Implied",
+]
+
+
+def _predict_skewnormal(_filedict, _market, _stat_data, player_stats, *_args) -> pd.DataFrame:
+    """A SkewNormal booster's raw ratio-space output, with ``_predict``'s category cast."""
+    for column in ("Home", "Player position"):
+        player_stats[column] = player_stats[column].astype("category")
+    return pd.DataFrame(
+        {"loc": [1.1, 0.9, 1.2], "scale": [0.6, 0.5, 0.4], "alpha": [0.8, -0.5, 1.5]},
+        index=player_stats.index,
+    )
+
+
+def test_a_skewnormal_win_prob_reprices_from_its_record(log_dir, monkeypatch, tmp_path):
+    """Model Param, Served Skew, Gate, Projection, Line and Step rebuild the served price.
+
+    The pickle's temperature is 1 and its post-hoc none, so that price is the served CDF alone.
+    """
+    served = _score(
+        monkeypatch,
+        tmp_path,
+        filedict=_SN_FILEDICT,
+        predict=_predict_skewnormal,
+        stat_zi={_LEAGUE: {_MARKET: _SN_ZERO_RATE}},
+    )
+
+    def reprice(skew: pd.Series) -> np.ndarray:
+        shape = pd.DataFrame(
+            {
+                "Line": served["Line"],
+                "Model Sigma": served["Model Param"],
+                "Model Skew": skew,
+                "Model Gate": served["Gate"],
+            }
+        )
+        # Projection is the gated marginal mean; the pricing reads the mean of the ungated part.
+        base_mean = (served["Projection"] / (1 - served["Gate"])).to_numpy()
+        step = served["Step"].iat[0]
+        over = mp._model_over_and_push(shape, "SkewNormal", served["CV"].iat[0], step, base_mean)[0]
+        return np.where(served["Bet"] == "Over", over, 1 - over)
+
+    assert served[["Hist Gate", "Skew Cal"]].drop_duplicates().to_dict("records") == [
+        {"Hist Gate": _SN_ZERO_RATE, "Skew Cal": _SN_FILEDICT["skew_cal"]}
+    ]
+    np.testing.assert_allclose(reprice(served["Served Skew"]), served["Win Prob"])
+    # The blend's own skew, before the shift, prices what serving never offered.
+    unshifted = reprice(served["Served Skew"] - served["Skew Cal"])
+    assert not np.isclose(unshifted, served["Win Prob"]).any()
+
+    # The dashboard snapshot keeps its NaN Model Skew and none of the history-only columns.
+    snapshot = persist._normalize_offers(served)
+    assert snapshot["Model Skew"].isna().all()
+    assert snapshot.columns.intersection(_RECORD_DECISION_COLS).empty
 
 
 def test_a_two_date_player_is_priced_and_logged_for_his_earlier_game(

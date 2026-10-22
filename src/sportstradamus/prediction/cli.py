@@ -416,6 +416,7 @@ def main(progress, contest_variant, log_level):
         all_df["Payout Over"] = all_df["Boost_Over"]
         all_df["Payout Under"] = all_df["Boost_Under"]
         all_df["Scored At"] = scored_at
+        all_df["First Scored At"] = scored_at
         new_df = all_df[HISTORY_COLS].copy() if not all_df.empty else pd.DataFrame()
     else:
         new_df = pd.DataFrame()
@@ -460,17 +461,25 @@ def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame
     covers prediction-level freshness (Team/Projection/etc.) for the offer-keys
     touched this run, since those columns are just duplicated across every
     offer row for a prediction and ``keep="last"`` prefers the newer row.
+    ``First Scored At`` is the one column a re-score never refreshes: whichever
+    row the dedup keeps carries the stamp the key was stored with.
     """
     if new_df.empty:
         return history
     if history.empty:
         return new_df
 
+    key = [*PREDICTION_KEY, "Line", "Platform"]
     combined = pd.concat([history, new_df], ignore_index=True)
+    # Stored rows precede this run's, so a key's first row is its stored one: a re-score keeps
+    # the stored stamp (NaN where that row predates the column); only a new key takes this run's.
+    combined["First Scored At"] = combined.groupby(key, dropna=False)["First Scored At"].transform(
+        "first", skipna=False
+    )
     combined["_closed"] = combined["Close Market Prob"].notna()
     return (
         combined.sort_values("_closed", kind="stable")
-        .drop_duplicates(subset=[*PREDICTION_KEY, "Line", "Platform"], keep="last")
+        .drop_duplicates(subset=key, keep="last")
         .drop(columns="_closed")
     )
 
