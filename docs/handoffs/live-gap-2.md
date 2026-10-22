@@ -203,8 +203,10 @@ verdicts, E5's is below:**
   (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee) under the
   Gate-1 CI §8 ask 4 settles; I6d's research brief, then the book-leg levelling it designs (H3; opening
   note in the lane folder's `research/`); the NFL FTN/PFR ingest fix (`stats/nfl.py` keeps an unpublished
-  source NaN and re-parses the trailing weeks; mind the always-NaN reprocessing trap); dev's NHL
-  game-line re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
+  source NaN and re-parses the trailing weeks; mind the always-NaN reprocessing trap); the 2026 PBP
+  season aggregates of the NFL comp profiles, empty on both boxes because `nfl_data_py` merges
+  participation data nflverse does not serve for 2026 (`stats/nfl_pbp_agg.py`; retry without it, never
+  for past seasons); dev's NHL game-line re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
 - **Week 3 (about 11-06):** one retrain per league on the fixed code (the lever-T campaign's recipe
   without the rebuild; `scripts/sync_to_prod.sh --league L` between board runs), then four weeks of
   stable versions (to about 12-04) for the live verdict. The 30-day Gate-2 read of the 10-18 versions
