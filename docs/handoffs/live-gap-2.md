@@ -71,18 +71,21 @@ league; the live instruments (§6) read the fixed versions over a stable window;
    where it disagrees most. `ship graduation` reads every served NFL cell `demoted` (0 graduated, 10
    demoted) on the 10-15, 10-18 and 10-21 live-metrics files: the verdict predates the campaign and
    scores the 09-27 / 10-03 / 10-15 versions; the 10-18 versions' own 30-day read lands about 11-17.
-5. **What serving persists today.** `prediction/feature_log.py` writes one row per scored player, game
+5. **What serving persists.** `prediction/feature_log.py` writes one row per scored player, game
    and platform with the frame fed to the model, the decision-time book leg (`Quote Over Prob`, `Quote
-   EV`), the raw outputs and the pre-blend projection; partitions older than 30 days are deleted at the
-   end of `prophecize`; `scripts/sync_from_prod.sh` pulls `data/runtime/` without deleting, so the dev box
-   keeps what prod prunes as long as it syncs inside 30 days (dev holds 2026-10-05 → 10-26 today).
-   `history.parquet` holds the blended `Win Prob`, `Market Prob` at the DFS line, `Consensus Line`,
-   `Model Weight`, `Temperature`, the blended `Gate`, both payouts and the decision-time columns
-   (`history_schema.DECISION_COLS`, since 2026-10-15); it lacks the pre-blend model probability, the
-   blended skew (so a SkewNormal `Win Prob` cannot be rebuilt from the row), the book probability at the
-   book's own line, the per-book quotes and the first-seen time. `meditate` keeps a replaced model file
-   14 days under `data/models/prior/` (dev only; production receives models by rsync and has no prior
-   directory). `data/test_sets/*.csv` is overwritten at each retrain.
+   EV`), the raw outputs and the pre-blend projection; partitions older than `FEATURE_LOG_RETENTION_DAYS`
+   (400 since week 1, 30 before) are deleted at the end of `prophecize`. `scripts/sync_from_prod.sh` pulls
+   `data/runtime/` without deleting and the dev crontab runs it weekly ([OPERATIONS.md](../OPERATIONS.md)),
+   so the dev box keeps every partition (dev holds 2026-10-05 on). `history.parquet` holds the blended
+   `Win Prob`, `Market Prob` at the DFS line, `Consensus Line`, `Model Weight`, `Temperature`, the
+   blended `Gate`, both payouts and the decision-time columns (`history_schema.DECISION_COLS`, since
+   2026-10-15). Week 1 added `Standalone Prob` (the model's own probability of the chosen side at the
+   offer line, before the blend and calibration), `Served Skew` and `Skew Cal` (a SkewNormal `Win Prob`
+   can now be rebuilt from the row), `Hist Gate`, `Market Prob Implied` and `First Scored At`; rows
+   written before hold NaN. History still lacks the book probability at the book's own line and the
+   per-book quotes, and keeps 365 days (`prediction/cli.py`) against the log's 400. `meditate` keeps a
+   replaced model file and its test set 400 days under `data/models/prior/` and `data/test_sets/prior/`
+   (dev only; production receives models by rsync and has no prior directory).
 6. **Offline skill against the book is mostly the book's level error on 11 cells** (exploratory, post
    hoc; [research brief](../archive/researcher_live_gap_2.md) Finding 1). Across the 38 served cells with
    at least 100 priced held-out rows, offline BSS tracks the |CITL| of the training book leg (Spearman
@@ -125,14 +128,14 @@ populations and Holm family that §3 pins.
 
 **4.2 Instrumentation push (subagent-driven, one module per subagent; ships to `devel` in a job gap):**
 
-| item | where | change |
+| item | where | status |
 |---|---|---|
-| Feature-log retention | `prediction/feature_log.py` (the 30-day constant; the prune runs last in `prophecize`) | keep the season (400 days); ~5 MB a day, production has 13 GB free |
-| History columns | `history_schema.py` + `prediction/offer_records.py` + `prediction/persist.py` | add the pre-blend model probability of the chosen side at the offer line, the blended skew and `skew_cal`, `Hist Gate`, a quoted-vs-payout-implied flag on `Market Prob`, and `First Scored At` (the minimum on upsert); `DECISION_COLS` rules: offer-level, never backfilled, NaN on older rows |
-| Prior model files | `training/prior_models.py` | keep the season on the dev box (14 → 400 days; 109 files are 173 MB today) |
-| Test-set dumps per version | `training/pipeline.py` (the dump path) | copy each cell's CSV to `data/test_sets/prior/<model version>/` at retrain, so offline reads can be re-run per version |
-| Dev-side sync | dev crontab | `scripts/sync_from_prod.sh` weekly, so no partition is ever pruned before the dev copy exists |
-| Recommender stage counts | `prediction/` (the recommendation rule's call site) | optional: one line per board run with the legs surviving each filter per cell and side |
+| Feature-log retention | `prediction/feature_log.py` | done: `FEATURE_LOG_RETENTION_DAYS` 30 → 400 (~5 MB a day; production has 13 GB free) |
+| History columns | `history_schema.py`, `prediction/model_prob.py`, `prediction/offer_records.py`, `prediction/cli.py` | done: the six columns in §2 fact 5, offer-level and never backfilled. `First Scored At` is the stamp of the key's first stored row: a re-score keeps it and a key stored before the column stays NaN. `persist.py` needed no change; its allow-list keeps the six out of `current_offers` |
+| Prior model files | `training/prior_models.py` | done: 14 → 400 days on the dev box |
+| Test-set dumps per version | `training/prior_models.py` (`keep_prior_model`, called from the dump path) | done as flat files, `data/test_sets/prior/{LEAGUE}_{market}__{version}.csv.gz`, not `prior/<version>/` folders: one glob prunes both prior folders, the name joins a test set to its pickle, and no `*.csv` glob over `test_sets/` matches it |
+| Dev-side sync | dev crontab | done: weekly, Monday 06:30 CDT; the line and its keep-the-newest-3-backups rule live in [OPERATIONS.md](../OPERATIONS.md) |
+| Recommender stage counts | — | skipped (§8 ask 1): E3 (d) reads the board → recommended funnel from history |
 
 **4.3 Experiments on the data in hand (main session; outputs beside their scripts in the lane folder
 `~/backups/sportstradamus/2026-10-21-live-gap-2/`):**
@@ -215,8 +218,10 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 
 ## 8. Owner asks (one each)
 
-1. Go on week 1: the brief, the instrumentation push and E1–E5 (answered 2026-10-21: go; the owner
-   kicks off the week-1 fixes).
+1. Go on week 1: the brief, the instrumentation push and E1–E5 (answered 2026-10-21: go. Claude pushes
+   week 1 to `devel` in a job gap after the refactoring-specialist and the gates; the recommender
+   stage-count sink is skipped; the weekly dev sync keeps the newest 3 archive backups; the brief's four
+   amendments are adopted).
 2. Sequencing of the model fixes: batch into one retrain about 11-06 (default) or ship each as proven.
 3. On E2's result: whether cells whose blind re-gating fails leave `devel` (the owner's file; Gate 2 alone
    never removes a cell).

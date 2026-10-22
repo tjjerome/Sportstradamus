@@ -494,7 +494,7 @@ inside its group; §8 restates each open one as a plain question.
   1. **I6e serve-time feature log + parity monitor — built** (no retrain, no served probability
      moves). `model_prob` upserts one row per scored player and game to
      `data/runtime/feature_log/date=<game date>/` (`prediction/feature_log.py`: the frame fed to the
-     model, the decision-time book leg, the model's outputs, the probable pitcher; 30 days kept; never
+     model, the decision-time book leg, the model's outputs, the probable pitcher; 400 days kept; never
      `history.parquet` or a dashboard snapshot). `sportstradamus admin feature-parity` replays it by
      hand, not from cron: it checks each logged batch reproduces through the file carrying its
      `Model Version`, compares each row with its training-matrix row once the matrix catches up
@@ -505,8 +505,9 @@ inside its group; §8 restates each open one as a plain question.
      BLK_RATIO` or `Team OPP_BLK_RATIO`; setting it to 0 moves WNBA PR by −0.7 pp on average). Then
      repair feature by feature (R3's worst: NFL completions, receptions, interceptions, qb yards).
   2. **I6g version-age test** (pre-registered; a cadence change only if it confirms). `meditate`
-     keeps each model file it replaces for 14 days (`training/prior_models.py`, `data/models/prior/`)
-     and `feature-parity --versions` re-serves the logged legs through it offline.
+     keeps each model file it replaces, and its test set, for 400 days (`training/prior_models.py`,
+     `data/models/prior/`, `data/test_sets/prior/`) and `feature-parity --versions` re-serves the
+     logged legs through it offline.
      Primary statistic: fresh (version days 0–3) minus aged (days 4+) recommended gap, day-clustered,
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
      difference between versions. Decision rule (fixed 2026-10-17, before the first read): the

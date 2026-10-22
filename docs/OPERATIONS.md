@@ -135,14 +135,32 @@ crontab — they run on the dev box beside the manual weekly `meditate`, then
 per-league `corr_*` files, MLB's two Savant comp tables — see the script
 header), and their snapshots
 (snapshots additive, never `--delete`). The models mirror skips
-`data/models/prior/`: the superseded model files a retrain keeps stay on the box
-that trained them (`training/prior_models.py` in
-[ARCHITECTURE.md](ARCHITECTURE.md)). Training runs dev-side this way, so prod's
+`data/models/prior/` and the script never sends `data/test_sets/`: the superseded
+model files and test sets a retrain keeps stay on the box that trained them
+(`training/prior_models.py` in [ARCHITECTURE.md](ARCHITECTURE.md)). Training runs dev-side this way, so prod's
 `meditate` cron line stays commented out — the two workflows would overwrite
 each other's models and serving artifacts.
 Both collectors are `run_job.sh` cases, so scheduling either (with a
 `HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
 See [data_collectors.md](data_collectors.md).
+
+The dev box's own crontab holds one line: the weekly pull of production's archive,
+runtime outputs and collector snapshots (`scripts/sync_from_prod.sh`), so nothing
+prod prunes (feature-log partitions, history rows) is lost before dev has a copy.
+
+```cron
+30 6 * * 1 cd <repo-dir> && { date -u +"start \%FT\%TZ"; PATH=<home>/.local/bin:/usr/bin:/bin flock -n /tmp/sportstradamus-sync-from-prod.lock timeout 2h scripts/sync_from_prod.sh && ls -1 archive/archive.duckdb.bak-* | head -n -3 | xargs -r rm -fv --; echo "exit=$?"; } >> logs/sync_from_prod.log 2>&1
+```
+
+Monday 06:30 CDT falls after `reflect` and `odds-backfill` and before the first
+`confer`, so the weekend's games arrive before the Monday reads. `timeout` bounds
+the prod-side archive flock, which has no timeout of its own. After a green sync
+the line keeps the newest 3 `archive.duckdb.bak-*` copies (`merge-archives` writes
+one per sync, about 2.5 GB each) and deletes the rest. It skips `run_job.sh`, whose
+self-deploy pull would move the dev checkout. A Monday with no `start` line in the
+log means WSL was not running at 06:30: run the line by hand. The fold step can
+leave `banned_combos.json` and `parlay_rake.json` modified in the checkout; review
+them before they are committed.
 
 That sync carries every league at once: the models mirror deletes any prod model
 file the dev box lacks, and `book_weights.json`, `stat_calibration.json` and

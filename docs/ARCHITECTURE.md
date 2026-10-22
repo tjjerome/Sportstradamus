@@ -118,7 +118,7 @@ Sportstradamus/
 | `graduation.py` | Shared lifecycle classification for `(league, market)` cells |
 | `ship_config.py` / `config.py` | Per-cell ship-config resolution and JSON I/O for the split config files |
 | `shap.py` | Post-train drift-monitoring SHAP only — writes `feature_importances.csv` / `feature_correlations.csv`; does not drive feature selection |
-| `prior_models.py` | `keep_prior_model` — before a retrain overwrites a served pickle, copies it to `data/models/prior/{LEAGUE}_{market}__{version}.mdl`, named for the `Model Version` that model stamped in history, so an offline pass (`sportstradamus admin feature-parity --versions`) can score the same legs with the previous model. The same call deletes prior files superseded more than `PRIOR_MODEL_RETENTION_DAYS` (14) ago. Nothing serves from `prior/`, and `sync_to_prod.sh` leaves it out of the models mirror |
+| `prior_models.py` | `keep_prior_model` — before a retrain overwrites a served pickle and its test set, copies the pickle to `data/models/prior/{LEAGUE}_{market}__{version}.mdl` and gzips the test set to `data/test_sets/prior/{LEAGUE}_{market}__{version}.csv.gz`, both named for the `Model Version` that model stamped in history, so an offline pass (`sportstradamus admin feature-parity --versions`, or a re-read of a version's offline gates) can use the previous model and the test set it was graded on. The same call deletes prior files of either kind superseded more than `PRIOR_MODEL_RETENTION_DAYS` (400) ago. Nothing serves from either `prior/`, and `sync_to_prod.sh` sends neither |
 | `component_cells.py` / `component_sum.py` | A combo cell priced as the weighted sum of its component cells' served predictives, read from their test sets: evidence for the ship scorecard, not a serving path |
 | `lineage.py` / `matrix_audit.py` | Deterministic matrix manifests for quarantined rebuilds; read-only cache integrity audit |
 | `model_strategy/` | Per-cell strategy sweep/confirm harness (registry, sweep, confirm, TPE search) |
@@ -399,7 +399,7 @@ order:
 9. **Evaluation + diagnostics** — held-out test set scoring; diagnostics are
    written into the model pickle alongside the model
 10. **Save** — pickle to `data/models/{LEAGUE}_{market}.mdl`, after
-    `prior_models.keep_prior_model` sets aside the served file it replaces;
+    `prior_models.keep_prior_model` sets aside the served file and test set it replaces;
     `report()` then rebuilds `model_stats.parquet` and computes the ship gates
 
 There is no feature selection at training time: every cell trains on the full
