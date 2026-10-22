@@ -9,6 +9,7 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 
 from __future__ import annotations
 
+import datetime
 import os.path
 import pickle
 
@@ -1268,7 +1269,7 @@ def book_fallback_prob(
     market: str,
     platform: str,
     stat_data,
-    date,
+    date: datetime.date,
 ) -> list[dict]:
     """Score offers from the modal-line book cohort when no trained model exists.
 
