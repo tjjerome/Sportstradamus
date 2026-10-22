@@ -499,11 +499,12 @@ inside its group; §8 restates each open one as a plain question.
      hand, not from cron: it checks each logged batch reproduces through the file carrying its
      `Model Version`, compares each row with its training-matrix row once the matrix catches up
      (flag at a per-cell RMS(ΔP) above 1 pp at its player-clustered lower bound, live-gap-2's rule), re-scores under the other versions on disk
-     (`--versions`) and lists the settled cells with no log rows. No logged game is in a matrix yet,
-     so the first real parity read follows the next `meditate`. First finding, with no matrix needed:
-     serving feeds `inf` where training holds 0 (all 48 logged WNBA rows carry it in `Team
-     BLK_RATIO` or `Team OPP_BLK_RATIO`; setting it to 0 moves WNBA PR by −0.7 pp on average). Then
-     repair feature by feature (R3's worst: NFL completions, receptions, interceptions, qb yards).
+     (`--versions`) and lists the settled cells with no log rows. The first read (live-gap-2 E5, the
+     games of 10-05 → 10-17 inside the 10-18 matrices) flagged 11 of 15 NFL and NHL cells; the
+     classification is [live-gap-2](live-gap-2.md) §4.3. Its two builder mismatches are repaired in
+     `prediction/scoring.py`: serving zeroes ±inf as training does (which also clears the WNBA `Team
+     BLK_RATIO` rows), and builds each offer's row as of its game date, one pass per date. What is
+     left is data (production's NFL FTN/PFR columns, live-gap-2 §8 ask 5) and timing (I6f).
   2. **I6g version-age test** (pre-registered; a cadence change only if it confirms). `meditate`
      keeps each model file it replaces, and its test set, for 400 days (`training/prior_models.py`,
      `data/models/prior/`, `data/test_sets/prior/`) and `feature-parity --versions` re-serves the
@@ -570,17 +571,20 @@ inside its group; §8 restates each open one as a plain question.
      test-set `P` and temperature move at its next retrain. I6b is optional: align
      training's non-authentic fusion to serving, never the reverse.
   5. **I6d NFL at-market information** (research; no method is guaranteed). Order: after I6e's parity
-     repair, and after the NFL count quote is levelled (`ev` and `under_prob` disagree, which
-     contaminates every fused NFL number). Acceptance: fixed-effect logistic encompassing with
+     repair, and after the historical book leg is levelled. live-gap-2 H3 held: on the NFL count cells
+     the training book leg is off the outcome level (.10 offline against .02 live), so their offline
+     skill is mostly the book's error, and NHL's priced rows show the same. I6d's first step is
+     levelling the historical book leg in every league, research brief first (opening note in the
+     live-gap-2 lane folder's `research/`). Acceptance: fixed-effect logistic encompassing with
      b_model's day-clustered CI lower bound above 0 on held-out quoted player-games at the
      decision-time reference, plus the tail scorecard. g1 passes every NFL volume cell today and
      cannot judge this.
 
   **Not to build** (each measured; brief §5 and §7): w = 1 serving for unquoted rows; price-blind or
   distance-conditional recalibration as a gap fix; rung admission as a gap lever (it is a volume
-  lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change (R3
-  measured no decay of the booster's information; the gain from refitting the booster on all rows is
-  a different lever, untested by R3 and decided by [live-gap-2](live-gap-2.md) H1); any trust layer or
+  lever); combo-shape alignment; a staleness gate on model rows; a `_TRAIN_FRACTION` change or a refit
+  of the booster on all rows (R3 measured no decay of the booster's information; [live-gap-2](live-gap-2.md)
+  H1 measured no forward gain from the refit, 0 of 5 cells); any trust layer or
   fixed scalar shrink toward the book; the DFS main line as a book leg for unquoted legs (owner
   decision 5, §2).
 - **E tail scorecard — built** (`sportstradamus admin tail-scorecard`; `scripts/tail_scorecard.py`

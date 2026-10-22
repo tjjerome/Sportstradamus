@@ -120,6 +120,15 @@ Killed levers are not retried without new evidence (memory `research_verdicts_le
 layer, selection shrink toward the book, a higher edge floor, the argmax-EV side rule, price-blind tail
 recalibration, the post-fusion mean corrector as built.
 
+**Week-1 verdicts** (every number has its script in the lane folder's `REPORT.md`):
+
+| # | Statistic | Value | Verdict |
+|---|---|---|---|
+| H1 | E1: d̄ of arm C against arm A on W | 0 wins, 0 losses of 5 cells (NFL yards +.0022 [−.0001, +.0044]; the other four within ±.0002) | Not a lever: the refit protocol stays out of the week-3 batch |
+| H2 | E2: the served booster with cross-fit calibrators | 60 of 64 cells ship re-gated on the validation half, 63 on the test half, 64 stored; the test half reads easier on Gates 6 and 5 (34 and 29 of 44 cells) | Descriptive: §8 asks 3 and 4 |
+| H3 | T1: D = L_off − L_live | L_off .102 [.084, .118], L_live .019 [.013, .046], D .083 [.050, .099], p .001 | Holds (Holm .025): I6d opens in week 2, scoped to levelling the historical book leg in every league |
+| H4 | T2: BSS of the > .10 band on levelled rows | +.001 [−.106, +.106], p .526 | Retained (Holm .05): no monitor column; the live loss is a population shift, read in E3 (d) |
+
 ## 4. Week 1 (2026-10-22 → 10-28): no retrain, no clock reset
 
 **4.1 Research brief.** Done, with R3 as the prior:
@@ -138,7 +147,8 @@ populations and Holm family that §3 pins.
 | Recommender stage counts | — | skipped (§8 ask 1): E3 (d) reads the board → recommended funnel from history |
 
 **4.3 Experiments on the data in hand (main session; outputs beside their scripts in the lane folder
-`~/backups/sportstradamus/2026-10-21-live-gap-2/`):**
+`~/backups/sportstradamus/2026-10-21-live-gap-2/`). All five ran; E1–E4's results are §3's week-1
+verdicts, E5's is below:**
 
 - **E1 train fraction / refit** (decides H1): NFL receptions, yards, carries and NHL shots, points, in a
   throwaway worktree through `--artifact-output` and `--frozen-matrix-dir` with environment-guarded hooks,
@@ -177,13 +187,24 @@ populations and Holm family that §3 pins.
   42 logged columns, qb yards has no pickle) and NHL through each row's own version, and ranks repairs by
   served RMS (≈ (w/T) × raw) × live volume. A builder mismatch gets a serve-side repair feature by feature;
   a timing gap (as-of game lines or quotes) routes to I6f. No retrain.
+  Result: 11 of 15 cells flag (NHL points, assists, goals, shots, hits, skater and goalie fantasy; NFL
+  receiving yards, tds, rushing yards, yards). The two builder mismatches are repaired in
+  `prediction/scoring.py`: serving fed ±inf where training holds 0 (a 0-target game's yards per target),
+  and built every row as of the run's date where training builds it as of the game's (NFL tds: 64 % of
+  its gap); each game date is now its own pass. The data gaps are production's NFL FTN/PFR-fed columns,
+  0 on every 2026 row (§8 ask 5), and dev's NHL game lines, defaulted on 72 team-games (re-read before the
+  week-2 retrain). Game lines and NHL comps read at scoring time are timing (I6f). With the builder and
+  data repairs, NFL's RMS falls under the alarm (tds .0057, receiving yards .0054, rushing yards .0065,
+  yards .0030).
 
 ## 5. Weeks 2 and 3
 
-- **Week 2 (10-29 → 11-05):** build the training fixes that passed their experiments in a worktree:
-  the walk-forward evaluation with a refit on all rows for serving (H1), the blind confirm walk
-  (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee), the
-  count-quote producer if the I6d brief says so (H3). I6g reads: NHL about 10-29, NBA about 11-05.
+- **Week 2 (10-29 → 11-05):** build in a worktree what week 1 left standing: the blind confirm walk
+  (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee) under the
+  Gate-1 CI §8 ask 4 settles; I6d's research brief, then the book-leg levelling it designs (H3; opening
+  note in the lane folder's `research/`); the NFL FTN/PFR ingest fix (`stats/nfl.py` keeps an unpublished
+  source NaN and re-parses the trailing weeks; mind the always-NaN reprocessing trap); dev's NHL
+  game-line re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
 - **Week 3 (about 11-06):** one retrain per league on the fixed code (the lever-T campaign's recipe
   without the rebuild; `scripts/sync_to_prod.sh --league L` between board runs), then four weeks of
   stable versions (to about 12-04) for the live verdict. The 30-day Gate-2 read of the 10-18 versions
@@ -210,10 +231,10 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | candidate | verdict | why |
 |---|---|---|
 | Instrumentation (§4.2) | do now | no model change, no clock reset |
-| Serve-side parity repairs (E5) | do after the read, this week | serve-side, no retrain |
-| Train fraction / refit on all (H1) | test first (E1), ship in the batch | lever-T class if the gain is real; one constant plus a refit step |
+| Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's data gaps are §8 ask 5 and week 2, its timing gaps I6f |
+| Train fraction / refit on all (H1) | not a lever | E1: no cell's forward Brier moved (0 of 5) |
 | Blind confirm walk (H2) | ship in the batch | protocol; changes no served probability by itself |
-| Count-quote producer (H3, I6d) | needs the brief | both archive columns are wrong; the design is not obvious |
+| Book-leg levelling (H3, I6d) | brief first, week 2 | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the design is not obvious |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
 
@@ -225,12 +246,23 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    amendments are adopted).
 2. Sequencing of the model fixes: batch into one retrain about 11-06 (default) or ship each as proven.
 3. On E2's result: whether cells whose blind re-gating fails leave `devel` (the owner's file; Gate 2 alone
-   never removes a cell).
-4. Gate 1's ship CI: today a 95 % iid bootstrap whose upper bound must sit under .005. Of the 39 served
-   cells with a computable Gate 1, all 39 pass under it, 38 under a date-clustered CI and 34–35 under a
-   two-way (date × player) CI: NBA RA, NFL attempts, NFL yards and WNBA PR flip, and MLB runs allowed sits
-   on the bar. Keep iid, or move the ship CI to date-clustered or two-way? Not part of H2's rule; E2 reports
-   the counts on both halves.
+   never removes a cell). Re-gated on the blind half, 60 of 64 served cells still ship; MLB runs allowed,
+   NFL yards, NFL fantasy points (PrizePicks) and NBA FTM fail one gate each. Recommendation: withhold MLB
+   runs allowed (fails on both halves) and NFL yards (fails Gate 1 on the blind half, on E1's forward
+   window and under a date-clustered CI) now; keep the other two until the week-3 blind walk re-gates
+   them. Packet: the lane folder's `e2/PACKET_E2.md`.
+4. Gate 1's ship CI: today a 95 % iid bootstrap whose upper bound must sit under .005. On E2's 33 cells
+   with a computable Gate 1 (validation / test half), iid passes 32 / 33, date-clustered 32 / 31 and the
+   two-way estimate (player + date − iid variance) 32 / 31; beyond iid only NFL yards and MLB runs allowed
+   fail, the two ask 3 withholds. The brief's two-way bootstrap (28 / 26) multiplies a player draw by a
+   date draw, counts row noise about three times, and is not a target. Recommendation: date-clustered,
+   from the week-3 walk on.
+5. Production's NFL FTN/PFR-fed columns (first read, breakaway yards, broken tackles, drops, blitz,
+   first-read EPA, pressure) are 0 on every 2026 row: ingest writes a source that is not yet published as
+   0 and never revisits it. Dev holds real values for most of them, and the models trained on those. The
+   sources are published now: re-parse production's 2026 gamelog and teamlog rows for these columns (or
+   copy dev's values) ahead of the week-2 ingest fix? It writes production data. Evidence: the lane
+   folder's `e5/probes/nfl_classification.md`, group 3.
 
 ## 9. Records
 

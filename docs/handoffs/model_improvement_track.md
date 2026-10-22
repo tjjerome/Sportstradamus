@@ -603,8 +603,9 @@ Entry: none — this recurs.
 4. **Train/live parity harness (BUILT — `tests/golden/test_train_live_feature_parity.py`).**
    `get_training_matrix` and the live serving path share `get_stats`; the only per-gameday
    divergence is `_game_context`'s `date < today` branch (historical reads the gamelog row,
-   upcoming reads `upcoming_games` + `archive.get_moneyline`/`get_total`) plus the fillna
-   asymmetry (training `replace([inf,-inf],0)`, serving not). The harness drives the real
+   upcoming reads `upcoming_games` + `archive.get_moneyline`/`get_total`). Training ends with
+   `replace([inf,-inf],0)`, and serving's `match_offers` does the same since live-gap-2 week 1 (the
+   book fallback's frame still only fills NaN). The harness drives the real
    `StatsNBA.get_stats` twice on one synthetic frozen gameday — flipping only that branch (real
    today vs a frozen `today == D`) — and asserts identical column sets, identical values on the
    `get_stat_columns` shared surface, no inf on the shared surface, and matching
