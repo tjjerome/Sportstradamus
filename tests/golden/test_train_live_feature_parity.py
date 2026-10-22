@@ -26,10 +26,11 @@ asserts the shared feature surface (``get_stat_columns``) matches. Synthetic gam
 data, a stubbed archive, pre-seeded comps, and an injected depth keep it fast,
 deterministic, and free of network / DuckDB -- each of those is branch-*independent*
 state shared by both arms, so none can mask the branch divergence under test. The
-``fillna`` asymmetry between the two real paths (training does
-``fillna(0).replace([inf,-inf],0)``, serving does ``fillna(0)`` only) is covered by
-the no-inf assertion: a shared column that can be ``inf`` would diverge, so the gate
-forbids one.
+``inf`` handling is covered by the no-inf assertion: training
+(``get_training_matrix``) and the model's serving path (``match_offers``) both end
+``fillna(0).replace([inf,-inf],0)``, but the book fallback (``book_fallback_prob``)
+joins its features after ``fillna(0)`` only, so a shared column that can be ``inf``
+would diverge there, and the gate forbids one.
 """
 
 from __future__ import annotations
@@ -229,8 +230,8 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
             mismatched.append(col)
     assert not mismatched, f"train/live feature values diverge on the shared surface: {mismatched}"
 
-    # fillna asymmetry guard: training zeros inf (base.py replace), serving keeps it
-    # (model_prob fillna only). Forbid inf on the shared surface so the two agree.
+    # inf guard: training and match_offers zero inf, the book fallback (model_prob
+    # fillna only) keeps it. Forbid inf on the shared surface so every path agrees.
     inf_cols = [
         c
         for c in shared
@@ -241,7 +242,7 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
         )
     ]
     assert not inf_cols, (
-        f"shared feature columns contain inf (train zeros it, serve does not): {inf_cols}"
+        f"shared feature columns contain inf (the book fallback keeps it): {inf_cols}"
     )
 
     # The _game_context invariant, named explicitly so a regression points here.

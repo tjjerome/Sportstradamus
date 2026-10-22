@@ -16,9 +16,11 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import pickle
 import warnings
+from datetime import date, datetime
 from itertools import chain
 
 import line_profiler
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -89,11 +91,20 @@ def _match_league_offers(league, markets, stats, book, pbar):
     """Archive and score one league's markets; return its scored offer records.
 
     Every market's lines reach the archive before anything that can raise, so a
-    scoring crash never costs a capture: a feature-prep failure costs the league
-    its scoring and returns the empty sentinel, a scoring failure costs only that
-    market's records. A league with no active ``Stats`` object is archived but
-    never scored, and so is a game before the league's opening night.
+    scoring crash never costs a capture: a feature-prep failure costs only that
+    game date's pass, a scoring failure only that market's records in the pass. A
+    league with no active ``Stats`` object is archived but never scored, and so is
+    a game before the league's opening night.
+
+    A player's features are built as of his earliest offered game, and each game
+    date is its own pass, as the training matrix builds each gameday: depth and
+    volume for that date's players, then every market's scoring of all their
+    offers, a later game's too. Nothing of another date may run inside a pass,
+    because ``Stats.base_profile`` rebuilds ``playerProfile`` whenever the date
+    moves, wiping the depth and volume columns the pass prepared.
     """
+    # style: allow-complexity — one pass a game date, its feature prep and each market's
+    # scoring behind their own catches, as get_training_matrix loops its gamedays.
     for offers in markets.values():
         archive.add_dfs(offers, book, stat_map[book])
         pbar.update(len(offers))
@@ -104,26 +115,35 @@ def _match_league_offers(league, markets, stats, book, pbar):
         return []
 
     stat_data = stats[league]
-    # Depth and volume are prepared once a player, for the game his feature row is built on.
     by_player = {
         offer["Player"]: offer for offer in earliest_last(chain.from_iterable(markets.values()))
     }
-    all_offers = list(by_player.values())
-    try:
-        stat_data.get_depth(all_offers)
-        stat_data.get_volume_stats(all_offers)
-        if league == "MLB":
-            stat_data.get_volume_stats(all_offers, pitcher=True)
-    except Exception:
-        logger.exception(f"{league} features unavailable, markets not scored")
-        return []
+    today = datetime.today().date()
+    passes = {}
+    for offer in by_player.values():
+        # Never before today: a past date would build the row from its realized game.
+        day = max(date.fromisoformat(offer["Date"]), today) if offer["Date"] else today
+        passes.setdefault(day, []).append(offer)
 
     scored = []
-    for market, offers in markets.items():
+    for day, day_offers in sorted(passes.items()):
         try:
-            scored.extend(_score_market(offers, league, market, book, stat_data))
+            stat_data.get_depth(day_offers, day)
+            stat_data.get_volume_stats(day_offers, day)
+            if league == "MLB":
+                stat_data.get_volume_stats(day_offers, day, pitcher=True)
         except Exception:
-            logger.exception(f"{league} {market} not scored")
+            logger.exception(f"{league} features unavailable for {day}, its players not scored")
+            continue
+        players = {offer["Player"] for offer in day_offers}
+        for market, offers in markets.items():
+            pass_offers = [offer for offer in offers if offer["Player"] in players]
+            if not pass_offers:
+                continue
+            try:
+                scored.extend(_score_market(pass_offers, league, market, book, stat_data, day))
+            except Exception:
+                logger.exception(f"{league} {market} not scored")
     return scored
 
 
@@ -148,16 +168,17 @@ def _in_season_markets(league, markets):
     return {market: offers for market, offers in kept.items() if offers}
 
 
-def _score_market(offers, league, market, book, stat_data):
+def _score_market(offers, league, market, book, stat_data, date):
     """Score one market's offers — trained model when present, else book odds.
 
-    Builds the feature matrix; when it comes back empty (no model pickle, or no
-    player matched) falls back to :func:`book_fallback_prob`, which devigs the
-    composite book odds into the model slot. Returns the scored offer records.
+    Builds the feature matrix as of ``date``, the game date its pass prepared depth
+    and volume for; when it comes back empty (no model pickle, or no player matched)
+    falls back to :func:`book_fallback_prob`, which devigs the composite book odds
+    into the model slot. Returns the scored offer records.
     """
-    playerStats = match_offers(offers, league, market, book, stat_data)
+    playerStats = match_offers(offers, league, market, book, stat_data, date)
     if len(playerStats) == 0:
-        modeled = book_fallback_prob(offers, league, market, book, stat_data)
+        modeled = book_fallback_prob(offers, league, market, book, stat_data, date)
         if not modeled:
             logger.info(f"{league}, {market} offers not matched")
         return modeled
@@ -165,7 +186,7 @@ def _score_market(offers, league, market, book, stat_data):
 
 
 @line_profiler.profile
-def match_offers(offers, league, market, platform, stat_data):
+def match_offers(offers, league, market, platform, stat_data, date):
     """Build a feature matrix for ``offers`` from the ``Stats`` object.
 
     Normalizes the market name, calls ``stat_data.get_stats``, and slices
@@ -178,6 +199,8 @@ def match_offers(offers, league, market, platform, stat_data):
         market: Raw market name from the scraper.
         platform: DFS platform name.
         stat_data: Loaded ``Stats`` instance for ``league``.
+        date: Date the features are built as of, the one the caller prepared
+            ``stat_data``'s depth and volume for.
 
     Returns:
         pd.DataFrame: Feature matrix indexed by player name, or an empty
@@ -188,7 +211,7 @@ def match_offers(offers, league, market, platform, stat_data):
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            playerStats = stat_data.get_stats(market, offers)
+            playerStats = stat_data.get_stats(market, offers, date)
             if playerStats.empty:
                 return playerStats
 
@@ -200,10 +223,12 @@ def match_offers(offers, league, market, platform, stat_data):
                 expected_cols = pickle.load(infile)["expected_columns"]
             playerStats = playerStats.reindex(columns=expected_cols)
 
+            # Training's matrix ends the same way: a 0-target game makes yards per target infinite.
             return (
                 playerStats[~playerStats.index.duplicated(keep="first")]
                 .fillna(0)
                 .infer_objects(copy=False)
+                .replace([np.inf, -np.inf], 0)
             )
     else:
         return pd.DataFrame()

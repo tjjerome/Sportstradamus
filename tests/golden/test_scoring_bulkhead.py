@@ -4,15 +4,22 @@
 the bulkhead in ``_match_league_offers`` one raising ``(league, market)`` cost that
 platform its scoring, its parlays and every ``archive.add_dfs`` capture that had not
 yet run — 305 blackouts across 1642 prod runs. Captures now land ahead of anything
-that can raise, and the two catches hold the blast radius at one league's scoring
+that can raise, and the two catches hold the blast radius at one game date's pass
 and one market's records.
+
+The passes are pinned here too: one a game date, never before today, its feature
+prep ahead of every market's scoring, as the training matrix builds each gameday.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import date
+import pickle
+from datetime import date, timedelta
+from types import SimpleNamespace
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from sportstradamus.helpers import stat_map
@@ -51,37 +58,50 @@ class _Pbar:
 
 
 class _StatsStub:
-    """The ``Stats`` surface league feature prep touches, nothing else."""
+    """The ``Stats`` surface league feature prep touches, logging each call in ``events``.
 
-    def __init__(self, depth_error=None):
+    ``depth_error`` raises from ``get_depth`` on ``failing_day``, or on every day
+    when that is None.
+    """
+
+    def __init__(self, depth_error=None, failing_day=None):
         self.depth_error = depth_error
-        self.depth_calls = 0
+        self.failing_day = failing_day
+        self.events = []
 
-    def get_depth(self, offers):
-        self.depth_calls += 1
+    def get_depth(self, offers, date):
         self.depth_offers = offers
-        if self.depth_error is not None:
+        self.events.append(("depth", date, _players(offers)))
+        if self.depth_error is not None and self.failing_day in (None, date):
             raise self.depth_error
 
-    def get_volume_stats(self, offers, pitcher=False):
-        pass
+    def get_volume_stats(self, offers, date, pitcher=False):
+        self.events.append(("volume", date, _players(offers), pitcher))
+
+
+def _players(offers):
+    return sorted(offer["Player"] for offer in offers)
+
+
+def _dated_markets(*rows):
+    """``{market: [offer, ...]}`` from ``(player, market, Date)`` rows, in row order."""
+    markets = {}
+    for player, market, game_date in rows:
+        markets.setdefault(market, []).append(
+            {"Player": player, "Market": market, "Line": 1.5, "Date": game_date}
+        )
+    return markets
 
 
 def _nba_markets():
-    return {
-        market: [
-            {"Player": player, "Market": market, "League": "NBA", "Line": 1.5, "Date": _DATE}
-            for player in players
-        ]
-        for market, players in (("PTS", ["A"]), ("REB", ["B", "C"]))
-    }
+    return _dated_markets(("A", "PTS", _DATE), ("B", "REB", _DATE), ("C", "REB", _DATE))
 
 
 def test_one_market_crash_costs_only_that_market(monkeypatch, caplog):
     recorder = _ArchiveRecorder()
     monkeypatch.setattr(scoring, "archive", recorder)
 
-    def score(offers, league, market, book, stat_data):
+    def score(offers, league, market, book, stat_data, date):
         if market == "PTS":
             raise ValueError("unservable cell")
         return [{"Player": offer["Player"], "Market": market} for offer in offers]
@@ -130,7 +150,8 @@ def test_inactive_league_is_archived_but_not_scored(monkeypatch):
     assert pbar.count == 3
 
 
-def _score_every_offer(offers, league, market, book, stat_data):
+def _score_every_offer(offers, league, market, book, stat_data, date):
+    stat_data.events.append(("score", market, date, _players(offers)))
     return [{"Player": offer["Player"], "Market": market} for offer in offers]
 
 
@@ -148,7 +169,7 @@ def test_preseason_offers_are_archived_but_never_scored(monkeypatch, caplog):
     assert scored == []
     assert recorder.markets == ["PTS", "REB"]
     assert pbar.count == 3
-    assert stats["NBA"].depth_calls == 0
+    assert stats["NBA"].events == []
     assert "NBA: 3 offers before opening night 2026-09-13 not scored" in caplog.text
 
 
@@ -208,3 +229,150 @@ def test_feature_prep_gets_each_players_earliest_dated_offer(monkeypatch):
     prepared = {offer["Player"]: offer["Date"] for offer in stats["NBA"].depth_offers}
     assert prepared == {"A": _DATE, "B": later, "C": _DATE}
     assert len(stats["NBA"].depth_offers) == 3
+
+
+def test_each_game_date_is_one_pass_in_date_order(monkeypatch):
+    """Depth, volume and every market's scoring run at one date before the next starts.
+
+    ``base_profile`` rebuilds the profile whenever the date moves, so a call at another
+    date inside a pass would leave its scoring on wiped depth and volume columns.
+    """
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    today = date.today()
+    later = today + timedelta(days=3)
+    markets = _dated_markets(
+        ("B", "PTS", later.isoformat()),
+        ("A", "PTS", today.isoformat()),
+        ("C", "REB", later.isoformat()),
+        ("A", "REB", later.isoformat()),
+    )
+    stats = _StatsStub()
+
+    scoring._match_league_offers("NBA", markets, {"NBA": stats}, _BOOK, _Pbar())
+
+    assert stats.events == [
+        ("depth", today, ["A"]),
+        ("volume", today, ["A"], False),
+        ("score", "PTS", today, ["A"]),
+        ("score", "REB", today, ["A"]),
+        ("depth", later, ["B", "C"]),
+        ("volume", later, ["B", "C"], False),
+        ("score", "PTS", later, ["B"]),
+        ("score", "REB", later, ["C"]),
+    ]
+
+
+def test_a_player_is_scored_in_every_market_in_his_earliest_pass(monkeypatch):
+    """His one feature row is built for his earliest game, so his later offers ride along."""
+    handed = {}
+
+    def score(offers, league, market, book, stat_data, date):
+        handed[market, date] = [(offer["Player"], offer["Date"]) for offer in offers]
+        return []
+
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", score)
+    today = date.today()
+    later = today + timedelta(days=3)
+    markets = _dated_markets(
+        ("X", "PTS", today.isoformat()),
+        ("Y", "REB", later.isoformat()),
+        ("X", "REB", later.isoformat()),
+    )
+
+    scoring._match_league_offers("NBA", markets, {"NBA": _StatsStub()}, _BOOK, _Pbar())
+
+    assert handed == {
+        ("PTS", today): [("X", today.isoformat())],
+        ("REB", today): [("X", later.isoformat())],
+        ("REB", later): [("Y", later.isoformat())],
+    }
+
+
+def test_past_and_undated_offers_are_built_as_of_today(monkeypatch):
+    """A past date would build the row from the realized game; no date has no other day."""
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    markets = _dated_markets(("A", "PTS", yesterday.isoformat()), ("B", "PTS", None))
+    stats = _StatsStub()
+
+    scoring._match_league_offers("NBA", markets, {"NBA": stats}, _BOOK, _Pbar())
+
+    assert stats.events == [
+        ("depth", today, ["A", "B"]),
+        ("volume", today, ["A", "B"], False),
+        ("score", "PTS", today, ["A", "B"]),
+    ]
+
+
+def test_a_feature_prep_crash_costs_only_its_dates_pass(monkeypatch, caplog):
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    today = date.today()
+    later = today + timedelta(days=3)
+    markets = _dated_markets(("A", "PTS", today.isoformat()), ("B", "PTS", later.isoformat()))
+    stats = _StatsStub(depth_error=KeyError("proj carries loc"), failing_day=today)
+
+    with caplog.at_level(logging.ERROR, logger="log"):
+        scored = scoring._match_league_offers("NBA", markets, {"NBA": stats}, _BOOK, _Pbar())
+
+    assert scored == [{"Player": "B", "Market": "PTS"}]
+    assert "NBA features unavailable" in caplog.text
+    assert today.isoformat() in caplog.text
+
+
+def test_mlb_prepares_pitcher_volume_in_every_pass(monkeypatch):
+    monkeypatch.setattr(scoring, "archive", _ArchiveRecorder())
+    monkeypatch.setattr(scoring, "_score_market", _score_every_offer)
+    today = date.today()
+    later = today + timedelta(days=1)
+    markets = _dated_markets(("A", "hits", today.isoformat()), ("B", "hits", later.isoformat()))
+    stats = _StatsStub()
+
+    scoring._match_league_offers("MLB", markets, {"MLB": stats}, _BOOK, _Pbar())
+
+    assert stats.events == [
+        ("depth", today, ["A"]),
+        ("volume", today, ["A"], False),
+        ("volume", today, ["A"], True),
+        ("score", "hits", today, ["A"]),
+        ("depth", later, ["B"]),
+        ("volume", later, ["B"], False),
+        ("volume", later, ["B"], True),
+        ("score", "hits", later, ["B"]),
+    ]
+
+
+def test_match_offers_builds_as_of_its_date_and_zeroes_inf_as_training_does(monkeypatch, tmp_path):
+    """The model reads its features as the training matrix ends them: NaN and ±inf as 0."""
+    (tmp_path / "models").mkdir()
+    with open(tmp_path / "models" / "NBA_PTS.mdl", "wb") as outfile:
+        pickle.dump({"expected_columns": ["MeanYr", "Rate", "Unbuilt"]}, outfile)
+    monkeypatch.setattr(scoring.pkg_resources, "files", lambda package: tmp_path)
+    asked = []
+
+    def get_stats(market, offers, day):
+        asked.append((market, day))
+        return pd.DataFrame(
+            {
+                "MeanYr": [np.nan, 20.0, 99.0],
+                "Rate": [np.inf, -np.inf, 5.0],
+                "Untrained": [1.0, 2.0, 3.0],
+            },
+            index=["A", "B", "A"],
+        )
+
+    stat_data = SimpleNamespace(gamelog=pd.DataFrame(columns=["PTS"]), get_stats=get_stats)
+    later = date.today() + timedelta(days=3)
+
+    built = scoring.match_offers([], "NBA", "PTS", _BOOK, stat_data, later)
+
+    assert asked == [("PTS", later)]
+    assert list(built.columns) == ["MeanYr", "Rate", "Unbuilt"]
+    assert built.to_dict("index") == {
+        "A": {"MeanYr": 0.0, "Rate": 0.0, "Unbuilt": 0.0},
+        "B": {"MeanYr": 20.0, "Rate": 0.0, "Unbuilt": 0.0},
+    }

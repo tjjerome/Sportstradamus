@@ -37,6 +37,7 @@ _BOOK_UNDER = 0.42
 _LINE = 25.5
 _CV = 0.5
 _TS = datetime.datetime(2026, 6, 3, 12, 0, 0)
+_PASS_DATE = datetime.date(2026, 6, 3)
 
 
 class _StubArchive:
@@ -67,8 +68,10 @@ class _StubStats:
     def __init__(self, feature_frame, combo_ev=float("nan")):
         self._features = feature_frame
         self._combo_ev = combo_ev
+        self.feature_dates = []
 
-    def get_stats(self, market, offers):
+    def get_stats(self, market, offers, date):
+        self.feature_dates.append(date)
         return self._features
 
     def check_combo_markets(self, market, player, date):
@@ -129,7 +132,7 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(_feature_frame(["Test Player"], player_position=1))
 
-    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
 
     assert len(records) == 1
     rec = records[0]
@@ -167,9 +170,23 @@ def test_a_two_date_players_book_leg_is_read_for_his_earlier_game(monkeypatch):
     stats = _StubStats(_feature_frame(["Test Player"]))
     listed_last = _offer() | {"Date": "2026-06-04"}
 
-    mp.book_fallback_prob([_offer(), listed_last], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+    mp.book_fallback_prob(
+        [_offer(), listed_last], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE
+    )
 
     assert asked == ["2026-06-03"]
+
+
+def test_features_are_built_as_of_the_callers_pass_date(monkeypatch):
+    """The caller's pass prepared depth and volume for its date; a feature row built at
+    any other date would rebuild the profile and read them wiped."""
+    _patch_cell(monkeypatch)
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
+    stats = _StubStats(_feature_frame(["Test Player"]))
+
+    mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
+
+    assert stats.feature_dates == [_PASS_DATE]
 
 
 def test_neutral_fill_when_no_feature_matrix(monkeypatch):
@@ -177,7 +194,7 @@ def test_neutral_fill_when_no_feature_matrix(monkeypatch):
     monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())  # no players matched -> no features
 
-    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
 
     assert len(records) == 1
     rec = records[0]
@@ -195,7 +212,9 @@ def test_returns_empty_when_market_unknown(monkeypatch):
     monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
 
 
 def test_returns_empty_when_no_book_quote(monkeypatch):
@@ -203,7 +222,9 @@ def test_returns_empty_when_no_book_quote(monkeypatch):
     monkeypatch.setattr(book_quotes, "archive", _StubArchive({}))  # no archived rows at all
     stats = _StubStats(pd.DataFrame())  # check_combo_markets also returns NaN
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
 
 
 def test_dfs_only_cohort_never_serves(monkeypatch):
@@ -214,7 +235,9 @@ def test_dfs_only_cohort_never_serves(monkeypatch):
     )
     stats = _StubStats(pd.DataFrame())
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
 
 
 def test_pure_ev_inversion_never_serves(monkeypatch):
@@ -225,7 +248,9 @@ def test_pure_ev_inversion_never_serves(monkeypatch):
     )
     stats = _StubStats(pd.DataFrame())
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
 
 
 def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
@@ -243,4 +268,6 @@ def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
     monkeypatch.setitem(book_quotes.combo_props, _RAW_MARKET, ["A", "B"])
     stats = _StubStats(pd.DataFrame(), combo_ev=22.0)
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )

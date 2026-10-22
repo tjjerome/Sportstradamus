@@ -1268,6 +1268,7 @@ def book_fallback_prob(
     market: str,
     platform: str,
     stat_data,
+    date,
 ) -> list[dict]:
     """Score offers from the modal-line book cohort when no trained model exists.
 
@@ -1280,8 +1281,9 @@ def book_fallback_prob(
     correlation, parlay search, and the export with no claimed edge (``Model EV``
     mirrors ``Market EV``). Rows without independent support (no real sportsbook in
     the cohort and no combo consensus) are dropped, not served at a guessed price.
-    Returns an empty list when the market is unknown to ``stat_meta`` (no
-    distribution to devig with) or nothing is servable.
+    The feature columns it joins are built as of ``date``, the date the caller's pass
+    prepared depth and volume for. Returns an empty list when the market is unknown
+    to ``stat_meta`` (no distribution to devig with) or nothing is servable.
     """
     market = normalize_market(league, market, platform)
     dist, cv, hist_gate, step = _book_cell_params(league, market)
@@ -1307,7 +1309,7 @@ def book_fallback_prob(
     price_offers_at_quotes(offer_df, quotes, league, market, dist, cv, step)
     annotate_quote_provenance(offer_df, [quotes[player] for player in offer_df.index])
 
-    playerStats = stat_data.get_stats(market, offers)
+    playerStats = stat_data.get_stats(market, offers, date)
     if not playerStats.empty:
         playerStats = (
             playerStats[~playerStats.index.duplicated(keep="first")]

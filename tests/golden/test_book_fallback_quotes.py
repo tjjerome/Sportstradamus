@@ -37,6 +37,7 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 _LEAGUE = "NBA"
 _MARKET = "TESTMKT"
 _DATE = "2026-06-03"
+_PASS_DATE = datetime.date.fromisoformat(_DATE)
 _TS = datetime.datetime(2026, 6, 3, 12, 0, 0)
 
 
@@ -74,7 +75,7 @@ def _patch_cell(monkeypatch, dist, cv):
 class _StubStats:
     league = _LEAGUE
 
-    def get_stats(self, market, offers):
+    def get_stats(self, market, offers, date):
         return pd.DataFrame()
 
     # Bound rather than stubbed: the serving second pass prices through the real
@@ -110,6 +111,7 @@ def test_modal_cohort_prices_all_lines_shape_consistently(archive, monkeypatch):
         _MARKET,
         "Underdog",
         _StubStats(),
+        _PASS_DATE,
     )
 
     by_line = {r["Line"]: r for r in records}
@@ -133,7 +135,7 @@ def test_all_dfs_cohort_produces_no_served_row(archive, monkeypatch):
     _insert_odds(archive, "Star Guard", "Underdog", 0.58, 24.5)
 
     records = mp.book_fallback_prob(
-        [_offer("Star Guard", 24.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Star Guard", 24.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert records == []
@@ -146,7 +148,7 @@ def test_one_real_book_beside_dfs_serves(archive, monkeypatch):
     _insert_odds(archive, "Star Guard", "fanduel", 0.60, 24.5)
 
     records = mp.book_fallback_prob(
-        [_offer("Star Guard", 24.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Star Guard", 24.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert len(records) == 1
@@ -171,7 +173,7 @@ def test_component_sum_serves_an_unquoted_combo(archive, monkeypatch):
     _insert_components(archive, "Combo Guy")
 
     records = mp.book_fallback_prob(
-        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert len(records) == 1
@@ -206,6 +208,7 @@ def test_book_quote_keeps_its_price_and_takes_the_sum_shape(archive, monkeypatch
         _MARKET,
         "Underdog",
         _StubStats(),
+        _PASS_DATE,
     )
 
     by_line = {r["Line"]: r for r in records}
@@ -235,7 +238,7 @@ def test_component_only_dfs_support_never_serves(archive, monkeypatch):
     _insert_odds(archive, "Combo Guy", "Underdog", 0.50, 8.5, market="B")
 
     records = mp.book_fallback_prob(
-        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert records == []
@@ -249,7 +252,7 @@ def test_blocked_combo_cell_never_serves(archive, monkeypatch):
     _insert_components(archive, "Combo Guy")
 
     records = mp.book_fallback_prob(
-        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert records == []
@@ -266,7 +269,7 @@ def test_fantasy_market_never_serves_combo_fallback(archive, monkeypatch):
     _insert_components(archive, "Bench Guy")
 
     records = mp.book_fallback_prob(
-        [_offer("Bench Guy", 5.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+        [_offer("Bench Guy", 5.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
     )
 
     assert records == []
@@ -395,7 +398,7 @@ def test_fallback_row_records_its_decode_gate_and_no_model_columns(
 
     served = pd.DataFrame(
         mp.book_fallback_prob(
-            [_offer("Star Guard", line)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+            [_offer("Star Guard", line)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
         )
     )
 
