@@ -16,6 +16,8 @@ Options:
                        data/runtime/feature_log).
   --versions           Also re-score each logged row under every other version
                        of its cell on disk.
+  --fixed-file         Score every logged row through the served model file,
+                       whichever version logged it.
   --out FILE           Sandbox CSV of every table.  [default:
                        /tmp/feature_parity.csv]
   --help               Show this message and exit.

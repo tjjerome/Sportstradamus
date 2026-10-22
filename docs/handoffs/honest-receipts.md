@@ -498,7 +498,7 @@ inside its group; §8 restates each open one as a plain question.
      `history.parquet` or a dashboard snapshot). `sportstradamus admin feature-parity` replays it by
      hand, not from cron: it checks each logged batch reproduces through the file carrying its
      `Model Version`, compares each row with its training-matrix row once the matrix catches up
-     (flag at a per-cell sd(ΔP) above 1 pp), re-scores under the other versions on disk
+     (flag at a per-cell RMS(ΔP) above 1 pp at its player-clustered lower bound, live-gap-2's rule), re-scores under the other versions on disk
      (`--versions`) and lists the settled cells with no log rows. No logged game is in a matrix yet,
      so the first real parity read follows the next `meditate`. First finding, with no matrix needed:
      serving feeds `inf` where training holds 0 (all 48 logged WNBA rows carry it in `Team

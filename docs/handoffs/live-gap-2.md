@@ -169,8 +169,9 @@ populations and Holm family that §3 pins.
   `~/backups/sportstradamus/2026-10-21-under-read/`) on the levelled-opponent population of §3. Secondary:
   the literal priced test rows (expected positive because of H3), the count and yardage strata, NHL.
 - **E5 I6e parity read**: the training matrices hold the logged games from 10-05 (NFL to 10-15, NHL to
-  10-17). `admin feature-parity` flags only the sd of the raw ΔP, which cannot see a level shift, and
-  scores each row through its own version's file, which leaves 4–36 NFL rows per cell. This read flags a
+  10-17). `admin feature-parity` flagged only the sd of the raw ΔP, which cannot see a level shift, and
+  scored each row through its own version's file, which leaves 4–36 NFL rows per cell; it now carries this
+  read's rule (RMS flag, `--fixed-file`, rank). This read flags a
   cell when the CI lower bound of RMS(ΔP) exceeds 1 pp; it scores NFL receptions, receiving yards, rushing
   yards, carries, interceptions, tds and yards through the current pickle on both frames (completions lacks
   42 logged columns, qb yards has no pickle) and NHL through each row's own version, and ranks repairs by

@@ -15,14 +15,24 @@ model version:
 - **Parity.** A logged row whose (cell, player, game date) is in the cell's cached training
   matrix is compared with that row feature by feature, and both feature vectors are scored
   through the same file. ``flag`` marks a cell whose probability difference (serve minus
-  training features) has a standard deviation above ``PARITY_SD_ALARM``.
+  training features) has a root mean square above ``PARITY_RMS_ALARM`` at the lower end of
+  its player-clustered 95% interval: an RMS sees a level shift that a standard deviation
+  misses. ``served_rms`` is that RMS as it reaches the served probability, and
+  ``rank_score``, ``served_rms`` times the cell's settled model-served legs in the window
+  (``live_legs``), orders the repairs.
+- **Fixed file** (``--fixed-file``). Every logged row is scored through the served pickle at
+  that file's own zero-rate gate, whichever version logged it, and nothing is self-checked:
+  both feature vectors go through the one file, so rows whose own file is gone or does not
+  reproduce still count. A version whose rows never fill a feature the served file reads
+  logged before that feature existed, and is left out with a note.
 - **Version re-score** (``--versions``). Each logged row is re-scored under every other
   version of its cell on disk as that version would have served it, through its own file at
   its own zero-rate gate: the paired same-leg difference between versions, with the days
   between the two version stamps. A version that needs a feature the log does not hold, or
   whose file serving would refuse, is named with the reason and not scored.
 - **Coverage.** Each cell, platform and game date with settled model-served legs in
-  ``history.parquet`` and no log rows, so a log that fails silently shows.
+  ``history.parquet`` and no log rows, so a log that fails silently shows. The same legs,
+  summed per cell, are ``live_legs``.
 
 Every probability is the model's own: ``get_odds`` on the decoded outputs at the pickle's
 step, before the book blend and the calibration fitted on top of it, so a difference is the
@@ -73,9 +83,14 @@ from sportstradamus.prediction.model_prob import (
 TRAINING_DATA_DIR = Path(str(pkg_resources.files(data) / "training_data"))
 _DEFAULT_OUT = Path("/tmp/feature_parity.csv")
 
-# The honest-receipts brief's alarm (I6e): a cell whose probability difference between serve
-# and training features has a standard deviation above one percentage point.
-PARITY_SD_ALARM = 0.01
+# The honest-receipts brief's alarm (I6e), as live-gap-2 pre-registered it: a cell whose
+# probability difference between serve and training features has a root mean square above
+# one percentage point at the lower end of its two-sided 95% interval.
+PARITY_RMS_ALARM = 0.01
+_RMS_LOWER_QUANTILE = 0.025
+# live-gap-2's pre-registered resampling: 2,000 player-clustered draws at the lane's seed.
+_RMS_DRAWS = 2000
+_RMS_SEED = 1729
 
 # Model outputs are float32 and LightGBM's summation order moves with the batch, so a
 # re-score agrees to float32 rounding (worst on the replay logs: 9e-8 relative), not bit for
@@ -105,7 +120,12 @@ _SUMMARY_COLUMNS = [
     "matched",
     "dp_mean",
     "dp_sd",
+    "dp_rms",
+    "dp_rms_lo",
+    "served_rms",
     "flag",
+    "live_legs",
+    "rank_score",
     "note",
 ]
 _FEATURE_COLUMNS = ["cell", "version", "feature", "differ_share", "mean_abs_diff"]
@@ -121,18 +141,28 @@ _PAIR_COLUMNS = [
 ]
 
 
-def model_files(cell: str) -> dict[str, dict]:
+def load_model(path: Path) -> tuple[str, dict]:
+    """A model file's version and its unpickled dict."""
+    with path.open("rb") as infile:
+        filedict = pickle.load(infile)
+    return resolve_model_version(str(path), filedict), filedict
+
+
+def model_files(cell: str) -> tuple[dict[str, dict], str | None]:
     """Every model file on disk for a cell, keyed by the version it carries.
 
     The served pickle is read last, so it answers for a version a prior copy also carries.
+
+    Returns:
+        The files, and the served pickle's version (``None`` for a cell not served).
     """
     models = Path(str(MODELS_DIR))
-    files = {}
-    for path in [*sorted((models / "prior").glob(f"{cell}__*.mdl")), *models.glob(f"{cell}.mdl")]:
-        with path.open("rb") as infile:
-            filedict = pickle.load(infile)
-        files[resolve_model_version(str(path), filedict)] = filedict
-    return files
+    files = dict(map(load_model, sorted((models / "prior").glob(f"{cell}__*.mdl"))))
+    served = models / f"{cell}.mdl"
+    if not served.exists():
+        return files, None
+    version, filedict = load_model(served)
+    return files | {version: filedict}, version
 
 
 def score(
@@ -163,8 +193,26 @@ def over_probability(outputs: pd.DataFrame, filedict: dict, line: pd.Series) -> 
     )[0]
 
 
+def rms_bound(dp: pd.Series, players: pd.Series) -> tuple[float, float]:
+    """The root mean square of ``dp`` and the lower end of its 95% interval.
+
+    The interval resamples players, not rows: a player's rows share his features' errors.
+    """
+    square = dp**2
+    by_player = square.groupby(players.to_numpy())
+    sums, sizes = by_player.sum().to_numpy(), by_player.size().to_numpy()
+    n = len(sizes)
+    draws = np.random.default_rng(_RMS_SEED).multinomial(n, np.full(n, 1 / n), size=_RMS_DRAWS)
+    resampled = np.sqrt(draws @ sums / (draws @ sizes))
+    return float(np.sqrt(square.mean())), float(np.quantile(resampled, _RMS_LOWER_QUANTILE))
+
+
 def check_version(
-    rows: pd.DataFrame, filedict: dict, others: dict[str, dict], train: pd.DataFrame
+    rows: pd.DataFrame,
+    filedict: dict,
+    others: dict[str, dict],
+    train: pd.DataFrame,
+    fixed_file: bool,
 ) -> tuple[dict, pd.DataFrame, list[dict]]:
     """One model version's logged rows of a cell: self-check, parity and version re-score.
 
@@ -173,6 +221,8 @@ def check_version(
         filedict: The model file that carries the version.
         others: The cell's other model files to re-score the rows under, by version.
         train: The training-matrix rows of the cell's matched logged rows, indexed like them.
+        fixed_file: ``rows`` are every version's and ``filedict`` the served file, which
+            scores them at its own gate without a self-check.
 
     Returns:
         The summary record (``note`` set when the version does not reproduce), the features
@@ -190,7 +240,7 @@ def check_version(
     served, trained = [], []
     rescored = {other: [] for other in scoreable}
     for _, batch in rows.groupby("Scored At"):
-        gate = batch["Hist Gate"].iat[0]
+        gate = filedict["hist_gate"] if fixed_file else batch["Hist Gate"].iat[0]
         frame = batch[expected]
         served.append(score(filedict, league, market, frame, gate))
         hit = batch.index.intersection(train.index)
@@ -209,22 +259,25 @@ def check_version(
             )
 
     served = pd.concat(served).loc[rows.index]
-    # reindex, not a column pick: an output the rows never logged compares as a miss.
-    close = np.isclose(
-        served.to_numpy(float),
-        rows.reindex(columns=served.columns).to_numpy(float),
-        rtol=REPRODUCE_TOL,
-        atol=REPRODUCE_TOL,
-        equal_nan=True,
-    )
-    reproduced = pd.Series(close.all(axis=1), index=rows.index)
-    record = {"log_rows": len(rows), "reproduced": reproduced.mean()}
-    # A row with dispersion history is seeded from its own features, so a miss on one means
-    # the file is not the model that served it.
-    if not reproduced[rows["STDYr"].gt(0)].all():
-        missed = int((~reproduced).sum())
-        note = f"{missed} of {len(rows)} rows' logged outputs not reproduced"
-        return record | {"note": note}, pd.DataFrame(), []
+    record = {"log_rows": len(rows)}
+    reproduced = pd.Series(True, index=rows.index)
+    if not fixed_file:
+        # reindex, not a column pick: an output the rows never logged compares as a miss.
+        close = np.isclose(
+            served.to_numpy(float),
+            rows.reindex(columns=served.columns).to_numpy(float),
+            rtol=REPRODUCE_TOL,
+            atol=REPRODUCE_TOL,
+            equal_nan=True,
+        )
+        reproduced = pd.Series(close.all(axis=1), index=rows.index)
+        record["reproduced"] = reproduced.mean()
+        # A row with dispersion history is seeded from its own features, so a miss on one
+        # means the file is not the model that served it.
+        if not reproduced[rows["STDYr"].gt(0)].all():
+            missed = int((~reproduced).sum())
+            note = f"{missed} of {len(rows)} rows' logged outputs not reproduced"
+            return record | {"note": note}, pd.DataFrame(), []
 
     kept = train.index.intersection(rows.index[reproduced])
     record["matched"] = len(kept)
@@ -235,7 +288,19 @@ def check_version(
             over_probability(served.loc[kept], filedict, line)
             - over_probability(pd.concat(trained).loc[kept], filedict, line)
         )
-        record |= {"dp_mean": dp.mean(), "dp_sd": dp.std(), "flag": dp.std() > PARITY_SD_ALARM}
+        rms, rms_lo = rms_bound(dp, rows.loc[kept, "Player"])
+        # Serving blends the model's distribution with the book's at the file's weight and
+        # tempers the blend, which carries a small gap in the model's own probability
+        # through at about weight / temperature.
+        temperature = filedict.get("temperature") or 1.0
+        record |= {
+            "dp_mean": dp.mean(),
+            "dp_sd": dp.std(),
+            "dp_rms": rms,
+            "dp_rms_lo": rms_lo,
+            "served_rms": rms * filedict["weight"] / temperature,
+            "flag": rms_lo > PARITY_RMS_ALARM,
+        }
         serve_x = rows.loc[kept, expected].astype(float)
         train_x = train.loc[kept].reindex(columns=expected).astype(float)
         differ = ~np.isclose(
@@ -273,10 +338,40 @@ def check_version(
     return record, features, pairs
 
 
+def served_pool(
+    groups: dict[str, pd.DataFrame], served_file: dict | None, served_version: str | None, tag: dict
+) -> tuple[dict[str, pd.DataFrame], list[dict]]:
+    """``--fixed-file``: every version's logged rows of a cell pooled under the served version.
+
+    A version whose rows never fill a feature the served file reads logged before that
+    feature existed, so its rows are left out; so are all of a cell that is not served.
+
+    Returns:
+        The pool keyed by the served version (empty when no row is left) and the records of
+        the versions left out.
+    """
+    if served_file is None:
+        note = "the cell is not served, so no file scores every version"
+        left_out = [
+            tag | {"version": version, "log_rows": len(rows), "note": note}
+            for version, rows in groups.items()
+        ]
+        return {}, left_out
+    pool, left_out = [], []
+    for version, rows in groups.items():
+        unlogged = rows.reindex(columns=served_file["expected_columns"]).isna().all().sum()
+        if unlogged:
+            note = f"never logged {unlogged} of the served file's features"
+            left_out.append(tag | {"version": version, "log_rows": len(rows), "note": note})
+        else:
+            pool.append(rows)
+    return ({served_version: pd.concat(pool)} if pool else {}), left_out
+
+
 def check_cell(
-    logged: pd.DataFrame, compare_versions: bool
+    logged: pd.DataFrame, compare_versions: bool, fixed_file: bool
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """One cell's logged rows, version by version.
+    """One cell's logged rows, version by version or pooled under the served file.
 
     Returns:
         Summary records per model version (``note`` set on an excluded one), the differing
@@ -284,17 +379,18 @@ def check_cell(
     """
     league, market = logged["League"].iat[0], logged["Market"].iat[0]
     cell = market_file_slug(league, market)
-    by_version = logged.groupby("Model Version")
+    cell_tag = {"cell": cell, "League": league}
+    groups = dict(list(logged.groupby("Model Version")))
     if market in VOLUME_STATS[league]:
         note = "volume cell: served from the volume projector, not from the logged frame"
-        tag = {"cell": cell, "League": league}
         records = [
-            tag | {"version": version, "log_rows": len(rows), "note": note}
-            for version, rows in by_version
+            cell_tag | {"version": version, "log_rows": len(rows), "note": note}
+            for version, rows in groups.items()
         ]
         return records, [], []
+    on_disk, served_version = model_files(cell)
     files, refused = {}, {}
-    for version, filedict in model_files(cell).items():
+    for version, filedict in on_disk.items():
         try:
             _resolve_serving_strategy(filedict, league, market)
         except ValueError as error:
@@ -309,14 +405,18 @@ def check_cell(
     train = matrix.loc[keys[matched]].set_axis(logged.index[matched])
 
     records, features, pairs = [], [], []
-    for version, rows in by_version:
-        tag = {"cell": cell, "League": league, "version": version}
+    if fixed_file:
+        groups, records = served_pool(groups, on_disk.get(served_version), served_version, cell_tag)
+    for version, rows in groups.items():
+        tag = cell_tag | {"version": version}
         if version not in files:
             note = refused.get(version, "no model file on disk carries this version")
             records.append(tag | {"log_rows": len(rows), "note": note})
             continue
         others = {v: f for v, f in files.items() if v != version} if compare_versions else {}
-        record, differing, version_pairs = check_version(rows, files[version], others, train)
+        record, differing, version_pairs = check_version(
+            rows, files[version], others, train, fixed_file
+        )
         records.append(tag | record)
         features += differing.assign(**tag).to_dict("records")
         pairs += [tag | pair for pair in version_pairs]
@@ -325,16 +425,13 @@ def check_cell(
     return records, features, pairs
 
 
-def coverage_gaps(
-    logged_days: pd.DataFrame, leagues: tuple[str, ...], start: str, end: str | None
-) -> pd.DataFrame:
-    """Each cell, platform and game date with settled model-served legs in history and no log rows.
+def served_legs(leagues: tuple[str, ...], start: str, end: str | None) -> pd.Series:
+    """Settled model-served legs in history per cell market, platform and game date.
 
     Args:
-        logged_days: The cells, platforms and game dates the log holds rows for.
-        leagues: Leagues to check; empty for every league in history.
-        start: First game date checked.
-        end: Last game date checked, or ``None`` for no upper bound.
+        leagues: Leagues to count; empty for every league in history.
+        start: First game date counted.
+        end: Last game date counted, or ``None`` for no upper bound.
     """
     history = read_history()
     served = (
@@ -351,9 +448,7 @@ def coverage_gaps(
     # markets the "... prizepicks" cell serves; archive_market folds them. Not normalize_market:
     # Sleeper's stat map chains bat_walks -> walks -> walks allowed.
     cell_market = pd.Series(map(archive_market, legs["League"], legs["Market"]), index=legs.index)
-    counts = legs.assign(Market=cell_market).groupby(_COVERAGE_KEY).size()
-    merged = counts.rename("legs").reset_index().merge(logged_days, how="left", indicator=True)
-    return merged[merged["_merge"].eq("left_only")].drop(columns="_merge")
+    return legs.assign(Market=cell_market).groupby(_COVERAGE_KEY).size().rename("legs")
 
 
 @click.command()
@@ -383,6 +478,11 @@ def coverage_gaps(
     help="Also re-score each logged row under every other version of its cell on disk.",
 )
 @click.option(
+    "--fixed-file",
+    is_flag=True,
+    help="Score every logged row through the served model file, whichever version logged it.",
+)
+@click.option(
     "--out",
     type=click.Path(dir_okay=False, path_type=Path),
     default=_DEFAULT_OUT,
@@ -395,6 +495,7 @@ def main(
     end: datetime | None,
     log_dir: Path,
     versions: bool,
+    fixed_file: bool,
     out: Path,
 ) -> None:
     """Check the serve-time feature log against the training matrices.
@@ -404,6 +505,8 @@ def main(
     probability), lists settled cells and dates the log missed, and writes every table to
     OUT.
     """
+    if versions and fixed_file:
+        raise click.UsageError("--versions re-scores each row from its own version's file")
     # ISO dates order as text, so partition names and history dates are compared unparsed.
     first, last = (day and str(day.date()) for day in (start, end))
     cells: dict[str, list[Path]] = {}
@@ -419,24 +522,31 @@ def main(
     for cell in tqdm(sorted(cells), desc="re-scoring cells"):
         logged = pd.concat([pd.read_parquet(path) for path in cells[cell]], ignore_index=True)
         logged_days.append(logged[_COVERAGE_KEY].drop_duplicates())
-        cell_records, cell_features, cell_pairs = check_cell(logged, versions)
+        cell_records, cell_features, cell_pairs = check_cell(logged, versions, fixed_file)
         records += cell_records
         features += cell_features
         pairs += cell_pairs
     logged_days = pd.concat(logged_days, ignore_index=True)
+    legs = served_legs(leagues, first or logged_days["Date"].min(), last)
+    merged = legs.reset_index().merge(logged_days, how="left", indicator=True)
+    gaps = merged[merged["_merge"].eq("left_only")].drop(columns="_merge")
+    live_legs = legs.groupby(lambda key: market_file_slug(*key[:2])).sum()
     summary = pd.DataFrame(records, columns=_SUMMARY_COLUMNS)
+    summary["live_legs"] = summary["cell"].map(live_legs).fillna(0)
+    summary["rank_score"] = summary["served_rms"] * summary["live_legs"]
+    summary = summary.sort_values("rank_score", ascending=False, kind="stable")
     differing = pd.DataFrame(features, columns=_FEATURE_COLUMNS).sort_values(
         ["cell", "version", "differ_share", "mean_abs_diff"], ascending=[True, True, False, False]
     )
     compared = pd.DataFrame(pairs, columns=_PAIR_COLUMNS)
-    gaps = coverage_gaps(logged_days, leagues, first or logged_days["Date"].min(), last)
     tables = {"summary": summary, "feature": differing, "version": compared, "coverage": gaps}
     written = pd.concat({name: table for name, table in tables.items() if not table.empty})
     written.rename_axis(["table", None]).reset_index(level="table").to_csv(out, index=False)
 
     shown = [
         (
-            "self-check and parity (dp: serve minus training features, at the matrix line):",
+            "self-check and parity (dp: serve minus training features, at the matrix line;"
+            " by rank_score):",
             summary[summary["note"].isna()].drop(columns="note").astype({"matched": int}),
         ),
         (

@@ -3,7 +3,8 @@
 (a) Identical serve and training features give a zero probability difference and no flag.
 (b) A perturbed feature is the top differing feature and moves the probability; a
     difference inside the tolerance is not reported.
-(c) The flag trips once the standard deviation exceeds the alarm, not at it.
+(c) The flag trips once the RMS's player-clustered lower bound exceeds the alarm, not at it,
+    and a level shift the standard deviation cannot see trips it.
 (d) A row whose version is only under ``prior/`` is scored from there, and re-scored under
     the served version with the days between the two stamps, each version at its own gate.
 (e) Rows the log cannot replay are excluded with a reason: a version whose logged outputs
@@ -11,6 +12,9 @@
     row seeded from an incomplete batch is left out alone.
 (f) The coverage listing names a cell, and a platform of a logged cell, with settled history
     legs and no log rows.
+(g) ``--fixed-file`` pools every version's rows through the served file at its gate, leaves
+    out a version that never logged one of its features and a cell that is not served.
+(h) Cells rank by served RMS times their settled live legs.
 
 Fixture-based under ``tmp_path``: the log is written by the real ``upsert_feature_log``, the
 model files and the training matrix sit beside it, and a linear stand-in replaces the
@@ -69,6 +73,7 @@ def _filedict(coefficient: float, version: str, expected=_FEATURES) -> dict:
         "normalized": False,
         "offset_meta": None,
         "model_version": version,
+        "weight": 0.5,
     }
 
 
@@ -172,6 +177,20 @@ def world(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def gates(monkeypatch) -> list[float]:
+    """The zero-rate gate of every decode the script runs, in order."""
+    seen = []
+    decode = feature_parity._decode_model_params
+
+    def recording(outputs, dist, frame, hist_gate, *rest):
+        seen.append(hist_gate)
+        decode(outputs, dist, frame, hist_gate, *rest)
+
+    monkeypatch.setattr(feature_parity, "_decode_model_params", recording)
+    return seen
+
+
 def test_identical_features_give_zero_difference_and_no_flag(world):
     features = _features()
     _serve(_save(world / "models" / "NBA_PTS.mdl", _filedict(1.0, _NEW)), features)
@@ -185,6 +204,7 @@ def test_identical_features_give_zero_difference_and_no_flag(world):
     assert cell["matched"] == len(features)
     assert cell["dp_mean"] == 0.0
     assert cell["dp_sd"] == 0.0
+    assert (cell["dp_rms"], cell["dp_rms_lo"]) == (0.0, 0.0)
     assert not cell["flag"]
     assert _table(csv, "feature").empty
 
@@ -195,7 +215,7 @@ def test_perturbed_feature_surfaces_first_and_moves_the_probability(world):
     served.loc[served.index[:4], "Avg5"] += 1.0
     served.loc[served.index[0], "ZeroYr"] = 0.3
     served["MeanYr"] *= 1 + 1e-9  # float noise, inside FEATURE_TOL
-    model = _save(world / "models" / "NBA_PTS.mdl", _filedict(1.0, _NEW))
+    model = _save(world / "models" / "NBA_PTS.mdl", _filedict(1.0, _NEW) | {"temperature": 2.0})
     _serve(model, served)
     _matrix(world, features)
 
@@ -212,12 +232,15 @@ def test_perturbed_feature_surfaces_first_and_moves_the_probability(world):
     assert expected.mean() > 0.01
     assert cell["dp_mean"] == pytest.approx(expected.mean())
     assert cell["dp_sd"] == pytest.approx(expected.std(ddof=1))
-    assert cell["dp_sd"] > feature_parity.PARITY_SD_ALARM
+    assert cell["dp_rms"] == pytest.approx(np.sqrt(np.mean(expected**2)))
+    # The served blend carries the gap at weight 0.5, tempered by 2.
+    assert cell["served_rms"] == pytest.approx(cell["dp_rms"] * 0.5 / 2.0)
+    assert cell["dp_rms_lo"] > feature_parity.PARITY_RMS_ALARM
     assert cell["flag"]
 
 
-def test_flag_trips_once_the_sd_exceeds_the_alarm(world, monkeypatch):
-    assert feature_parity.PARITY_SD_ALARM == 0.01  # one percentage point
+def test_flag_trips_once_the_rms_lower_bound_exceeds_the_alarm(world, monkeypatch):
+    assert feature_parity.PARITY_RMS_ALARM == 0.01  # one percentage point
 
     features = _features()
     served = features.copy()
@@ -227,14 +250,29 @@ def test_flag_trips_once_the_sd_exceeds_the_alarm(world, monkeypatch):
     logged = pd.read_parquet(world / "feature_log" / f"date={_DATE}" / "NBA_PTS.parquet")
 
     def record() -> dict:
-        return feature_parity.check_cell(logged, False)[0][0]
+        return feature_parity.check_cell(logged, False, False)[0][0]
 
-    sd = record()["dp_sd"]
-    assert sd > 0
-    monkeypatch.setattr(feature_parity, "PARITY_SD_ALARM", sd)
+    bound = record()["dp_rms_lo"]
+    # Half the players carry the error, so the bound sits between zero and the point value.
+    assert 0 < bound < record()["dp_rms"]
+    monkeypatch.setattr(feature_parity, "PARITY_RMS_ALARM", bound)
     assert not record()["flag"]
-    monkeypatch.setattr(feature_parity, "PARITY_SD_ALARM", np.nextafter(sd, 0))
+    monkeypatch.setattr(feature_parity, "PARITY_RMS_ALARM", np.nextafter(bound, 0))
     assert record()["flag"]
+
+
+def test_level_shift_the_sd_cannot_see_trips_the_flag(world):
+    features = _features()
+    # Every player's serve-time Avg5 runs high by the same amount: a near-constant gap.
+    served = features.assign(Avg5=features["Avg5"] + 0.2)
+    _serve(_save(world / "models" / "NBA_PTS.mdl", _filedict(1.0, _NEW)), served)
+    _matrix(world, features)
+
+    _, csv = _run(world)
+
+    cell = _table(csv, "summary").iloc[0]
+    assert cell["dp_sd"] < feature_parity.PARITY_RMS_ALARM < cell["dp_rms_lo"]
+    assert cell["flag"]
 
 
 def test_version_only_in_prior_is_scored_from_there(world):
@@ -266,26 +304,70 @@ def test_version_only_in_prior_is_scored_from_there(world):
     assert _table(csv, "version").empty
 
 
-def test_each_version_is_decoded_at_its_own_gate(world, monkeypatch):
+def test_each_version_is_decoded_at_its_own_gate(world, gates):
     features = _features()
     old = _save(world / "models" / "prior" / f"NBA_PTS__{_OLD}.mdl", _filedict(1.0, _OLD))
     _save(world / "models" / "NBA_PTS.mdl", _filedict(1.2, _NEW) | {"hist_gate": 0.4})
     _serve(old, features, hist_gate=0.25)
     _matrix(world, features, date="2026-09-20")
-    gates = []
-    decode = feature_parity._decode_model_params
-
-    def recording(outputs, dist, frame, hist_gate, *rest):
-        gates.append(hist_gate)
-        decode(outputs, dist, frame, hist_gate, *rest)
-
-    monkeypatch.setattr(feature_parity, "_decode_model_params", recording)
 
     _run(world, "--versions")
 
     # The logged version at the runtime gate its rows logged, not the 0.0 in its file; the
     # other version at the gate its own file keeps.
     assert gates == [0.25, 0.4]
+
+
+def test_fixed_file_scores_every_version_through_the_served_file(world, gates):
+    features = _features()
+    served = features.assign(Avg5=features["Avg5"] + 0.5)
+    new = _save(world / "models" / "NBA_PTS.mdl", _filedict(1.2, _NEW) | {"hist_gate": 0.4})
+    # The old version's prior copy is pruned and its rows logged another gate; they still
+    # hold every feature the served file reads.
+    _serve(_filedict(1.0, _OLD), served.iloc[:4], hist_gate=0.25)
+    _serve(new, served.iloc[4:])
+    # An older version predates Home, which the served file reads.
+    older = "20260920.none.cccccccc"
+    _serve(
+        _filedict(1.0, older, expected=_FEATURES[:-1]),
+        served.drop(columns="Home").iloc[:2],
+        date="2026-10-02",
+    )
+    # A cell whose served pickle was pulled: only a prior copy is left.
+    rebounds = _save(world / "models" / "prior" / f"NBA_REB__{_OLD}.mdl", _filedict(1.0, _OLD))
+    _serve(rebounds, features, market="REB")
+    # A served file that reads a feature no logged version holds: nothing is left to pool.
+    _save(world / "models" / "NBA_AST.mdl", _filedict(1.0, _NEW, expected=[*_FEATURES, "Min"]))
+    _serve(_filedict(1.0, _OLD), features, market="AST")
+    for cell in ("NBA_PTS", "NBA_REB", "NBA_AST"):
+        _matrix(world, features, cell=cell)
+
+    output, csv = _run(world, "--fixed-file")
+
+    summary = _table(csv, "summary").set_index(["cell", "version"])
+    pooled = summary.loc[("NBA_PTS", _NEW)]
+    assert (pooled["log_rows"], pooled["matched"]) == (8, 8)
+    assert "reproduced" not in summary.columns  # nothing is self-checked
+    expected = _over(new, served) - _over(new, features)
+    assert pooled["dp_mean"] == pytest.approx(expected.mean())
+    assert pooled["dp_rms"] == pytest.approx(np.sqrt(np.mean(expected**2)))
+    # Both batches, logged and swapped, at the served file's gate.
+    assert gates == [0.4] * 4
+    assert f"excluded NBA_PTS {older}: never logged 1 of the served file's features" in output
+    not_served = "the cell is not served, so no file scores every version"
+    assert f"excluded NBA_REB {_OLD}: {not_served}" in output
+    assert f"excluded NBA_AST {_OLD}: never logged 1 of the served file's features" in output
+    assert summary.loc["NBA_AST", "note"].notna().all()
+
+    output, _ = _run(world)  # each version through its own file: the pruned one has none
+    assert f"excluded NBA_PTS {_OLD}: no model file on disk carries this version" in output
+
+    both = CliRunner().invoke(
+        feature_parity.main,
+        ["--log-dir", str(world / "feature_log"), "--versions", "--fixed-file"],
+    )
+    assert both.exit_code == 2
+    assert "--versions re-scores each row from its own version's file" in both.output
 
 
 def test_version_needing_unlogged_features_is_not_rescored(world):
@@ -423,6 +505,30 @@ def test_coverage_lists_a_cell_with_history_and_no_log(world, monkeypatch):
         {"Market": "REB", "Platform": "Underdog", "Date": _DATE, "legs": 2},
     ]
     assert "REB" in output
+
+
+def test_cells_rank_by_served_rms_times_live_legs(world, monkeypatch):
+    features = _features()
+    for cell, market, shift in (("NBA_PTS", "PTS", 0.4), ("NBA_REB", "REB", 0.2)):
+        model = _save(world / "models" / f"{cell}.mdl", _filedict(1.0, _NEW))
+        _serve(model, features.assign(Avg5=features["Avg5"] + shift), market=market)
+        _matrix(world, features, cell=cell)
+    history = pd.DataFrame(
+        [("NBA", "PTS", "Underdog", _DATE, 21.0, _NEW)]
+        + [("NBA", "REB", "Underdog", _DATE, 7.0, _NEW)] * 5,
+        columns=_HISTORY_COLUMNS,
+    )
+    monkeypatch.setattr(feature_parity, "read_history", lambda: history)
+
+    _, csv = _run(world)
+
+    summary = _table(csv, "summary")
+    # Rebounds' gap is the smaller, on five times the legs.
+    assert summary["cell"].tolist() == ["NBA_REB", "NBA_PTS"]
+    assert summary["served_rms"].iloc[0] < summary["served_rms"].iloc[1]
+    assert summary["live_legs"].tolist() == [5, 1]
+    product = summary["served_rms"] * summary["live_legs"]
+    assert summary["rank_score"].tolist() == pytest.approx(product.tolist())
 
 
 def test_league_and_date_window_cut_the_log(world):
