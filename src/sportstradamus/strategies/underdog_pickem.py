@@ -43,7 +43,6 @@ class PickemConfig:
     min_model_edge: float = 0.020
     min_sharp_edge: float = 0.015
     disagreement_threshold: float = 0.04
-    min_correlation: float = 0.10
     min_ev: float = 0.05
     entry_sizes: tuple[int, ...] = (3, 5)
     contest_variants: tuple[str, ...] = ("power", "flex")
@@ -257,7 +256,7 @@ def leg_player(leg: str) -> str:
 
 def _parlays_per_variant(
     scored_offers_df: pd.DataFrame,
-    stats: dict[str, Any],
+    stats: dict[str, Stats],
     config: PickemConfig,
     platform: str = "Underdog",
 ) -> dict[str, pd.DataFrame]:

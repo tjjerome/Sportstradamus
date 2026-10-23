@@ -106,6 +106,7 @@ def build_candidate_universe(
         book, which sits near a coin flip on an even pick, and they cut the read
         by its cell's trust.
     """
+    # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
     from sportstradamus.stats import load_live_leagues
 
     # A league whose gamelog update failed is logged by the loader and sits this build
