@@ -6,6 +6,10 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Changed
+- A withheld cell's props serve the book consensus instead of leaving the board
+  (`prediction/scoring.py::match_offers`).
+- Gate 1's ship CI resamples game dates; the row bootstrap's interval decides when its upper
+  bound is higher.
 - `trim_matrix` reads the line, never the outcome: the `Result` band and the over/under
   balancing that cut stars' big games from book-less cells are gone (lever T, branch `lever-t`).
 - Training's SkewNormal push probabilities use the cell's `step`, as serving does.
@@ -30,6 +34,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- NFL team-weeks parsed before nflverse published their FTN charting or weekly PFR rows
+  re-parse once it does (production held zeros in those columns for every 2026 week); PFR's
+  `LA` reads as the Rams' `LAR`.
 - The withheld prune keeps volume-denominator pickles (`VOLUME_STATS`: NFL targets /
   attempts / carries, NBA and WNBA MIN, MLB pitches thrown, NHL timeOnIce / shotsAgainst);
   a withheld denominator still serves nothing but the league's other cells keep their

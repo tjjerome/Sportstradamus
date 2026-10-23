@@ -233,6 +233,17 @@ def test_reopen_sends_back_team_weeks_a_source_published_late(monkeypatch):
     assert kept == {(2026, 2), (2026, 4), (2026, 5), (2025, 1)}
 
 
+def test_reopen_fetches_nothing_while_no_team_week_reads_zero(monkeypatch):
+    s = _reopen_stats(monkeypatch)
+    s.teamlog = s.teamlog.loc[s.teamlog.week == 5]
+    monkeypatch.setattr(nfl_module.nfl, "import_ftn_data", _http_error(503))
+    monkeypatch.setattr(nfl_module.nfl, "import_weekly_pfr", _http_error(503))
+
+    s._reopen_late_source_weeks()
+
+    assert not s.gamelog.isna().any().any()
+
+
 def test_reopen_waits_on_an_unpublished_season(monkeypatch):
     s = _reopen_stats(monkeypatch)
     monkeypatch.setattr(nfl_module.nfl, "import_ftn_data", _http_error(404))

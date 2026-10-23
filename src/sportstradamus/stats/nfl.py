@@ -898,7 +898,8 @@ class StatsNFL(Stats):
         within hours of a game, so every week it holds was parsed early). A team-week whose
         columns from one source are all zero while that source now holds the game loses
         its team row and gets NaN in its players' source-fed columns, which puts both
-        back through :meth:`_backfill_missing_rows`.
+        back through :meth:`_backfill_missing_rows`. Nothing is fetched while no team-week
+        reads zero.
         """
         season = self.season_start.year
         team_week = ["season", "week", "team"]
@@ -906,6 +907,8 @@ class StatsNFL(Stats):
             ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
             pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
         )
+        if not (team.ftn_zero | team.pfr_zero).any():
+            return
         games = self.gamelog[[*team_week, "game id"]].drop_duplicates(team_week)
         team = team.merge(games, on=team_week)
         ftn_games, pfr_games = self._late_source_games(season)
