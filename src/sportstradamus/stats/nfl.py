@@ -177,6 +177,30 @@ _PFR_WEEKLY_COLUMNS: list[str] = [
     "passing_drop_pct",
 ]
 
+# Team-week columns fed only by FTN charting (read_thrown, n_blitzers) and only by weekly
+# PFR (times_pressured). A charted game always has first-read passes and blitzes, and a
+# PFR-covered one pressures, so all zero means the team-week was parsed before its game
+# reached that source.
+_FTN_TEAM_COLUMNS: list[str] = [
+    "first_read_success_rate",
+    "first_read_success_rate_allowed",
+    "first_read_epa",
+    "first_read_epa_allowed",
+    "blitz_rate",
+    "epa_per_blitz",
+    "epa_allowed_per_blitz",
+]
+_PFR_TEAM_COLUMNS: list[str] = ["pressure_per_pass", "pressure_allowed_per_pass"]
+# The player columns the same two sources feed.
+_LATE_SOURCE_PLAYER_COLUMNS: list[str] = [
+    "first read targets per route run",
+    "first read target share",
+    "receiver drops",
+    "breakaway yards",
+    "broken tackles",
+    "drop rate",
+]
+
 # KNN comp-pool filtering thresholds. The percentile gate removes very
 # low-usage players who would pollute the nearest-neighbor set with
 # small-sample noise. The min-players guard avoids fitting a BallTree
@@ -546,6 +570,7 @@ class StatsNFL(Stats):
             remove_accents
         )
         self._load_player_ids()
+        self._reopen_late_source_weeks()
         teamDataList = self._backfill_missing_rows(sched)
         self._finalize_logs(teamDataList)
         if self._full_clean_due():
@@ -865,6 +890,54 @@ class StatsNFL(Stats):
         self.players.index = self.players["name"]
         self.players = self.players[["age", "height", "weight", "team", "position"]]
 
+    def _reopen_late_source_weeks(self):
+        """Send this season's team-weeks parsed before FTN or PFR held their game back to parse.
+
+        Both sources trail the pbp by days and the backfill parses a team-week once, so a
+        team-week parsed early keeps zeros in every column that source feeds (prod ingests
+        within hours of a game, so every week it holds was parsed early). A team-week whose
+        columns from one source are all zero while that source now holds the game loses
+        its team row and gets NaN in its players' source-fed columns, which puts both
+        back through :meth:`_backfill_missing_rows`.
+        """
+        season = self.season_start.year
+        team = self.teamlog.loc[self.teamlog.season == season].assign(
+            ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
+            pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
+        )
+        games = self.gamelog[["season", "week", "team", "game id"]].drop_duplicates(
+            ["season", "week", "team"]
+        )
+        team = team.merge(games, on=["season", "week", "team"])
+        ftn_games, pfr_games = self._late_source_games(season)
+        stale = team.loc[
+            (team.ftn_zero & team["game id"].isin(ftn_games))
+            | (team.pfr_zero & team["game id"].isin(pfr_games)),
+            ["season", "week", "team"],
+        ]
+        if stale.empty:
+            return
+        logger.info(f"Re-parsing {len(stale)} NFL team-weeks that FTN or PFR published late")
+        flagged = self.gamelog.merge(stale, how="left", indicator=True)["_merge"].eq("both")
+        self.gamelog.loc[flagged.to_numpy(), _LATE_SOURCE_PLAYER_COLUMNS] = np.nan
+        kept = self.teamlog.merge(stale, how="left", indicator=True)
+        self.teamlog = kept.loc[kept["_merge"].eq("left_only")].drop(columns="_merge")
+
+    def _late_source_games(self, season):
+        """Game ids the season's FTN charting and weekly PFR files hold; empty while unpublished."""
+        try:
+            ftn = set(nfl.import_ftn_data([season])["nflverse_game_id"])
+        except HTTPError as exc:
+            self._raise_unless_unpublished(exc)
+            ftn = set()
+        try:
+            # The rush and rec files publish with this one, and every game has a passer.
+            pfr = set(nfl.import_weekly_pfr("pass", [season])["game_id"])
+        except HTTPError as exc:
+            self._raise_unless_unpublished(exc)
+            pfr = set()
+        return ftn, pfr
+
     def _backfill_missing_rows(self, sched):
         teamDataList = []
         for i, row in tqdm(
@@ -1047,6 +1120,8 @@ class StatsNFL(Stats):
                 # where the real frame's numpy scalars give NaN.
                 self.pfr = pd.DataFrame(columns=_PFR_WEEKLY_COLUMNS, dtype=float)
             self.pfr["pfr_player_name"] = self.pfr["pfr_player_name"].apply(remove_accents)
+            # PFR spells the Rams "LA", as the raw pbp does before the renames above.
+            self.pfr[["team", "opponent"]] = self.pfr[["team", "opponent"]].replace("LA", "LAR")
             self.need_pbp = False
 
     def _raise_unless_unpublished(self, exc: HTTPError) -> None:
