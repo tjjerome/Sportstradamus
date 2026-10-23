@@ -140,7 +140,7 @@ def model_pickle_path(league: str, market: str) -> Path:
     Built from :func:`market_file_slug`, e.g.
     ``("NFL", "rushing tds") -> models/NFL_rushing-tds.mdl``. This is the single
     path both the training writer and the prediction loader use, and the one
-    ``prune_model_pickle`` deletes to dark-out a withheld cell.
+    ``prune_model_pickle`` deletes for a withheld cell.
 
     Args:
         league: League code (e.g. ``"NBA"``).
