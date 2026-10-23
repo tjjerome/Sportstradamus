@@ -1082,8 +1082,9 @@ def _confirm_one(
 ) -> tuple[str, str, str, list[str]]:
     """Persist a candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
 
-    The pickle prune on failure keeps the artifact set honest: ``model_prob`` already serves
-    nothing for a withheld cell, and a volume denominator (``VOLUME_STATS``) keeps its pickle.
+    The pickle prune on failure keeps the artifact set honest: serving already prices a
+    withheld cell at the book consensus, and a volume denominator (``VOLUME_STATS``) keeps
+    its pickle.
 
     ``min_model_weight`` is the campaign's blend-weight floor, checked here rather than on the
     board: the board's ``model_weight`` is a fixed-HP proxy that this retrain refits, so only the

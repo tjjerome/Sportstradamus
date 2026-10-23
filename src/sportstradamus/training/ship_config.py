@@ -24,8 +24,8 @@ Fields per cell drive shipping + training:
 
   - ``"withheld"`` — never shipped; ``meditate`` still refreshes the cell's
     training matrix (so a later sweep runs from a warm cache) but skips
-    training and prunes the production pickle so inference dark-outs the
-    market.
+    training and prunes the production pickle; serving prices the cell's
+    offers at the book consensus.
   - ``"devel"`` — passed Gate 1; ships on the ``devel`` branch that the
     production server tracks. Has not yet graduated through Gate 2 to
     ``main``.
@@ -47,9 +47,10 @@ Shipping a cell that has cleared Gate 1 is a one-field edit to
 ``stat_meta.json``: set ``shipped`` from ``"withheld"`` to ``"devel"`` (or
 ``"main"`` after Gate 2 graduation). Inference never reads this config for
 *how* to serve — the strategy is decoded from the self-describing pickle, so
-training config and inference cannot drift — but ``model_prob`` refuses a
-cell whose ``shipped`` is :data:`WITHHELD`, a fail-closed backstop when a
-missed ``meditate`` prune leaves a stale pickle on disk.
+training config and inference cannot drift — but serving
+(``prediction.scoring.match_offers``) sends a cell whose ``shipped`` is
+:data:`WITHHELD` to the book consensus, even when a missed ``meditate`` prune
+leaves a stale pickle on disk.
 """
 
 from __future__ import annotations

@@ -100,11 +100,11 @@ MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
 FEATURE_LOG_DIR = _RUNTIME_DIR / "feature_log"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
-# from this root; prune_model_pickle deletes one to dark-out a withheld cell.
+# from this root; prune_model_pickle deletes a withheld cell's.
 MODELS_DIR = pkg_resources.files(data) / "models"
 
 # Serve-time volume denominators Stats.load_volume_model_params reads for every other cell
-# of the league; a withheld one keeps its pickle (model_prob still serves nothing for it).
+# of the league; a withheld one keeps its pickle (its own offers still serve the book consensus).
 VOLUME_STATS: dict[str, tuple[str, ...]] = {
     "NBA": ("MIN",),
     "WNBA": ("MIN",),
@@ -176,12 +176,13 @@ def resolve_model_version(filepath: str, filedict: dict) -> str:
 
 
 def prune_model_pickle(league: str, market: str) -> bool:
-    """Delete a cell's production model pickle so inference skips that market.
+    """Delete a withheld cell's production model pickle.
 
-    Used by ``meditate`` to dark-out a cell marked ``shipped="withheld"`` in
-    ``stat_meta.json``: with no pickle on disk, ``model_prob`` returns ``[]``
-    and the market is not scored. A volume denominator (``VOLUME_STATS``) is
-    never deleted: the league's other cells project their volume from it.
+    Used by ``meditate`` on a cell marked ``shipped="withheld"`` in
+    ``stat_meta.json``. Serving already prices such a cell at the book consensus
+    (``prediction.scoring.match_offers``), so this only keeps a stale model off disk.
+    A volume denominator (``VOLUME_STATS``) is never deleted: the league's other
+    cells project their volume from it.
 
     Args:
         league: League code.

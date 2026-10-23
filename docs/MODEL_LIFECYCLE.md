@@ -11,7 +11,7 @@ battery of automatic quality checks (Is it as accurate as the sportsbook? Are it
 unbiased and well-calibrated?). A cell's release status is the `shipped` field in `stat_meta.json`,
 and it moves through three stages:
 
-- `withheld` — not served; still being worked on.
+- `withheld` — the model is not served (the board prices its props at the book consensus); still being worked on.
 - `devel` — served on the tracking server and watched on real settled bets.
 - `main` — fully live.
 
@@ -179,7 +179,7 @@ The weekly `meditate` retrains each served cell once with its persisted `stat_me
 A retrain that fails the fresh gates only **warns** (a SHIP-GATE WARNINGS table at the end of the
 run, echoed by `ship config --branch devel`) — the cell keeps serving until you demote it: flip
 `shipped` to `"withheld"` (the next meditate prunes the pickle) or run
-`sportstradamus ship config --branch devel --prune` for an immediate dark-out.
+`sportstradamus ship config --branch devel --prune` to prune the pickle now.
 
 ## 5. Graduate to main
 
