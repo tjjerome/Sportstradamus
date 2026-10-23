@@ -243,6 +243,15 @@ def read_parquet_safe(path, columns: list[str] | None = None) -> pd.DataFrame:
     return pd.read_parquet(p, engine="pyarrow", columns=columns)
 
 
+def _read_json(path, default):
+    """Parse the JSON at ``path``, or return ``default`` when the file is absent."""
+    p = Path(str(path))
+    if not p.is_file():
+        return default
+    with p.open() as f:
+        return json.load(f)
+
+
 # ---------------------------------------------------------------------------
 # History parquet (flat, one row per prediction x book offer)
 # ---------------------------------------------------------------------------
@@ -437,11 +446,7 @@ ODDS_USAGE_LEDGER_PATH = _RUNTIME_DIR / "odds_api_usage.jsonl"
 
 def read_upcoming_events() -> list[dict]:
     """Return the list of upcoming events, or empty list if the file is absent."""
-    p = Path(str(UPCOMING_EVENTS_PATH))
-    if not p.is_file():
-        return []
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(UPCOMING_EVENTS_PATH, [])
 
 
 def write_upcoming_events(events: list[dict]) -> None:
@@ -456,11 +461,7 @@ def _has_nan(values) -> bool:
 
 def read_close_line_captures() -> list[dict]:
     """Return close-lines' spooled captures, or empty list if the file is absent."""
-    p = Path(str(CLOSE_LINE_CAPTURES_PATH))
-    if not p.is_file():
-        return []
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(CLOSE_LINE_CAPTURES_PATH, [])
 
 
 def write_close_line_captures(captures: list[dict]) -> None:
@@ -477,11 +478,7 @@ LEAGUE_ACTIVITY_PATH = _RUNTIME_DIR / "league_activity.json"
 
 def read_league_activity() -> dict:
     """Return the league-activity snapshot, or empty dict if the file is absent."""
-    p = Path(str(LEAGUE_ACTIVITY_PATH))
-    if not p.is_file():
-        return {}
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(LEAGUE_ACTIVITY_PATH, {})
 
 
 def write_league_activity(activity: dict) -> None:
@@ -497,11 +494,7 @@ def write_league_activity(activity: dict) -> None:
 
 def read_modifier_overrides() -> dict:
     """Return the modifier-overrides overlay, or the empty shape if absent."""
-    p = Path(str(MODIFIER_OVERRIDES_PATH))
-    if not p.is_file():
-        return {"modifiers": {}, "rake": {}}
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(MODIFIER_OVERRIDES_PATH, {"modifiers": {}, "rake": {}})
 
 
 def write_modifier_overrides(overlay: dict) -> None:

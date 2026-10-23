@@ -19,13 +19,13 @@ lives in ``sportstradamus.helpers.odds_budget``. Game lines are decoupled
 from props admission: they are bought for the whole live slate whenever
 the close-lines floor holds, even on runs where props fit nothing.
 
-The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
-pass: it fetches the games in ``data/runtime/upcoming_events.json`` (refreshed by
-every broad ``confer`` run) that start within the closing window into the
-``data/runtime/close_line_captures.json`` spool, then archives the spool under the
-archive lock, which it takes for that write alone and leaves to a later tick when
-busy. With nothing due and nothing spooled it touches neither the network, the
-lock nor the archive. Its cron schedule is in docs/OPERATIONS.md.
+The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted pass. It
+fetches each game in ``data/runtime/upcoming_events.json`` (refreshed by every broad
+``confer`` run) that starts within the closing window, spools the payload to
+``data/runtime/close_line_captures.json``, then archives the spool. The archive lock is
+held for that write alone, and a busy lock leaves the spool to a later tick. With
+nothing due and nothing spooled it touches neither the network, the lock nor the
+archive. Its cron schedule is in docs/OPERATIONS.md.
 """
 
 import importlib.resources as pkg_resources
@@ -156,11 +156,15 @@ def _active_in_scope(sport, leagues=None):
     return sport["title"] in allowed and sport["active"]
 
 
+# Back-off before _get_with_retry's single retry, in seconds.
+_RETRY_DELAY_S = 1
+
+
 def _get_with_retry(url, params=None):
     """GET ``url``, retrying a 429 or a network blip once. Returns the ``requests.Response``.
 
     The Odds API hands back 429s under bursty load, and connection drops and read
-    timeouts are just as transient; a single 1-second retry clears either in
+    timeouts are just as transient; a single short retry clears either in
     practice. Unretried, one read timeout cost a broad confer every league's staged
     props. A second network error raises. As the single chokepoint for all Odds API
     HTTP, every response is fed to the :mod:`odds_budget` usage ledger. A
@@ -173,7 +177,7 @@ def _get_with_retry(url, params=None):
     except (requests.ConnectionError, requests.Timeout):
         res = None
     if res is None or res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-        sleep(1)
+        sleep(_RETRY_DELAY_S)
         res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
     # Before the 401 raise so exhausted-key responses still hit the ledger.
     odds_budget.record_response(url, params, res)
@@ -932,9 +936,8 @@ def _archive_event_props(archive, game, league, props, game_date, observed_at=No
 
     Splits markets into player props (per-player EV and consensus lines),
     totals (game-total team buckets), and spreads (used to fold home/away
-    team-total adjustments back into the totals write). Mirrors the inline
-    logic that ``get_props`` previously ran, hoisted out so the
-    ``--close-lines`` pass can reuse it without duplicating the parser.
+    team-total adjustments back into the totals write). ``observed_at`` stamps every
+    row written, team totals included; ``None`` lets the archive stamp the current time.
     """
     odds = {}
     totals = {}
@@ -1062,7 +1065,7 @@ def _close_lines_pass(keys, props):
     window_end = now + timedelta(minutes=CLOSING_LEAD_MAX)
     due = []
     for e in _prune_upcoming_events(read_upcoming_events()):
-        commence = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+        commence = datetime.fromisoformat(e["commence_time"])
         fresh = (e["sport_key"], e["event_id"]) not in captured
         if fresh and window_start <= commence <= window_end:
             due.append(e)
@@ -1109,7 +1112,7 @@ def _ingest_close_line_captures(captures, props):
             archive = Archive()
             for c in pending:
                 game_date = (
-                    datetime.fromisoformat(c["commence_time"].replace("Z", "+00:00"))
+                    datetime.fromisoformat(c["commence_time"])
                     .astimezone(pytz.timezone("America/Chicago"))
                     .strftime("%Y-%m-%d")
                 )
