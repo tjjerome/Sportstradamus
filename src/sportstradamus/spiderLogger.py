@@ -9,10 +9,12 @@ from sportstradamus import logs
 logger = logging.getLogger("log")
 logger.setLevel(logging.INFO)
 
-# create file handler
+# create file handler; delay=True opens the file on the first record, so a
+# process that never logs (e.g. each cron pull's fold step) leaves no empty file
 fh = logging.FileHandler(
     pkg_resources.files(logs) / datetime.now().strftime("%Y_%m_%d_%H:%M:%S.log"),
     mode="w",
+    delay=True,
 )
 fh.setLevel(logging.INFO)
 
