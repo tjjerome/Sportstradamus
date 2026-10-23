@@ -87,10 +87,8 @@ from sportstradamus.training.structural_strategies import (
 # devel->main live).
 #
 #   * research -> devel, set baseline: the SIX offline gates computed here —
-#     Gate 1 Brier-vs-book paired bootstrap resampling whole game dates (one slate's
-#     rows share game-level shocks — totals, pace, weather — so a row bootstrap is too
-#     narrow where dates are few; the row bound stays the floor), Gates 2/3 star/bench
-#     bias-vs-spread
+#     Gate 1 Brier-vs-book paired bootstrap over whole game dates (a slate's rows share
+#     game-level shocks; the row bound stays the floor), Gates 2/3 star/bench bias-vs-spread
 #     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
 #     low-variance bench segments), Gate 4 randomized-PIT KS (the IQR ratio stays a
 #     diagnostic), Gate 5 equal-mass ECE, Gate 6 the anti-shrinkage OR of three legs.
@@ -585,10 +583,9 @@ def _brier_inputs(
     non-finite ``Odds`` (so the Brier and ECE row sets can differ when some events
     have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
     entirely, every priced row is non-finite, or the priced rows fall below the
-    cluster floor. Shared by
-    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`); ``index``
-    is the surviving-row index so callers can align ancillary columns (Date, Player) to
-    the same rows without re-deriving the filter.
+    cluster floor. Shared by :func:`_brier_skill_score` and Gate 1
+    (:func:`_gate1_brier_ci`); ``index`` is the surviving-row index so callers can align
+    ancillary columns (Date, Player) to the same rows without re-deriving the filter.
     """
     sub = _priced_rows(df)
     if sub is None:
@@ -721,8 +718,8 @@ def _bootstrap_mean_ci(
     Resamples ``values`` with replacement ``n_boot`` times (seeded ``rng`` for a
     reproducible CI) and returns the point mean plus the 95% two-sided percentile
     bounds, specialized to the mean of an already-computed per-event statistic
-    (supersede S2's paired Brier difference here).
-    Returns ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
+    (Gate 1's row bound, supersede S2's paired Brier difference). Returns
+    ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -746,9 +743,8 @@ def _bootstrap_mean_ci_clustered(
 
     Resamples whole clusters with replacement, so within-cluster correlation is
     preserved and the CI is not anti-conservative on repeated-player panels or on
-    rows that share a slate.
-    ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns ``(mean, ci_lo, ci_hi)``;
-    ``(nan, nan, nan)`` if empty.
+    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns
+    ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
     """
     values = np.asarray(values, dtype=float)
     cluster_ids = np.asarray(cluster_ids)
@@ -812,23 +808,17 @@ def _gate1_brier_ci(
     with the larger upper bound decides. Returns ``(mean, ci_lo, ci_hi)``.
     """
     d = (p_model - y) ** 2 - (p_book - y) ** 2
-    return max(
-        _bootstrap_mean_ci(d, np.random.default_rng(_GATE1_SEED)),
-        _bootstrap_mean_ci_clustered(d, dates, np.random.default_rng(_GATE1_SEED)),
-        key=lambda ci: ci[2],
-    )
+    by_rows = _bootstrap_mean_ci(d, np.random.default_rng(_GATE1_SEED))
+    by_dates = _bootstrap_mean_ci_clustered(d, dates, np.random.default_rng(_GATE1_SEED))
+    return max(by_rows, by_dates, key=lambda ci: ci[2])
 
 
 def _gate1_brier_ci_clustered(
-    p_model: np.ndarray,
-    p_book: np.ndarray,
-    y: np.ndarray,
-    cluster_ids: np.ndarray,
-    rng: np.random.Generator,
+    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, cluster_ids: np.ndarray
 ) -> tuple[float, float, float]:
     """Gate 1 paired Brier CI under a player-clustered bootstrap (reported, never decisive)."""
     d = (p_model - y) ** 2 - (p_book - y) ** 2
-    return _bootstrap_mean_ci_clustered(d, cluster_ids, rng)
+    return _bootstrap_mean_ci_clustered(d, cluster_ids, np.random.default_rng(_GATE1_SEED))
 
 
 def _iqr(values: np.ndarray) -> float:
@@ -1963,9 +1953,10 @@ def gate_row(
     g4_pit_ks_max = _gate4_pit_ks_threshold(len(df))
     _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
 
-    # Gate 1 — paired Brier vs book, resampling game dates. Needs Odds; blank ⇒ "no book
-    # to beat, model wins by default" (the auto-pass convention is doc'd at the module-header
-    # and applied at verdict-wiring time). Oracle p_model = y (the label itself, 0.5 at a tie).
+    # Gate 1 — paired Brier vs book (the wider of the row and game-date bootstraps). Needs
+    # Odds, plus Date once priced; blank ⇒ "no book to beat, model wins by default" (the
+    # auto-pass convention is doc'd at the module-header and applied at verdict-wiring time).
+    # Oracle p_model = y (the label itself, 0.5 at a tie).
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
@@ -1979,11 +1970,7 @@ def gate_row(
         g1_clustered_hi = None
         if "Player" in df.columns:
             g1_clustered_hi = _gate1_brier_ci_clustered(
-                p_model_b,
-                p_book,
-                y_b,
-                df.loc[priced_index, "Player"].to_numpy(),
-                np.random.default_rng(_GATE1_SEED),
+                p_model_b, p_book, y_b, df.loc[priced_index, "Player"].to_numpy()
             )[2]
         g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index, dates)
 

@@ -86,7 +86,7 @@ def test_gate1_ship_bound_resamples_game_dates():
             "Line": np.full(n, 10.5),
             "P": np.full(n, 0.55),
             "P_standalone": np.full(n, 0.55),
-            "Odds": np.full(n, 0.55),
+            "Odds": np.full(n, 0.55),  # the book's Under price, so it prices Over at 0.45
             "Date": np.repeat(dates, rows_per_date),
         }
     )
@@ -116,6 +116,8 @@ def test_gate1_ship_bound_never_narrower_than_rows():
     per_date = np.repeat([d_win, d_loss], 10)
     y = np.ones(3 * len(per_date))
     p_book = np.full_like(y, 0.5)
+    # With y = 1 the book's Brier is .25, so this p_model scores .25 + d: each row's
+    # (model - book) difference is exactly its d.
     p_model = 1 - np.sqrt(0.25 + np.tile(per_date, 3))
     dates = np.repeat(["2026-09-13", "2026-09-20", "2026-09-27"], len(per_date))
     d = (p_model - y) ** 2 - (p_book - y) ** 2
