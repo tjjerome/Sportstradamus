@@ -20,10 +20,12 @@ from props admission: they are bought for the whole live slate whenever
 the close-lines floor holds, even on runs where props fit nothing.
 
 The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
-pass: it reads ``data/runtime/upcoming_events.json`` (refreshed by every broad
-``confer`` run) and only fires per-event endpoint calls for games starting
-within the closing window. If the window is empty, it exits before
-touching the archive or the network. Its cron schedule is in docs/OPERATIONS.md.
+pass: it fetches the games in ``data/runtime/upcoming_events.json`` (refreshed by
+every broad ``confer`` run) that start within the closing window into the
+``data/runtime/close_line_captures.json`` spool, then archives the spool under the
+archive lock, which it takes for that write alone and leaves to a later tick when
+busy. With nothing due and nothing spooled it touches neither the network, the
+lock nor the archive. Its cron schedule is in docs/OPERATIONS.md.
 """
 
 import importlib.resources as pkg_resources
@@ -58,11 +60,14 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR
 from sportstradamus.helpers.io import (
+    read_close_line_captures,
     read_league_activity,
     read_upcoming_events,
+    write_close_line_captures,
     write_league_activity,
     write_upcoming_events,
 )
+from sportstradamus.helpers.locks import ARCHIVE_LOCK_FILE, LockTimeoutError, file_lock
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
@@ -73,6 +78,10 @@ from sportstradamus.spiderLogger import logger
 # are no-ops.
 CLOSING_LEAD_MIN = 5
 CLOSING_LEAD_MAX = 25
+
+# Outlasts a broad confer's 15-105 s archive hold; prophecize, ledger-commit and reflect
+# hold it 17-90 min, so a tick behind them spools and a later tick archives.
+CLOSE_LINES_LOCK_WAIT_S = 120
 
 # Leagues with live odds we care about. All five tracked leagues since the
 # 2026-07 MLB/NHL activation; the budget governor decides which get fetched
@@ -324,9 +333,10 @@ def _resolve_broad_run_leagues(keys, cli_log):
     is_flag=True,
     default=False,
     help=(
-        "Targeted close-line scrape only. Reads data/runtime/upcoming_events.json and hits "
-        "per-event endpoints for games starting within the closing window. "
-        "Exits without touching archive or API when no events are due."
+        "Targeted close-line scrape only. Fetches games in data/runtime/upcoming_events.json "
+        "starting within the closing window into data/runtime/close_line_captures.json, then "
+        "archives that spool once the archive lock frees, else leaves it to a later run. Exits "
+        "without touching API, lock or archive when nothing is due or spooled."
     ),
 )
 @click.option(
@@ -625,10 +635,10 @@ def _region_markets(league, props):
 def _fetch_event_odds(req, sport, event_id, region_markets):
     """One event's odds, one request per region, merged into a single payload.
 
-    Returns ``False`` when the endpoint 404s (the caller aborts the whole run), ``None``
-    when no region returned anything usable, else the payload with every region's
-    bookmakers concatenated. The regions carry disjoint market lists, so no book can
-    contribute the same market twice.
+    Returns ``False`` when the endpoint 404s (a broad run aborts; close-lines skips the
+    event), ``None`` when no region returned anything usable, else the payload with
+    every region's bookmakers concatenated. The regions carry disjoint market lists, so
+    no book can contribute the same market twice.
     """
     merged, bookmakers = None, []
     for region, markets in region_markets:
@@ -692,23 +702,14 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
 
 
 def _record_upcoming_event(ledger, sport, event, league, props):
-    """Refresh an event's ledger entry, carrying the close-lines dedupe stamp.
-
-    A broad-run rebuild must not wipe ``close_fetched``, or a broad slot
-    landing inside an event's closing window would re-arm a second paid
-    close fetch.
-    """
-    entry = {
+    """Refresh an event's entry in the upcoming-events ledger close-lines reads."""
+    ledger[(sport, event["id"])] = {
         "sport_key": sport,
         "event_id": event["id"],
         "league": league,
         "commence_time": event["commence_time"],
         "markets": list(props[league].keys()),
     }
-    stamp = ledger.get((sport, event["id"]), {}).get("close_fetched")
-    if stamp:
-        entry["close_fetched"] = stamp
-    ledger[(sport, event["id"])] = entry
 
 
 def get_props(
@@ -1026,13 +1027,7 @@ def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
                 game = json.load(infile)
 
             _archive_event_props(archive, game, league, props, game_date_str)
-            ledger[(sport, event["id"])] = {
-                "sport_key": sport,
-                "event_id": event["id"],
-                "league": league,
-                "commence_time": event["commence_time"],
-                "markets": list(props[league].keys()),
-            }
+            _record_upcoming_event(ledger, sport, event, league, props)
 
     write_upcoming_events(_prune_upcoming_events(list(ledger.values())))
     return archive
@@ -1053,85 +1048,80 @@ def _prune_upcoming_events(events):
 
 
 def _close_lines_pass(keys, props):
-    """Per-event close-line scrape. Exits early when the window is empty.
+    """Fetch the games entering their closing window, then archive the capture spool.
 
-    Loads ``data/runtime/upcoming_events.json``, filters to events with a
-    ``commence_time`` between ``CLOSING_LEAD_MIN`` and ``CLOSING_LEAD_MAX``
-    minutes from now, and only then opens ``Archive`` and hits the per-event
-    Odds API endpoint for each — spending from ``keys["odds_api_plus"]``,
-    with a one-shot fallback to the ``odds_api`` margin key if the plus key
-    exhausts mid-run. Each event is fetched once: a successful parse stamps
-    ``close_fetched`` on its ledger entry, so later ticks inside the same
-    20-minute window skip it (a failed fetch stays unstamped and retries next
-    tick). Past-commence entries are pruned on the way out so the ledger
-    stays small. The ten-minute cron tick yields no archive read, no API
-    call, and no log noise on empty windows — the intended common case.
+    An event in ``upcoming_events.json`` commencing ``CLOSING_LEAD_MIN`` to
+    ``CLOSING_LEAD_MAX`` minutes out is fetched once (on ``odds_api_plus``, falling back
+    once to the ``odds_api`` margin key) and spooled with its fetch time; a failed fetch
+    stays due for the next tick. Only the archive write waits on the lock. A tick with
+    nothing due and nothing spooled makes no API call, takes no lock and writes no file.
     """
-    # style: allow-complexity — flat close-lines pass (CC 11): window filter,
-    # then a per-event fetch loop whose one-shot margin-key fallback adds the
-    # two branches over the limit; extracting it would scatter the key-flip state.
-    ledger = read_upcoming_events()
-    ledger = _prune_upcoming_events(ledger)
-
+    captures = read_close_line_captures()
+    captured = {(c["sport_key"], c["event_id"]) for c in captures}
     now = datetime.now(pytz.utc)
     window_start = now + timedelta(minutes=CLOSING_LEAD_MIN)
     window_end = now + timedelta(minutes=CLOSING_LEAD_MAX)
-
     due = []
-    for e in ledger:
-        if "close_fetched" in e:
-            continue
-        try:
-            ts = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
-        except (ValueError, KeyError, AttributeError):
-            continue
-        ts_utc = ts.astimezone(pytz.utc)
-        if window_start <= ts_utc <= window_end:
+    for e in _prune_upcoming_events(read_upcoming_events()):
+        commence = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+        fresh = (e["sport_key"], e["event_id"]) not in captured
+        if fresh and window_start <= commence <= window_end:
             due.append(e)
-
-    if not due:
-        write_upcoming_events(ledger)
-        return
-
-    logger.info(f"close-lines: {len(due)} event(s) due")
-    archive = Archive()
-    params = {"apiKey": keys["odds_api_plus"], "regions": "us"}
-
+    if due:
+        logger.info(f"close-lines: {len(due)} event(s) due")
+    req = _props_request(keys["odds_api_plus"], now, historical=False)
     for e in due:
-        sport_key = e["sport_key"]
-        event_id = e["event_id"]
-        league = e["league"]
-        markets = e.get("markets") or list(props.get(league, {}).keys())
-        if not markets:
-            continue
-        event_params = {**params, "markets": ",".join(markets)}
-        url = ODDS_API_EVENT_ODDS_URL.format(sport=sport_key, eventId=event_id)
+        region_markets = _region_markets(e["league"], props)
         try:
-            res = _get_with_retry(url, params=event_params)
+            game = _fetch_event_odds(req, e["sport_key"], e["event_id"], region_markets)
         except OddsAPIAuthError:
-            # One fallback per run: after the flip every later event builds its
-            # params from the mutated dict, and a margin-key 401 propagates.
-            if params["apiKey"] == keys["odds_api"]:
+            # One fallback per run: later events reuse the margin key, whose 401 propagates.
+            if req.params["apiKey"] == keys["odds_api"]:
                 raise
             logger.warning("close-lines: plus key exhausted, falling back to margin key")
-            params["apiKey"] = keys["odds_api"]
-            event_params = {**params, "markets": ",".join(markets)}
-            res = _get_with_retry(url, params=event_params)
-        if res.status_code != HTTPStatus.OK:
-            logger.warning(f"close-lines: {league} {event_id} returned status {res.status_code}")
-            continue
-        game = res.json()
-        game_date = (
-            datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
-            .astimezone(pytz.timezone("America/Chicago"))
-            .strftime("%Y-%m-%d")
-        )
-        _archive_event_props(archive, game, league, props, game_date)
-        e["close_fetched"] = now.isoformat()
+            req = req._replace(params={**req.params, "apiKey": keys["odds_api"]})
+            game = _fetch_event_odds(req, e["sport_key"], e["event_id"], region_markets)
+        # False (a 404) or None (nothing usable) leaves the event due for the next tick.
+        if game:
+            observed_at = datetime.now(pytz.utc).replace(tzinfo=None).isoformat()
+            captures.append({**e, "observed_at": observed_at, "game": game})
+            # Per event, so a later raise cannot lose a fetch already paid for.
+            write_close_line_captures(captures)
+    if any(c["game"] for c in captures):
+        _ingest_close_line_captures(captures, props)
 
-    archive.write()
-    write_upcoming_events(_prune_upcoming_events(ledger))
-    logger.info("close-lines: archive updated")
+
+def _ingest_close_line_captures(captures, props):
+    """Archive the spooled captures that still hold a payload, under the archive lock.
+
+    A lock busy past ``CLOSE_LINES_LOCK_WAIT_S`` leaves the spool for a later tick; any
+    other failure raises with the spool intact. A capture archives at its fetch time and
+    under its game's Chicago date however late it lands, then stays spooled without its
+    payload (so it is never refetched) until its game starts.
+    """
+    pending = [c for c in captures if c["game"]]
+    try:
+        with file_lock(
+            ARCHIVE_LOCK_FILE,
+            timeout_s=CLOSE_LINES_LOCK_WAIT_S,
+            label="confer --close-lines",
+            contention_hint="A later tick archives the spool.",
+        ):
+            archive = Archive()
+            for c in pending:
+                game_date = (
+                    datetime.fromisoformat(c["commence_time"].replace("Z", "+00:00"))
+                    .astimezone(pytz.timezone("America/Chicago"))
+                    .strftime("%Y-%m-%d")
+                )
+                observed_at = datetime.fromisoformat(c["observed_at"])
+                _archive_event_props(archive, c["game"], c["league"], props, game_date, observed_at)
+            archive.write()
+    except LockTimeoutError as exc:
+        logger.info(f"close-lines: {len(pending)} capture(s) spooled; {exc}")
+        return
+    write_close_line_captures([{**c, "game": None} for c in _prune_upcoming_events(captures)])
+    logger.info(f"close-lines: archived {len(pending)} capture(s)")
 
 
 if __name__ == "__main__":

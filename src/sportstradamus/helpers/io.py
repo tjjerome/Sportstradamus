@@ -425,10 +425,13 @@ def delete_user_slip(slip_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Upcoming-events ledger (close-line scheduler input)
+# Upcoming-events ledger (close-line scheduler input) and close-line capture spool
 # ---------------------------------------------------------------------------
 
 UPCOMING_EVENTS_PATH = _RUNTIME_DIR / "upcoming_events.json"
+# Close-lines' fetches, held until a tick that gets the archive lock archives them. Only
+# close-lines writes it, so it never races the broad confer's rewrite of the ledger above.
+CLOSE_LINE_CAPTURES_PATH = _RUNTIME_DIR / "close_line_captures.json"
 ODDS_USAGE_LEDGER_PATH = _RUNTIME_DIR / "odds_api_usage.jsonl"
 
 
@@ -449,6 +452,20 @@ def write_upcoming_events(events: list[dict]) -> None:
 
 def _has_nan(values) -> bool:
     return any(isinstance(v, float) and math.isnan(v) for v in values)
+
+
+def read_close_line_captures() -> list[dict]:
+    """Return close-lines' spooled captures, or empty list if the file is absent."""
+    p = Path(str(CLOSE_LINE_CAPTURES_PATH))
+    if not p.is_file():
+        return []
+    with p.open() as f:
+        return json.load(f)
+
+
+def write_close_line_captures(captures: list[dict]) -> None:
+    """Atomically write close-lines' capture spool as JSON."""
+    _atomic_write_json(captures, CLOSE_LINE_CAPTURES_PATH)
 
 
 # ---------------------------------------------------------------------------

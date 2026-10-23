@@ -40,9 +40,11 @@
 #   - Per-job flock (-n): a second invocation of the *same* job is skipped.
 #   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
 #     the pull and run the checkout as-is. A failed pull never blocks the job.
-#   - Shared archive flock (-w): all jobs serialize on the DuckDB archive so
-#     they don't fight over the single-writer lock. A queued job waits up to
+#   - Shared archive flock (-w): every job but close-lines serializes on the DuckDB
+#     archive so they don't fight over the single-writer lock. A queued job waits up to
 #     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
+#     close-lines takes the same lock from Python around its archive write alone, and
+#     leaves what it fetched spooled for its next tick when the lock stays busy.
 #
 # Exit codes: propagates the wrapped command's exit code.
 
@@ -239,19 +241,23 @@ fi
 
 # Shared archive lock: serialize against any other job touching the DuckDB
 # archive so we don't crash on DuckDB's single-writer constraint. Wait up to
-# ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish.
-exec 8>"$ARCHIVE_LOCK_FILE"
-wait_start=$(date +%s)
-if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
-    waited=$(( $(date +%s) - wait_start ))
-    log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
-    ping_hc "/fail" "$HC_TAG status=fail_lock waited=${waited}s
+# ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish. close-lines takes this lock
+# itself, around its archive write only: a 2-second job queued behind a 20-minute
+# prophecize misses the games it exists to capture.
+if [[ "$JOB" != close-lines ]]; then
+    exec 8>"$ARCHIVE_LOCK_FILE"
+    wait_start=$(date +%s)
+    if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
+        waited=$(( $(date +%s) - wait_start ))
+        log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
+        ping_hc "/fail" "$HC_TAG status=fail_lock waited=${waited}s
 $JOB never started: gave up waiting for the shared DuckDB archive lock.
 jobs running: $(running_jobs)"
-    exit 75  # EX_TEMPFAIL
+        exit 75  # EX_TEMPFAIL
+    fi
+    wait_end=$(date +%s)
+    wait_duration=$((wait_end - wait_start))
+    [[ $wait_duration -gt 1 ]] && log "WAIT job=$JOB archive_lock_wait=${wait_duration}s"
 fi
-wait_end=$(date +%s)
-wait_duration=$((wait_end - wait_start))
-[[ $wait_duration -gt 1 ]] && log "WAIT job=$JOB archive_lock_wait=${wait_duration}s"
 
 run

@@ -37,7 +37,8 @@ All jobs run through [`scripts/run_job.sh`](../scripts/run_job.sh), which adds a
 per-job `flock` (an overlapping run of the same job is skipped), a self-deploy
 `git pull` before each job (restarting the dashboard when that pull moves its
 code — see [Dashboard as a service](#dashboard-as-a-service)), a shared archive
-lock (DuckDB allows one writer), and Healthchecks.io start/fail/success pings. Each job pings
+lock (DuckDB allows one writer; `close-lines` takes it itself, below), and Healthchecks.io
+start/fail/success pings. Each job pings
 `HEALTHCHECK_URL_<JOB>` (the job name uppercased, `-` → `_`; e.g. `close-lines`
 → `HEALTHCHECK_URL_CLOSE_LINES`), falling back to the shared `HEALTHCHECK_URL`.
 
@@ -69,7 +70,7 @@ stays invisible.
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
 | `meditate` | off on prod | retrain models — runs dev-side weekly; `scripts/sync_to_prod.sh` sends the results (below) |
 | `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
-| `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
+| `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due or spooled |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
 | `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
@@ -83,11 +84,14 @@ Couplings to keep in sync:
 - `close-lines` is the per-game data floor and is never throttled by the
   governor — don't widen its hours without re-checking the credit budget.
 - `reflect` holds the shared archive lock for its whole ~1 h run, so it sits at
-  2am, after `close-lines` stops at 01:50. Overlapping the two starves
-  `close-lines` — it waits `ARCHIVE_LOCK_TIMEOUT` and exits without capturing
-  the closing lines for games tipping in that window. Every job takes that lock,
-  including ones like `gate-status` that never read the archive, which is why it
-  sits at 4am rather than sharing `reflect`'s start minute.
+  2am, after `close-lines` stops at 01:50. `close-lines` alone does not hold that
+  lock for its whole run: it fetches on time, spools the fetch to
+  `data/runtime/close_line_captures.json`, and takes the lock only to archive the
+  spool, giving up after `moneylines.CLOSE_LINES_LOCK_WAIT_S` and leaving the spool
+  to a later tick. A tick that overlaps `reflect` therefore archives nothing until
+  `reflect` finishes. Every other job holds the lock for its whole run, including
+  ones like `gate-status` that never read the archive, which is why it sits at 4am
+  rather than sharing `reflect`'s start minute.
 - The headshot cache is per-box and gitignored, so `headshots` runs on the dev box
   and the prod box independently and is deliberately absent from `sync_to_prod.sh`'s
   `COLLECTOR_RELS` — don't "fix" that omission by adding it.
