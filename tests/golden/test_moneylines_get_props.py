@@ -99,7 +99,7 @@ class _FakeArchive:
     def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):
         self.ladder_calls.append((league, market, gameDate, player, book, rungs, observed_at))
 
-    def set_team_books(self, league, market, gameDate, team, books):  # pragma: no cover
+    def set_team_books(self, *args, **kwargs):  # pragma: no cover
         raise AssertionError("synthetic payload has no totals market")
 
 

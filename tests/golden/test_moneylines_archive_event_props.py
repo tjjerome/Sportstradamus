@@ -19,11 +19,15 @@ totals/spreads bucket blend looks up ``spread_*`` (keyed by the parsed
 spread-name) with a *book* key, so the spread adjustment always resolves to 0
 and the written value is simply ``total / 2``.
 
-The last test pins the totals write for a team whose name carries a digit (49ers,
-76ers), which the name normalization respells.
+The stamp test pins that every row, the team totals included, carries the
+``observed_at`` it is given: a quote archived after it was taken keeps the time it
+was quoted. The last test pins the totals write for a team whose name carries a
+digit (49ers, 76ers), which the name normalization respells.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import pytest
 
@@ -120,8 +124,8 @@ class _FakeArchive:
         self.player_books.append((league, market, gameDate, player, ev, lines, observed_at))
         self.player_quotes.append((player, book_quotes))
 
-    def set_team_books(self, league, market, gameDate, team, books):
-        self.team_books.append((league, market, gameDate, team, books))
+    def set_team_books(self, league, market, gameDate, team, books, observed_at=None):
+        self.team_books.append((league, market, gameDate, team, books, observed_at))
 
     def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):
         self.ladder_calls.append((league, market, gameDate, player, book, rungs, observed_at))
@@ -143,8 +147,8 @@ _EXPECTED_PLAYER = [
 ]
 
 _EXPECTED_TEAM = [
-    ("NBA", "", "2026-06-04", "LAL", {"draftkings": 110.24999999999997}),
-    ("NBA", "", "2026-06-04", "BOS", {"draftkings": 110.24999999999997}),
+    ("NBA", "", "2026-06-04", "LAL", {"draftkings": 110.24999999999997}, None),
+    ("NBA", "", "2026-06-04", "BOS", {"draftkings": 110.24999999999997}, None),
 ]
 
 
@@ -189,6 +193,16 @@ def test_archive_event_props_captures_full_ladder() -> None:
     assert davis[1][1] == pytest.approx(0.5, abs=1e-6)
 
 
+def test_archive_event_props_stamps_every_row_with_the_given_time() -> None:
+    archive = _FakeArchive()
+    fetched = datetime(2026, 6, 4, 23, 40)
+
+    moneylines._archive_event_props(archive, _GAME, "NBA", _PROPS, "2026-06-04", fetched)
+
+    assert [row[-1] for row in archive.team_books] == [fetched, fetched]
+    assert {row[-1] for row in archive.player_books + archive.ladder_calls} == {fetched}
+
+
 @pytest.mark.parametrize(
     ("league", "home", "away", "home_abbr", "away_abbr"),
     [
@@ -209,6 +223,6 @@ def test_write_event_totals_writes_both_sides_when_a_team_name_has_a_digit(
     )
 
     assert archive.team_books == [
-        (league, "", "2026-06-04", home_abbr, {"draftkings": 110.25}),
-        (league, "", "2026-06-04", away_abbr, {"draftkings": 110.25}),
+        (league, "", "2026-06-04", home_abbr, {"draftkings": 110.25}, None),
+        (league, "", "2026-06-04", away_abbr, {"draftkings": 110.25}, None),
     ]

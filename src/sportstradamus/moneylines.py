@@ -897,7 +897,9 @@ def _event_spread_book(market, book, game, spread_home, spread_away):
         spread_away[spread_name][book["key"]] = spread
 
 
-def _write_event_totals(archive, game, league, game_date, totals, spread_home, spread_away):
+def _write_event_totals(
+    archive, game, league, game_date, totals, spread_home, spread_away, observed_at=None
+):
     """Write the totals team buckets, blending in the parsed spreads."""
     home_team = _TEAM_ABBR[league].get(remove_accents(game["home_team"]))
     away_team = _TEAM_ABBR[league].get(remove_accents(game["away_team"]))
@@ -913,6 +915,7 @@ def _write_event_totals(archive, game, league, game_date, totals, spread_home, s
             game_date,
             home_team,
             {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()},
+            observed_at,
         )
         archive.set_team_books(
             league,
@@ -920,6 +923,7 @@ def _write_event_totals(archive, game, league, game_date, totals, spread_home, s
             game_date,
             away_team,
             {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()},
+            observed_at,
         )
 
 
@@ -965,7 +969,9 @@ def _archive_event_props(archive, game, league, props, game_date, observed_at=No
                     league, market, game_date, player, book, rungs, observed_at=observed_at
                 )
 
-    _write_event_totals(archive, game, league, game_date, totals, spread_home, spread_away)
+    _write_event_totals(
+        archive, game, league, game_date, totals, spread_home, spread_away, observed_at
+    )
 
 
 def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
