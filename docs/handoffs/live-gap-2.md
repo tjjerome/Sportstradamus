@@ -55,7 +55,7 @@ league; the live instruments (§6) read the fixed versions over a stable window;
    requires `--deterministic`, so it trains the fixed deterministic booster and cross-fits only its
    calibrators over the validation half; it cannot re-gate a served model. Gate 1 is a non-inferiority
    test (`scorecard._GATE1_NONINF_MARGIN` lets the ensemble be 0.005 Brier worse than the book) with a
-   95 % iid bootstrap CI. 31 of the 70 served cells have no computable Gate 1 and pass it blank; NFL
+   95 % bootstrap CI (iid when this was verified; game-date resampling since §8 ask 4). 31 of the 70 served cells have no computable Gate 1 and pass it blank; NFL
    yards' rests on 19 rows from 18 players over 4 dates (iid upper bound −.001, date-clustered +.022).
    So "pass offline" means tie-or-better on a multiply-inspected random half of the same period, while
    "fail live" means a strictly negative 30-day Brier skill, forward in time, on the props the platforms
@@ -264,9 +264,11 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    two-way estimate (player + date − iid variance) 32 / 31; beyond iid only NFL yards and MLB runs allowed
    fail, the two ask 3 withholds. The brief's two-way bootstrap (28 / 26) multiplies a player draw by a
    date draw, counts row noise about three times, and is not a target. Recommendation: date-clustered,
-   from the week-3 walk on (answered 2026-10-23: date-clustered. Gate 1 resamples game dates
-   (`training/scorecard.py`, [ship_gate.md](../ship_gate.md)); `model_stats` takes it at each league's
-   next `meditate`).
+   from the week-3 walk on (answered 2026-10-23: date-clustered. Gate 1 resamples game dates, and the
+   row bootstrap's interval decides when its upper bound is higher: over three dates the date
+   bootstrap collapsed and passed withheld NFL qb-yards (`training/scorecard.py`,
+   [ship_gate.md](../ship_gate.md)). Of the 39 served cells with a computable Gate 1 on dev's dumps,
+   only NFL yards flips, to a fail; `model_stats` takes it at each league's next `meditate`).
 5. Production's NFL FTN/PFR-fed columns (first read, breakaway yards, broken tackles, drops, blitz,
    first-read EPA, pressure) are 0 on every 2026 row: ingest writes a source that is not yet published as
    0 and never revisits it. Dev holds real values for most of them, and the models trained on those. The

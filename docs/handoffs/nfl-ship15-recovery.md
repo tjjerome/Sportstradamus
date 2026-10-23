@@ -349,18 +349,19 @@ on every board and need nothing. Interceptions is the owner's lowest-priority ce
    `ship == False` on the 2026-09-26 board are `shipped: "withheld"` (`7d986d3c`, on prod since
    2026-09-27 06:09 CDT; receiving yards back to `devel` in `34fbdcb4` after the floor-20k
    retrain), which put the remaining eight on the fresh lane: `ship sweep --league NFL --confirm`
-   auto-ships a withheld cell on a clean 6/6. Serving fails closed on a withheld cell: while its pickle is
-   still on disk the market yields no offers at all (not even the book fallback); a dev
+   auto-ships a withheld cell on a clean 6/6. Serving never reads a withheld cell's model: its offers
+   serve the book consensus whether or not its pickle is on disk (`prediction/scoring.py::match_offers`;
+   until 2026-10-23 a pickle on disk blanked the market); a dev
    `meditate` prunes a withheld cell's pickle and `sync_to_prod.sh` mirrors `models/` with
    `--delete`.
    The 2026-09-28 sync carried all 20 dev pickles, the withheld eight included (they were left
-   in place by the `--bypass-withholding` retrain; serve-neutral, since the withheld check in
-   `model_prob` precedes the pickle check, but each logs a `withheld but pickle on disk`
+   in place by the `--bypass-withholding` retrain; serve-neutral, since the withheld check
+   precedes the pickle check, but each logs a `withheld but pickle on disk`
    warning per prophecize run). **Landmine — fixed 2026-09-29 (`05e6e18c`):** `targets` is
    withheld *and* one of the three NFL volume dependencies (`VOLUME_STATS` in `helpers/io.py`,
    read by `StatsNFL.volume_stats`); `prune_model_pickle` now keeps every denominator, so a
    plain `meditate` refreshes its matrix, prunes nothing, and the WR/TE cells keep their
-   targets projection while `model_prob` still serves nothing for the withheld cell. The kept
+   targets projection while the withheld cell's own offers serve the book consensus. The kept
    pickle is not retrained either: a withheld denominator ages until the cell ships or a
    `--bypass-withholding` run refreshes it.
 2. **Trim floor — decided 2026-09-27.** `pipeline._MATRIX_TRIM_FLOOR` is 20,000 (`0a22c0a9`;
