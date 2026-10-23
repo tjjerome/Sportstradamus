@@ -28,12 +28,14 @@ fi
 git fetch origin main
 
 WORKTREE_DIR=""
-# Always remove the worktree (if one was created) so a mid-run failure (push
-# / gh pr create) can't leave a stale worktree that collides with next
-# month's `git worktree add`.
+# Always remove the worktree and its local branch (if created) so a mid-run
+# failure (push / gh pr create) can't leave a stale worktree that collides with
+# next month's `git worktree add`, nor a local branch per failed month. A
+# pushed branch stays on origin for its PR.
 cleanup() {
     if [[ -n "$WORKTREE_DIR" ]]; then
         git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
