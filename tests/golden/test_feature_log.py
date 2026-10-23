@@ -310,7 +310,6 @@ def _score(
         pickle.dump(filedict or _FILEDICT, outfile)
     stub_archive = _StubArchive()
     monkeypatch.setattr(mp, "model_pickle_path", lambda _league, _market: str(pickle_path))
-    monkeypatch.setattr(mp, "stat_meta", {})
     monkeypatch.setattr(mp, "stat_zi", stat_zi or {})
     monkeypatch.setattr(mp, "_build_prob_params", predict)
     monkeypatch.setattr(book_quotes, "archive", stub_archive)

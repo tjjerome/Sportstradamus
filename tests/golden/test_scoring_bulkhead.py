@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.helpers import stat_map
+from sportstradamus.helpers import stat_map, stat_meta
 from sportstradamus.prediction import scoring
 
 _BOOK = "Underdog"
@@ -340,6 +340,7 @@ def test_match_offers_builds_as_of_its_date_and_zeroes_inf_as_training_does(monk
     with open(tmp_path / "models" / "NBA_PTS.mdl", "wb") as outfile:
         pickle.dump({"expected_columns": ["MeanYr", "Rate", "Unbuilt"]}, outfile)
     monkeypatch.setattr(scoring.pkg_resources, "files", lambda package: tmp_path)
+    monkeypatch.setitem(stat_meta["NBA"]["PTS"], "shipped", "devel")
     asked = []
 
     def get_stats(market, offers, day):

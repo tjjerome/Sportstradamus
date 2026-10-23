@@ -1,15 +1,13 @@
 """A diverged calibration fit must never scale the served distribution.
 
-Three fail-closed serving guards in ``prediction/model_prob.py``. A
+Two fail-closed serving guards in ``prediction/model_prob.py``. A
 ``dispersion_cal`` pinned at its optimizer bound (the 2026-08 WNBA
 overconfident-unders vector) means the joint ``(c, s)`` fit diverged, so
-``_serving_dispersion_cal`` serves the unscaled shape instead. A cell
-whose ``stat_meta`` says ``withheld`` must serve nothing even when a missed
-``meditate`` left a stale pickle on disk (two weeks of WNBA PRA, 2026-08).
-And a pickle whose strategy identity no longer validates costs its own cell
-only — it is a known-unservable cell rather than a crash, so it warns and
-serves nothing instead of reaching ``_match_league_offers``' per-market
-bulkhead as an unexpected failure.
+``_serving_dispersion_cal`` serves the unscaled shape instead. And a pickle
+whose strategy identity no longer validates costs its own cell only — it is
+a known-unservable cell rather than a crash, so it warns and serves nothing
+instead of reaching ``_match_league_offers``' per-market bulkhead as an
+unexpected failure.
 """
 
 import dataclasses
@@ -27,7 +25,6 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     strategy_controls,
 )
-from sportstradamus.training.ship_config import WITHHELD
 
 # The package __init__ re-exports the model_prob *function*, shadowing the
 # submodule on any attribute-style import; go through sys.modules instead.
@@ -67,51 +64,6 @@ def test_healthy_dispersion_passes_through(dispersion_cal, skew_cal, caplog):
     assert "pinned at its fit bound" not in caplog.text
 
 
-def _withhold_wnba_pra(monkeypatch, pickle_path):
-    monkeypatch.setattr(model_prob_module, "stat_meta", {"WNBA": {"PRA": {"shipped": WITHHELD}}})
-    monkeypatch.setattr(model_prob_module, "model_pickle_path", lambda league, market: pickle_path)
-
-
-def _serve_wnba_pra():
-    return model_prob_module.model_prob(
-        [{"Player": "Test Player", "Date": "2026-08-15"}],
-        "WNBA",
-        "PRA",
-        "Underdog",
-        None,
-        pd.DataFrame(),
-    )
-
-
-def test_withheld_cell_with_stale_pickle_serves_nothing(monkeypatch, tmp_path, caplog):
-    pickle_path = tmp_path / "WNBA_PRA.mdl"
-    # Unloadable bytes: reaching pickle.load would raise, proving the withheld
-    # check precedes the load.
-    pickle_path.write_bytes(b"not a pickle")
-    _withhold_wnba_pra(monkeypatch, pickle_path)
-    with caplog.at_level(logging.WARNING, logger="log"):
-        assert _serve_wnba_pra() == []
-    assert "withheld but pickle on disk" in caplog.text
-
-
-def test_withheld_cell_without_pickle_is_silent(monkeypatch, tmp_path, caplog):
-    _withhold_wnba_pra(monkeypatch, tmp_path / "WNBA_PRA.mdl")
-    with caplog.at_level(logging.WARNING, logger="log"):
-        assert _serve_wnba_pra() == []
-    assert "withheld but pickle on disk" not in caplog.text
-
-
-def test_withheld_volume_dependency_keeps_quiet_and_serves_nothing(monkeypatch, tmp_path, caplog):
-    """A withheld volume denominator keeps its pickle on purpose; no 'run meditate to prune'."""
-    pickle_path = tmp_path / "WNBA_PRA.mdl"
-    pickle_path.write_bytes(b"not a pickle")
-    _withhold_wnba_pra(monkeypatch, pickle_path)
-    monkeypatch.setattr(model_prob_module, "VOLUME_STATS", {"WNBA": ("PRA",)})
-    with caplog.at_level(logging.WARNING, logger="log"):
-        assert _serve_wnba_pra() == []
-    assert "withheld but pickle on disk" not in caplog.text
-
-
 def test_stale_strategy_identity_skips_the_cell_not_the_slate(monkeypatch, tmp_path, caplog):
     spec = get_strategy("SkewNormal")
     identity = build_artifact_identity(
@@ -136,10 +88,17 @@ def test_stale_strategy_identity_skips_the_cell_not_the_slate(monkeypatch, tmp_p
             outfile,
             -1,
         )
-    monkeypatch.setattr(model_prob_module, "stat_meta", {})
     monkeypatch.setattr(model_prob_module, "model_pickle_path", lambda league, market: pickle_path)
 
     with caplog.at_level(logging.WARNING, logger="log"):
-        assert _serve_wnba_pra() == []
+        served = model_prob_module.model_prob(
+            [{"Player": "Test Player", "Date": "2026-08-15"}],
+            "WNBA",
+            "PRA",
+            "Underdog",
+            None,
+            pd.DataFrame(),
+        )
+    assert served == []
     assert "not served" in caplog.text
     assert "WNBA_PRA" in caplog.text

@@ -26,11 +26,13 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import LazyArchive, odds_budget, stat_map
+from sportstradamus.helpers import LazyArchive, odds_budget, stat_map, stat_meta
+from sportstradamus.helpers.io import VOLUME_STATS
 from sportstradamus.prediction.correlation import find_correlation
 from sportstradamus.prediction.model_prob import book_fallback_prob, model_prob, normalize_market
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import earliest_last
+from sportstradamus.training.ship_config import WITHHELD
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -173,9 +175,9 @@ def _score_market(offers, league, market, book, stat_data, date):
     """Score one market's offers — trained model when present, else book odds.
 
     Builds the feature matrix as of ``date``, the game date its pass prepared depth
-    and volume for; when it comes back empty (no model pickle, or no player matched)
-    falls back to :func:`book_fallback_prob`, which devigs the composite book odds
-    into the model slot. Returns the scored offer records.
+    and volume for; when it comes back empty (a withheld cell, no model pickle, or no
+    player matched) falls back to :func:`book_fallback_prob`, which devigs the composite
+    book odds into the model slot. Returns the scored offer records.
     """
     playerStats = match_offers(offers, league, market, book, stat_data, date)
     if len(playerStats) == 0:
@@ -205,10 +207,20 @@ def match_offers(offers, league, market, platform, stat_data, date):
 
     Returns:
         pd.DataFrame: Feature matrix indexed by player name, or an empty
-            DataFrame when the market is not in the gamelog or no model
-            file exists.
+            DataFrame when the cell is withheld, the market is not in the
+            gamelog, or no model file exists.
     """
     market = normalize_market(league, market, platform)
+    filename = "_".join([league, market]).replace(" ", "-")
+    filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+    if stat_meta.get(league, {}).get(market, {}).get("shipped") == WITHHELD:
+        # A volume denominator keeps its pickle on purpose: prune_model_pickle skips it.
+        if filepath.is_file() and market not in VOLUME_STATS[league]:
+            logger.warning(
+                f"{filename} withheld but pickle on disk — serving the book consensus; "
+                "run meditate to prune the pickle"
+            )
+        return pd.DataFrame()
     if market not in stat_data.gamelog.columns:
         return pd.DataFrame()
 
@@ -218,8 +230,6 @@ def match_offers(offers, league, market, platform, stat_data, date):
         if playerStats.empty:
             return playerStats
 
-        filename = "_".join([league, market]).replace(" ", "-")
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
         if not filepath.is_file():
             return pd.DataFrame()
         with open(filepath, "rb") as infile:

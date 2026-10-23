@@ -34,12 +34,10 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
     stat_map,
-    stat_meta,
     stat_zi,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import (
-    VOLUME_STATS,
     market_file_slug,
     model_pickle_path,
     resolve_model_version,
@@ -89,7 +87,6 @@ from sportstradamus.training.model_strategy import (
 )
 from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc, correct_fused_mean
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
-from sportstradamus.training.ship_config import WITHHELD
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY,
     TWO_PART_STRATEGY,
@@ -1060,16 +1057,6 @@ def model_prob(
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
-    # Withhold is normally enforced by meditate pruning the pickle; a missed meditate leaves
-    # a stale pickle serving a withheld cell (two weeks of WNBA PRA, 2026-08). Fail closed.
-    # A volume denominator keeps its pickle on purpose (VOLUME_STATS), so it is not a
-    # missed meditate and gets no warning.
-    if stat_meta.get(league, {}).get(market, {}).get("shipped") == WITHHELD:
-        if os.path.isfile(filepath) and market not in VOLUME_STATS[league]:
-            logger.warning(
-                f"{filename} withheld but pickle on disk — skipping; run meditate to prune"
-            )
-        return []
     if not os.path.isfile(filepath):
         logger.warning(f"{filename} missing")
         return []
@@ -1274,7 +1261,7 @@ def book_fallback_prob(
     """Score offers from the modal-line book cohort when no trained model exists.
 
     Routed to by :func:`process_offers` whenever model scoring would otherwise be
-    empty (missing model pickle, or a model that matched no players). Resolves the
+    empty (a withheld cell, no model pickle, or no player matched). Resolves the
     same per-player quote the training matrix uses — :func:`resolve_training_quote`
     over the archive's latest per-book rows, native under-probabilities averaged
     within one modal-line cohort — then inverts that quote to a mean and prices
