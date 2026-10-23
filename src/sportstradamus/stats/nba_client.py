@@ -31,19 +31,15 @@ from typing import NamedTuple
 
 from nba_api.stats.library.http import NBAStatsHTTP
 
+from sportstradamus.helpers.scraping import BROWSER_USER_AGENT
 from sportstradamus.spiderLogger import logger
-
-# Real-browser User-Agent captured from a working live session (Firefox,
-# 2026-05). The backend fingerprints on it; refresh from the browser dev-tools
-# Network tab (on or near the deploy host) if calls start hanging again.
-_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
 
 # Header set captured from a live, working stats.nba.com browser session. We
 # deliberately omit the x-nba-stats-token/origin headers some guides recommend:
 # sending them made the backend hang every request from this project's host.
 NBA_STATS_HEADERS: dict[str, str] = {
     "Host": "stats.nba.com",
-    "User-Agent": _USER_AGENT,
+    "User-Agent": BROWSER_USER_AGENT,
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
     # The live browser advertised "gzip, deflate, br, zstd"; trimmed to the

@@ -23,6 +23,14 @@ from sportstradamus.spiderLogger import logger
 
 REQUEST_TIMEOUT_S = 60  # bound network hangs; generous because proxy-routed fetches legitimately take tens of seconds
 
+# Real-browser User-Agent captured from a working live Firefox session (2026-05).
+# stats.nba.com fingerprints on it (refresh from the browser dev-tools Network tab,
+# on or near the deploy host, if NBA calls start hanging again), and moneypuck
+# answers the default requests UA with an HTML bot-block page.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
+)
+
 # Statuses that mean "stop asking" rather than "try again": a rotated header is a
 # different browser, not a different client, so retrying either is just knocking harder.
 _BLOCKED_STATUSES = (HTTPStatus.FORBIDDEN, HTTPStatus.TOO_MANY_REQUESTS)
@@ -51,12 +59,26 @@ class Scrape:
         self._weights = None
 
     def _ensure_headers(self):
-        """Fetch the header pool from ScrapeOps on first access."""
+        """Fetch the header pool from ScrapeOps on first access.
+
+        A ScrapeOps outage leaves this process a pool of one static browser header,
+        so a host that bot-blocks the default requests UA (moneypuck) still answers.
+        """
         if self._headers is None:
-            self._headers = requests.get(
-                f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}",
-                timeout=REQUEST_TIMEOUT_S,
-            ).json()["result"]
+            try:
+                res = requests.get(
+                    f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}",
+                    timeout=REQUEST_TIMEOUT_S,
+                )
+                res.raise_for_status()
+                self._headers = res.json()["result"]
+            except requests.RequestException as exc:
+                # The exception text carries the URL, and with it the API key.
+                logger.warning(
+                    f"ScrapeOps headers unavailable ({type(exc).__name__}); "
+                    "using the static browser header"
+                )
+                self._headers = [{"User-Agent": BROWSER_USER_AGENT}]
             self._header = random.choice(self._headers)
             self._weights = np.ones([len(self._headers)])
 
@@ -89,6 +111,8 @@ class Scrape:
     def _new_headers(self):
         """Rotate to a new header, weighted against the recently-burned one."""
         self._ensure_headers()
+        if len(self._headers) == 1:
+            return  # the static fallback: zeroing its only weight would make random.choices raise
         for i, candidate in enumerate(self._headers):
             if candidate == self._header:
                 self._weights[i] = 0

@@ -22,13 +22,11 @@ from typing import Literal
 
 import requests
 
-from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
+from sportstradamus.helpers.scraping import BROWSER_USER_AGENT, REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
-# Conservative default: a realistic Firefox UA so requests look like a
-# logged-in browser, and a 2 s pause between catalog endpoints so a
-# weekly walk of ~50 tools stays well under any plausible rate ceiling.
-_DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
+# A 2 s pause between catalog endpoints keeps a weekly walk of ~50 tools
+# well under any plausible rate ceiling.
 _INTER_REQUEST_SLEEP_S = 2.0
 
 # Exponential backoff schedule for retryable failures. Each entry is
@@ -105,7 +103,7 @@ class CookieClient:
         """
         self._authorization = authorization or ""
         self._cookie = cookie or ""
-        self._user_agent = user_agent or _DEFAULT_UA
+        self._user_agent = user_agent or BROWSER_USER_AGENT
         self._referer = referer
         self._origin = origin
         self._sleep_s = (
