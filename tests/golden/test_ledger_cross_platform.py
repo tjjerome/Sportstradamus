@@ -94,7 +94,7 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
 
 
 def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
-    def _fake_live_load(config, platform):
+    def _fake_live_load(config, platform, stats):
         return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
 
     def _fake_construct_entries(bankroll, config, *, parlay_dfs, platform):
@@ -112,6 +112,7 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
             )
         ]
 
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr(ledger, "live_load", _fake_live_load)
     monkeypatch.setattr(ledger, "construct_entries", _fake_construct_entries)
     monkeypatch.setattr(ledger._ledger_cross_game, "build_cross_game_candidates", _fake_cross_game)
@@ -127,6 +128,30 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
     for cand_id, candidate in by_id.items():
         expected_platform = "Underdog" if cand_id.startswith("ud-") else "Sleeper"
         assert candidate.platform == expected_platform
+
+
+def test_build_candidate_universe_loads_the_leagues_once_for_both_platforms(monkeypatch) -> None:
+    """Both platforms score on one league load, as they do in the board run. The load
+    updates every league from its API, and the ledger job holds the archive lock while it
+    runs."""
+    loads, handed = [], []
+
+    def _load_live_leagues():
+        loads.append({"NBA": object()})
+        return loads[-1], []
+
+    def _fake_live_load(config, platform, stats):
+        handed.append(stats)
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
+
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", _load_live_leagues)
+    monkeypatch.setattr(ledger, "live_load", _fake_live_load)
+
+    ledger.build_candidate_universe(DATE, "morning")
+
+    assert len(loads) == 1
+    assert len(handed) == len(ledger._PLATFORMS)
+    assert all(stats is loads[0] for stats in handed)
 
 
 # --- even_picks draws Underdog's recommended even picks, across games ----------
@@ -197,10 +222,11 @@ def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd
 
 
 def _load_mixed_multiplier_frames(monkeypatch) -> dict:
-    """Fake ``live_load`` with the frames above, at full model trust so every cross-game
-    combo clears the shared EV floor. Returns the frames by platform."""
+    """Fake the league load and ``live_load`` with the frames above, at full model trust so
+    every cross-game combo clears the shared EV floor. Returns the frames by platform."""
     frames = {platform: _mixed_multiplier_frames(platform) for platform in ledger._PLATFORMS}
-    monkeypatch.setattr(ledger, "live_load", lambda config, platform: frames[platform])
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
+    monkeypatch.setattr(ledger, "live_load", lambda config, platform, stats: frames[platform])
     monkeypatch.setattr(
         ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (1.0, "training")
     )
@@ -330,11 +356,10 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
 
 
 def _live_load_offers(monkeypatch, platform: str, boost: float) -> pd.DataFrame:
-    """``live_load``'s offers frame with the league loader, the scrape and the search stubbed.
+    """``live_load``'s offers frame with the scrape and the search stubbed.
 
     ``boost`` is what ``process_offers`` hands back for the one offer.
     """
-    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr("sportstradamus.books.get_ud", list)
     monkeypatch.setattr("sportstradamus.books.get_sleeper", list)
     monkeypatch.setattr(
@@ -343,7 +368,7 @@ def _live_load_offers(monkeypatch, platform: str, boost: float) -> pd.DataFrame:
     )
     monkeypatch.setattr(underdog_pickem, "_parlays_per_variant", lambda *a: {})
 
-    _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, platform)
+    _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, platform, {})
     return offers_df
 
 

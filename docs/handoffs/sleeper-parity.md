@@ -41,7 +41,7 @@ priced per candidate at run time (`sleeper_flex_payout_curve`), both from
 4. [`books/sleeper.py`](../../src/sportstradamus/books/sleeper.py) — the Sleeper scrape (`get_sleeper`, `_sleeper_prop_offers`, the four `SLEEPER_*_URL` endpoints at :11-14). Read-only in this lane (§4).
 5. [`prediction/payouts.py`](../../src/sportstradamus/prediction/payouts.py) — the payout engine: `payout_curve_for` (Sleeper branch: `_sleeper_curve`), `sleeper_flex_payout_curve`, `expected_payout_with_pushes` (post parlay.py seam-split; `beam_search_parlays` stays in [`parlay.py`](../../src/sportstradamus/prediction/parlay.py), joint pricing in [`joint.py`](../../src/sportstradamus/prediction/joint.py)).
 6. [`prediction/correlation.py`](../../src/sportstradamus/prediction/correlation.py) — `find_correlation(offers, stats, platform, ...)`, the platform plumb-through point.
-7. [`strategies/underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py) + [`strategies/README.md`](../../src/sportstradamus/strategies/README.md) — the decision layer stage 2 generalized (`live_load(config, platform)` picks `get_ud` or `get_sleeper`).
+7. [`strategies/underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py) + [`strategies/README.md`](../../src/sportstradamus/strategies/README.md) — the decision layer stage 2 generalized (`live_load(config, platform, stats)` picks `get_ud` or `get_sleeper`).
 8. [`archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md) — background only; status claims stale.
 
 ## 3. Verify before you trust

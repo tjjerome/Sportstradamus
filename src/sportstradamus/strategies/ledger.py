@@ -94,7 +94,8 @@ def _platform_candidates(
 def build_candidate_universe(
     date: datetime.date, run_slot: str
 ) -> dict[str, list[_ledger_selection.LedgerCandidate]]:
-    """One live scrape per platform (via live_load), reused by every candidate builder.
+    """One league load for the run and one live scrape per platform (via live_load), reused
+    by every candidate builder.
 
     Returns:
         The candidates each persona draws from, keyed by persona. Every persona
@@ -105,10 +106,15 @@ def build_candidate_universe(
         book, which sits near a coin flip on an even pick, and they cut the read
         by its cell's trust.
     """
+    from sportstradamus.stats import load_live_leagues
+
+    # A league whose gamelog update failed is logged by the loader and sits this build
+    # out; the board run of the same hour is what raises the alarm.
+    stats, _ = load_live_leagues()
     universe: list[_ledger_selection.LedgerCandidate] = []
     even_picks_pool: list[_ledger_selection.LedgerCandidate] = []
     for platform in _PLATFORMS:
-        parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform)
+        parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform, stats)
         universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
         if platform == "Underdog":
             even_picks_pool = _ledger_cross_game.build_even_pick_candidates(

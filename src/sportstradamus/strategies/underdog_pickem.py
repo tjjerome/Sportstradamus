@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 import pandas as pd
@@ -29,6 +29,9 @@ from sportstradamus.strategies.kelly import (
     fractional_kelly_stake,
     resolve_shrinkage,
 )
+
+if TYPE_CHECKING:
+    from sportstradamus.stats import Stats
 
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
@@ -194,7 +197,12 @@ def construct_entries(
     """
     config = config or PickemConfig()
     if parlay_dfs is None:
-        parlay_dfs, _ = live_load(config, platform)
+        from sportstradamus.stats import load_live_leagues
+
+        # A league whose gamelog update failed is logged by the loader and sits this build
+        # out; the board run of the same hour is what raises the alarm.
+        stats, _ = load_live_leagues()
+        parlay_dfs, _ = live_load(config, platform, stats)
 
     entries: list[RecommendedEntry] = []
     for variant in config.contest_variants:
@@ -274,9 +282,13 @@ def _parlays_per_variant(
 
 
 def live_load(
-    config: PickemConfig, platform: str = "Underdog"
+    config: PickemConfig, platform: str, stats: dict[str, Stats]
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
-    """Re-run the prophecize loader and search per variant. Heavy.
+    """Re-run the prophecize scrape and scoring on ``stats`` and search per variant. Heavy.
+
+    ``stats`` comes from ``load_live_leagues``, which the caller runs because it updates
+    every league from its API: a build over both platforms loads once and scores each on
+    the same ``stats``, as prophecize does.
 
     Returns:
         ``(parlay_dfs, offers_df)``. ``Boost`` on ``offers_df`` is the
@@ -285,13 +297,9 @@ def live_load(
     """
     from sportstradamus.books import get_sleeper, get_ud
     from sportstradamus.prediction.scoring import process_offers
-    from sportstradamus.stats import load_live_leagues
 
     loaders = {"Underdog": get_ud, "Sleeper": get_sleeper}
 
-    # A league whose gamelog update failed is logged by the loader and sits this build
-    # out; the board run of the same hour is what raises the alarm.
-    stats, _ = load_live_leagues()
     offers_df, _ = process_offers(
         loaders[platform](), platform, stats, contest_variant=config.contest_variants[0]
     )
