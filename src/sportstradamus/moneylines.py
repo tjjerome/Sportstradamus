@@ -648,10 +648,10 @@ def _fetch_event_odds(req, sport, event_id, region_markets):
             req.odds_url_template.format(sport=sport, eventId=event_id),
             params={**req.params, "markets": ",".join(markets), "regions": region},
         )
-        if res.status_code == HTTPStatus.NOT_FOUND:
-            return False
         if res.status_code != HTTPStatus.OK:
             logger.warning(f"props: {sport} {event_id} {region} returned status {res.status_code}")
+            if res.status_code == HTTPStatus.NOT_FOUND:
+                return False
             continue
         payload = res.json()["data"] if req.historical else res.json()
         merged = merged or payload
@@ -697,18 +697,17 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
             observed_at,
         )
         if not req.historical:
-            _record_upcoming_event(ledger, sport, event, league, props)
+            _record_upcoming_event(ledger, sport, event, league)
     return True
 
 
-def _record_upcoming_event(ledger, sport, event, league, props):
+def _record_upcoming_event(ledger, sport, event, league):
     """Refresh an event's entry in the upcoming-events ledger close-lines reads."""
     ledger[(sport, event["id"])] = {
         "sport_key": sport,
         "event_id": event["id"],
         "league": league,
         "commence_time": event["commence_time"],
-        "markets": list(props[league].keys()),
     }
 
 
@@ -1027,7 +1026,7 @@ def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
                 game = json.load(infile)
 
             _archive_event_props(archive, game, league, props, game_date_str)
-            _record_upcoming_event(ledger, sport, event, league, props)
+            _record_upcoming_event(ledger, sport, event, league)
 
     write_upcoming_events(_prune_upcoming_events(list(ledger.values())))
     return archive

@@ -113,7 +113,6 @@ _EXPECTED_LEDGER = [
         "event_id": "ev1",
         "league": "NBA",
         "commence_time": _COMMENCE,
-        "markets": ["player_points"],
     },
 ]
 

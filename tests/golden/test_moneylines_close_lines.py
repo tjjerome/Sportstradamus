@@ -14,6 +14,7 @@ owns.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
@@ -308,7 +309,7 @@ def test_close_lines_archive_failure_raises_and_keeps_the_spool(monkeypatch, tmp
 
 
 @pytest.mark.parametrize("status", [HTTPStatus.NOT_FOUND, HTTPStatus.INTERNAL_SERVER_ERROR])
-def test_close_lines_failed_fetch_stays_due(monkeypatch, tmp_path, status) -> None:
+def test_close_lines_failed_fetch_stays_due(monkeypatch, tmp_path, status, caplog) -> None:
     events = [_event(10, "due1"), _event(20, "due2")]
     calls = []
 
@@ -319,8 +320,10 @@ def test_close_lines_failed_fetch_stays_due(monkeypatch, tmp_path, status) -> No
 
     wired = _wire(monkeypatch, tmp_path, events, fake_get)
 
-    moneylines._close_lines_pass(_KEYS, _PROPS)
+    with caplog.at_level(logging.WARNING, logger="log"):
+        moneylines._close_lines_pass(_KEYS, _PROPS)
     assert [c["event_id"] for c in wired.spool] == ["due2"]
+    assert f"due1 us returned status {int(status)}" in caplog.text
 
     moneylines._close_lines_pass(_KEYS, _PROPS)
     assert calls == [_event_url("due1"), _event_url("due2"), _event_url("due1")]
