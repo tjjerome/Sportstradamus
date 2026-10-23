@@ -29,9 +29,14 @@ def _serve(monkeypatch, responses):
     return sent
 
 
-def test_scrapeops_outage_falls_back_to_the_static_browser_header(monkeypatch):
+def test_scrapeops_outage_falls_back_to_the_static_browser_header(monkeypatch, caplog):
     _serve(monkeypatch, [])
-    assert Scrape().header == {"User-Agent": BROWSER_USER_AGENT}
+    scrape = Scrape()
+    # CI's fixture key is empty, and "" is in every string.
+    scrape._scrapeops_key = "secret-scrapeops-key"
+    assert scrape.header == {"User-Agent": BROWSER_USER_AGENT}
+    assert "ScrapeOps headers unavailable (502)" in caplog.text
+    assert "secret-scrapeops-key" not in caplog.text
 
 
 def test_get_csv_retries_a_soft_block_on_the_fallback_header(monkeypatch):

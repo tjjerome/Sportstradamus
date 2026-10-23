@@ -71,10 +71,11 @@ class Scrape:
                 response.raise_for_status()
                 self._headers = response.json()["result"]
             except requests.RequestException as exc:
-                # The exception text carries the URL, and with it the API key.
+                # The exception text carries the URL, and with it the API key. The status
+                # tells a dead key (401/403) from an outage (5xx).
+                cause = exc.response.status_code if exc.response is not None else type(exc).__name__
                 logger.warning(
-                    f"ScrapeOps headers unavailable ({type(exc).__name__}); "
-                    "using the static browser header"
+                    f"ScrapeOps headers unavailable ({cause}); using the static browser header"
                 )
                 self._headers = [{"User-Agent": BROWSER_USER_AGENT}]
             self._header = random.choice(self._headers)
@@ -82,7 +83,7 @@ class Scrape:
 
     @property
     def headers(self):
-        """The ScrapeOps header pool, fetched on first access."""
+        """The browser-header pool, fetched on first access."""
         self._ensure_headers()
         return self._headers
 
