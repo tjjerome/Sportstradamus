@@ -233,6 +233,17 @@ def test_reopen_sends_back_team_weeks_a_source_published_late(monkeypatch):
     assert kept == {(2026, 2), (2026, 4), (2026, 5), (2025, 1)}
 
 
+@pytest.mark.parametrize("week", [3, 6], ids=["pfr_zero", "ftn_zero"])
+def test_reopen_sends_back_a_team_week_when_only_one_source_reads_zero(monkeypatch, week):
+    s = _reopen_stats(monkeypatch)
+    # Cut to one week: weeks 1 and 2 (both sources zero) would make the method fetch on their own.
+    s.teamlog = s.teamlog.loc[s.teamlog.week == week]
+
+    s._reopen_late_source_weeks()
+
+    assert s.teamlog.empty
+
+
 def test_reopen_fetches_nothing_while_no_team_week_reads_zero(monkeypatch):
     s = _reopen_stats(monkeypatch)
     s.teamlog = s.teamlog.loc[s.teamlog.week == 5]
