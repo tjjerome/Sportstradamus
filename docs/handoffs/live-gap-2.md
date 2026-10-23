@@ -124,7 +124,7 @@ recalibration, the post-fusion mean corrector as built.
 
 | # | Statistic | Value | Verdict |
 |---|---|---|---|
-| H1 | E1: d̄ of arm C against arm A on W | 0 wins, 0 losses of 5 cells (NFL yards +.0022 [−.0001, +.0044]; the other four within ±.0002) | Not a lever: the refit protocol stays out of the week-3 batch |
+| H1 | E1: d̄ of arm C against arm A on W | 0 wins, 0 losses of 5 cells (NFL yards +.0022 [−.0001, +.0044]; the other four within ±.0002) | Not a lever: the refit protocol is not adopted |
 | H2 | E2: the served booster with cross-fit calibrators | 60 of 64 cells ship re-gated on the validation half, 63 on the test half, 64 stored; the test half reads easier on Gates 6 and 5 (34 and 29 of 44 cells) | Descriptive: §8 asks 3 and 4 |
 | H3 | T1: D = L_off − L_live | L_off .102 [.084, .118], L_live .019 [.013, .046], D .083 [.050, .099], p .001 | Holds (Holm .025): I6d opens in week 2, scoped to levelling the historical book leg in every league |
 | H4 | T2: BSS of the > .10 band on levelled rows | +.001 [−.106, +.106], p .526 | Retained (Holm .05): no monitor column; the live loss is a population shift, read in E3 (d) |
@@ -192,29 +192,30 @@ verdicts, E5's is below:**
   `prediction/scoring.py`: serving fed ±inf where training holds 0 (a 0-target game's yards per target),
   and built every row as of the run's date where training builds it as of the game's (NFL tds: 64 % of
   its gap); each game date is now its own pass. The data gaps are production's NFL FTN/PFR-fed columns,
-  0 on every 2026 row (§8 ask 5), and dev's NHL game lines, defaulted on 72 team-games (re-read before the
-  week-2 retrain). Game lines and NHL comps read at scoring time are timing (I6f). With the builder and
+  0 on every 2026 row until the ingest fix of §8 ask 5, and dev's NHL game lines, defaulted on 72
+  team-games (re-read before the NHL retrain). Game lines and NHL comps read at scoring time are timing (I6f). With the builder and
   data repairs, NFL's RMS falls under the alarm (tds .0057, receiving yards .0054, rushing yards .0065,
   yards .0030).
 
 ## 5. Weeks 2 and 3
 
+Each model fix ships when it is proven (§8 ask 2): its league retrains on the lever-T campaign's recipe
+without the rebuild and goes out with `scripts/sync_to_prod.sh --league L` between board runs. Every send
+restarts the cell's live clock, so live reads split by `Model Version`; the 30-day Gate-2 read of the
+10-18 versions (about 11-17) covers the cells no fix has replaced by then.
+
 - **Week 2 (10-29 → 11-05):** build in a worktree what week 1 left standing: the blind confirm walk
-  (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee) under the
-  Gate-1 CI §8 ask 4 settles; I6d's research brief, then the book-leg levelling it designs (H3; opening
-  note in the lane folder's `research/`); the NFL FTN/PFR ingest fix (`stats/nfl.py` keeps an unpublished
-  source NaN and re-parses the trailing weeks; mind the always-NaN reprocessing trap); the 2026 PBP
-  season aggregates of the NFL comp profiles, empty on both boxes because `nfl_data_py` merges
-  participation data nflverse does not serve for 2026 (`stats/nfl_pbp_agg.py`; retry without it, never
-  for past seasons); dev's NHL game-line re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
-- **Week 3 (about 11-06):** one retrain per league on the fixed code (the lever-T campaign's recipe
-  without the rebuild; `scripts/sync_to_prod.sh --league L` between board runs), then four weeks of
-  stable versions (to about 12-04) for the live verdict. The 30-day Gate-2 read of the 10-18 versions
-  lands about 11-17 and is the control.
-- **Sequencing (owner's call, open):** batch every model fix into the week-3 retrain (the default: the
-  10-18 versions get a clean 30-day read first and every retrain resets the live clock), or ship each fix
-  the day it is proven, accepting mixed versions in the live reads (the owner's preference on 2026-10-18
-  was send-now).
+  (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee) under Gate 1's
+  date-clustered CI; I6d's research brief, then the book-leg levelling it designs (H3; opening note in the
+  lane folder's `research/`); the NFL rows the FTN/PFR re-parse does not reach, since it covers the
+  current season only (on both boxes most 2025 team rows of weeks 2, 7 and 14–20 hold FTN and PFR zeros,
+  and the Rams' pressure columns are 0 in every season before 2026), and the Bengals' week-5 running
+  backs, which nflverse lists and neither box's gamelog holds; the 2026 PBP season aggregates of the NFL
+  comp profiles, empty on both boxes because `nfl_data_py` merges participation data nflverse does not
+  serve for 2026 (`stats/nfl_pbp_agg.py`; retry without it, never for past seasons); dev's NHL game-line
+  re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
+- **Week 3 on:** each fix retrains and ships as it is proven; a version then holds four weeks for its live
+  verdict.
 
 ## 6. Live reads: what each verdict needs
 
@@ -233,9 +234,9 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | candidate | verdict | why |
 |---|---|---|
 | Instrumentation (§4.2) | do now | no model change, no clock reset |
-| Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's data gaps are §8 ask 5 and week 2, its timing gaps I6f |
+| Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's FTN/PFR data gap is fixed (§8 ask 5), its timing gaps are I6f |
 | Train fraction / refit on all (H1) | not a lever | E1: no cell's forward Brier moved (0 of 5) |
-| Blind confirm walk (H2) | ship in the batch | protocol; changes no served probability by itself |
+| Blind confirm walk (H2) | ship when proven | protocol; changes no served probability by itself |
 | Book-leg levelling (H3, I6d) | brief first, week 2 | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the design is not obvious |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
@@ -246,25 +247,40 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    week 1 to `devel` in a job gap after the refactoring-specialist and the gates; the recommender
    stage-count sink is skipped; the weekly dev sync keeps the newest 3 archive backups; the brief's four
    amendments are adopted).
-2. Sequencing of the model fixes: batch into one retrain about 11-06 (default) or ship each as proven.
+2. Sequencing of the model fixes: batch into one retrain about 11-06 (default) or ship each as proven
+   (answered 2026-10-23: ship each as proven; §5).
 3. On E2's result: whether cells whose blind re-gating fails leave `devel` (the owner's file; Gate 2 alone
    never removes a cell). Re-gated on the blind half, 60 of 64 served cells still ship; MLB runs allowed,
    NFL yards, NFL fantasy points (PrizePicks) and NBA FTM fail one gate each. Recommendation: withhold MLB
    runs allowed (fails on both halves) and NFL yards (fails Gate 1 on the blind half, on E1's forward
    window and under a date-clustered CI) now; keep the other two until the week-3 blind walk re-gates
-   them. Packet: the lane folder's `e2/PACKET_E2.md`.
+   them. Packet: the lane folder's `e2/PACKET_E2.md` (answered 2026-10-23: yes, all four leave `devel`
+   serving, so the board prices their props at the book consensus. Their pickles left production's
+   models folder at 16:14 CDT, record and undo line in the lane folder's `pull/`; a withheld cell now
+   serves the book consensus instead of leaving the board (`prediction/scoring.py::match_offers`); the
+   four `withheld` flips in `stat_meta.json` are the owner's).
 4. Gate 1's ship CI: today a 95 % iid bootstrap whose upper bound must sit under .005. On E2's 33 cells
    with a computable Gate 1 (validation / test half), iid passes 32 / 33, date-clustered 32 / 31 and the
    two-way estimate (player + date − iid variance) 32 / 31; beyond iid only NFL yards and MLB runs allowed
    fail, the two ask 3 withholds. The brief's two-way bootstrap (28 / 26) multiplies a player draw by a
    date draw, counts row noise about three times, and is not a target. Recommendation: date-clustered,
-   from the week-3 walk on.
+   from the week-3 walk on (answered 2026-10-23: date-clustered. Gate 1 resamples game dates
+   (`training/scorecard.py`, [ship_gate.md](../ship_gate.md)); `model_stats` takes it at each league's
+   next `meditate`).
 5. Production's NFL FTN/PFR-fed columns (first read, breakaway yards, broken tackles, drops, blitz,
    first-read EPA, pressure) are 0 on every 2026 row: ingest writes a source that is not yet published as
    0 and never revisits it. Dev holds real values for most of them, and the models trained on those. The
    sources are published now: re-parse production's 2026 gamelog and teamlog rows for these columns (or
    copy dev's values) ahead of the week-2 ingest fix? It writes production data. Evidence: the lane
-   folder's `e5/probes/nfl_classification.md`, group 3.
+   folder's `e5/probes/nfl_classification.md`, group 3 (answered 2026-10-23: find the cause and fix it
+   now. Cause: the backfill parses a team-week once, and production ingests within hours of a game,
+   before nflverse publishes its FTN charting and weekly PFR rows; PFR also spells the Rams `LA`, which
+   zeroed their pressure columns in every season. Fix: each NFL update re-parses this season's
+   team-weeks whose FTN- or PFR-fed columns are all zero once that source holds the game
+   (`stats/nfl.py::_reopen_late_source_weeks`), and PFR's `LA` reads as `LAR`. Production heals at its
+   first NFL update after the deploy: on a copy of its logs the pass re-parsed 186 team-weeks (2,057
+   player rows) in about a minute and left zeros only in week 7, which neither source holds yet.
+   Past seasons are week 2, §5).
 
 ## 9. Records
 

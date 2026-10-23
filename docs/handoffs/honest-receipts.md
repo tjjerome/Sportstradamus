@@ -504,7 +504,7 @@ inside its group; §8 restates each open one as a plain question.
      classification is [live-gap-2](live-gap-2.md) §4.3. Its two builder mismatches are repaired in
      `prediction/scoring.py`: serving zeroes ±inf as training does (which also clears the WNBA `Team
      BLK_RATIO` rows), and builds each offer's row as of its game date, one pass per date. What is
-     left is data (production's NFL FTN/PFR columns, live-gap-2 §8 ask 5) and timing (I6f).
+     left is timing (I6f); the data gap, production's zero NFL FTN/PFR columns, is fixed (live-gap-2 §8 ask 5).
   2. **I6g version-age test** (pre-registered; a cadence change only if it confirms). `meditate`
      keeps each model file it replaces, and its test set, for 400 days (`training/prior_models.py`,
      `data/models/prior/`, `data/test_sets/prior/`) and `feature-parity --versions` re-serves the
