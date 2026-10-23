@@ -52,7 +52,7 @@ from sportstradamus.training.scorecard import (
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
-    _gate1_brier_ci_clustered,
+    _gate1_brier_ci,
     _gate4_iqr_spread,
     _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
@@ -222,7 +222,7 @@ def test_segment_masks_partition_top_decile_and_bottom_quartile():
 
 
 # ---------------------------------------------------------------------------
-# Gate 1 — Brier vs book, paired bootstrap CI over game dates.
+# Gate 1 — Brier vs book, paired bootstrap CI (the wider of rows and game dates).
 # ---------------------------------------------------------------------------
 
 
@@ -231,7 +231,7 @@ def test_gate1_ci_below_zero_when_model_beats_book():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.9, 0.1)  # close to truth
     p_book = np.full_like(y, 0.5)  # near-random
-    mean, _lo, hi = _gate1_brier_ci_clustered(p_model, p_book, y, _game_dates(4000), rng)
+    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, _game_dates(4000))
     assert mean < 0  # model Brier lower than book
     assert hi < 0  # 95% CI entirely below 0
 
@@ -241,7 +241,7 @@ def test_gate1_ci_above_zero_when_book_beats_model():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
     p_book = np.where(y == 1, 0.9, 0.1)  # nails it
-    mean, lo, _hi = _gate1_brier_ci_clustered(p_model, p_book, y, _game_dates(4000), rng)
+    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, _game_dates(4000))
     assert mean > 0
     assert lo > 0  # CI excludes 0 on the book's side
 
@@ -252,7 +252,7 @@ def test_gate1_oracle_equals_negative_book_brier():
     rng = np.random.default_rng(2)
     y = (rng.uniform(size=3000) < 0.5).astype(float)
     p_book = rng.uniform(0.2, 0.8, size=3000)
-    mean, _lo, hi = _gate1_brier_ci_clustered(y, p_book, y, _game_dates(3000), rng)
+    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, _game_dates(3000))
     assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
     assert hi < 0
 

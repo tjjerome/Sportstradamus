@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from sportstradamus.training.scorecard import (
     _GATE1_NONINF_MARGIN,
@@ -7,6 +8,7 @@ from sportstradamus.training.scorecard import (
     DEFAULT_PRED_COL,
     _bootstrap_mean_ci,
     _bootstrap_mean_ci_clustered,
+    _gate1_brier_ci,
     apply_thresholds,
     gate_row,
     load_test_set,
@@ -103,3 +105,24 @@ def test_gate1_ship_bound_resamples_game_dates():
     )
     oracle_width = row["g1_brier_diff_ci_hi_oracle"] - row["g1_brier_diff_ci_lo_oracle"]
     assert oracle_width > 2 * (oracle_iid_hi - oracle_iid_lo)
+
+
+def test_gate1_ship_bound_never_narrower_than_rows():
+    # Three slates that mix alike: every date holds the same ten wins and ten losses for
+    # the model, so each date's mean difference is the same +.004 and resampling dates
+    # can only return it. That collapsed bound would pass the tie margin; the rows'
+    # spread says the cell has not shown it, and the row bound holds the gate shut.
+    d_win, d_loss = -0.1, 0.108
+    per_date = np.repeat([d_win, d_loss], 10)
+    y = np.ones(3 * len(per_date))
+    p_book = np.full_like(y, 0.5)
+    p_model = 1 - np.sqrt(0.25 + np.tile(per_date, 3))
+    dates = np.repeat(["2026-09-13", "2026-09-20", "2026-09-27"], len(per_date))
+    d = (p_model - y) ** 2 - (p_book - y) ** 2
+    _, _, date_hi = _bootstrap_mean_ci_clustered(d, dates, np.random.default_rng(_GATE1_SEED))
+    assert date_hi < _GATE1_NONINF_MARGIN
+
+    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, dates)
+
+    assert mean == pytest.approx(0.004)
+    assert hi > _GATE1_NONINF_MARGIN

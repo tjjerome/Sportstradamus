@@ -984,7 +984,7 @@ live in the references doc (Ship-75 sweep-era verdicts) and memory; the durable 
   objective are KILLED — assay-sensitivity leak, and Brier-at-line picks the same λ as CRPS anyway.
   A `crps_1se` ship buys coverage, not edge: `kelly_shrinkage = clip(BSS,0,1)` sizes it near zero —
   keep that valve. Cluster-count sensitivity makes NFL systematically more book-lean than NBA (by
-  design). Gate note from the same brief: the ship gate reads `g1_brier_diff_ci_hi` (date-clustered);
+  design). Gate note from the same brief: the ship gate reads `g1_brier_diff_ci_hi` (date-clustered, never narrower than the row bootstrap);
   the player-clustered `g1_clustered_ci_hi` is reported-only, and board-crossfit vs production-test
   g1 disagree by ~0.003 on the same cell (open question below).
 
