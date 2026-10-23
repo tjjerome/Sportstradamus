@@ -901,29 +901,28 @@ class StatsNFL(Stats):
         back through :meth:`_backfill_missing_rows`.
         """
         season = self.season_start.year
+        team_week = ["season", "week", "team"]
         team = self.teamlog.loc[self.teamlog.season == season].assign(
             ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
             pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
         )
-        games = self.gamelog[["season", "week", "team", "game id"]].drop_duplicates(
-            ["season", "week", "team"]
-        )
-        team = team.merge(games, on=["season", "week", "team"])
+        games = self.gamelog[[*team_week, "game id"]].drop_duplicates(team_week)
+        team = team.merge(games, on=team_week)
         ftn_games, pfr_games = self._late_source_games(season)
         stale = team.loc[
             (team.ftn_zero & team["game id"].isin(ftn_games))
             | (team.pfr_zero & team["game id"].isin(pfr_games)),
-            ["season", "week", "team"],
+            team_week,
         ]
         if stale.empty:
             return
-        logger.info(f"Re-parsing {len(stale)} NFL team-weeks that FTN or PFR published late")
+        logger.info("Re-parsing %d NFL team-weeks that FTN or PFR published late", len(stale))
         flagged = self.gamelog.merge(stale, how="left", indicator=True)["_merge"].eq("both")
         self.gamelog.loc[flagged.to_numpy(), _LATE_SOURCE_PLAYER_COLUMNS] = np.nan
         kept = self.teamlog.merge(stale, how="left", indicator=True)
         self.teamlog = kept.loc[kept["_merge"].eq("left_only")].drop(columns="_merge")
 
-    def _late_source_games(self, season):
+    def _late_source_games(self, season: int) -> tuple[set[str], set[str]]:
         """Game ids the season's FTN charting and weekly PFR files hold; empty while unpublished."""
         try:
             ftn = set(nfl.import_ftn_data([season])["nflverse_game_id"])

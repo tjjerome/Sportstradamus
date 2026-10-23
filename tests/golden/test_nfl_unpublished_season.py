@@ -160,16 +160,23 @@ def test_other_http_failures_still_raise(monkeypatch, code, past_grace):
 
 
 # (week, game id, FTN columns zero, PFR columns zero) per SEA team-week of 2026; the
-# stubbed sources hold weeks 1, 3, 5 and FTN also week 4.
+# stubbed sources hold weeks 1, 3, 5, 6 and FTN also week 4.
 _WEEKS = [
     (1, "2026_01_NE_SEA", True, True),
     (2, "2026_02_SEA_ARI", True, True),
     (3, "2026_03_SEA_LAR", False, True),
     (4, "2026_04_KC_SEA", False, True),
     (5, "2026_05_SEA_TB", False, False),
+    (6, "2026_06_MIA_SEA", True, False),
 ]
-_FTN_HELD = ["2026_01_NE_SEA", "2026_03_SEA_LAR", "2026_04_KC_SEA", "2026_05_SEA_TB"]
-_PFR_HELD = ["2026_01_NE_SEA", "2026_03_SEA_LAR", "2026_05_SEA_TB"]
+_FTN_HELD = [
+    "2026_01_NE_SEA",
+    "2026_03_SEA_LAR",
+    "2026_04_KC_SEA",
+    "2026_05_SEA_TB",
+    "2026_06_MIA_SEA",
+]
+_PFR_HELD = ["2026_01_NE_SEA", "2026_03_SEA_LAR", "2026_05_SEA_TB", "2026_06_MIA_SEA"]
 
 
 def _reopen_stats(monkeypatch) -> StatsNFL:
@@ -188,23 +195,19 @@ def _reopen_stats(monkeypatch) -> StatsNFL:
     weeks = [(2026, *w) for w in _WEEKS] + [(2025, 1, held_last_season, True, True)]
     team = pd.DataFrame(
         [
-            {"season": season, "week": week, "team": TEAM, "gameday": f"{season}-09-{week:02d}"}
+            {"season": season, "week": week, "team": TEAM}
             | dict.fromkeys(nfl_module._FTN_TEAM_COLUMNS, 0.0 if ftn_zero else 0.4)
             | dict.fromkeys(nfl_module._PFR_TEAM_COLUMNS, 0.0 if pfr_zero else 0.3)
+            # Published columns can hold a genuine zero: a defense that never blitzed or pressured.
+            | {"blitz_rate": 0.0, "pressure_per_pass": 0.0}
             for season, week, _, ftn_zero, pfr_zero in weeks
         ]
     )
     gamelog = pd.DataFrame(
         [
-            {
-                "season": season,
-                "week": week,
-                "team": TEAM,
-                "game id": game,
-                "player display name": RECEIVER,
-            }
-            | dict.fromkeys(nfl_module._LATE_SOURCE_PLAYER_COLUMNS, 0.0 if ftn_zero else 0.2)
-            for season, week, game, ftn_zero, _ in weeks
+            {"season": season, "week": week, "team": TEAM, "game id": game}
+            | dict.fromkeys(nfl_module._LATE_SOURCE_PLAYER_COLUMNS, 0.0)
+            for season, week, game, _, _ in weeks
         ]
     )
     s = StatsNFL()
@@ -219,16 +222,15 @@ def test_reopen_sends_back_team_weeks_a_source_published_late(monkeypatch):
 
     s._reopen_late_source_weeks()
 
-    # Week 1 (both sources) and week 3 (PFR) now hold their game; week 2 is still
-    # unpublished, week 4's zero PFR columns still lack their game though FTN holds it,
-    # week 5 parsed fine, and 2025 is not this season.
-    reopened = {(2026, 1), (2026, 3)}
+    # Week 1 (both sources), week 3 (PFR) and week 6 (FTN) now hold their game; week 2 is
+    # still unpublished, week 4's zero PFR columns still lack their game though FTN holds
+    # it, week 5 parsed fine, and 2025 is not this season.
+    reopened = {(2026, 1), (2026, 3), (2026, 6)}
+    flagged = s.gamelog[nfl_module._LATE_SOURCE_PLAYER_COLUMNS].isna().all(axis=1)
+    assert set(zip(s.gamelog.season[flagged], s.gamelog.week[flagged], strict=True)) == reopened
+    assert not s.gamelog.loc[~flagged].isna().any().any()
     kept = set(zip(s.teamlog.season, s.teamlog.week, strict=True))
     assert kept == {(2026, 2), (2026, 4), (2026, 5), (2025, 1)}
-    flagged = s.gamelog[nfl_module._LATE_SOURCE_PLAYER_COLUMNS].isna().all(axis=1)
-    keys = list(zip(s.gamelog.season, s.gamelog.week, strict=True))
-    assert {k for k, f in zip(keys, flagged, strict=True) if f} == reopened
-    assert not s.gamelog.loc[~flagged.to_numpy()].isna().any().any()
 
 
 def test_reopen_waits_on_an_unpublished_season(monkeypatch):
@@ -250,7 +252,7 @@ def test_pfr_spells_the_rams_like_the_logs(monkeypatch):
     pfr = pd.DataFrame(
         {c: [0.0, 0.0] for c in nfl_module._PFR_WEEKLY_COLUMNS}
         | {"pfr_player_name": ["Rams QB", "Seahawks QB"], "week": [1, 1]}
-        | {"team": ["LA", TEAM], "opponent": [TEAM, "LA"], "times_pressured": [4.0, 2.0]}
+        | {"team": ["LA", TEAM], "opponent": [TEAM, "LA"]}
     )
     monkeypatch.setattr(nfl_module.nfl, "import_weekly_pfr", lambda kind, years: pfr.copy())
 
