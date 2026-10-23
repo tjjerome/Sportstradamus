@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Pull production's odds archive, runtime outputs, and player/team collector
-# snapshots down to this dev machine and fold them in losslessly. Run from
+# Pull production's odds archive, runtime outputs, simulated-bettor ledger and
+# player/team collector snapshots down to this dev machine and fold them in
+# losslessly. Run from
 # the dev box whenever you want to sync up:
 #
 #   scripts/sync_from_prod.sh             # full sync
@@ -54,6 +55,7 @@ PULL_RELS=(
     "src/sportstradamus/data/runtime"
     "src/sportstradamus/data/player_data"
     "src/sportstradamus/data/team_data"
+    "data/ledger"
 )
 SSH_OPTS=(-o "ConnectTimeout=$SSH_CONNECT_TIMEOUT" -o BatchMode=yes)
 RSYNC_SSH="ssh -o ConnectTimeout=$SSH_CONNECT_TIMEOUT -o BatchMode=yes"
@@ -94,12 +96,14 @@ run ssh "${SSH_OPTS[@]}" "$PROD_SSH" \
 run rsync -a --partial --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
     "$PROD_SSH:$SNAPSHOT" "$SNAPSHOT"
 
-# 4. Pull data/runtime/, data/player_data/ and data/team_data/ (update mode,
-#    never delete dev-only files). Runtime files are written atomically on
-#    prod and periodically refreshed; player_data/team_data collector
-#    snapshots are written atomically once per season/week and never
-#    touched again — both guarantee a live read never catches a partial
-#    write.
+# 4. Pull the PULL_RELS dirs (update mode, never delete dev-only files).
+#    Runtime files are written atomically on prod and periodically refreshed;
+#    player_data/team_data collector snapshots are written atomically once per
+#    season/week and never touched again — both guarantee a live read never
+#    catches a partial write. The ledger is the exception: its entries/*.jsonl
+#    files are appended, and a copy caught mid-append is replaced by the next
+#    pull, because prod's newer mtime wins under -u. The ledger lives only on
+#    prod, so this pull is its one copy off the box.
 for rel in "${PULL_RELS[@]}"; do
     run mkdir -p "$LOCAL_DIR/$rel"
     run rsync -au --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
