@@ -984,9 +984,9 @@ live in the references doc (Ship-75 sweep-era verdicts) and memory; the durable 
   objective are KILLED — assay-sensitivity leak, and Brier-at-line picks the same λ as CRPS anyway.
   A `crps_1se` ship buys coverage, not edge: `kelly_shrinkage = clip(BSS,0,1)` sizes it near zero —
   keep that valve. Cluster-count sensitivity makes NFL systematically more book-lean than NBA (by
-  design). Gate note from the same brief: the ship gate reads the **iid** `g1_brier_diff_ci_hi`;
-  `g1_clustered_ci_hi` is reported-only, and board-crossfit vs production-test g1 disagree by
-  ~0.003 on the same cell (open question below).
+  design). Gate note from the same brief: the ship gate reads `g1_brier_diff_ci_hi` (date-clustered);
+  the player-clustered `g1_clustered_ci_hi` is reported-only, and board-crossfit vs production-test
+  g1 disagree by ~0.003 on the same cell (open question below).
 
 - **Built + committed:** power (logarithmic) de-vig (favourite-longshot bias on asymmetric /
   anytime-TD lines, Clarke-Kovalchik-Ingram 2017) and the count-tail regularizer `_sanitize_book_ev`
@@ -1529,7 +1529,7 @@ first-ship gates:
 
 | # | Gate | Statistic | Threshold |
 |---|---|---|---|
-| 1 | Brier vs book (non-inferiority) | paired-bootstrap 95% CI of `(p_model−y)² − (p_book−y)²` | `ci_hi < 0.005` |
+| 1 | Brier vs book (non-inferiority) | date-clustered paired-bootstrap 95% CI of `(p_model−y)² − (p_book−y)²` | `ci_hi < 0.005` |
 | 2 | Star σ-match | `\|mean(Blended_EV) − mean(Result)\| / std` on top-mean decile | `z < 0.5` |
 | 3 | Bench σ-match | same on bottom-mean quartile | `z < 0.5` |
 | 4 | **PIT-KS calibration** | `KS(randomized-PIT, Uniform)` of the predictive CDF | `pit_ks < max(0.05, 1.358/√n)` |

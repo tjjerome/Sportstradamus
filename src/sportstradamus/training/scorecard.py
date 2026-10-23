@@ -87,7 +87,9 @@ from sportstradamus.training.structural_strategies import (
 # devel->main live).
 #
 #   * research -> devel, set baseline: the SIX offline gates computed here —
-#     Gate 1 Brier-vs-book paired bootstrap, Gates 2/3 star/bench bias-vs-spread
+#     Gate 1 Brier-vs-book paired bootstrap resampling whole game dates (one slate's
+#     rows share game-level shocks — totals, pace, weather — so a row bootstrap is too
+#     narrow where dates are few), Gates 2/3 star/bench bias-vs-spread
 #     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
 #     low-variance bench segments), Gate 4 randomized-PIT KS (the IQR ratio stays a
 #     diagnostic), Gate 5 equal-mass ECE, Gate 6 the anti-shrinkage OR of three legs.
@@ -544,7 +546,7 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
     """Rows usable for the priced Brier gates: sportsbook-priced, finite book evidence.
 
     The single source of truth for which test rows enter Gate 1, so ancillary
-    columns (e.g. Player for the clustered bootstrap) align to the same rows.
+    columns (Date and Player for the clustered bootstraps) align to the same rows.
     Provenance-bearing artifacts fail closed to explicit ``authentic`` quotes — a
     ``pickem`` quote is a real line priced at the platform's even payout, so beating
     it is beating a coin flip; legacy artifacts without provenance retain their
@@ -583,9 +585,9 @@ def _brier_inputs(
     have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
     entirely, every priced row is non-finite, or the priced rows fall below the
     cluster floor. Shared by
-    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`); ``index`` is the
-    surviving-row index so callers can align ancillary columns (Player) to the same
-    rows without re-deriving the filter.
+    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci_clustered`); ``index``
+    is the surviving-row index so callers can align ancillary columns (Date, Player) to
+    the same rows without re-deriving the filter.
     """
     sub = _priced_rows(df)
     if sub is None:
@@ -600,7 +602,7 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
     """1 - brier(model_P) / brier(book_over) on the test set, or None if cols absent.
 
     Informational summary kept on the :class:`Scorecard` / run log; the Gate-1 ship
-    signal is the paired bootstrap CI in :func:`_gate1_brier_ci`, not this ratio.
+    signal is the paired bootstrap CI in :func:`_gate1_brier_ci_clustered`, not this ratio.
     """
     inputs = _brier_inputs(df)
     if inputs is None:
@@ -614,20 +616,20 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
 
 
 def _standalone_g1_hi(
-    df: pd.DataFrame, p_book: np.ndarray, y: np.ndarray, index: pd.Index
+    df: pd.DataFrame, p_book: np.ndarray, y: np.ndarray, index: pd.Index, dates: np.ndarray
 ) -> float | None:
     """Gate-1 CI upper bound for the *pre-blend* model probabilities (``P_standalone``).
 
     Scored on the same priced rows as the fused gate (``index`` from
-    :func:`_brier_inputs`) against the same book, so the two upper bounds are
-    directly comparable: it shows whether the standalone model or the book
-    carries the fused pass. Report-only — never a ship term. ``None`` when the
-    column is absent (CSVs predating the dump).
+    :func:`_brier_inputs`) against the same book, resampling the same game ``dates``,
+    so the two upper bounds are directly comparable: it shows whether the standalone
+    model or the book carries the fused pass. Report-only — never a ship term.
+    ``None`` when the column is absent (CSVs predating the dump).
     """
     if "P_standalone" not in df.columns:
         return None
     p_sa = np.clip(df.loc[index, "P_standalone"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
-    return _gate1_brier_ci(p_sa, p_book, y, np.random.default_rng(_GATE1_SEED))[2]
+    return _gate1_brier_ci_clustered(p_sa, p_book, y, dates, np.random.default_rng(_GATE1_SEED))[2]
 
 
 def _segment_masks(df: pd.DataFrame, n_deciles: int = N_DECILES) -> tuple[np.ndarray, np.ndarray]:
@@ -718,7 +720,7 @@ def _bootstrap_mean_ci(
     Resamples ``values`` with replacement ``n_boot`` times (seeded ``rng`` for a
     reproducible CI) and returns the point mean plus the 95% two-sided percentile
     bounds, specialized to the mean of an already-computed per-event statistic
-    (Gate 1 here, supersede S2 later).
+    (supersede S2's paired Brier difference here).
     Returns ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
     """
     values = np.asarray(values, dtype=float)
@@ -739,10 +741,11 @@ def _bootstrap_mean_ci_clustered(
     rng: np.random.Generator,
     n_boot: int = _GATE1_N_BOOT,
 ) -> tuple[float, float, float]:
-    """Cluster (player) block bootstrap of the mean of ``values``.
+    """Cluster (player or game date) block bootstrap of the mean of ``values``.
 
     Resamples whole clusters with replacement, so within-cluster correlation is
-    preserved and the CI is not anti-conservative on repeated-player panels.
+    preserved and the CI is not anti-conservative on repeated-player panels or on
+    rows that share a slate.
     ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns ``(mean, ci_lo, ci_hi)``;
     ``(nan, nan, nan)`` if empty.
     """
@@ -802,7 +805,13 @@ def _gate1_brier_ci_clustered(
     cluster_ids: np.ndarray,
     rng: np.random.Generator,
 ) -> tuple[float, float, float]:
-    """Gate 1 paired Brier CI under a player-clustered bootstrap."""
+    """Gate 1 — cluster bootstrap of the per-event (model - book) Brier difference.
+
+    ``d_i = (p_model_i - y_i)^2 - (p_book_i - y_i)^2``. Lower Brier is better, so a
+    bootstrap-mean CI entirely below 0 means the model beats the book. The ship bound
+    clusters on game date; the reported ``g1_clustered_ci_hi`` clusters on player.
+    Returns ``(mean, ci_lo, ci_hi)``.
+    """
     d = (p_model - y) ** 2 - (p_book - y) ** 2
     return _bootstrap_mean_ci_clustered(d, cluster_ids, rng)
 
@@ -1539,19 +1548,6 @@ def _dispersion_diagnostics(
     return pit_ks, tail_pit_ks, cov50, cov80
 
 
-def _gate1_brier_ci(
-    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, rng: np.random.Generator
-) -> tuple[float, float, float]:
-    """Gate 1 — paired bootstrap of the per-event (model - book) Brier difference.
-
-    ``d_i = (p_model_i - y_i)^2 - (p_book_i - y_i)^2``. Lower Brier is better, so a
-    bootstrap-mean CI entirely below 0 means the model beats the book. Returns
-    ``(mean, ci_lo, ci_hi)``.
-    """
-    d = (p_model - y) ** 2 - (p_book - y) ** 2
-    return _bootstrap_mean_ci(d, rng)
-
-
 def _gate23_segment_match(
     pred: np.ndarray, actual: np.ndarray, mask: np.ndarray
 ) -> tuple[float, float, float, float, float]:
@@ -1952,20 +1948,21 @@ def gate_row(
     g4_pit_ks_max = _gate4_pit_ks_threshold(len(df))
     _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
 
-    # Gate 1 — paired Brier vs book. Needs Odds; blank ⇒ "no book to beat, model wins
-    # by default" (the auto-pass convention is doc'd at the module-header and applied
-    # at verdict-wiring time). Oracle p_model = y (the label itself, 0.5 at a tie).
+    # Gate 1 — paired Brier vs book, resampling game dates. Needs Odds; blank ⇒ "no book
+    # to beat, model wins by default" (the auto-pass convention is doc'd at the module-header
+    # and applied at verdict-wiring time). Oracle p_model = y (the label itself, 0.5 at a tie).
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
         g1_clustered_hi = g1_standalone_hi = None
     else:
         p_model_b, p_book, y_b, priced_index = brier_in
-        g1_mean, g1_lo, g1_hi = _gate1_brier_ci(
-            p_model_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
+        dates = df.loc[priced_index, "Date"].to_numpy()
+        g1_mean, g1_lo, g1_hi = _gate1_brier_ci_clustered(
+            p_model_b, p_book, y_b, dates, np.random.default_rng(_GATE1_SEED)
         )
-        g1_mean_o, g1_lo_o, g1_hi_o = _gate1_brier_ci(
-            y_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
+        g1_mean_o, g1_lo_o, g1_hi_o = _gate1_brier_ci_clustered(
+            y_b, p_book, y_b, dates, np.random.default_rng(_GATE1_SEED)
         )
         bss = _brier_skill_score(df)
         g1_clustered_hi = None
@@ -1977,7 +1974,7 @@ def gate_row(
                 df.loc[priced_index, "Player"].to_numpy(),
                 np.random.default_rng(_GATE1_SEED),
             )[2]
-        g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index)
+        g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index, dates)
 
     # Gate 5 — model-only calibration. Needs P + Line (NOT Odds) — Gate 5 checks the
     # model's probabilities against outcomes; the book doesn't enter. Blank only if

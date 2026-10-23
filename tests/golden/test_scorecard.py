@@ -52,7 +52,7 @@ from sportstradamus.training.scorecard import (
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
-    _gate1_brier_ci,
+    _gate1_brier_ci_clustered,
     _gate4_iqr_spread,
     _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
@@ -105,6 +105,11 @@ def _compressed_frame(n: int = 2000, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame({"MeanYr": meanyr, "Result": actual, "EV": pred})
 
 
+def _game_dates(n: int) -> np.ndarray:
+    """``n`` rows dealt round-robin over 100 game dates, written as the dumps write them."""
+    return np.resize(pd.date_range("2025-10-01", periods=100).strftime("%Y-%m-%d"), n)
+
+
 def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
     """A priced frame (P/Odds/Line present) with a calibrated-ish model and a noisy book."""
     rng = np.random.default_rng(seed)
@@ -121,6 +126,7 @@ def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
             "Line": line,
             "P": p_true,  # model tracks the true over-rate
             "Odds": np.full(n, 0.5),  # book under-prob 0.5 (near-random)
+            "Date": _game_dates(n),
         }
     )
 
@@ -216,7 +222,7 @@ def test_segment_masks_partition_top_decile_and_bottom_quartile():
 
 
 # ---------------------------------------------------------------------------
-# Gate 1 — Brier vs book, paired bootstrap CI.
+# Gate 1 — Brier vs book, paired bootstrap CI over game dates.
 # ---------------------------------------------------------------------------
 
 
@@ -225,7 +231,7 @@ def test_gate1_ci_below_zero_when_model_beats_book():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.9, 0.1)  # close to truth
     p_book = np.full_like(y, 0.5)  # near-random
-    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci_clustered(p_model, p_book, y, _game_dates(4000), rng)
     assert mean < 0  # model Brier lower than book
     assert hi < 0  # 95% CI entirely below 0
 
@@ -235,7 +241,7 @@ def test_gate1_ci_above_zero_when_book_beats_model():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
     p_book = np.where(y == 1, 0.9, 0.1)  # nails it
-    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, lo, _hi = _gate1_brier_ci_clustered(p_model, p_book, y, _game_dates(4000), rng)
     assert mean > 0
     assert lo > 0  # CI excludes 0 on the book's side
 
@@ -246,7 +252,7 @@ def test_gate1_oracle_equals_negative_book_brier():
     rng = np.random.default_rng(2)
     y = (rng.uniform(size=3000) < 0.5).astype(float)
     p_book = rng.uniform(0.2, 0.8, size=3000)
-    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci_clustered(y, p_book, y, _game_dates(3000), rng)
     assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
     assert hi < 0
 
@@ -3036,6 +3042,7 @@ def _dpo_frame(n: int = 600, seed: int = 0) -> pd.DataFrame:
             "Line": line,
             "P": 1.0 - cdf_at_line,
             "Odds": np.full(n, 0.5),
+            "Date": _game_dates(n),
         }
     )
 
@@ -3144,6 +3151,7 @@ def _mix_frame(n: int = 200, seed: int = 4) -> pd.DataFrame:
             "MIX_Scale2": raw_scale2,
             "MIX_W1": w1,
             "DenomCol": "MeanYr",
+            "Date": _game_dates(n),
         }
     )
     median = _pred_ppf(df, "Mixture", 0.5, strategy=_MIX_STRATEGY)
@@ -3635,6 +3643,7 @@ def _skewnormal_priced_frame(n: int = 900, seed: int = 5) -> pd.DataFrame:
             "SN_Scale": raw_scale,
             "SN_Alpha": alpha,
             "DenomCol": "MeanYr",
+            "Date": _game_dates(n),
         }
     )
     df["Line"] = np.round(df["Blended_EV"]) + 0.5

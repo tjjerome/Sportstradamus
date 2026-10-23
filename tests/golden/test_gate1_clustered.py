@@ -2,9 +2,13 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.training.scorecard import (
+    _GATE1_NONINF_MARGIN,
+    _GATE1_SEED,
     DEFAULT_PRED_COL,
     _bootstrap_mean_ci,
     _bootstrap_mean_ci_clustered,
+    apply_thresholds,
+    gate_row,
     load_test_set,
 )
 
@@ -59,3 +63,43 @@ def test_clustered_ci_is_wider_on_correlated_panel():
     _, lo_i, hi_i = _bootstrap_mean_ci(values, np.random.default_rng(1))
     _, lo_c, hi_c = _bootstrap_mean_ci_clustered(values, players, np.random.default_rng(1))
     assert (hi_c - lo_c) > (hi_i - lo_i)
+
+
+def test_gate1_ship_bound_resamples_game_dates():
+    # Six slates whose rows go over or under together (a shared game-level shock). The
+    # model leans Over and the book Under on every row, so a slate's Brier difference
+    # moves with its over rate. Resampling the 1,200 rows as independent clears the tie
+    # margin; resampling the six dates does not. The oracle and pre-blend bounds resample
+    # the same dates.
+    rows_per_date = 200
+    over_rates = [0.72, 0.66, 0.58, 0.46, 0.38, 0.32]
+    over = np.concatenate([np.arange(rows_per_date) < rate * rows_per_date for rate in over_rates])
+    n = len(over)
+    dates = pd.date_range("2026-09-13", periods=len(over_rates), freq="7D").strftime("%Y-%m-%d")
+    df = pd.DataFrame(
+        {
+            "MeanYr": np.linspace(5.0, 15.0, n),
+            "Result": np.where(over, 12.0, 9.0),
+            "EV": np.full(n, 10.5),
+            "Line": np.full(n, 10.5),
+            "P": np.full(n, 0.55),
+            "P_standalone": np.full(n, 0.55),
+            "Odds": np.full(n, 0.55),
+            "Date": np.repeat(dates, rows_per_date),
+        }
+    )
+    y = over.astype(float)
+    _, _, iid_hi = _bootstrap_mean_ci(
+        (0.55 - y) ** 2 - (0.45 - y) ** 2, np.random.default_rng(_GATE1_SEED)
+    )
+    assert iid_hi < _GATE1_NONINF_MARGIN
+
+    row = apply_thresholds(gate_row(df, "EV", league="NFL", market="yards", strategy="t"))
+    assert row["g1_brier_diff_ci_hi"] > _GATE1_NONINF_MARGIN
+    assert not row["g1_pass"]
+    assert row["g1_brier_diff_ci_hi_standalone"] == row["g1_brier_diff_ci_hi"]
+    _, oracle_iid_lo, oracle_iid_hi = _bootstrap_mean_ci(
+        -((0.45 - y) ** 2), np.random.default_rng(_GATE1_SEED)
+    )
+    oracle_width = row["g1_brier_diff_ci_hi_oracle"] - row["g1_brier_diff_ci_lo_oracle"]
+    assert oracle_width > 2 * (oracle_iid_hi - oracle_iid_lo)

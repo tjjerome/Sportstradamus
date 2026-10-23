@@ -26,7 +26,7 @@ ground truth:
 the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-10-15._
+_Last updated: 2026-10-23._
 
 ---
 
@@ -64,7 +64,7 @@ The outcome label `y` in Gates 1 and 5 is `training/labels.over_label`: 1 when `
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
-| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded); scored on sportsbook-priced rows (`QuoteAuthenticity == authentic`) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
+| 1 | **Brier vs book, date-clustered paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` resampling whole game dates (2000 resamples, seeded): one slate's rows share game-level shocks (totals, pace, weather), so a row bootstrap reads too narrow where dates are few; scored on sportsbook-priced rows (`QuoteAuthenticity == authentic`) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
 | 2 | **Star σ-match** | `z = |mean(EV) − mean(Result)| / std(Result)` on the top-mean decile | `z < 0.5` — bias under half the segment's spread | `_GATE2_STAR_Z_MAX = 0.5` |
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
