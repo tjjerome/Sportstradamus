@@ -65,13 +65,11 @@ class Scrape:
         so a host that bot-blocks the default requests UA (moneypuck) still answers.
         """
         if self._headers is None:
+            url = f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}"
             try:
-                res = requests.get(
-                    f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}",
-                    timeout=REQUEST_TIMEOUT_S,
-                )
-                res.raise_for_status()
-                self._headers = res.json()["result"]
+                response = requests.get(url, timeout=REQUEST_TIMEOUT_S)
+                response.raise_for_status()
+                self._headers = response.json()["result"]
             except requests.RequestException as exc:
                 # The exception text carries the URL, and with it the API key.
                 logger.warning(
