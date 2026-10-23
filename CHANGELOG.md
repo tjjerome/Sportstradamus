@@ -6,8 +6,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Changed
-- A withheld cell's props serve the book consensus instead of leaving the board
-  (`prediction/scoring.py::match_offers`).
+- A withheld cell's props that a sportsbook quotes serve the book consensus instead of leaving
+  the board (`prediction/scoring.py::match_offers`).
 - Gate 1's ship CI resamples game dates; the row bootstrap's interval decides when its upper
   bound is higher.
 - `trim_matrix` reads the line, never the outcome: the `Result` band and the over/under

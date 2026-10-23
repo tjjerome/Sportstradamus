@@ -356,7 +356,7 @@ A "market" is a betting category for a single stat in a single league (e.g.
    `Mixture` is research-only: its strategy trains and scores in the sweep but
    lacks the `serve` capability (`model_strategy/specs.py`), so serving refuses it.
    `shipped: "withheld"` keeps the cell's model out of training and serving (its
-   offers serve the book consensus) until it clears the offline gates (see [docs/ship_gate.md](ship_gate.md)). Optional
+   quoted offers serve the book consensus) until it clears the offline gates (see [docs/ship_gate.md](ship_gate.md)). Optional
    knobs (`blending`, `zinb_mode`, `dist_training_loss`, `sn_param`,
    `hpo_selection`, `count_dispersion_objective`) default sensibly when absent.
 

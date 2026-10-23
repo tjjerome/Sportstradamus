@@ -269,8 +269,9 @@ record. Every cell carries `{"dist", "shipped", "target_normalization",
 `"devel"` / `"main"`:
 
 - `"withheld"` — `prophecize` prices the cell's offers at the book consensus
-  instead of its model, and `meditate` prunes its pickle (a volume denominator in
-  `VOLUME_STATS` keeps its pickle for the league's projections).
+  instead of its model; an offer no sportsbook quotes (fantasy points, for one) leaves
+  the board. `meditate` prunes its pickle (a volume denominator in `VOLUME_STATS` keeps
+  its pickle for the league's projections).
 - `"devel"` — the production-tracking branch (`devel`) trains + ships
   the cell, and live Gate 2 scores it over a rolling 30-day window.
 - `"main"` — the cell also passed Gate-2 graduation; it's locked in on

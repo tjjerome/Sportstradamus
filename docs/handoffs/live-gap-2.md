@@ -255,10 +255,12 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    runs allowed (fails on both halves) and NFL yards (fails Gate 1 on the blind half, on E1's forward
    window and under a date-clustered CI) now; keep the other two until the week-3 blind walk re-gates
    them. Packet: the lane folder's `e2/PACKET_E2.md` (answered 2026-10-23: yes, all four leave `devel`
-   serving, so the board prices their props at the book consensus. Their pickles left production's
-   models folder at 16:14 CDT, record and undo line in the lane folder's `pull/`; a withheld cell now
-   serves the book consensus instead of leaving the board (`prediction/scoring.py::match_offers`); the
-   four `withheld` flips in `stat_meta.json` are the owner's).
+   serving, so the board prices their quoted props at the book consensus. Their pickles left
+   production's models folder at 16:14 CDT, record and undo line in the lane folder's `pull/`; a withheld
+   cell now serves the book consensus instead of leaving the board (`prediction/scoring.py::match_offers`);
+   the four `withheld` flips in `stat_meta.json` are the owner's. No sportsbook prices NFL fantasy points,
+   so its props, about 200 Sleeper rows a board, left the board with the pickle (`pull/after_pull_board.txt`):
+   keep it off, or restore that one pickle and leave it `devel`, is the owner's call).
 4. Gate 1's ship CI: today a 95 % iid bootstrap whose upper bound must sit under .005. On E2's 33 cells
    with a computable Gate 1 (validation / test half), iid passes 32 / 33, date-clustered 32 / 31 and the
    two-way estimate (player + date − iid variance) 32 / 31; beyond iid only NFL yards and MLB runs allowed

@@ -11,7 +11,7 @@ battery of automatic quality checks (Is it as accurate as the sportsbook? Are it
 unbiased and well-calibrated?). A cell's release status is the `shipped` field in `stat_meta.json`,
 and it moves through three stages:
 
-- `withheld` — the model is not served (the board prices its props at the book consensus); still being worked on.
+- `withheld` — the model is not served (the board prices its props at the book consensus, and drops a prop no sportsbook quotes); still being worked on.
 - `devel` — served on the tracking server and watched on real settled bets.
 - `main` — fully live.
 

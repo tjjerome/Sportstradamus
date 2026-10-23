@@ -269,8 +269,8 @@ Quick checks when collection or serving looks wrong:
 - **Withheld cell still serving**: the dev box's `meditate` prunes withheld
   pickles, and the next full `scripts/sync_to_prod.sh` removes them from prod
   (`--league` never deletes); a volume denominator in `VOLUME_STATS` keeps its
-  pickle, no warning. Either way the cell's offers serve the book consensus
-  (`prediction/scoring.py::match_offers`); another pickle still on disk logs a
+  pickle, no warning. Either way the cell's quoted offers serve the book consensus
+  ([ship_gate.md](ship_gate.md) `withheld`); another pickle still on disk logs a
   "withheld but pickle on disk" warning. To prune immediately:
   `poetry run python -c "from sportstradamus.helpers.io import prune_model_pickle; print(prune_model_pickle('WNBA','PRA'))"`
 - **Served cell failing fresh gates**: `meditate` only warns (SHIP-GATE
