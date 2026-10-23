@@ -281,8 +281,9 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   - a dashboard restart when that pull moves `dashboard/` or `data/config/`
     (the only long-lived process, so it otherwise serves pre-pull
     `sys.modules`; unit from `DASHBOARD_UNIT`, empty to skip),
-  - a shared archive `flock -w 900` (serializes against DuckDB's
-    single-writer lock so jobs don't collide on `archive.duckdb`),
+  - a shared archive `flock -w 900` held for the whole job (serializes against
+    DuckDB's single-writer lock so jobs don't collide on `archive.duckdb`);
+    `close-lines` skips it and takes the lock itself around its archive write,
   - Healthchecks.io `/start` / `/fail` / success pings,
   - structured `START` / `OK` / `FAIL` / `WAIT` / `PULL` log lines per job.
 * **Production crontab** (run as `sportstradamus@<host>`): the canonical
@@ -322,9 +323,10 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   (`shipped: "withheld"` → `shipped: "devel"`) the human commits directly;
   `sportstradamus ship config --branch devel` only validates + summarizes.
 
-  `prophecize` and `close-lines` both fire at `:50` during peak hours; the
-  `run_job.sh` archive flock serializes them, so the second-to-acquire just
-  waits and emits a `WAIT job=… archive_lock_wait=Ns` line.
+  `prophecize` and `close-lines` both fire at `:50` during peak hours.
+  close-lines does not queue behind prophecize: it fetches on time, and while
+  the archive is held its captures wait in `close_line_captures.json` for a
+  later tick (docs/OPERATIONS.md, couplings).
 
 ## Package structure (canonical paths)
 

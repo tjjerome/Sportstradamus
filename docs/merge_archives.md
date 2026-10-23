@@ -72,7 +72,8 @@ there with dev's snapshot as `--source`. Re-running on already-merged data is a 
 | `--dry-run` | Report row counts only; write nothing. |
 | `--no-backup` | Skip the pre-merge `.bak-<epoch>` copy of the target. |
 
-The command takes the shared archive flock itself (the lock `scripts/run_job.sh` wraps
-every cron job in), so it waits for a running cron and fails after 15 minutes. Run it
+The command takes the shared archive flock itself (the lock `scripts/run_job.sh` holds
+for every cron job but `close-lines`, which takes it around its archive write), so it
+waits for a running cron and fails after 15 minutes. Run it
 bare: wrapped in `flock` on the same lock file, it waits out its own timeout against the
 wrapper's hold and then fails.

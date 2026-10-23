@@ -44,16 +44,20 @@ start/fail/success pings. Each job pings
 
 Every ping carries a `?rid=` run ID and a body opening `job=<job> host=<host>
 status=…`; failures append the exit code and a tqdm-stripped log excerpt, and a
-lock timeout names the jobs that were running instead. Point each
-`HEALTHCHECK_URL_<JOB>` at its own check UUID if you can — with one shared UUID
-any job's success still marks the check alive, so a job that fails every run
-stays invisible.
+lock timeout names the jobs that were running instead. Give every job its own
+check (schedule type cron, the job's cron line, timezone America/Chicago, grace
+above the job's longest lock wait plus run) and point its `HEALTHCHECK_URL_<JOB>`
+at it — with one shared UUID any job's success still marks the check alive, so a
+job that fails every run stays invisible.
+
+Replace `<repo-dir>` with the checkout's absolute path: cron's shell reads a
+leftover `<repo-dir>` as an input redirect, and the line never runs.
 
 ```cron
 50 8-20 * * *          <repo-dir>/scripts/run_job.sh prophecize
 30 8,11,14,17,20 * * * <repo-dir>/scripts/run_job.sh confer
-55 8 * * *             <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
-55 14 * * *            <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
+5 9 * * *              ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
+5 15 * * *             ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
 # 0 1 * * 5            <repo-dir>/scripts/run_job.sh meditate   # off: models train dev-side (below)
 0 2 * * *              <repo-dir>/scripts/run_job.sh reflect
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
@@ -83,15 +87,19 @@ Couplings to keep in sync:
   config claims underspends the monthly credit budget; more overspends it.
 - `close-lines` is the per-game data floor and is never throttled by the
   governor — don't widen its hours without re-checking the credit budget.
-- `reflect` holds the shared archive lock for its whole ~1 h run, so it sits at
-  2am, after `close-lines` stops at 01:50. `close-lines` alone does not hold that
-  lock for its whole run: it fetches on time, spools the fetch to
-  `data/runtime/close_line_captures.json`, and takes the lock only to archive the
-  spool, giving up after `moneylines.CLOSE_LINES_LOCK_WAIT_S` and leaving the spool
-  to a later tick. A tick that overlaps `reflect` therefore archives nothing until
-  `reflect` finishes. Every other job holds the lock for its whole run, including
-  ones like `gate-status` that never read the archive, which is why it sits at 4am
-  rather than sharing `reflect`'s start minute.
+- Every job but `close-lines` holds the shared archive lock for its whole run,
+  including ones like `gate-status` that never read the archive, which is why
+  `gate-status` sits at 4am rather than inside `reflect`'s ~1.5 h hold from 2am.
+  `ledger-commit` queues behind the 8:50 and 14:50 `prophecize` runs (17-35 min),
+  so its lines raise `ARCHIVE_LOCK_TIMEOUT` from 15 to 40 min.
+- `close-lines` runs a few seconds but must not queue behind those holds, or the
+  games starting inside them lose their closing line. It takes the archive lock
+  itself, only to archive what it fetched and for at most
+  `moneylines.CLOSE_LINES_LOCK_WAIT_S` (2 min): it fetches each due game on time
+  into `data/runtime/close_line_captures.json`; while a long job holds the lock
+  the captures wait there, and the next tick that gets it archives them with
+  their fetch time. Deleting that file loses the captures not yet archived and
+  lets a game still in its window be fetched, and paid for, again.
 - The headshot cache is per-box and gitignored, so `headshots` runs on the dev box
   and the prod box independently and is deliberately absent from `sync_to_prod.sh`'s
   `COLLECTOR_RELS` — don't "fix" that omission by adding it.
@@ -129,8 +137,7 @@ against the offers already on disk, so it costs one archive read and no scrape.
 20 8-20 * * *          <repo-dir>/scripts/run_job.sh export-line-movement
 ```
 
-Keep it off the `:50` minute `prophecize` and `close-lines` already share — it
-takes the same archive lock.
+Keep it off `prophecize`'s `:50` minute — it takes the same archive lock.
 
 Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the prod
 crontab — they run on the dev box beside the manual weekly `meditate`, then
