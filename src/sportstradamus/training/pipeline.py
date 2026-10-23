@@ -2478,8 +2478,8 @@ def _build_filedict(
 
 
 def _persist_player_metadata(X_test: pd.DataFrame, splits: dict) -> None:
-    # Player key + game date enable the offline scorecard's player-clustered Gate-1
-    # bootstrap; the i.i.d. bootstrap over-credits repeated-player panels without them.
+    # The offline scorecard's Gate 1 resamples game dates and reports a player-clustered
+    # bound; a row bootstrap alone over-credits rows that share a slate or a player.
     # Guard is real — some leagues (e.g. team-level markets) omit "Player" entirely.
     if splits.get("players_test") is not None:
         X_test["Player"] = splits["players_test"]
