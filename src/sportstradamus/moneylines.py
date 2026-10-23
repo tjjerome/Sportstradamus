@@ -148,17 +148,22 @@ def _active_in_scope(sport, leagues=None):
 
 
 def _get_with_retry(url, params=None):
-    """GET ``url`` with one 429-retry. Returns the ``requests.Response``.
+    """GET ``url``, retrying a 429 or a network blip once. Returns the ``requests.Response``.
 
-    The Odds API hands back 429s under bursty load; a single 1-second
-    retry clears them in practice. As the single chokepoint for all Odds API
+    The Odds API hands back 429s under bursty load, and connection drops and read
+    timeouts are just as transient; a single 1-second retry clears either in
+    practice. Unretried, one read timeout cost a broad confer every league's staged
+    props. A second network error raises. As the single chokepoint for all Odds API
     HTTP, every response is fed to the :mod:`odds_budget` usage ledger. A
     ``401`` (out of credits / bad key) raises :class:`OddsAPIAuthError`;
-    other non-200 statuses propagate back so callers can decide whether to
-    ``continue`` or bail.
+    other non-200 statuses, a second 429 included, propagate back so callers
+    can decide whether to ``continue`` or bail.
     """
-    res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
-    if res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
+    try:
+        res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
+    except (requests.ConnectionError, requests.Timeout):
+        res = None
+    if res is None or res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         sleep(1)
         res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
     # Before the 401 raise so exhausted-key responses still hit the ledger.
