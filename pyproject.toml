@@ -52,7 +52,8 @@ nflreadpy = "^0.1.2"
 polars = "^1.33.1"
 pyarrow = "^23.0.1"
 scrapeops-python-requests = "^0.4.7"
-streamlit = ">=1.38"
+# 1.66.1 is the first release that allows Pillow 13 and its security fixes.
+streamlit = ">=1.66.1"
 plotly = ">=5.18"
 streamlit-aggrid = "^1.2.1.post2"
 # Constellation graph layout (dashboard); previously reached the env only as a
