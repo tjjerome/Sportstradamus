@@ -77,6 +77,7 @@ def test_leg_field_reads_raw_offer_row():
     assert leg_field(OFFER_ROW, "market") == "PTS"
     assert leg_field(OFFER_ROW, "bet") == "Over"
     assert leg_field(OFFER_ROW, "line") == 26.5
+    assert leg_field({"League": "NBA"}, "league") == "NBA"  # the constellation's display name
 
 
 def test_leg_field_defaults_when_missing():

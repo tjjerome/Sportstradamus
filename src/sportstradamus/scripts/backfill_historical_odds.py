@@ -18,15 +18,26 @@ Validate before spending: ``--dry-run`` makes the same paid API calls but
 routes the parsed result into a capturing stub (no archive write) and prints
 the per-book ``ev`` spread per market. A non-zero cross-book std means real
 de-vig came back; a zero std means the source is degenerate too and a backfill
-will not help.
+will not help. For a market with no archived rows yet (the NFL combo markets),
+``--dates-from Moneyline`` seeds the game-dates from an archived market,
+``--props-only`` skips the sport-level game-line call those windows already
+hold, and ``--key-name`` picks which ``creds/keys.json`` entry pays.
 
     poetry run python -m sportstradamus.scripts.backfill_historical_odds \
         --league NFL --markets "passing yards,attempts,completions" \
         --start 2023-10-29 --end 2023-10-29 --max-dates 1 --dry-run
+
+A pull paid from the key live polling runs on takes ``--surplus-only``: it buys
+only the dates the credit cycle's leftover covers
+(:func:`sportstradamus.helpers.odds_budget.backfill_allowance`), and with
+``--newest-first`` the history it holds is always one unbroken block ending at
+``--end``. The ``odds-backfill`` cron in docs/OPERATIONS.md runs it that way.
 """
 
+import bisect
 import datetime
 import importlib.resources as pkg_resources
+import itertools
 import json
 from pathlib import Path
 
@@ -36,8 +47,15 @@ import numpy as np
 import pytz
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive
-from sportstradamus.moneylines import OddsAPIAuthError, get_moneylines, get_props
+from sportstradamus.helpers import Archive, odds_budget
+from sportstradamus.moneylines import (
+    ODDS_API_SPORTS_URL,
+    OddsAPIAuthError,
+    _get_with_retry,
+    _region_markets,
+    get_moneylines,
+    get_props,
+)
 
 # Matches Archive's default DB location (resolved relative to the repo cwd).
 ARCHIVE_DB = Path("archive/archive.duckdb")
@@ -48,6 +66,15 @@ PROGRESS_PATH = Path("archive/backfill_progress.json")
 # creds/keys.json entry funding paid historical fetches; get_props takes the
 # key string itself while get_moneylines takes the whole creds dict.
 HISTORICAL_KEY_NAME = "odds_api_max"
+
+# The Odds API bills a historical events list one credit and each event's odds
+# call ten per market (one region a market).
+HISTORICAL_EVENTS_COST = 1
+HISTORICAL_MARKET_COST = 10
+
+# Games priced beyond a date's archived count: a 49ers game has left no Moneyline rows since
+# 2024 (docs/handoffs/honest-receipts.md), and an unpriced game spends past the leftover.
+EXTRA_GAMES_PRICED = 1
 
 # Historical *_alternate market keys (availability probed 2026-07-09, all
 # five leagues) mapped onto the primary market's stat_map name so their rungs
@@ -160,18 +187,67 @@ def _load_keys_and_props(league, markets=None, alt_mode=None):
     return apikey, {league: subset}
 
 
-def _game_dates(league, props, start, end):
-    """Distinct archived game-dates for the league in ``[start, end]``."""
-    want = [m.strip() for m in props[league].values()]
+def _game_dates(league, markets, start, end):
+    """Distinct archived game-dates for ``markets`` in ``[start, end]``."""
     con = duckdb.connect(str(ARCHIVE_DB), read_only=True)
     rows = con.execute(
         "SELECT DISTINCT game_date FROM odds "
         "WHERE league=? AND market = ANY(?) AND game_date BETWEEN ? AND ? "
         "ORDER BY game_date",
-        [league, want, start, end],
+        [league, list(markets), start, end],
     ).fetchall()
     con.close()
     return [r[0] for r in rows]
+
+
+def _games_per_date(league, dates):
+    """Games on each archived game-date, from its Moneyline rows: two team entities a game."""
+    con = duckdb.connect(str(ARCHIVE_DB), read_only=True)
+    rows = con.execute(
+        "SELECT game_date, COUNT(DISTINCT entity) FROM odds "
+        "WHERE league=? AND market='Moneyline' AND game_date = ANY(?) GROUP BY game_date",
+        [league, dates],
+    ).fetchall()
+    con.close()
+    # A game with one side archived still costs a whole event call.
+    return {game_date: (teams + 1) // 2 for game_date, teams in rows}
+
+
+def _affordable_runs(dates, league, props, paying_key):
+    """Yield the leading runs of ``dates`` the credit cycle's leftover pays for.
+
+    The leftover is :func:`odds_budget.backfill_allowance` on the paying key's live
+    remaining-credits header (the sports index is free). A date is priced at one events
+    call plus ``HISTORICAL_MARKET_COST`` per market for each archived game and
+    ``EXTRA_GAMES_PRICED`` more, so a bought run costs less than it was priced at and
+    leaves credits over. Each run is planned on the balance the one before it left, until
+    the next date does not fit; a run ends there rather than buying a cheaper date behind it.
+    """
+    per_game = HISTORICAL_MARKET_COST * sum(len(m) for _, m in _region_markets(league, props))
+    # One read, before the first yield: the first bought run's Archive() takes the read-write
+    # lock for the rest of the process, and DuckDB refuses a read-only connection beside it.
+    games = _games_per_date(league, dates)
+    while dates:
+        quota = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": paying_key})
+        remaining = int(quota.headers["X-Requests-Remaining"])
+        allowance = odds_budget.backfill_allowance(
+            datetime.datetime.now(pytz.utc), remaining, odds_budget.BUDGET_CFG
+        )
+        spend = list(
+            itertools.accumulate(
+                HISTORICAL_EVENTS_COST + per_game * (games.get(d, 0) + EXTRA_GAMES_PRICED)
+                for d in dates
+            )
+        )
+        n_affordable = bisect.bisect_right(spend, allowance)
+        click.echo(
+            f"surplus: {remaining} credits remaining, {allowance:.0f} spare -> {n_affordable} "
+            f"date(s), priced at most {spend[n_affordable - 1] if n_affordable else 0} credits"
+        )
+        if not n_affordable:
+            return
+        yield dates[:n_affordable]
+        dates = dates[n_affordable:]
 
 
 def _report_dry_run(capture):
@@ -193,12 +269,14 @@ def _report_dry_run(capture):
         click.echo(f"  ladder rungs {market}: {n}")
 
 
-def _job_sig(league, props, alt_mode=None, layer="feature", game_lines_only=False):
+def _job_sig(
+    league, props, alt_mode=None, layer="feature", game_lines_only=False, props_only=False
+):
     """Stable key for the resume log: league + market set, tagged by mode.
 
-    Alt-mode, close-layer and game-lines-only runs fetch different data for the
-    same market names, so they must not share resume state with the plain
-    feature job (whose historical sig format stays untouched).
+    Alt-mode, close-layer, game-lines-only and props-only runs fetch different
+    data for the same market names, so they must not share resume state with
+    the plain feature job (whose historical sig format stays untouched).
     """
     sig = f"{league}|{','.join(sorted(props[league].values()))}"
     if alt_mode:
@@ -207,6 +285,8 @@ def _job_sig(league, props, alt_mode=None, layer="feature", game_lines_only=Fals
         sig += f"|{layer}"
     if game_lines_only:
         sig += "|gamelines"
+    if props_only:
+        sig += "|propsonly"
     return sig
 
 
@@ -259,10 +339,12 @@ def _backfill(
     alt_mode=None,
     layer="feature",
     game_lines_only=False,
+    props_only=False,
+    surplus_only=False,
 ):
     """Fetch each date, flushing + checkpointing per date so a credit-out exit
     is safe and the same command resumes from where it stopped."""
-    job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
+    job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only, props_only)
     done = _load_done(job_sig)
     remaining = [d for d in dates if d.isoformat() not in done]
     click.echo(f"{league}: {len(done)} done, {len(remaining)} to fetch this run")
@@ -273,8 +355,9 @@ def _backfill(
         click.echo(
             f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})"
         )
+        failed_before = odds_budget.run_summary()["failed"]
         try:
-            if layer == "feature":
+            if layer == "feature" and not props_only:
                 get_moneylines(
                     archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
                 )
@@ -289,12 +372,14 @@ def _backfill(
                     observed_at_hour=observed_at_hour,
                 )
         except OddsAPIAuthError as e:
-            click.echo(f"STOP (401): {e}")
-            click.echo(
-                f"Out of credits/auth at {d}. {len(done)} date(s) saved; partial {d} discarded. "
+            raise click.ClickException(
+                f"STOP (401) at {d}: {e}. {len(done)} date(s) saved; partial {d} discarded. "
                 "Refill credits and re-run the SAME command to resume."
-            )
-            return
+            ) from e
+        # The fetch logs a failed call and moves on. A leftover pull runs unattended and
+        # its block must stay whole, so a date with one is left for the next cycle.
+        if surplus_only and odds_budget.run_summary()["failed"] > failed_before:
+            raise click.ClickException(f"{d}: an Odds API call failed; date not marked done")
         archive.write()
         _mark_done(job_sig, d.isoformat())
         done.add(d.isoformat())
@@ -332,7 +417,7 @@ def _backfill(
     "--layer",
     type=click.Choice(["feature", "close"]),
     default="feature",
-    help="feature: pre-read snapshot (observed_at 01:00, includes game lines). "
+    help="feature: pre-read snapshot (props observed_at 01:00; game lines at the snapshot hour). "
     "close: evaluation-only closing snapshot (observed_at 23:00, props only).",
 )
 @click.option(
@@ -340,6 +425,38 @@ def _backfill(
     is_flag=True,
     help="Fetch only h2h/totals/spreads, skipping the per-event prop calls. "
     "For repairing a window where game lines went unfetched but props did not.",
+)
+@click.option(
+    "--key-name",
+    default=HISTORICAL_KEY_NAME,
+    show_default=True,
+    help="creds/keys.json entry that funds the paid historical calls.",
+)
+@click.option(
+    "--dates-from",
+    default=None,
+    help="Comma-separated archived markets whose game-dates seed the run, for markets "
+    "with no archived rows yet (e.g. Moneyline).",
+)
+@click.option(
+    "--props-only",
+    is_flag=True,
+    help="Skip the sport-level game-line call (h2h/totals/spreads) when the window's "
+    "Moneyline/Totals rows already exist; add missing game lines later with "
+    "--game-lines-only, never the plain command.",
+)
+@click.option(
+    "--newest-first",
+    is_flag=True,
+    help="Walk the game-dates newest to oldest, so a pull that stops early holds one "
+    "unbroken block ending at --end.",
+)
+@click.option(
+    "--surplus-only",
+    is_flag=True,
+    help="Fetch only the dates the live polling key's leftover pays for, per the budget "
+    "governor: nothing until its credit cycle's last day, and a date with a failed call "
+    "stays unbought. Needs --props-only and that key in --key-name.",
 )
 def main(
     league,
@@ -353,12 +470,17 @@ def main(
     alt_mode,
     layer,
     game_lines_only,
+    key_name,
+    dates_from,
+    props_only,
+    newest_first,
+    surplus_only,
 ):
     """Re-fetch real historical book EVs for degenerate-seed markets.
 
     Resumable: completed game-dates are logged to ``PROGRESS_PATH`` after each
-    date's write, so a run that hits the Odds API credit limit (HTTP 401) exits
-    cleanly and the same invocation picks up where it left off.
+    date's write, so a run that hits the Odds API credit limit (HTTP 401) stops
+    with a non-zero exit and the same invocation picks up where it left off.
     """
     if layer == "feature" and snapshot_hour > FEATURE_SNAPSHOT_MAX_HOUR:
         raise click.ClickException(
@@ -375,7 +497,29 @@ def main(
         # --dry-run reports per-book prop ev spread, which this mode never fetches;
         # letting it through would pay the full prop bill the flag exists to avoid.
         raise click.ClickException("--dry-run probes prop ev spread; nothing to probe here")
+    if props_only and game_lines_only:
+        raise click.ClickException("--props-only and --game-lines-only are opposites")
+    if props_only and layer != "feature":
+        raise click.ClickException("--layer close is already props-only")
+    if dates_from and check_all:
+        raise click.ClickException(
+            "--dates-from seeds dates from the archive; --check-all walks the calendar"
+        )
+    if surplus_only and not props_only:
+        raise click.ClickException(
+            "--surplus-only prices the per-event prop calls only; pass --props-only"
+        )
+    if surplus_only and dry_run:
+        raise click.ClickException(
+            "--surplus-only sizes a real run; --dry-run pays for every date it probes"
+        )
+    if surplus_only and check_all:
+        raise click.ClickException(
+            "--surplus-only prices archived game-dates; --check-all walks the calendar"
+        )
     apikey, props = _load_keys_and_props(league, markets, alt_mode)
+    # moneylines' historical game-line path reads the odds_api_max slot by name.
+    apikey[HISTORICAL_KEY_NAME] = apikey[key_name]
     sport_key = ODDS_API_SPORT_KEYS[league]
     if check_all:
         dates = [
@@ -389,7 +533,10 @@ def main(
             )
         ]
     else:
-        dates = _game_dates(league, props, start, end)
+        seed = [m.strip() for m in dates_from.split(",")] if dates_from else props[league].values()
+        dates = _game_dates(league, seed, start, end)
+    if newest_first:
+        dates = dates[::-1]
     click.echo(
         f"{league}: {len(dates)} archived game-date(s) {start}..{end}, markets={list(props[league].values())}"
     )
@@ -400,13 +547,26 @@ def main(
         )
         return
 
-    if max_dates:
-        job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
+    if max_dates or surplus_only:
+        job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only, props_only)
         done = _load_done(job_sig)
-        dates = [d for d in dates if d.isoformat() not in done][:max_dates]
-    _backfill(
-        apikey, props, league, sport_key, dates, snapshot_hour, alt_mode, layer, game_lines_only
-    )
+        dates = [d for d in dates if d.isoformat() not in done][: max_dates or None]
+    runs = _affordable_runs(dates, league, props, apikey[key_name]) if surplus_only else [dates]
+    for run in runs:
+        _backfill(
+            apikey,
+            props,
+            league,
+            sport_key,
+            run,
+            snapshot_hour,
+            alt_mode,
+            layer,
+            game_lines_only,
+            props_only,
+            surplus_only,
+        )
+    click.echo(f"credits spent this run: {odds_budget.run_summary()['cost']}")
 
 
 if __name__ == "__main__":

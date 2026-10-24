@@ -41,6 +41,9 @@ class LazyGroup(click.Group):
         "meditate": "sportstradamus.training.cli:meditate",
         "reflect": "sportstradamus.nightly:run",
         "dashboard": "sportstradamus.dashboard:run",
+        # Top level, not under `admin`: this group is what scripts/run_job.sh dispatches as a
+        # cron job, and export-line-movement has a case there. `admin` is hand-run maintenance.
+        "export-line-movement": "sportstradamus.scripts.export_line_movement:export_line_movement",
     },
 )
 def cli() -> None:
@@ -67,6 +70,7 @@ cli.add_command(
             "fp": "sportstradamus.collectors.fantasypoints.cli:fp_fetch",
             "ctg": "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch",
             "savant": "sportstradamus.collectors.baseballsavant.cli:savant_fetch",
+            "headshots": "sportstradamus.collectors.headshots:headshots",
         },
     )
 )
@@ -95,6 +99,9 @@ cli.add_command(
             "backfill-live-metrics": "sportstradamus.scripts.backfill_live_metrics:main",
             "backfill-history-eras": "sportstradamus.scripts.backfill_history_eras:backfill_history_eras",
             "count-family-screen": "sportstradamus.scripts.count_family_screen:main",
+            "tail-scorecard": "sportstradamus.scripts.tail_scorecard:main",
+            "feature-parity": "sportstradamus.scripts.feature_parity:main",
+            "restamp-identity": "sportstradamus.scripts.restamp_strategy_identity:main",
         },
     )
 )

@@ -12,6 +12,8 @@ half-total (the two sides sum to the game total) per the v2 context contract.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 
 from sportstradamus.prediction.stories import (
@@ -19,6 +21,18 @@ from sportstradamus.prediction.stories import (
     attach_offer_why,
     attach_parlay_theses,
 )
+from sportstradamus.prediction.stories.bank import why_bank
+from sportstradamus.prediction.stories.context import Leg
+from sportstradamus.prediction.stories.effects import split_effects
+from sportstradamus.prediction.stories.legs import offer_index
+from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
+from sportstradamus.prediction.stories.why import (
+    _anchor_clauses,
+    _form_clause,
+    _matchup_clause,
+    story_dek,
+)
+from sportstradamus.stats.base import Stats
 
 _DATE = "2026-06-13"
 
@@ -147,8 +161,8 @@ _OFFERS = pd.DataFrame(
 )
 
 # Three families: Tatum drives BOS family 1 (two markets, blowout); BOS family 2
-# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script;
-# Jokic drives DEN/MIA.
+# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script,
+# Mixed, whose same-family clauses name both players; Jokic drives DEN/MIA.
 _PARLAYS = pd.DataFrame(
     [
         {
@@ -193,23 +207,32 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p3b"
+    assert STORIES_VERSION == "p6"
 
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
-        ("BOS/PHI", 1.0): "Jayson Tatum piles on before the BOS/PHI bench empties",
-        ("BOS/PHI", 2.0): "edges on both sides of the ledger in BOS/PHI",
-        ("DEN/MIA", 1.0): ("The closer DEN/MIA gets, the better Nikola Jokic's passes become"),
+        ("BOS/PHI", 1.0): (
+            "Jayson Tatum runs up the score before the BOS/PHI spread pulls the starters"
+        ),
+        ("BOS/PHI", 2.0): (
+            "The BOS/PHI margin drains one side: Jayson Tatum clears the points number "
+            "while Joel Embiid comes up short on points"
+        ),
+        ("DEN/MIA", 1.0): (
+            "One-possession games need a passer, and Nikola Jokic carries DEN/MIA home"
+        ),
     }
 
 
-def test_no_standout_family_routes_to_game_script_not_a_star():
+def test_no_standout_family_routes_to_game_script_and_names_both_sides():
     """The even Embiid-Under / Tatum-Over split has no leg-majority ⇒ the headline
-    is about the game, naming neither player (the v1 alphabetical-star bug)."""
+    is about the game, not one star picked alphabetically (the v1 bug). Both legs
+    share a family, so the Mixed clauses name each side's player: the split is
+    stated, never a vague "ride some, fade the rest"."""
     thesis = _theses_by_family(_PARLAYS, _OFFERS)[("BOS/PHI", 2.0)]
-    assert "Tatum" not in thesis and "Embiid" not in thesis
-    assert thesis
+    assert "Jayson Tatum" in thesis and "Joel Embiid" in thesis
+    assert thesis.index("Jayson Tatum") > 0
 
 
 def test_thesis_written_on_every_row():
@@ -223,17 +246,18 @@ def test_why_exact_strings():
     out = attach_offer_why(_OFFERS.copy())
     whys = {(r["Player"], r["Market"], r["Bet"]): r["Why"] for _, r in out.iterrows()}
     assert whys[("Jayson Tatum", "PTS", "Over")] == (
-        "Running 3.5 past a 28.5 line over his last 5, with 2 of daylight above it "
-        "head-to-head, the matchup grades out friendly, a 7-pt gap on the over: "
-        "model 59%, book 52%."
+        "The over has his last 5 averaging 3.5 above the 28.5 line, with 2 of daylight above "
+        "it head-to-head, facing an opponent that lets this stat climb, a 7-pt gap on the "
+        "over: model 59%, book 52%."
     )
     assert whys[("Joel Embiid", "PTS", "Under")] == (
-        "2 below a 30.5 line over his last 5, and 1.5 short of it when these two meet, "
-        "a matchup that leans the right way, model 57%, book 51% — the under carries "
-        "a 6-pt edge."
+        "The under goes with his last 5 running 2 short of the 30.5 line, and 1.5 short of it "
+        "when these two meet, into a matchup that has been suppressing this stat, model 57%, "
+        "book 51% — the under carries a 6-pt edge."
     )
     assert whys[("Jayson Tatum", "REB", "Over")] == (
-        "1 above a 8.5 line over his last 5, a 6-pt gap on the over: model 56%, book 50%."
+        "The over goes with his last 5 running 1 past the 8.5 line, a 6-pt gap on the over: "
+        "model 56%, book 50%."
     )
 
 
@@ -533,6 +557,115 @@ def test_muddled_mixed_slip_names_nobody(monkeypatch):
     assert "Alpha" not in thesis and "Zeta" not in thesis
 
 
+def _effect_leg(
+    player: str, bet: str, market: str, category: str, win_prob: float, *, negative: bool = False
+) -> Leg:
+    """An enriched leg carrying only the fields the effect clauses read."""
+    return Leg(
+        player=player,
+        bet=bet,
+        line=1.5,
+        market=market,
+        category=category,
+        negative=negative,
+        win_prob=win_prob,
+    )
+
+
+def test_effect_clauses_name_each_side_s_stat_family():
+    """Sides in different families each speak through their own stat noun."""
+    effects = split_effects(
+        [
+            _effect_leg("Tarik Skubal", "Over", "pitcher strikeouts", "k's", 0.61),
+            _effect_leg("Bobby Witt Jr.", "Under", "hits", "scoring", 0.58),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert effects == {"up": "the strikeouts climb", "down": "the hits stay down"}
+    assert effects["up"] != effects["down"]
+
+
+def test_effect_clauses_name_the_players_when_one_family_holds_both_sides():
+    """Two scoring legs would print the same noun twice, so the players carry the clause."""
+    effects = split_effects(
+        [
+            _effect_leg("Aaron Judge", "Over", "total bases", "scoring", 0.62),
+            _effect_leg("Alex Bregman", "Under", "hits", "scoring", 0.57),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert effects == {
+        "up": "Aaron Judge clears the total bases number",
+        "down": "Alex Bregman comes up short on hits",
+    }
+
+
+def test_effect_clauses_name_the_higher_conviction_leg_on_a_crowded_side():
+    """One market on both sides: the named fader is the stronger read, not the first name."""
+    effects = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Over", "PTS", "scoring", 0.59),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.71),
+            _effect_leg("Tyrese Maxey", "Under", "PTS", "scoring", 0.55),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert effects == {
+        "up": "Jayson Tatum clears the points number",
+        "down": "Joel Embiid comes up short on points",
+    }
+
+
+def test_effect_clauses_read_a_negative_market_as_the_thriving_side():
+    """Both legs are bet Under; the TOV leg thrives and the PTS leg fades."""
+    effects = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Under", "TOV", "mistakes", 0.63, negative=True),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.57),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert effects == {"up": "the turnovers stay down", "down": "the points dry up"}
+
+
+def test_effect_clauses_keep_acronym_board_names_capitalised():
+    """A board name reads as prose mid-clause, but FG and RBIs are spelled that way anywhere."""
+    nba = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Over", "FGM", "scoring", 0.60),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.57),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert nba["up"] == "Jayson Tatum clears the FG made number"
+    mlb = split_effects(
+        [
+            _effect_leg("Aaron Judge", "Over", "hits+runs+rbi", "scoring", 0.60),
+            _effect_leg("Alex Bregman", "Under", "total bases", "scoring", 0.57),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert mlb["up"] == "Aaron Judge clears the hits + runs + RBIs number"
+
+
+def test_mixed_headline_renders_both_effect_clauses(monkeypatch):
+    """The engine fills a Mixed cell's effect slots: the split Tatum/Embiid family."""
+    from sportstradamus.prediction.stories import engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "bank_cell", lambda *_k: ["{g}: {up} and {down}"])
+    mixed = _PARLAYS[_PARLAYS["Family"] == 2.0]
+    thesis = attach_parlay_theses(mixed.copy(), _OFFERS.copy())["Thesis"].iloc[0]
+    assert thesis == (
+        "BOS/PHI: Jayson Tatum clears the points number and Joel Embiid comes up short on points"
+    )
+
+
 def test_wnba_why_uses_her():
     row = pd.DataFrame(
         [
@@ -556,3 +689,248 @@ def test_why_rotation_deterministic():
     a = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     b = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     assert a == b
+
+
+def test_matchup_clause_reads_the_defense_on_an_under():
+    """The per-offer matchup says what the defense does with the stat, true on either
+    side of the bet (naming the side is the edge clause's job); the dek says it only
+    when it backs the bet."""
+    bank = why_bank()
+    for dvpoa, branch, in_dek in ((-0.10, "takes", True), (0.10, "gives", False)):
+        facts = {"DVPOA": dvpoa, "Bet": "Under"}
+        assert _matchup_clause(pd.Series(facts)) in bank["why"]["matchup"][branch]
+        dek_clauses = _anchor_clauses("Joel Embiid", facts, _DATE)
+        if in_dek:
+            (dek_clause,) = dek_clauses
+            assert dek_clause in {v.format(p="Joel Embiid") for v in bank["dek"]["matchup"][branch]}
+        else:
+            assert dek_clauses == []
+
+
+def test_form_clause_is_bet_factual():
+    """An Under on a player running above the line reads as form cutting against it,
+    and one on a player running below it as form backing it; the dek carries only
+    the backing read."""
+    bank = why_bank()
+    for avg5, branch, in_dek in ((2.0, "above_against", False), (-2.0, "below_for", True)):
+        facts = {"Avg 5": avg5, "Line": 30.5, "Bet": "Under"}
+        why = {v.format(dev="2", line="30.5", pronoun="his") for v in bank["why"]["form"][branch]}
+        assert _form_clause(pd.Series(facts)) in why
+        dek_clauses = _anchor_clauses("Joel Embiid", facts, _DATE)
+        if in_dek:
+            (dek_clause,) = dek_clauses
+            assert dek_clause in {
+                v.format(p="Joel Embiid", dev="2", line="30.5") for v in bank["dek"]["form"][branch]
+            }
+        else:
+            assert dek_clauses == []
+
+
+# Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a
+# single name map would let the pitcher shadow the hitter's batting side. The two
+# Max Muncys are the same collision within one role, and they disagree.
+_MLB_PLAYERS = {
+    592450: {"name": "Aaron Judge", "bats": "R"},
+    605141: {"name": "Mookie Betts", "bats": "R"},
+    677651: {"name": "Luis Garcia", "bats": "L"},
+    571970: {"name": "Max Muncy", "bats": "L"},
+    676059: {"name": "Max Muncy", "bats": "R"},
+    543037: {"name": "Gerrit Cole", "throws": "R"},
+    472610: {"name": "Luis Garcia", "throws": "R"},
+}
+# NYY and HOU have a probable starter and a posted card; LAD has neither yet.
+_MLB_UPCOMING = {
+    "NYY": {"Opponent Pitcher": "Gerrit Cole", "Batting Order": ["Aaron Judge"]},
+    "HOU": {"Opponent Pitcher": "Luis Garcia", "Batting Order": ["Mookie Betts"]},
+    "LAD": {"Opponent Pitcher": "", "Batting Order": []},
+}
+
+
+def _fake_mlb() -> Stats:
+    """A ``Stats`` holding the ``StatsMLB`` data ``attach_lineup_columns`` reads."""
+    mlb = Stats()
+    mlb.players = _MLB_PLAYERS
+    mlb.upcoming_games = _MLB_UPCOMING
+    return mlb
+
+
+def _mlb_offer(*, position="B3", bats="R", opp_hand="L", lineup="posted") -> pd.DataFrame:
+    """One MLB hitter offer already carrying the lineup columns."""
+    return pd.DataFrame(
+        [
+            {
+                "League": "MLB",
+                "Date": _DATE,
+                "Team": "NYY",
+                "Player": "Aaron Judge",
+                "Market": "total bases",
+                "Bet": "Over",
+                "Line": 1.5,
+                "Avg 5": 0.6,
+                "Position": position,
+                "Bats": bats,
+                "Opp Hand": opp_hand,
+                "Lineup": lineup,
+            }
+        ]
+    )
+
+
+# A posted slot is tonight's card; a usual one is only the modal slot get_depth
+# fell back to, and each has its own clause family.
+_LINEUP_FAMILIES = (("posted", "lineup"), ("usual", "lineup_usual"))
+
+
+def _lineup_variants(family: str, branch: str, **slots: str) -> set[str]:
+    return {variant.format(**slots) for variant in why_bank()["why"][family][branch]}
+
+
+def test_batting_slot_maps_only_real_lineup_slots():
+    """The seam with correlation.py's Position labels: B1-B9 are slots, nothing else is."""
+    assert [batting_slot(f"B{n}") for n in range(1, 10)] == [
+        "leadoff",
+        "2nd",
+        "3rd",
+        "4th",
+        "5th",
+        "6th",
+        "7th",
+        "8th",
+        "9th",
+    ]
+    assert all(batting_slot(p) is None for p in ("P", "B0", "B10", "", ["B1", "B2"]))
+
+
+def test_lineup_clause_reads_the_platoon_edge():
+    """A lefty batting 3rd against a right-hander gets both the slot and the split."""
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="L", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        assert "3rd" in why, lineup
+        variants = _lineup_variants(family, "platoon_edge", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_reads_a_same_side_matchup():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="R", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "same_side", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_calls_out_a_switch_hitter():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="S", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "switch", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_without_a_probable_starter_says_only_the_slot():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(opp_hand="", lineup=lineup))["Why"].iloc[0]
+        assert any(v in why for v in _lineup_variants(family, "slot_only", slot="3rd")), why
+        assert "-hander" not in why
+
+
+def test_usual_slot_never_asserts_tonights_order():
+    """The modal slot is habit, so none of the posted-card wording may appear."""
+    why = attach_offer_why(_mlb_offer(lineup="usual"))["Why"].iloc[0]
+    posted = _lineup_variants("lineup", "platoon_edge", slot="3rd", throws="left")
+    assert not any(v in why for v in posted), why
+
+
+def test_lineup_clause_ignores_a_nan_opposing_hand():
+    """An unresolved starter arrives as NaN off the parquet, not as a blank string."""
+    why = attach_offer_why(_mlb_offer(opp_hand=float("nan")))["Why"].iloc[0]
+    assert any(v in why for v in _lineup_variants("lineup", "slot_only", slot="3rd")), why
+
+
+def test_pitcher_case_is_unchanged_by_the_lineup_columns():
+    """A pitcher carries no batting slot, so his case is byte-identical to the pre-WS-F one."""
+    pitcher = _mlb_offer(position="P", bats="", opp_hand="", lineup="")
+    before = attach_offer_why(pitcher.drop(columns=["Bats", "Opp Hand", "Lineup"]))["Why"].iloc[0]
+    assert before
+    assert attach_offer_why(pitcher)["Why"].iloc[0] == before
+
+
+def test_dek_names_the_posted_batting_slot():
+    """A hitter-anchored story's subhead carries the batting order and the starter's hand.
+
+    ``story_dek`` reads only ``date``, ``bet_df``, and ``g.p_model`` off the
+    scoring context for a single-leg core (the cluster clause needs two legs).
+    """
+    sctx = SimpleNamespace(
+        date=_DATE,
+        bet_df={0: {"Player": "Aaron Judge", "Bet": "Over", "Line": 1.5, "Market": "total bases"}},
+        g=SimpleNamespace(p_model=[0.61]),
+    )
+    dek = story_dek([0], sctx, offer_index(_mlb_offer()), "")
+    assert "Aaron Judge" in dek
+    assert "3rd" in dek and "left" in dek
+
+
+def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
+    """Posted vs usual, the no-starter blank, and the rows that carry no lineup at all.
+
+    The NBA row is the reason the League check exists: ``B1`` is a bench label
+    there, not a leadoff hitter. The two Luis Garcia rows cover the cross-role
+    name collision from both sides — the hitter keeps his own batting side, and
+    the pitcher of that name still resolves as a starter's throwing hand. Max
+    Muncy is the same-role collision: two batters, opposite sides, so the side is
+    dropped rather than guessed at.
+    """
+    offers = pd.DataFrame(
+        [
+            {"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"},
+            {"League": "MLB", "Team": "NYY", "Player": "Mookie Betts", "Position": "B1"},
+            {"League": "MLB", "Team": "LAD", "Player": "Mookie Betts", "Position": "B2"},
+            {"League": "MLB", "Team": "NYY", "Player": "Luis Garcia", "Position": "B4"},
+            {"League": "MLB", "Team": "NYY", "Player": "Max Muncy", "Position": "B5"},
+            {"League": "MLB", "Team": "HOU", "Player": "Mookie Betts", "Position": "B2"},
+            {"League": "MLB", "Team": "NYY", "Player": "Gerrit Cole", "Position": "P"},
+            {"League": "NBA", "Team": "BOS", "Player": "Jayson Tatum", "Position": "B1"},
+        ]
+    ).assign(Date=_DATE)
+    out = attach_lineup_columns(offers, {"MLB": _fake_mlb()})
+    assert out[["Bats", "Opp Hand", "Lineup"]].to_numpy().tolist() == [
+        ["R", "R", "posted"],
+        ["R", "R", "usual"],
+        ["R", "", "usual"],
+        ["L", "R", "usual"],
+        ["", "R", "usual"],
+        ["R", "R", "posted"],
+        ["", "", ""],
+        ["", "", ""],
+    ]
+
+
+def test_attach_lineup_columns_reads_the_game_of_the_rows_own_date():
+    """Judge is on tonight's card against a right-hander; tomorrow his team faces a
+    left-hander and no card is posted yet.
+    """
+    tomorrow = "2026-06-14"
+    mlb = _fake_mlb()
+    mlb.players = _MLB_PLAYERS | {1: {"name": "Lefty Arm", "throws": "L"}}
+    mlb.upcoming_games_by_date = {
+        ("NYY", _DATE): _MLB_UPCOMING["NYY"],
+        ("NYY", tomorrow): {"Opponent Pitcher": "Lefty Arm", "Batting Order": []},
+    }
+    judge = {"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"}
+    offers = pd.DataFrame([judge | {"Date": _DATE}, judge | {"Date": tomorrow}])
+
+    out = attach_lineup_columns(offers, {"MLB": mlb})
+
+    assert out[["Opp Hand", "Lineup"]].to_numpy().tolist() == [["R", "posted"], ["L", "usual"]]
+
+
+def test_attach_lineup_columns_blanks_when_mlb_is_not_loaded():
+    """Out of season MLB is never loaded, so every row keeps blank lineup columns."""
+    offers = pd.DataFrame(
+        [{"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"}]
+    )
+    out = attach_lineup_columns(offers, {"NBA": _fake_mlb()})
+    assert out[["Bats", "Opp Hand", "Lineup"]].to_numpy().tolist() == [["", "", ""]]
+
+
+def test_attach_lineup_columns_on_empty_offers_still_adds_the_columns():
+    out = attach_lineup_columns(pd.DataFrame(), {"MLB": _fake_mlb()})
+    assert {"Bats", "Opp Hand", "Lineup"} <= set(out.columns)

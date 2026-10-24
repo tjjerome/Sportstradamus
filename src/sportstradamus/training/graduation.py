@@ -1,17 +1,21 @@
 """Shared lifecycle classification for (league, market) cells.
 
-Joins the offline Gate-1 view (``data/model_stats.parquet``) with the live
-Gate-2 view (``data/live_metrics_per_market.parquet``) and classifies each cell
+Joins the offline Gate-1 view (``data/training/model_stats.parquet``) with the live
+Gate-2 view (``data/runtime/live_metrics_per_market.parquet``) and classifies each cell
 into ``not-shipped`` / ``in-test`` / ``graduated`` / ``demoted``. Both the
-``check-graduation`` display CLI and the ``generate-ship-config`` generator
+``ship graduation`` display CLI and the ``ship config`` generator
 import these functions so the two share one definition of "graduated".
 
-The Gate-2 rule here (positive Gate-1 BSS + at least
+The Gate-2 rule here (a non-negative Gate-1 BSS, then at least
 :data:`MIN_SETTLED_FOR_GRADUATION` settled offers in the
-:data:`GRADUATION_WINDOW_DAYS`-day window + non-negative live book-BSS) is a
-*simplified proxy* of the full Gate 2 in ``docs/ship_gate.md``; see that doc's
-"Known gap" note. ``main`` is dormant (no live metrics yet), so the proxy is
-acceptable until the live aggregator is producing data.
+:data:`GRADUATION_WINDOW_DAYS`-day window, a non-negative live book-BSS and neither
+side's live precision below :data:`MIN_PRECISION_SIDE`) is the live table of
+``docs/ship_gate.md`` ("devel → main (live)").
+
+The selected-tail read rides the same frame as monitor columns: :func:`read_tail` joins the
+offline scorecard (``data/training/tail_scorecard.parquet``) with its nightly live half
+(``data/runtime/live_gap_per_cell.parquet``) and :func:`tail_state` labels each cell against
+the pre-registered bar. Those columns describe a cell; they never move its lifecycle state.
 """
 
 from __future__ import annotations
@@ -22,23 +26,40 @@ from pathlib import Path
 import click
 import pandas as pd
 
+from sportstradamus.helpers.io import LIVE_GAP_PATH, TAIL_SCORECARD_PATH
+from sportstradamus.realized import RECOMMENDED_EDGE_MIN
+
 # Graduation requires at least this many settled offers in the window before the
 # live BSS signal is trustworthy.
 MIN_SETTLED_FOR_GRADUATION = 200
 # The 30d window is the canonical graduation gate (7d is too noisy for state).
 GRADUATION_WINDOW_DAYS = 30
-# Demote a cell when the Bet=Over hit rate (precision_over) falls below this.
-# Precision_over = P(Result=Over | Bet=Over) is the like-for-like metric that
-# matches the training pipeline's `precision_over` column — comparing the
-# aggregate `predicted_over_rate` vs `empirical_over_rate` instead conflates
+# Demote a cell when EITHER recommended side's live hit rate (precision_over
+# or precision_under) falls below this. Precision_side = P(Result=side |
+# Bet=side) is the like-for-like metric that matches the training pipeline's
+# `precision_over`/`precision_under` columns — comparing the aggregate
+# `predicted_over_rate` vs `empirical_over_rate` instead conflates
 # publication-selection bias (Sleeper/UD push Over-skewed offers) with real
-# model bias and produces false-positive demotes (see
-# `/tmp/researcher_fg3m_calibration_divergence.md`, 2026-05-24). Below 0.50
-# the model's Over recommendations lose more often than they win, which is a
-# losing strategy at any boost ≤ 2.0×. Live precision_over is NaN when fewer
-# than `_MIN_BETS_FOR_PRECISION` Over bets exist in the window (see
-# `nightly.py`); the check is skipped in that case.
-MIN_PRECISION_OVER = 0.50
+# model bias and produces false-positive demotes (a research-analyst read of
+# FG3M, 2026-05-24). Below 0.50 that side's recommendations lose more often
+# than they win, a losing strategy at any boost ≤ 2.0×. A side's live
+# precision is NaN when it has fewer than `_MIN_BETS_FOR_PRECISION` bets in
+# the window (see `nightly.py`); NaN means no evidence for that side, so the
+# check is skipped only for that side, not the whole cell.
+MIN_PRECISION_SIDE = 0.50
+# Below this many selected (recommended) legs in the offline replay the selected-tail gap is
+# descriptive only (docs/archive/researcher_train_serve_skew.md section 6, Power); the
+# scorecard flags the same bar.
+DESCRIPTIVE_MIN_SELECTED = 100
+_LIVE_GAP_COLUMNS = ["live_n", "live_gap", "live_gap_hi"]
+# The selected-tail read, one row per cell. The frame carries these dtypes whether or not
+# either sidecar exists, so the lifecycle left-join and the dashboard's float formatting see
+# the same columns on every run.
+_TAIL_COLUMNS = {
+    "league": "object",
+    "market": "object",
+    **dict.fromkeys(["tail_n", "tail_gap", "tail_gap_hi", *_LIVE_GAP_COLUMNS], "float64"),
+}
 
 
 def _is_nan_like(x: object) -> bool:
@@ -47,17 +68,24 @@ def _is_nan_like(x: object) -> bool:
     return x is None or (isinstance(x, float) and math.isnan(x))
 
 
+def _precision_below_min(precision_live: float) -> bool:
+    # NaN means no evidence for this side (too few bets); only a measured
+    # precision can fail the gate.
+    return not _is_nan_like(precision_live) and precision_live < MIN_PRECISION_SIDE
+
+
 def classify_lifecycle(
     gate1_bss: float,
     n_settled: float,
     book_bss_30d: float,
     precision_over_live: float = float("nan"),
+    precision_under_live: float = float("nan"),
 ) -> str:
-    """Map (Gate-1 BSS, n_settled, Gate-2 BSS, precision_over) to a lifecycle state.
+    """Map (Gate-1 BSS, n_settled, Gate-2 BSS, side precisions) to a lifecycle state.
 
-    NaN/negative Gate-1 BSS -> ``not-shipped``; positive Gate-1 BSS but
-    insufficient live data -> ``in-test``; negative live BSS or live
-    precision_over below :data:`MIN_PRECISION_OVER` -> ``demoted``;
+    NaN/negative Gate-1 BSS -> ``not-shipped``; non-negative Gate-1 BSS but
+    insufficient live data -> ``in-test``; negative live BSS or either side's
+    live precision below :data:`MIN_PRECISION_SIDE` -> ``demoted``;
     otherwise -> ``graduated``.
 
     Args:
@@ -65,9 +93,10 @@ def classify_lifecycle(
         n_settled: Settled offer count in the graduation window.
         book_bss_30d: Live 30-day book-relative brier-skill-score.
         precision_over_live: Live 30d hit rate among ``Bet="Over"`` rows
-            (i.e. P(Result=Over | Bet=Over)). NaN -> precision check skipped
-            (typically because the cell has fewer Over bets than
-            ``nightly._MIN_BETS_FOR_PRECISION``).
+            (i.e. P(Result=Over | Bet=Over)). NaN -> no evidence for this
+            side, so its precision check is skipped (typically because the
+            cell has fewer Over bets than ``nightly._MIN_BETS_FOR_PRECISION``).
+        precision_under_live: Same metric for ``Bet="Under"`` rows.
 
     Returns:
         One of ``"not-shipped"``, ``"in-test"``, ``"graduated"``, ``"demoted"``.
@@ -83,9 +112,62 @@ def classify_lifecycle(
         return "in-test"
     if book_bss_30d < 0:
         return "demoted"
-    if not _is_nan_like(precision_over_live) and precision_over_live < MIN_PRECISION_OVER:
+    if _precision_below_min(precision_over_live) or _precision_below_min(precision_under_live):
         return "demoted"
     return "graduated"
+
+
+def tail_state(n: float, gap_hi: float) -> str:
+    """Label a cell's selected-tail gap against the pre-registered bar (decision D2).
+
+    ``"thin"`` below :data:`DESCRIPTIVE_MIN_SELECTED` selected legs (or none measured),
+    ``"honest"`` when the gap's CI upper bound sits under ``realized.RECOMMENDED_EDGE_MIN``,
+    ``"overstated"`` otherwise: above the edge floor the overstatement eats the whole edge a
+    recommended leg was picked for, so the cell's recommended legs cannot be expected to
+    win. A monitor label, never a gate.
+
+    Args:
+        n: Selected (recommended) legs in the offline replay; NaN when the cell has no
+            scorecard row.
+        gap_hi: Day-block 95 % CI upper bound of (read - hit) over those legs.
+    """
+    if _is_nan_like(n) or n < DESCRIPTIVE_MIN_SELECTED:
+        return "thin"
+    return "honest" if gap_hi < RECOMMENDED_EDGE_MIN else "overstated"
+
+
+def read_tail(tail_path: Path, live_gap_path: Path) -> pd.DataFrame:
+    """Join the selected-tail scorecard with its nightly live half, one row per cell.
+
+    The ``tail_*`` columns are the offline replay's ``n``, ``gap`` and ``gap_hi``; the
+    ``live_*`` columns come from the nightly parquet where it holds the cell, else from the
+    scorecard's own live half. A missing file contributes no rows, so the frame always
+    carries every :data:`_TAIL_COLUMNS` column plus ``tail_state``.
+
+    Args:
+        tail_path: The scorecard parquet (``helpers.io.TAIL_SCORECARD_PATH``).
+        live_gap_path: The nightly live-gap parquet (``helpers.io.LIVE_GAP_PATH``).
+    """
+    key = ["league", "market"]
+    frames = [pd.DataFrame(columns=list(_TAIL_COLUMNS)).astype(_TAIL_COLUMNS)]
+    if tail_path.exists():
+        # The scorecard's headline `market` is a probability (the market's read); the parquet
+        # stores it as `market_read` and keeps the cell name under `market`, the join key.
+        scorecard = pd.read_parquet(
+            tail_path, columns=[*key, "n", "gap", "gap_hi", *_LIVE_GAP_COLUMNS]
+        )
+        frames.append(
+            scorecard.rename(columns={"n": "tail_n", "gap": "tail_gap", "gap_hi": "tail_gap_hi"})
+        )
+    if live_gap_path.exists():
+        frames.append(pd.read_parquet(live_gap_path, columns=[*key, *_LIVE_GAP_COLUMNS]))
+    # `last` keeps each column's last non-null value per cell, so the nightly frame, appended
+    # last, wins over the scorecard's live half wherever it holds the cell.
+    out = pd.concat(frames).groupby(key, sort=False).last().reset_index()
+    out["tail_state"] = [
+        tail_state(n, hi) for n, hi in zip(out["tail_n"], out["tail_gap_hi"], strict=True)
+    ]
+    return out
 
 
 def read_gate1(path: Path, league: str | None = None) -> pd.DataFrame:
@@ -170,16 +252,22 @@ def lifecycle_table(
     model_stats_path: Path,
     live_metrics_path: Path,
     league: str | None = None,
+    *,
+    tail_path: Path = TAIL_SCORECARD_PATH,
+    live_gap_path: Path = LIVE_GAP_PATH,
 ) -> pd.DataFrame:
-    """Join Gate 1 + Gate 2 and add a ``lifecycle_state`` column per cell.
+    """Join Gate 1 + Gate 2, add ``lifecycle_state`` and the selected-tail read per cell.
 
     Args:
         model_stats_path: Gate-1 parquet path (required to exist).
         live_metrics_path: Gate-2 parquet path (may be missing).
         league: Optional league filter.
+        tail_path: Selected-tail scorecard parquet (may be missing).
+        live_gap_path: Nightly live-gap parquet (may be missing).
 
     Returns:
-        The merged frame with a ``lifecycle_state`` column. Empty (but carrying
+        The merged frame with a ``lifecycle_state`` column and the :func:`read_tail`
+        columns, which describe a cell and never move its state. Empty (but carrying
         ``lifecycle_state``) when no Gate-1 rows match the filter.
     """
     gate1 = read_gate1(model_stats_path, league)
@@ -195,10 +283,11 @@ def lifecycle_table(
             r.get("n_settled", float("nan")),
             r.get("gate2_book_bss", float("nan")),
             r.get("precision_over_live", float("nan")),
+            r.get("precision_under_live", float("nan")),
         ),
         axis=1,
     )
-    return merged
+    return merged.merge(read_tail(tail_path, live_gap_path), on=["league", "market"], how="left")
 
 
 def graduated_cells(model_stats_path: Path, live_metrics_path: Path) -> set[tuple[str, str]]:
@@ -230,11 +319,12 @@ def served_cells_failing_ship(
 ) -> list[tuple[str, str]]:
     """Return ``(league, market)`` cells marked ``shipped`` devel/main yet failing ship.
 
-    A cell may serve only when its ``model_stats`` row clears all five offline
-    gates (``ship == True``; see ``training.scorecard``). This is the invariant
-    the ``generate-ship-config --branch devel`` guard and the golden test both
-    enforce. A missing parquet or an ``NA`` ``ship`` (no scored evidence) is not
-    a failure — only an explicit ``ship == False`` demotes.
+    Feeds the two warning surfaces — meditate's post-run table and the
+    ``ship config --branch devel`` summary — that tell the human which
+    served cells fail the offline gates (``ship == False``; see
+    ``training.scorecard``); the cull itself is a manual decision. A missing
+    parquet or an ``NA`` ``ship`` (no scored evidence) is not a failure — only
+    an explicit ``ship == False`` flags.
     """
     if not model_stats_path.exists():
         return []

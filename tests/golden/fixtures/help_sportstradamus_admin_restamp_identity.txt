@@ -1,0 +1,8 @@
+Usage: sportstradamus admin restamp-identity [OPTIONS]
+
+  Rewrite rotated strategy signatures in place wherever the implementation is
+  unchanged.
+
+Options:
+  --dry-run  Report what would change; write nothing.
+  --help     Show this message and exit.

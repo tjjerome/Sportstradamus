@@ -1,44 +1,65 @@
 """Pins for the dashboard constellation — the DESIGN §4a static, shape-dealt star map.
 
 ``constellation_figure`` is pure (networkx force layout + plotly draw, no Streamlit).
-The node set is the game's **model-liked** legs (Kelly ``K`` > 0), fixed per game —
-selecting a leg never moves a star, it only lights it up. A slip leg renders active
-(full team color, opacity 1, labelled); a candidate renders desaturated + dim,
-labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side — on the
+The node set is the game's strongest **model-liked** legs (Kelly ``K`` > 0), capped and
+fixed per game — selecting a leg never moves a star, it only lights it up, and a slip
+leg beyond the cut is promoted into the spot the *deeper* lens would have given it. A
+slip leg renders active (full team color, opacity 1, labelled); a candidate renders
+desaturated + dim, labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side — on the
 template the game was dealt when it has one, on the spring solve when it doesn't. Every tie is a
 gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) drawn as a faint base web that
 brightens when both its stars are in the slip. These assert that grammar, the static layout,
-the size/selection encodings, the hover, the per-edge endpoint ``meta``, the
-click-key + card-field ``customdata`` the in-app editor and its JS card rely on, and
-the Phase D decoration layer's subordination to all of it.
+the size/selection encodings, the hover, the edge records in ``layout.meta``, the fill
+each star's trace ``meta`` flips it to, the click-key + card-field ``customdata`` the
+in-app editor and its JS card rely on, and the Phase D decoration layer's subordination
+to all of it.
 """
 
 from __future__ import annotations
 
+import itertools
+import json
+import math
+
 import pandas as pd
 import pytest
+from PIL import Image
 
-from sportstradamus.dashboard.components.constellation import (
-    _DEEP_ALPHA,
-    _EDGE_BASE_ALPHA,
-    _INACTIVE_ALPHA,
-    _LABEL_FONT_SIZE_MOBILE,
-    _SIZE_MAX,
-    _SIZE_MIN,
-    _SIZE_MIN_MOBILE,
-    _WIDER_SCALE,
-    constellation_figure,
+from sportstradamus.dashboard.components.constellation import constellation_figure
+from sportstradamus.dashboard.components.constellation_deep import (
+    _DEEP_COLOR,
+    DEEP_ALPHA_MIN,
+    DEEP_SIZE_MIN,
+    DEEP_SIZE_MIN_MOBILE,
 )
-from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_shapes import ART_DIR, shape_catalog
 from sportstradamus.dashboard.components.constellation_slate import (
+    ART_OPACITY,
     DECORATION,
     FILLER_SIZE,
     SHAPE_SCALE,
     SHAPE_SCALE_MOBILE,
-    SILHOUETTE_ALPHA,
-    scale_path,
 )
-from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
+from sportstradamus.dashboard.components.constellation_spacing import (
+    _STAR_GAP_PX,
+    DEFAULT_STARS,
+    PX_PER_UNIT,
+    PX_PER_UNIT_MOBILE,
+)
+from sportstradamus.dashboard.components.constellation_traces import (
+    _EDGE_ALPHA_MIN,
+    EDGE_BASE_ALPHA,
+    INACTIVE_ALPHA,
+    INACTIVE_DESAT,
+    LABEL_FONT_SIZE_MOBILE,
+    SIZE_MAX,
+    SIZE_MIN,
+    SIZE_MIN_MOBILE,
+    desaturate,
+    star_label,
+)
+from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES, WIDER_SCALE
+from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
 
@@ -71,13 +92,8 @@ def _pool(*specs) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _corr(*triples: tuple[str, str, float]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {"League": "NBA", "Game": "NYK/SAS", "leg_a": a, "leg_b": b, "rho": r}
-            for a, b, r in triples
-        ]
-    )
+def _corr(*triples: tuple[str, str, float]) -> dict[frozenset, float]:
+    return {frozenset((a, b)): r for a, b, r in triples}
 
 
 def _trace(fig, name: str):
@@ -90,8 +106,8 @@ def _node_traces(fig) -> list:
     return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != DECORATION]
 
 
-def _edge_traces(fig) -> list:
-    return [t for t in fig.data if t.mode == "lines" and t.name != DECORATION]
+def _edges(fig) -> list[dict]:
+    return fig.layout.meta["edges"]
 
 
 def _decoration_traces(fig) -> list:
@@ -136,8 +152,21 @@ def test_active_full_color_candidate_desaturated_and_dim():
     assert active.marker.symbol == "star"
     assert active.marker.opacity == 1.0
     assert list(active.marker.color) == [nyk_primary]  # full NYK fill
-    assert cand.marker.opacity == _INACTIVE_ALPHA
+    assert list(active.marker.line.color) == [GREEN]  # A is an Over call
+    assert cand.marker.opacity == INACTIVE_ALPHA
     assert cand.marker.color[0] != team_colors("NBA", "SAS")[0]  # blended toward gray, not raw
+    assert list(cand.marker.line.color) == [RED]  # B is an Under call
+
+
+def test_star_meta_is_the_fill_a_click_flips_it_to():
+    """The component repaints a clicked star from its trace's ``meta`` before the rerun
+    lands: a candidate lights to its full team fill, a slip star dims to the candidate tint."""
+    legs = _slip("A|PTS|Over")  # NYK, active
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # B = SAS candidate
+    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
+    assert list(_trace(fig, "candidate").meta) == [team_colors("NBA", "SAS")[0]]
+    nyk_dimmed = desaturate(team_colors("NBA", "NYK")[0], INACTIVE_DESAT)
+    assert list(_trace(fig, "active").meta) == [nyk_dimmed]
 
 
 def test_two_team_fixture_resolves_two_distinct_team_primaries():
@@ -170,14 +199,25 @@ def test_no_node_marker_color_equals_gold():
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|PTS|Over", 0.5)), pool)
     for trace in _node_traces(fig):
         assert all(c != GOLD for c in trace.marker.color)
+        assert all(c != GOLD for c in trace.marker.line.color)
 
 
 def test_active_and_candidate_stars_both_carry_labels():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
-    assert list(_trace(fig, "active").text) == ["A PTS o10.5"]
-    assert list(_trace(fig, "candidate").text) == ["B REB u10.5"]  # candidates now labelled too
+    assert list(_trace(fig, "active").text) == ["A Points o10.5"]
+    assert list(_trace(fig, "candidate").text) == ["B Rebounds u10.5"]  # candidates labelled too
+
+
+def test_star_labels_name_markets_the_way_the_board_does():
+    # The map and the Board are one vocabulary: a star reads the colloquial name,
+    # never the slug the archive keys on. A leg carrying no league at all — the one
+    # shape leg_field can't resolve — still labels, on the slug.
+    canonical = {"player": "A B", "market": "PTS", "bet": "Over", "line": 10.5, "league": "NBA"}
+    assert star_label(canonical) == "B Points o10.5"
+    leagueless = {"Player": "A B", "Market": "PTS", "Bet": "Over", "Line": 10.5}
+    assert star_label(leagueless) == "B PTS o10.5"
 
 
 def test_star_size_scales_with_edge():
@@ -185,15 +225,26 @@ def test_star_size_scales_with_edge():
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.1))
     sizes = _sizes(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool))
     assert sizes["A|PTS|Over"] > sizes["B|REB|Under"]  # higher K → bigger star
-    assert sizes["A|PTS|Over"] == _SIZE_MAX  # the game's strongest leg maxes out
+    assert sizes["A|PTS|Over"] == SIZE_MAX  # the game's strongest leg maxes out
+
+
+def _ladder(n: int) -> pd.DataFrame:
+    """``n`` one-leg players, teams alternating, Kelly strictly descending."""
+    return _pool(*[(f"P{i:02d}|PTS|Over", 0.9 - i * 0.03) for i in range(n)])
 
 
 def test_layout_is_static_under_selection():
-    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
-    corr = _corr(("A|PTS|Over", "B|REB|Under", 0.5))
-    one = _node_pos(constellation_figure(_slip("A|PTS|Over"), corr, pool))
-    both = _node_pos(constellation_figure(_slip("A|PTS|Over", "B|REB|Under"), corr, pool))
-    assert one == both  # selecting B moves no star — the map is fixed per game
+    # The picked leg is the pool's weakest, outside the default cut, so it joins the
+    # map by promotion — the one case that could re-solve the layout if the node set
+    # were ever allowed to depend on the selection.
+    pool = _ladder(DEFAULT_STARS + 3)
+    corr = _corr(("P00|PTS|Over", "P01|PTS|Over", 0.5))
+    before = _node_pos(constellation_figure([], corr, pool))
+    after = _node_pos(
+        constellation_figure([pool.to_dict("records")[DEFAULT_STARS + 2]], corr, pool)
+    )
+    assert len(before) == DEFAULT_STARS
+    assert all(after[key] == xy for key, xy in before.items())
 
 
 def test_nodes_carry_leg_key_customdata():
@@ -210,7 +261,7 @@ def test_node_customdata_carries_card_fields():
     fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
     cd = _trace(fig, "active").customdata[0]
     assert cd[0] == "A|PTS|Over"
-    assert [cd[1], cd[2], cd[3]] == ["A", "PTS", "Over"]
+    assert [cd[1], cd[2], cd[3]] == ["A", "Points", "Over"]  # the card names the market too
     assert float(cd[4]) == 10.5  # line
     assert 0.0 <= float(cd[5]) <= 1.0  # win prob
     assert float(cd[6]) > 0  # boost
@@ -251,10 +302,10 @@ def test_layout_bbox_is_centered_on_origin():
 
 
 def _edge_by_pair(fig) -> dict:
-    return {frozenset(e.meta): e for e in _edge_traces(fig)}
+    return {frozenset((e["a"], e["b"])): e for e in _edges(fig)}
 
 
-def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
+def test_all_ties_drawn_with_endpoint_keys_and_dashed_negative():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
     corr = _corr(
@@ -269,27 +320,27 @@ def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
         frozenset(("A|PTS|Over", "C|AST|Over")),
         frozenset(("B|REB|Under", "C|AST|Over")),
     }
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].line.dash == "dot"  # negative
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].line.dash == "solid"  # positive
+    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))]["dash"] == "dot"  # negative
+    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))]["dash"] == "solid"  # positive
 
 
-def test_slip_edges_brighten_over_the_faint_base_web():
-    # Every tie is drawn at a faint base alpha (the base web); a tie whose BOTH endpoints
-    # are in the slip brightens above it. A + B are in the slip, C is a candidate: A-B
-    # brightens; A-C and B-C stay at the faint base.
+def test_slip_edges_brighten_to_their_lit_alpha_over_the_faint_base_web():
+    # Every tie carries its |rho|-scaled lit alpha and is drawn at the faint base alpha (the
+    # base web) unless BOTH its endpoints are in the slip, which draws it lit. The JS reads
+    # lit to brighten a tie on a click before the rerun lands. A + B are in the slip, C is a
+    # candidate: A-B is lit; A-C and B-C stay at the faint base.
     legs = _slip("A|PTS|Over", "B|REB|Under")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
-    corr = _corr(
-        ("A|PTS|Over", "B|REB|Under", 0.4),
-        ("A|PTS|Over", "C|AST|Over", 0.3),
-        ("B|REB|Under", "C|AST|Over", 0.5),
+    ab, ac, bc = (
+        frozenset(("A|PTS|Over", "B|REB|Under")),
+        frozenset(("A|PTS|Over", "C|AST|Over")),
+        frozenset(("B|REB|Under", "C|AST|Over")),
     )
-    edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert (
-        edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > _EDGE_BASE_ALPHA
-    )  # both in slip
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
-    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
+    rho = {ab: 0.4, ac: -0.3, bc: 0.9}  # -0.3 takes |rho|; 0.9 hits the cap at 1
+    edges = _edge_by_pair(constellation_figure(legs, rho, pool))
+    assert all(edges[pair]["lit"] == min(1.0, _EDGE_ALPHA_MIN + abs(r)) for pair, r in rho.items())
+    assert edges[ab]["opacity"] == edges[ab]["lit"]  # both in slip
+    assert edges[ac]["opacity"] == edges[bc]["opacity"] == EDGE_BASE_ALPHA  # candidate
 
 
 def test_single_slip_leg_leaves_only_the_faint_base_web():
@@ -297,19 +348,30 @@ def test_single_slip_leg_leaves_only_the_faint_base_web():
     # sits at the faint base alpha (bright ties preview only on hover, client-side).
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
-    edges = _edge_traces(
-        constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool)
-    )
-    assert edges and all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
+    edges = _edges(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    assert edges and all(e["opacity"] == EDGE_BASE_ALPHA for e in edges)
 
 
 def test_empty_slip_shows_the_faint_base_web():
     # With nothing in the slip no edge brightens — but the whole web is still drawn at the
     # faint base alpha so the correlation structure reads before any pick.
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
-    edges = _edge_traces(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
-    assert edges  # the tie is present as a (base-web) trace
-    assert all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
+    edges = _edges(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    assert edges  # the tie is present as a (base-web) record
+    assert all(e["opacity"] == EDGE_BASE_ALPHA for e in edges)
+
+
+def test_edges_ride_in_layout_meta_as_plain_json_never_as_traces():
+    """Plotly.react's cost grows with trace count, so the web is data ``main.js`` strokes
+    itself, in list order: the lens's ties beneath the main web. plotly.js 2.27 can't
+    decode plotly 6's base64 arrays, so the records must survive a JSON round trip."""
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
+    corr = _corr(("A|PTS|Over", "B|REB|Under", -0.5), ("A|PTS|Over", "D|PTS|Under", 0.5))
+    deep_pool = _pool(("D|PTS|Under", -0.1))
+    fig = constellation_figure(_slip("A|PTS|Over"), corr, pool, deep_pool=deep_pool)
+    assert not {"edge", "deep_edge"} & {trace.name for trace in fig.data}
+    assert [edge["lens"] for edge in _edges(fig)] == [True, False]
+    assert json.loads(fig.to_json())["layout"]["meta"]["edges"] == _edges(fig)
 
 
 def test_layout_is_deterministic():
@@ -324,7 +386,7 @@ def test_layout_is_deterministic():
 def test_hover_shows_win_prob_boost_and_kelly():
     fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
     hover = _trace(fig, "active").hovertext[0]
-    assert "PTS" in hover and "Win" in hover and "Kelly" in hover
+    assert "Points" in hover and "Win" in hover and "Kelly" in hover
 
 
 def test_active_leg_below_k_floor_still_shows():
@@ -336,7 +398,7 @@ def test_active_leg_below_k_floor_still_shows():
 def test_no_legs_no_pool_is_blank():
     fig = constellation_figure([], None, None)
     assert _shown_keys(fig) == set()
-    assert _edge_traces(fig) == []
+    assert fig.layout.meta is None
 
 
 def test_deep_pool_none_is_byte_stable_with_no_deep_trace():
@@ -346,29 +408,48 @@ def test_deep_pool_none_is_byte_stable_with_no_deep_trace():
     assert _trace(fig, "deep") is None
 
 
-def test_deep_pool_adds_dim_unconnected_stars():
+def test_deep_stars_take_their_ties_to_main_stars():
+    """A deep star arrives with its correlations, marked as the lens ties the JS fades."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # model-liked candidate pool
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3))  # model-passed
-    fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool)
+    deep_pool = _pool(("D|PTS|Under", -0.1))  # model-passed
+    fig = constellation_figure(
+        legs, _corr(("A|PTS|Over", "D|PTS|Under", 0.5)), pool, deep_pool=deep_pool
+    )
+    tie = next(e for e in _edges(fig) if {e["a"], e["b"]} == {"A|PTS|Over", "D|PTS|Under"})
+    assert tie["lens"]  # a lens tie, so it fades in and out with its star
+    assert tie["opacity"] == EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
+
+
+def test_deep_tier_colors_split_liked_from_passed():
+    """Two readings: a liked leg the cut left behind is a candidate, just smaller and
+    dimmer; only the model-passed tier wears the lens's own gray, at the floor alpha
+    that keeps it present without competing with the lit map."""
+    fig = constellation_figure(
+        [], None, _ladder(DEFAULT_STARS + 1), deep_pool=_pool(("D|PTS|Under", -0.1))
+    )
     deep = _trace(fig, "deep")
-    assert deep is not None
-    assert {cd[0] for cd in deep.customdata} == {"D|PTS|Under", "E|AST|Over"}
-    assert deep.marker.opacity == _DEEP_ALPHA
-    assert deep.marker.color[0] not in (GRAY, GOLD)
-    # No edge trace names either deep star as an endpoint.
-    deep_keys = {cd[0] for cd in deep.customdata}
-    for edge in _edge_traces(fig):
-        assert not (set(edge.meta) & deep_keys)
+    assert [cd[0] for cd in deep.customdata] == [f"P{DEFAULT_STARS}|PTS|Over", "D|PTS|Under"]
+    liked, passed = deep.marker.opacity
+    assert liked > passed
+    assert passed == DEEP_ALPHA_MIN
+    assert all(alpha <= INACTIVE_ALPHA for alpha in deep.marker.opacity)
+    assert deep.marker.color[1] == _DEEP_COLOR
+    assert all(color not in (GRAY, GOLD) for color in deep.marker.color)
+    assert list(deep.marker.line.color) == [GREEN, RED]  # liked=Over, passed=Under
 
 
-def test_deep_pool_excludes_legs_already_in_slip():
-    legs = _slip("D|PTS|Under")
+def test_an_in_slip_deep_leg_burns_as_a_promoted_star():
+    """A slip never loses a leg to the cut: picking a model-passed star promotes it
+    out of the tier and lights it at main size, lens or no lens."""
+    legs = [_row(0, "D|PTS|Under", -0.1)]
     pool = _pool(("A|PTS|Over", 0.4))
     deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3))
     fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool)
-    deep = _trace(fig, "deep")
-    assert {cd[0] for cd in deep.customdata} == {"E|AST|Over"}  # D is already active, not deep
+    assert {cd[0] for cd in _trace(fig, "deep").customdata} == {"E|AST|Over"}
+    active = _trace(fig, "active")
+    assert [cd[0] for cd in active.customdata] == ["D|PTS|Under"]
+    assert active.marker.size[0] >= SIZE_MIN
 
 
 def test_deep_pool_does_not_move_existing_stars():
@@ -382,11 +463,19 @@ def test_deep_pool_does_not_move_existing_stars():
         assert with_deep[key] == xy
 
 
-def test_deep_pool_star_sizes_are_uniform_not_kelly_scaled():
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -5.0))
-    fig = constellation_figure([], _corr(), _pool(("A|PTS|Over", 0.4)), deep_pool=deep_pool)
-    deep = _trace(fig, "deep")
-    assert len(set(deep.marker.size)) == 1  # flat size, unlike the Kelly-scaled active/candidate
+def test_deep_pool_star_sizes_scale_with_edge_under_the_main_floor():
+    """The tier ranks itself the way the map does — edge sets a lens star's size — in
+    a band that starts over the engraving's fillers and ends under the main floor, so
+    the strongest thing behind the cut still never outranks the weakest star on it."""
+    pool = _ladder(DEFAULT_STARS + 1)
+    deep_pool = pd.concat([pool, _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -5.0))])
+    deep = _trace(constellation_figure([], None, pool, deep_pool=deep_pool), "deep")
+    size = dict(zip((cd[0] for cd in deep.customdata), deep.marker.size, strict=True))
+    assert size[f"P{DEFAULT_STARS}|PTS|Over"] > size["D|PTS|Under"]
+    assert size["D|PTS|Under"] == size["E|AST|Over"] == DEEP_SIZE_MIN  # both passes, both floored
+    assert all(FILLER_SIZE < px < SIZE_MIN for px in size.values())
+    phone = _trace(constellation_figure([], None, pool, deep_pool=deep_pool, mobile=True), "deep")
+    assert all(DEEP_SIZE_MIN_MOBILE <= px < SIZE_MIN_MOBILE for px in phone.marker.size)
 
 
 def test_deep_pool_positions_are_deterministic_across_calls():
@@ -419,28 +508,70 @@ def _wider_row(player, market, bet, game, team, league, kelly):
     }
 
 
-def test_wider_groups_scales_focus_layout():
-    legs = _slip("A|PTS|Over", "B|PTS|Over")
-    pool = _pool(("A|PTS|Over", 0.4), ("B|PTS|Over", 0.3))
-    corr = _corr(("A|PTS|Over", "B|PTS|Over", 0.5))
-    plain = _node_pos(constellation_figure(legs, corr, pool))
-    wider = _node_pos(constellation_figure(legs, corr, pool, wider_groups=[]))
-    for key, (x, y) in plain.items():
-        wx, wy = wider[key]
-        assert wx == pytest.approx(x * _WIDER_SCALE, rel=1e-6)
-        assert wy == pytest.approx(y * _WIDER_SCALE, rel=1e-6)
+def _sky(n: int, *, per_game: int = 4) -> list[tuple[str, list[dict]]]:
+    matchups = [
+        ("MIA/ORL", "MIA"),
+        ("BOS/PHI", "BOS"),
+        ("LAL/GSW", "LAL"),
+        ("DAL/HOU", "DAL"),
+        ("DEN/PHX", "DEN"),
+        ("MIL/CHI", "MIL"),
+        ("ATL/CLE", "ATL"),
+    ][:n]
+    return [
+        (
+            game,
+            [
+                _wider_row(f"{team}{i}", "3PM", "Over", game, team, "NBA", 0.3)
+                for i in range(per_game)
+            ],
+        )
+        for game, team in matchups
+    ]
+
+
+def test_wider_lens_recedes_the_focus_and_keeps_clearance():
+    """The map recedes to make room — it is never re-laid-out — and the spacing pass
+    re-solves at the tighter scale, so nothing collides once the sky is in."""
+    pool = _ladder(13)
+    groups = _sky(1, per_game=1)
+    for mobile, px in ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)):
+        plain = constellation_figure([], None, pool, shape=_HOURGLASS, mobile=mobile)
+        wider = constellation_figure(
+            [], None, pool, shape=_HOURGLASS, mobile=mobile, wider_groups=groups
+        )
+        before, after, sizes = _node_pos(plain), _node_pos(wider), _sizes(wider)
+        for key, (x, y) in before.items():
+            drift = math.hypot(
+                (after[key][0] - x * WIDER_SCALE) * px[0],
+                (after[key][1] - y * WIDER_SCALE) * px[1],
+            )
+            # Only the spacing pass moves a star off the exact recede, and never by
+            # more than its own radius — the drawing stays the same drawing.
+            assert drift <= SIZE_MAX / 2, (key, mobile, drift)
+        for one, other in itertools.combinations(sorted(before), 2):
+            apart = math.hypot(
+                (after[one][0] - after[other][0]) * px[0],
+                (after[one][1] - after[other][1]) * px[1],
+            )
+            assert apart >= (sizes[one] + sizes[other]) / 2 + _STAR_GAP_PX - 1e-9, (one, other)
+        # The phone has no side band even receded, so its sky grows in y instead.
+        assert (wider.layout.height > plain.layout.height) is mobile
 
 
 def test_wider_groups_renders_other_games_legs_with_customdata():
     pool = _pool(("A|PTS|Over", 0.4))
     groups = [
         ("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)]),
-        ("MIA/ORL", [_wider_row("Herro", "3PM", "Over", "MIA/ORL", "MIA", "NBA", 0.3)]),
+        ("MIA/ORL", [_wider_row("Herro", "3PM", "Under", "MIA/ORL", "MIA", "NBA", 0.3)]),
     ]
     fig = constellation_figure([], _corr(), pool, wider_groups=groups)
     wider = _trace(fig, "wider")
     assert wider is not None
-    assert {cd[0] for cd in wider.customdata} == {"Brunson|PTS|Over", "Herro|3PM|Over"}
+    assert {cd[0] for cd in wider.customdata} == {"Brunson|PTS|Over", "Herro|3PM|Under"}
+    colors = dict(zip((cd[0] for cd in wider.customdata), wider.marker.line.color, strict=True))
+    assert colors["Brunson|PTS|Over"] == GREEN
+    assert colors["Herro|3PM|Under"] == RED
 
 
 def test_wider_groups_have_no_edges():
@@ -448,20 +579,100 @@ def test_wider_groups_have_no_edges():
     groups = [("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)])]
     fig = constellation_figure([], _corr(), pool, wider_groups=groups)
     wider_keys = {cd[0] for cd in _trace(fig, "wider").customdata}
-    for edge in _edge_traces(fig):
-        assert not (set(edge.meta) & wider_keys)
+    for edge in _edges(fig):
+        assert not ({edge["a"], edge["b"]} & wider_keys)
 
 
-def test_both_lenses_together_produce_sane_nonoverlapping_geometry():
+def test_layout_meta_carries_the_paint_constants_and_the_wider_recede():
+    """``main.js`` repaints edges and dims stars against these and recedes the map by
+    ``focus_scale``, so they ride with every figure instead of living twice."""
+    pool = _pool(("A|PTS|Over", 0.4))
+    meta = constellation_figure([], _corr(), pool).layout.meta
+    assert (meta["edge_base"], meta["dim_alpha"], meta["focus_scale"]) == (
+        EDGE_BASE_ALPHA,
+        INACTIVE_ALPHA,
+        1.0,
+    )
+    wider = constellation_figure([], _corr(), pool, wider_groups=_sky(1, per_game=1))
+    assert wider.layout.meta["focus_scale"] == WIDER_SCALE
+
+
+def _map_footprint(fig, sky: set, px) -> tuple[list, tuple[float, float, float, float]]:
+    """The drawn map's stars as ``(px position, px size)``, plus their px bounding box.
+
+    ``sky`` names the wider lens's own keys, which are what the map is measured
+    against — everything else on the figure, main and deep alike, is the map.
+    """
+    pos, sizes = _node_pos(fig), _sizes(fig)
+    drawn = [((pos[k][0] * px[0], pos[k][1] * px[1]), sizes[k]) for k in pos if k not in sky]
+    box = (
+        min(x - size / 2 for (x, _), size in drawn),
+        min(y - size / 2 for (_, y), size in drawn),
+        max(x + size / 2 for (x, _), size in drawn),
+        max(y + size / 2 for (_, y), size in drawn),
+    )
+    return drawn, box
+
+
+def _band_of(at: tuple[float, float], box: tuple[float, float, float, float]) -> str:
+    """Which open band a sky star sits in: the side of the map it most clearly clears."""
+    beyond = {
+        "left": box[0] - at[0],
+        "right": at[0] - box[2],
+        "below": box[1] - at[1],
+        "above": at[1] - box[3],
+    }
+    return max(beyond, key=beyond.get)
+
+
+def test_wider_stars_never_enter_the_constellations_footprint():
+    """Both lenses at once: the sky stays outside the whole drawn map, deep stars
+    included, and keeps a glyph's clear air from every one of them."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
-    deep_pool = _pool(("D|PTS|Under", -0.1))
-    groups = [("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)])]
-    fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool, wider_groups=groups)
-    deep_trace, wider_trace = _trace(fig, "deep"), _trace(fig, "wider")
-    deep_r = max((x**2 + y**2) ** 0.5 for x, y in zip(deep_trace.x, deep_trace.y, strict=True))
-    wider_r = max((x**2 + y**2) ** 0.5 for x, y in zip(wider_trace.x, wider_trace.y, strict=True))
-    assert wider_r > deep_r  # wider ring sits clearly outside the deep ring
+    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3))
+    fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool, wider_groups=_sky(2))
+    sky = {cd[0] for cd in _trace(fig, "wider").customdata}
+    pos, sizes = _node_pos(fig), _sizes(fig)
+    drawn, box = _map_footprint(fig, sky, PX_PER_UNIT)
+    for key in sky:
+        at = (pos[key][0] * PX_PER_UNIT[0], pos[key][1] * PX_PER_UNIT[1])
+        assert not (box[0] <= at[0] <= box[2] and box[1] <= at[1] <= box[3]), key
+        for other_at, other in drawn:
+            assert math.dist(at, other_at) >= (sizes[key] + other) / 2 + _STAR_GAP_PX - 1e-9, key
+
+
+def test_wider_stars_are_not_a_ring():
+    """The owner's one hard no.
+
+    A ring holds one radius, leaves no empty sector, and hands every game its own
+    angular slot. The sky does none of those: it deals the games into the couple of
+    open bands beside the map, several games to a band.
+    """
+    groups = _sky(WIDER_GAMES)
+    game_of = {
+        f"{row['Player']}|{row['Market']}|{row['Bet']}": game
+        for game, rows in groups
+        for row in rows
+    }
+    for mobile, px in ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)):
+        fig = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile)
+        wider = _trace(fig, "wider")
+        radii = [math.hypot(float(x), float(y)) for x, y in zip(wider.x, wider.y, strict=True)]
+        assert max(radii) - min(radii) >= 0.25 * (sum(radii) / len(radii)), mobile
+        angles = sorted(
+            math.atan2(float(y), float(x)) % math.tau for x, y in zip(wider.x, wider.y, strict=True)
+        )
+        gaps = [b - a for a, b in itertools.pairwise(angles)] + [angles[0] + math.tau - angles[-1]]
+        # Bands leave whole sectors of the sky empty; an even ring leaves none.
+        assert max(gaps) >= 3 * math.tau / len(angles), (mobile, math.degrees(max(gaps)))
+        sky = {card[0] for card in wider.customdata}
+        _, box = _map_footprint(fig, sky, px)
+        bands: dict[str, set[str]] = {}
+        for card, x, y in zip(wider.customdata, wider.x, wider.y, strict=True):
+            at = (float(x) * px[0], float(y) * px[1])
+            bands.setdefault(_band_of(at, box), set()).add(game_of[card[0]])
+        assert max(len(games) for games in bands.values()) >= 2, (mobile, bands)
 
 
 def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
@@ -478,8 +689,8 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
     node_traces = _node_traces(fig)
     assert node_traces
     for t in node_traces:
-        assert min(t.marker.size) >= _SIZE_MIN_MOBILE
-        assert t.textfont.size == _LABEL_FONT_SIZE_MOBILE
+        assert min(t.marker.size) >= SIZE_MIN_MOBILE
+        assert t.textfont.size == LABEL_FONT_SIZE_MOBILE
         for cd in t.customdata:
             assert len(cd) == 9
             assert cd[8] in (0, 1)
@@ -494,14 +705,12 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
 _HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
 
 
-def _shaped(*, wider=None, mobile=False):
+def _shaped(*, wider=None, mobile=False, shape=_HOURGLASS):
     """A four-leg two-team game rendered onto a real template."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3), ("C|AST|Over", 0.2), ("D|PTS|Over", 0.1))
     corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
-    return constellation_figure(
-        legs, corr, pool, shape=_HOURGLASS, wider_groups=wider, mobile=mobile
-    )
+    return constellation_figure(legs, corr, pool, shape=shape, wider_groups=wider, mobile=mobile)
 
 
 def test_without_a_template_the_figure_is_exactly_the_spring_map():
@@ -512,15 +721,39 @@ def test_without_a_template_the_figure_is_exactly_the_spring_map():
     fig = constellation_figure(legs, corr, pool)
     assert _decoration_traces(fig) == []
     assert fig.layout.shapes == ()
+    assert fig.layout.images == ()
 
 
-def test_the_silhouette_is_drawn_faintly_beneath_everything():
-    shapes = _shaped().layout.shapes
-    assert len(shapes) == 1
-    assert shapes[0].type == "path"
-    assert shapes[0].layer == "below"
-    assert shapes[0].line.width == 0
-    assert f",{SILHOUETTE_ALPHA})" in shapes[0].fillcolor
+def test_the_art_is_drawn_faintly_beneath_everything():
+    figure = _shaped()
+    assert figure.layout.shapes == ()
+    (art,) = figure.layout.images
+    assert art.layer == "below"
+    assert (art.xref, art.yref) == ("x", "y")
+    assert art.source.startswith("data:image/png;base64,")
+    assert art.opacity == ART_OPACITY
+
+
+def test_the_art_keeps_its_own_aspect_and_takes_the_frame_scale():
+    """The layer's longer side spans the template box and the shorter one is centred, then
+    x and y take the frame's own corrections, exactly as the vertices do — so a star
+    authored on the drawing stays on it, on a laptop and in a hand."""
+    with Image.open(ART_DIR / _HOURGLASS["image"]) as layer:
+        width, height = layer.size
+    longer = max(width, height)
+    for mobile, (sx, sy) in ((False, SHAPE_SCALE), (True, SHAPE_SCALE_MOBILE)):
+        (art,) = _shaped(mobile=mobile).layout.images
+        assert (art.x, art.y, art.xanchor, art.yanchor) == (0, 0, "center", "middle")
+        assert art.sizing == "stretch"
+        assert art.sizex == pytest.approx(2 * sx * width / longer)
+        assert art.sizey == pytest.approx(2 * sy * height / longer)
+
+
+def test_a_template_without_art_draws_its_outline_alone():
+    figure = _shaped(shape={**_HOURGLASS, "image": None})
+    assert figure.layout.images == ()
+    assert figure.layout.shapes == ()
+    assert [t for t in _decoration_traces(figure) if t.mode == "lines"]
 
 
 def test_the_decoration_layer_is_inert_to_the_pointer():
@@ -535,7 +768,6 @@ def test_the_decoration_layer_is_inert_to_the_pointer():
 def test_no_engraved_stroke_is_ever_gold():
     """Gold means correlation and nothing else (DESIGN §4a)."""
     figure = _shaped()
-    assert figure.layout.shapes[0].fillcolor.lower().find(GOLD.lower()) == -1
     for trace in _decoration_traces(figure):
         rendered = f"{trace.line}{trace.marker}".lower()
         assert GOLD.lower() not in rendered
@@ -548,7 +780,7 @@ def test_the_template_does_not_change_how_many_gold_edges_are_drawn():
     corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
     plain = constellation_figure(legs, corr, pool)
     shaped = constellation_figure(legs, corr, pool, shape=_HOURGLASS)
-    assert len(_edge_traces(shaped)) == len(_edge_traces(plain))
+    assert len(_edges(shaped)) == len(_edges(plain))
     assert _shown_keys(shaped) == _shown_keys(plain)
 
 
@@ -563,25 +795,21 @@ def test_stars_land_on_template_vertices():
 def test_unfilled_vertices_get_filler_stars_too_small_to_read_as_legs():
     fillers = [t for t in _decoration_traces(_shaped()) if t.mode == "markers"]
     assert len(fillers) == 1
-    assert fillers[0].marker.size == FILLER_SIZE < _SIZE_MIN
+    assert fillers[0].marker.size == FILLER_SIZE < SIZE_MIN
     assert len(fillers[0].x) == len(_HOURGLASS["vertices"]) - len(_node_pos(_shaped()))
 
 
 def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
     """Decoration that ignored focus_scale would detach from the map it belongs to."""
-    outline = next(t for t in _decoration_traces(_shaped(wider=[])) if t.mode == "lines")
-    plain = next(t for t in _decoration_traces(_shaped()) if t.mode == "lines")
+    wider, plain = _shaped(wider=[]), _shaped()
+    outline = next(t for t in _decoration_traces(wider) if t.mode == "lines")
+    plain_outline = next(t for t in _decoration_traces(plain) if t.mode == "lines")
     span = max(x for x in outline.x if x is not None)
-    plain_span = max(x for x in plain.x if x is not None)
-    assert span == pytest.approx(plain_span * _WIDER_SCALE)
-
-
-def test_a_silhouette_rescales_x_and_y_independently():
-    """The frame is far wider than it is tall, so one uniform scale would leave every
-    round shape a flat lens — x and y take different corrections."""
-    assert scale_path("M -1 0.5 L 1 -0.5 Z", 0.8, 1.32) == "M -0.8 0.66 L 0.8 -0.66 Z"
-    # A cubic's control points are coordinates too, and alternate the same way.
-    assert scale_path("M 0 0 C 1 1 -1 -1 0.5 0.5", 2.0, 4.0) == "M 0 0 C 2 4 -2 -4 1 2"
+    plain_span = max(x for x in plain_outline.x if x is not None)
+    assert span == pytest.approx(plain_span * WIDER_SCALE)
+    (wider_art,), (plain_art,) = wider.layout.images, plain.layout.images
+    assert wider_art.sizex == pytest.approx(plain_art.sizex * WIDER_SCALE)
+    assert wider_art.sizey == pytest.approx(plain_art.sizey * WIDER_SCALE)
 
 
 def test_the_phone_frame_stretches_the_other_way():
@@ -597,7 +825,7 @@ def test_the_phone_frame_stretches_the_other_way():
 
 def test_the_shape_frame_correction_keeps_stars_and_engraving_together():
     """Whatever the correction is, both layers must take it — the whole point is that
-    the stars sit on the silhouette."""
+    the stars sit on the drawing."""
     figure = _shaped()
     outline = next(t for t in _decoration_traces(figure) if t.mode == "lines")
     star_xs = [x for x, _ in _node_pos(figure).values()]

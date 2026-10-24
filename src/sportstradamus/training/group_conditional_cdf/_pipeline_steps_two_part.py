@@ -7,6 +7,7 @@ import pandas as pd
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
+from sportstradamus.helpers.training_quotes import AUTHENTIC, AUTHENTICITY_VALUES
 from sportstradamus.training.group_conditional_cdf import fit_two_part_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import (
     apply_two_part_line,
@@ -28,6 +29,7 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part_support import (
     _two_part_nested_support_audit,
 )
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.scorecard import (
     _bootstrap_ratio_ci_clustered,
     _gate5_ece_debiased,
@@ -55,9 +57,9 @@ def _explicit_quote_authenticity_mask(values, index: pd.Index) -> np.ndarray:
     series = pd.Series(values).reindex(index)
     if series.isna().any():
         raise ValueError("quote authenticity does not align to its split")
-    if not series.isin(("authentic", "derived", "synthetic")).all():
+    if not series.isin(AUTHENTICITY_VALUES).all():
         raise ValueError("quote authenticity contains an unsupported value")
-    return series.eq("authentic").to_numpy(dtype=bool)
+    return series.eq(AUTHENTIC).to_numpy(dtype=bool)
 
 
 def _required_series(
@@ -103,7 +105,7 @@ def _two_part_support_rows(splits: dict, context: dict, index: pd.Index) -> tupl
         raise ValueError("two-part candidate positions must be finite")
     return (
         result,
-        (result >= line).astype(float),
+        over_label(result, line),
         _two_part_authentic_mask(splits, "validation", index),
         _required_series(splits, "players_validation", index).astype(str).to_numpy(),
         context["routes"]["validation"].reindex(index).astype(str).to_numpy(),
@@ -395,7 +397,7 @@ def _step_apply_two_part_groupcdf_candidate(
 
     authentic_val = _two_part_authentic_mask(splits, "validation", index_val)
     authentic_test = _two_part_authentic_mask(splits, "test", index_test)
-    outcome = (result >= line_val).astype(float)
+    outcome = over_label(result, line_val)
     residual_positions = tuple(context["boundary_residual_positions"])
     support_audit = _two_part_nested_support_audit(
         result,

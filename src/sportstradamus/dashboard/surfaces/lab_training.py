@@ -1,8 +1,9 @@
 """Per-cell training diagnostics from the latest `meditate` run.
 
 Renders the wide one-row-per-`(league, market)` schema written by
-``training.report.report()`` with the lifecycle state joined in at read
-time via ``training.graduation.lifecycle_table()``. Tabs split the slate
+``training.report.report()`` with the lifecycle state and the selected-tail
+read joined in at read time via ``training.graduation.lifecycle_table()``
+(the tail columns are monitors, never a gate). Tabs split the slate
 by metric family; each column carries a one-line help string indicating
 whether higher or lower is better (or that the field is informational).
 """
@@ -100,9 +101,15 @@ DIRECTIONS: dict[str, str] = {
     # Lifecycle / identity
     "lifecycle_state": INFO,
     "n_validation": INFO,
+    # Selected-tail read (read - hit on the recommended legs; decision D2 bar)
+    "tail_state": INFO,
+    "tail_gap": LOWER,
+    "live_gap": LOWER,
 }
 
-ID_COLS = ["league", "market", "distribution", "shipped", "lifecycle_state"]
+ID_COLS = ["league", "market", "distribution", "shipped", "lifecycle_state", "tail_state"]
+# What lifecycle_table() contributes beside the model_stats columns.
+LIFECYCLE_COLS = ["lifecycle_state", "tail_state", "tail_gap", "live_gap"]
 
 TAB_COLUMNS: dict[str, list[str]] = {
     "Overview": [
@@ -110,6 +117,8 @@ TAB_COLUMNS: dict[str, list[str]] = {
         "brier_skill_score",
         "kelly_shrinkage",
         "ship",
+        "tail_gap",
+        "live_gap",
     ],
     "Scoring rules": [
         "brier_book",
@@ -184,7 +193,12 @@ TAB_COLUMNS: dict[str, list[str]] = {
 }
 
 TAB_CAPTIONS: dict[str, str] = {
-    "Overview": ("One row per (league, market). Columns are annotated ↑/↓/informational."),
+    "Overview": (
+        "One row per (league, market). `tail_state` reads the selected tail — read minus hit"
+        " on the recommended legs, offline (`tail_gap`) and over the live 30-day window"
+        " (`live_gap`) — against the pre-registered bar; a monitor, never a gate."
+        " Columns are annotated ↑/↓/informational."
+    ),
     "Scoring rules": (
         "Proper scoring rules on the validation set. The model's `*_model` column"
         " should beat the `*_book` baseline; the derived `brier_skill_score` is the"
@@ -266,7 +280,9 @@ desk_only_notice()
 
 stats = load_model_stats()
 if stats.empty:
-    st.info("No model stats found. Run `poetry run meditate` to generate `model_stats.parquet`.")
+    st.info(
+        "No model stats found. Run `sportstradamus meditate` to generate `model_stats.parquet`."
+    )
     st.stop()
 
 # The global sport switch narrows every other surface; apply it here too so the training
@@ -277,18 +293,19 @@ if stats.empty:
     st.stop()
 
 # Lifecycle state joins offline Gate-1 (this parquet) with live Gate-2
-# (live_metrics_per_market.parquet, written daily by `reflect`). Computed
+# (live_metrics_per_market.parquet, written daily by `reflect`); the selected-tail
+# read (tail_scorecard.parquet + live_gap_per_cell.parquet) rides along. Computed
 # at read time so the lifecycle classification reflects today's live data
 # rather than whatever it was at the last meditate run.
 lifecycle = lifecycle_table(MODEL_STATS_PATH, LIVE_METRICS_PATH)
 if not lifecycle.empty:
     stats = stats.merge(
-        lifecycle[["league", "market", "lifecycle_state"]],
+        lifecycle[["league", "market", *LIFECYCLE_COLS]],
         on=["league", "market"],
         how="left",
     )
 else:
-    stats["lifecycle_state"] = pd.NA
+    stats[LIFECYCLE_COLS] = pd.NA
 
 # The former body Leagues/Markets multiselects duplicated the shared Lab filter panel
 # (rendered below) and defaulted to every market — a wall of chips. Keep only the

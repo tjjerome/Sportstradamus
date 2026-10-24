@@ -14,6 +14,7 @@ from sportstradamus.helpers.parlay_modifiers import (
 )
 
 MODS = {"MLB": {"team": {"B.hits & B.runs": [0.9, 1.05]}, "opponent": {}}}
+BANNED_MODS = {"MLB": {"team": {"B.hits & B.runs": [0.0, 0.0]}, "opponent": {}}}
 RAKE_3 = 0.962
 
 
@@ -60,6 +61,30 @@ def test_solves_unknown_pair_from_actual_quote():
     assert kind == "solve"
     assert target == ("MLB", "team", "TEAM.moneyline & P.pitcher strikeouts", 0)
     assert value == pytest.approx(0.94, abs=0.001)
+
+
+def test_slip_pairs_treats_banned_modifier_as_unknown():
+    legs = [
+        leg("1", "SD", "B.hits", True, 1.5),
+        leg("1", "SD", "B.runs", True, 1.6),
+    ]
+    pairs = slip_pairs(legs, BANNED_MODS)
+    assert pairs[0].disk_key == "B.hits & B.runs"
+    assert pairs[0].value is None
+
+
+def test_solves_banned_pair_from_actual_quote():
+    legs = [
+        leg("1", "SD", "B.hits", True, 1.5),
+        leg("1", "SD", "B.runs", True, 1.6),
+    ]
+    pairs = slip_pairs(legs, BANNED_MODS)
+    expected = expected_quote(legs, pairs, RAKE_3)
+    assert expected > 0
+    kind, target, value = reconcile(legs, pairs, RAKE_3, expected * 0.9, expected)
+    assert kind == "solve"
+    assert target == ("MLB", "team", "B.hits & B.runs", 0)
+    assert value == pytest.approx(0.9, abs=0.001)
 
 
 def test_all_cross_game_slip_calibrates_rake():

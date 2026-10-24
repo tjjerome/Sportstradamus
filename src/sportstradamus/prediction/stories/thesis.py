@@ -3,8 +3,7 @@
 ``attach_parlay_theses`` parses each parlay row's legs, enriches them against the
 scored offers, builds per-game context, and routes each *distinct leg-set*
 through the v2 engine. A slate-uniqueness pass guarantees no two leg-sets in the
-same ``(League, Date)`` render the same headline. Parlay-family clustering plays
-no part here — the ``Family`` column survives only as a Slips grouping device.
+same ``(League, Date)`` render the same headline.
 """
 
 from __future__ import annotations

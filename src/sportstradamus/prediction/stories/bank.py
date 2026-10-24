@@ -9,8 +9,10 @@ and WNBA), ``football``, ``hockey``, ``baseball``, and the league-neutral
 when a negative-market leg's actual bet is Under, so templates outside the
 ``mistakes`` category must carry mood, never literal bet-side words.
 ``why_bank.json`` holds the per-offer case clauses and story-dek clauses
-(``{clause: {branch: [variants]}}`` plus the pronoun map). This module is the
-only reader and stays pure stdlib so the dashboard can import it live.
+(``{clause: {branch: [variants]}}`` plus the pronoun map). ``stat_words.json``
+holds the stat-family words a Mixed headline's engine-supplied effect clauses
+are built from. This module is the only reader and stays pure stdlib so the
+dashboard can import it live.
 """
 
 import functools
@@ -37,20 +39,58 @@ def team_assets() -> dict:
     return _bank("team_assets.json")
 
 
-def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:
-    """Return the template variants for a cell via the voice → shared fallback chain.
+def stat_words() -> dict:
+    """Effect-clause words per voice and stat family.
 
-    Tries ``(voice, archetype, shape, direction, category)``, then the same key
-    under ``shared``, then ``shared`` with shape ``"even"``, and finally the
-    guaranteed ``shared (archetype, "even", direction, "production")`` endpoint
-    — never a KeyError, never an empty list, for any valid archetype/direction.
-    A voice missing from the bank reads straight from ``shared``.
+    ``{voice: {family: {noun, thrive, fade, owned_thrive, owned_fade}}}`` — the
+    plural stat noun with the verb phrases for a thriving and a fading side,
+    plus the player-subject templates used when both sides share a family.
+    Narrative valence is baked in: a ``mistakes`` family thrives on staying down.
+    """
+    return _bank("stat_words.json")
+
+
+def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:
+    """Return the template variants for a cell via the shape-first fallback chain.
+
+    Shape outranks both voice and category: a shootout keeps shootout copy even
+    when the voice authors no such cell and the category has to degrade to
+    ``production``, because shape-blind prose contradicts the game it describes
+    ("low ceiling — fade the scoring" on a Coors slate). The one exception is
+    ``mistakes``, which outranks shape instead: every voice authors ``mistakes``
+    cells only under ``even``, so that lookup probes voice/shared × shape/even
+    for ``mistakes`` before taking any ``production`` step. Under a shape node
+    the chain probes ``category`` then ``production`` and nothing else, so the
+    authoring invariant the design rests on is that every authored shaped node
+    carries a ``production`` cell. Only when neither the voice nor ``shared``
+    authors *any* cell for that shape and direction does the chain fall to
+    ``"even"``, and finally to the guaranteed ``shared (archetype, "even",
+    direction, "production")`` endpoint. A voice missing from the bank reads
+    straight from ``shared``.
     """
     bank = _bank()
     shared = bank["shared"]
+    voiced = bank.get(voice, shared)
+    mistakes_probe = (
+        (
+            (voiced, shape, "mistakes"),
+            (shared, shape, "mistakes"),
+            (voiced, "even", "mistakes"),
+            (shared, "even", "mistakes"),
+        )
+        if category == "mistakes"
+        else ()
+    )
     for phrases, shape_key, category_key in (
-        (bank.get(voice, shared), shape, category),
+        *mistakes_probe,
+        (voiced, shape, category),
+        (voiced, shape, "production"),
         (shared, shape, category),
+        (shared, shape, "production"),
+        # Defense in depth: no mapped league reaches these last two or the endpoint,
+        # because each voice authors the shaped player and game-script/Mixed nodes
+        # that shared leaves empty (pinned by test_shape_never_falls_through_to_even).
+        (voiced, "even", category),
         (shared, "even", category),
     ):
         cell = phrases.get(archetype, {}).get(shape_key, {}).get(direction, {}).get(category_key)

@@ -6,9 +6,9 @@ import json
 import os
 import pickle
 import random
-import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import lightgbm as lgb
 import numpy as np
@@ -22,10 +22,8 @@ from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.utils import softmax_fn
 from scipy.optimize import minimize_scalar
 from scipy.special import expit, logit
-from scipy.stats import norm
 from sklearn.metrics import (
     accuracy_score,
-    brier_score_loss,
     log_loss,
     precision_score,
     roc_auc_score,
@@ -51,11 +49,17 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_zi,
 )
-from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR, _dp_mu_from_mean
+from sportstradamus.helpers.distributions import (
+    _DP_PHI_CEILING,
+    _DP_PHI_FLOOR,
+    LOGIT_CLIP_EPS,
+    _dp_mu_from_mean,
+)
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.skew_normal_centered import CenteredSkewNormal
+from sportstradamus.skew_normal_centered import CenteredSkewNormal, _centered_to_direct
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
@@ -85,6 +89,7 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part impo
     pin_two_part_grouping,
 )
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
+from sportstradamus.training.labels import PUSH, over_label
 from sportstradamus.training.lineage import (
     MATRIX_TRIM_SEED,
     validate_matrix_manifest,
@@ -104,14 +109,15 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     validate_strategy_selection,
 )
-from sportstradamus.training.report import report
+from sportstradamus.training.prior_models import keep_prior_model
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
+    _DISPERSION_C_BOUNDS,
+    _DISPERSION_SKEW_BOUNDS,
     _gate4_pit_ks_threshold,
     _randomized_pit_draws,
     _randomized_pit_ks,
     _served_sn_pit_ks,
-    fit_skewnorm_dispersion_c,
     fit_skewnorm_dispersion_skew,
 )
 from sportstradamus.training.shap import compute_market_importance
@@ -136,8 +142,8 @@ _BRIER_SKILL_DENOM_FLOOR = 1e-9
 _PROBA_CLIP = 1e-6
 # Confidence cutoff for the mode-stats and diagnostic masks: only rows where
 # the model's top-class probability exceeds this are counted in precision /
-# accuracy / over% statistics.  Mirrors the live scoring path in
-# prediction/scoring.py. Value from CLAUDE.md "Performance Table".
+# accuracy / over% statistics. A training-side convention that no live path
+# applies; the calibration scripts under scripts/ use the same 0.54.
 _MODE_CONFIDENCE_THRESHOLD: float = 0.54
 # Minimum rows in an EV-conditioned, confidence-masked subset before its over-
 # rate is reported; thinner slices give a noisy mean, so the diagnostic is NaN.
@@ -174,8 +180,8 @@ _MIXTURE_SCALE_STD_CEILING: float = 20.0
 # so a searched corner is only ever tightened, never loosened.
 _MIXTURE_MIN_CHILD_WEIGHT: float = 0.1
 _MIXTURE_LAMBDA_L2_FLOOR: float = 1.0
-# Constrained-SkewNormal guardrails (research/briefs/researcher_hpo_objective_alignment.md
-# R1) — same Hathaway-style clamp as the Mixture above, but keyed to a ROBUST label scale
+# Constrained-SkewNormal guardrails (the HPO-objective alignment brief, R1) — same
+# Hathaway-style clamp as the Mixture above, but keyed to a ROBUST label scale
 # (IQR/1.349): np.std runs up to 47x looser on ratio_meanyr cells whose near-zero MeanYr
 # denominators fatten the normalized tail (brief finding 5). Ceiling 10: the corrected
 # shape ledger separates converged fits (max 2.46x the outcome SD) from diverged ones
@@ -414,6 +420,87 @@ def predict_lss_params(
     return preds
 
 
+def predict_cv_oof_params(
+    cvbooster,
+    folds,
+    opt_rounds: int,
+    X: pd.DataFrame,
+    start_values: np.ndarray,
+    dist_obj,
+) -> pd.DataFrame:
+    """Pooled out-of-fold raw distribution parameters from ``model.cv``'s fold boosters.
+
+    The raw-booster equivalent of :func:`predict_lss_params` for a ``CVBooster``: each fold's
+    held-out rows are predicted by that fold's booster capped at ``num_iteration=opt_rounds``,
+    the per-row predict-time margins are added, and the distribution's response functions are
+    applied in ``param_dict`` order — exactly what ``LightGBMLSS.predict`` does via
+    ``dist.predict_dist``, which exposes no iteration cap (why this cannot just call it). Same
+    column layout and float32 dtype as :func:`predict_lss_params`; the frame is indexed by the
+    pooled held-out rows in fold order.
+
+    Args:
+        cvbooster: ``CVBooster`` from ``model.cv(..., return_cvbooster=True)``;
+            ``boosters[k]`` pairs with ``folds[k]``.
+        folds: The explicit ``(train_idx, test_idx)`` positional index pairs the cv ran on.
+        opt_rounds: Boosting rounds at the trial's CV-loss argmin.
+        X: The full training frame the cv ``Dataset`` was built from.
+        start_values: Per-row raw-space start values for ``X`` — the array
+            ``set_model_start_values`` computes, shape ``(len(X), n_dist_param)``.
+        dist_obj: Distribution object whose ``param_dict`` response functions apply
+            (including any ``_BoundedResponseFn`` shape clamp already installed on it).
+    """
+    frames = [
+        _response_param_frame(
+            booster.predict(X.iloc[test_idx], raw_score=True, num_iteration=opt_rounds),
+            start_values[test_idx],
+            dist_obj,
+            X.iloc[test_idx].index,
+        )
+        for booster, (_, test_idx) in zip(cvbooster.boosters, folds, strict=True)
+    ]
+    return pd.concat(frames)
+
+
+def _response_param_frame(raw_margins, start_values: np.ndarray, dist_obj, index) -> pd.DataFrame:
+    """Raw booster margins + start values → response-space param frame for one row block."""
+    predt = torch.tensor(raw_margins, dtype=torch.float32).reshape(-1, dist_obj.n_dist_param)
+    init = torch.tensor(start_values, dtype=torch.float32)
+    params = np.concatenate(
+        [
+            response_fn(predt[:, i].reshape(-1, 1) + init[:, i].reshape(-1, 1)).numpy()
+            for i, response_fn in enumerate(dist_obj.param_dict.values())
+        ],
+        axis=1,
+    )
+    frame = pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=index)
+    if isinstance(dist_obj, CenteredSkewNormal):
+        # Mirror CenteredSkewNormal.predict_dist: downstream consumers only ever see the
+        # direct (loc, scale, alpha) frame.
+        loc, scale, alpha = _centered_to_direct(
+            frame["mean"].to_numpy(), frame["sd"].to_numpy(), frame["gamma1"].to_numpy(), np
+        )
+        frame = pd.DataFrame(
+            {"loc": loc, "scale": scale, "alpha": alpha}, index=index, dtype=np.float32
+        )
+    return frame
+
+
+def predict_cv_ensemble_params(
+    cvbooster, opt_rounds: int, X: pd.DataFrame, start_values: np.ndarray, dist_obj
+) -> pd.DataFrame:
+    """Ensemble raw params for rows no fold booster trained on (e.g. the validation split).
+
+    Averages the fold boosters' raw margins at ``num_iteration=opt_rounds`` — the standard
+    cv-ensemble predictor — then applies start values and response functions exactly as
+    :func:`predict_cv_oof_params` does for held-out fold rows.
+    """
+    raw = np.mean(
+        [b.predict(X, raw_score=True, num_iteration=opt_rounds) for b in cvbooster.boosters],
+        axis=0,
+    )
+    return _response_param_frame(raw, start_values, dist_obj, X.index)
+
+
 def fit_predict_params(
     dist_obj,
     dist: str,
@@ -573,33 +660,35 @@ def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = 
 
 
 def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
-    """Raw classification metrics for binary over/under predictions."""
+    """Over/under metrics: a tie is half an Over in the means, no row in the hit-or-miss stats."""
     probs = np.clip(np.asarray(probs, dtype=float), _PROBA_CLIP, 1 - _PROBA_CLIP)
-    y = np.asarray(y).astype(int)
+    y = np.asarray(y, dtype=float)
     pred = (probs > 0.5).astype(int)
-    n_classes = len(np.unique(y))
-    over_n = int((pred == 1).sum())
-    under_n = int((pred == 0).sum())
+    settled = y != PUSH
+    hit, hit_probs, hit_pred = y[settled].astype(int), probs[settled], pred[settled]
+    n_classes = len(np.unique(hit))
+    over_n = int((hit_pred == 1).sum())
+    under_n = int((hit_pred == 0).sum())
     return {
-        "brier_score": float(brier_score_loss(y, probs)),
-        "log_loss": float(log_loss(y, probs, labels=[0, 1])),
-        "roc_auc": float(roc_auc_score(y, probs)) if n_classes > 1 else float("nan"),
+        "brier_score": float(np.mean((probs - y) ** 2)),
+        "log_loss": float(log_loss(hit, hit_probs, labels=[0, 1])),
+        "roc_auc": float(roc_auc_score(hit, hit_probs)) if n_classes > 1 else float("nan"),
         "expected_calibration_error": _expected_calibration_error(probs, y),
-        "accuracy": float(accuracy_score(y, pred)),
+        "accuracy": float(accuracy_score(hit, hit_pred)),
         "precision_over": (
-            float(precision_score(y, pred, pos_label=1, zero_division=0))
+            float(precision_score(hit, hit_pred, pos_label=1, zero_division=0))
             if over_n
             else float("nan")
         ),
         "precision_under": (
-            float(precision_score(y, pred, pos_label=0, zero_division=0))
+            float(precision_score(hit, hit_pred, pos_label=0, zero_division=0))
             if under_n
             else float("nan")
         ),
         "predicted_over_rate": float(pred.mean()),
         "empirical_over_rate": float(y.mean()),
         "prediction_std": float(probs.std()),
-        "nll": float(log_loss(y, probs, labels=[0, 1])),
+        "nll": float(log_loss(hit, hit_probs, labels=[0, 1])),
     }
 
 
@@ -699,7 +788,7 @@ def _step_load_matrix(
     dependency_root: Path | None = None,
     dependency_namespace: str = DEPENDENCY_NAMESPACE,
     matrix_input: Path | None = None,
-) -> tuple[pd.DataFrame, object] | None:
+) -> tuple[pd.DataFrame, object, pd.Series] | None:
     """Load cached training parquet, fetch new rows, concat. Returns None on early-exit.
 
     Args:
@@ -713,7 +802,8 @@ def _step_load_matrix(
         need_model: True if no existing model pickle was found.
 
     Returns:
-        ``(M, training_data_path)`` tuple where ``M`` is the combined matrix,
+        ``(M, training_data_path, new_rows)`` where ``M`` is the combined matrix and
+        ``new_rows`` masks the rows fetched this run (every row on a rebuild or cold start),
         or ``None`` when there is nothing to train on.
     """
     # style: allow-complexity — four mutually exclusive matrix sources (frozen input, full
@@ -770,6 +860,11 @@ def _step_load_matrix(
     if new_M.empty and not force and not need_model:
         return None
 
+    # Positional: built before the concat below, M (cached) first and new_M (fetched)
+    # second, matching the concat's row order. drop_duplicates(keep="last") then keeps
+    # the fetched copy of a (Player, Date) collision, so re-indexing this mask by
+    # M.index afterward still tags the survivor correctly.
+    new_rows = pd.Series([False] * len(M) + [True] * len(new_M))
     M = pd.concat([M, new_M], ignore_index=True)
     if M.empty:
         logger.warning("  No usable training data for %s %s, skipping", league, market)
@@ -777,6 +872,7 @@ def _step_load_matrix(
     M.Date = pd.to_datetime(M.Date, format="mixed")
     if "Player" in M.columns:
         M = M.drop_duplicates(subset=["Player", "Date"], keep="last")
+        new_rows = new_rows.loc[M.index]
     unpriced = incomplete_provenance_rows(M)
     if unpriced:
         # Raise before the caller persists: cached rows predating the provenance block concat
@@ -790,7 +886,7 @@ def _step_load_matrix(
             f'--league {league} --markets "{market}"`, which re-resolves the block from the '
             "archive through the training join's own resolver, then retrain."
         )
-    return M, filepath
+    return M, filepath, new_rows
 
 
 def _step_synthesize_odds(
@@ -846,6 +942,10 @@ def _step_synthesize_odds(
 
 
 _PRETRIM_LINE_COLUMN = "__PreTrimLine"
+# trim_matrix never balances a matrix below this many rows. Raised from 15,000 on 2026-09-27:
+# the NFL WR/RB/TE cells (20k+ rows before trimming since the gamelog-keyed depth fix) were
+# losing a fifth of their unquoted rows to the balancing; at 20,000 they keep 2.4-5.8k more.
+_MATRIX_TRIM_FLOOR = 20000
 
 
 def _reconcile_clipped_neutral_quotes(
@@ -887,10 +987,9 @@ def _reconcile_clipped_neutral_quotes(
     return M.drop(columns=_PRETRIM_LINE_COLUMN)
 
 
-def _step_persist_matrix_and_comps(
+def _step_persist_matrix(
     M: pd.DataFrame,
     filepath,
-    stat_data,
     *,
     deterministic: bool,
     full_rebuild: bool = False,
@@ -899,14 +998,15 @@ def _step_persist_matrix_and_comps(
     market: str | None = None,
     dist: str | None = None,
     cv: float = 1.0,
+    new_rows: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
+    """Trim the matrix and write it to parquet; deterministic mode skips the write."""
     if immutable_input:
         return M
     if _PRETRIM_LINE_COLUMN in M:
         raise ValueError(f"reserved matrix column is present: {_PRETRIM_LINE_COLUMN}")
     M[_PRETRIM_LINE_COLUMN] = M["Line"]
-    M = trim_matrix(M, 15000, seed=MATRIX_TRIM_SEED)
+    M = trim_matrix(M, _MATRIX_TRIM_FLOOR, seed=MATRIX_TRIM_SEED, new_rows=new_rows)
     if league is not None and market is not None:
         M = _reconcile_clipped_neutral_quotes(
             M,
@@ -921,8 +1021,6 @@ def _step_persist_matrix_and_comps(
         M = M.reindex(sorted(M.columns), axis=1)
     if not deterministic:
         M.to_parquet(filepath, compression="zstd", index=True)
-        if not full_rebuild:
-            stat_data.save_comps()
     return M
 
 
@@ -1166,81 +1264,171 @@ def _step_build_lss_model(
     return model
 
 
-def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict:
-    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose CV
-    PIT-KS clears ``threshold``; if none qualify, the best-calibrated trial.
+# Asymptotic SD of the Kolmogorov statistic × √n — one sampling SE of a trial's measured PIT-KS.
+_KS_SAMPLING_SD_COEF = 0.2606
+
+# Per-trial constraint cost cap: the OOF pool is subsampled to this many rows before the
+# KS fit — every KS eval prices the predictive CDF over the whole pool (x 25 draws on the
+# lattice), and an uncapped 8-10k-row pool pushed one Optuna trial to ~17 min (exp2 NHL
+# points: 4 trials/hour). At 4000 rows the KS sampling SE is 0.021, still tighter than the
+# validation frame the retired v2 measure used at every cell size seen in the confirm ledger.
+_OOF_KS_MAX_ROWS = 4000
+_OOF_KS_SUBSAMPLE_SEED = 4517
+
+# Per-trial minimize_scalar tolerance for the SkewNormal (c, s) and count dispersion-c fits
+# inside the OOF constraint: a coarse ranking measure, not the full-precision serve fit — see
+# the per-branch comments below for each fit's specific eval cost.
+_TRIAL_XATOL = 1e-2
+
+
+def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows: int) -> dict:
+    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose OOF
+    PIT-KS clears the noise-aware effective threshold.
 
     Operationalizes Gneiting-Balabdaoui-Raftery 2007's "sharpness subject to calibration"
-    as a hard constraint (congruent with the ship gate) rather than a scalarized penalty.
-    The fallback is logged: a vacuous constraint (no qualifying trial — common at low n)
-    silently degrades to loss-only selection exactly where calibration matters most
-    (research brief reality-check b).
+    as an ε-constraint under the one-standard-error rule (ESL §7.10):
+    ``tau_eff = max(threshold, min_pit_ks + SE)`` with ``SE = _KS_SAMPLING_SD_COEF / √n_rows``,
+    then min ``cv_loss`` over ``pit_ks <= tau_eff`` (never empty — ``min_pit_ks`` qualifies).
+    When no trial clears the raw Gate-4 threshold the pick is the sharpest trial statistically
+    tied with the best-calibrated one, never the bare min-KS trial — the single most
+    winner's-cursed of ~300 noisy KS draws (Lever-1-v3 brief, R3).
 
-    Also logs the constraint's headroom (min PIT-KS, feasible count, and the CRPS price
-    of feasibility) — the Experiment-B probe of whether the constraint is non-vacuous
-    (researcher_hpo_objective_alignment brief, R2 step 1).
+    Also logs the constraint's headroom (min PIT-KS, feasible count at the raw threshold,
+    ``tau_eff``, and the CRPS price of the pick over the loss-only best) — the probe of
+    whether the constraint is non-vacuous.
+
+    Args:
+        candidates: Completed trials tagged with ``cv_loss`` and ``pit_ks``.
+        threshold: The cell's raw Gate-4 PIT-KS bar.
+        n_rows: Rows in the pooled OOF frame each trial's ``pit_ks`` was measured on.
     """
-    qualified = [c for c in candidates if c["pit_ks"] < threshold]
-    crps_price = (
-        min(c["cv_loss"] for c in qualified) - min(c["cv_loss"] for c in candidates)
-        if qualified
-        else None
-    )
+    min_pit_ks = min(c["pit_ks"] for c in candidates)
+    tau_eff = max(threshold, min_pit_ks + _KS_SAMPLING_SD_COEF / np.sqrt(n_rows))
+    picked = min((c for c in candidates if c["pit_ks"] <= tau_eff), key=lambda c: c["cv_loss"])
     logger.info(
-        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f crps_price=%s",
-        min(c["pit_ks"] for c in candidates),
-        len(qualified),
+        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f "
+        "tau_eff=%.4f crps_price=%.5f",
+        min_pit_ks,
+        sum(c["pit_ks"] < threshold for c in candidates),
         len(candidates),
         threshold,
-        "n/a" if crps_price is None else format(crps_price, ".5f"),
+        tau_eff,
+        picked["cv_loss"] - min(c["cv_loss"] for c in candidates),
     )
-    if qualified:
-        return min(qualified, key=lambda c: c["cv_loss"])
-    logger.warning(
-        "calibrated HP selection: no trial met CV-PIT-KS < %.4f (best %.4f); "
-        "falling back to min-PIT-KS",
-        threshold,
-        min(c["pit_ks"] for c in candidates),
-    )
-    return min(candidates, key=lambda c: c["pit_ks"])
+    return picked
 
 
-def _calibration_penalty(splits: dict, dist_info: dict):
+def _blend_oof_skewnormal(decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending):
+    """Blend the OOF model predictive with the book the way serving does.
+
+    exp2 MLB hits allowed: at model_weight ~0.12 the model-only measure anti-correlates
+    with the served gate (280 trials walked g4 from 0.02 to 0.15), so the constraint must
+    score the fused predictive. Per-trial ``fit_blend_weight`` mirrors the production fit;
+    rows without a real book EV blend at weight 1 (the authenticity fallback). Returns the
+    blended ``(mean, sigma, alpha, gate)``.
+    """
+    book_ok = np.isfinite(book_ev) & (book_ev > 0)
+    cv = dist_info["cv"]
+    gate_kwargs = (
+        {"gate_model": decoded.gate, "gate_book": 0.0}
+        if dist_info["hist_gate"] > GATE_PUBLISH_THRESHOLD and decoded.gate is not None
+        else {}
+    )
+    if book_ok.any():
+        w = calibration.fit_blend_weight(
+            blending,
+            decoded.ev[book_ok],
+            book_ev[book_ok],
+            y_pool[book_ok],
+            "SkewNormal",
+            cv=cv,
+            model_sigma=sn_scale[book_ok],
+            model_skew_alpha=skew[book_ok],
+            **{
+                key: (value[book_ok] if isinstance(value, np.ndarray) else value)
+                for key, value in gate_kwargs.items()
+            },
+        )
+    else:
+        w = 1.0
+    mean, sigma_blend, alpha_blend, gate_blend = fused_loc(
+        np.where(book_ok, w, 1.0),
+        decoded.ev,
+        np.where(book_ok, book_ev, decoded.ev),
+        cv,
+        "SkewNormal",
+        sigma=sn_scale,
+        skew_alpha=skew,
+        **gate_kwargs,
+    )
+    return mean, sigma_blend, alpha_blend, gate_blend if gate_kwargs else decoded.gate
+
+
+def _calibration_penalty(
+    splits: dict, dist_info: dict, *, blending: str = calibration.DEFAULT_BLENDING
+):
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
-    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the
-    served randomized-PIT KS on the validation split — SkewNormal via its joint
-    (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma / ZAGamma)
-    via one refit + scalar dispersion-``c`` fit. Two deliberate proxy simplifications:
-    (a) both branches are model-only — the book blend is skipped (the model dominates
-    failing cells, so the model-only KS closely proxies the served Gate-4 statistic while
-    keeping per-trial cost to one refit); (b) the count branch always fits ``c`` on the
+    Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
+    already-trained CV fold boosters to a served randomized-PIT KS — SkewNormal via its
+    joint (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma /
+    ZAGamma) via the scalar dispersion-``c`` fit. No refit anywhere: fold held-out rows
+    come from that fold's booster at ``num_iteration=opt_rounds`` (~4.7× the validation
+    rows, cutting the KS sampling SD 2.16× and removing the +33% per-trial refit —
+    Lever-1-v3 brief, R2), and the validation rows from the fold-booster ensemble mean.
+    The SkewNormal statistic is the **max over the OOF and validation frames** (the R2
+    era caveat, escalated after exp2): both frames blend with the book per trial
+    (:func:`_blend_oof_skewnormal` — mandatory at low model_weight) and the validation
+    leg vetoes trials whose in-era recal-fixability does not survive to the era the
+    serve fit and gate actually use. Deliberate proxy simplifications: (a) both frames
+    skip the post-hoc stages (≤0.005 KS); the count branch stays model-only OOF (no
+    demonstrated harm; its risk pins are all SN); (b) the count branch always fits ``c`` on the
     PIT-KS objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
-    served-KS ranking statistic.
+    served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
+    :data:`_OOF_KS_MAX_ROWS` rows, the SN fit runs sequential (c then s), and the count
+    c-fit at 0.01 tolerance — a per-trial constraint must cost seconds, not the ~17 min
+    the production-grade fit took on an 8k-row pool.
     """
     dist = dist_info["dist"]
     strategy = dist_info["target_normalization"]
     global_mean = dist_info["global_mean"]
     denom_col = dist_info["denom_col"]
-    X_val = splits["X_validation"]
-    y_val = splits["y_validation"]["Result"].to_numpy(dtype=float)
+    dist_obj = dist_info["dist_obj"]
+    X_train = splits["X_train"]
+    y_train_result = splits["y_train"]["Result"]
+    # The per-row predict-time margins predict_lss_params would seed for these rows; they
+    # depend only on the frame, so compute once. SimpleNamespace stands in for the model
+    # object set_model_start_values assigns onto.
+    carrier = SimpleNamespace()
+    set_model_start_values(
+        carrier,
+        dist,
+        X_train,
+        shape_ceiling=dist_info["shape_ceiling"],
+        normalized=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        sn_param=dist_info["sn_param"],
+    )
+    start_values = carrier.start_values
 
-    def served_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
-        )
-        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
-        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
+    def oof_frames(cvbooster, folds, opt_rounds):
+        preds = predict_cv_oof_params(cvbooster, folds, opt_rounds, X_train, start_values, dist_obj)
+        if len(preds) > _OOF_KS_MAX_ROWS:
+            keep = np.sort(
+                np.random.default_rng(_OOF_KS_SUBSAMPLE_SEED).choice(
+                    len(preds), _OOF_KS_MAX_ROWS, replace=False
+                )
+            )
+            preds = preds.iloc[keep]
+        # y_train is the raw pre-transform frame and X_train keeps its original index
+        # through the SkewNormal nonzero filter, so .loc realigns the raw outcomes.
+        y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
+        return preds, X_train.loc[preds.index], y_pool
+
+    def sn_frame_ks(preds, X_pool, y_pool, book_ev):
+        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_pool, global_mean, denom_col)
+        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_pool, denom_col)
         skew = preds["alpha"].to_numpy()
         decoded = decode_predictive_mean(
             preds,
@@ -1249,23 +1437,55 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             sn_scale=sn_scale,
             hist_gate=dist_info["hist_gate"],
         )
-        mean = decoded.ev
-        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val, gate=decoded.gate)
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0, decoded.gate)
-
-    def count_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
+        mean, sn_scale, skew, gate = _blend_oof_skewnormal(
+            decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
         )
+
+        # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
+        # fit. The production fit_skewnorm_dispersion_skew burns ~50 full-precision KS
+        # evals per call (~187 s/trial on a ZI SN pool); ~20 coarse evals order the
+        # trials identically.
+        def ks_at(c, s):
+            return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, gate)
+
+        c = minimize_scalar(
+            lambda c: ks_at(c, 0.0),
+            bounds=_DISPERSION_C_BOUNDS,
+            method="bounded",
+            options={"xatol": _TRIAL_XATOL},
+        ).x
+        s = minimize_scalar(
+            lambda s: ks_at(c, s),
+            bounds=_DISPERSION_SKEW_BOUNDS,
+            method="bounded",
+            options={"xatol": _TRIAL_XATOL},
+        ).x
+        return ks_at(c, s)
+
+    def served_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+        ks_oof = sn_frame_ks(
+            preds, X_pool, y_pool, splits["B_train"]["EV"].loc[preds.index].to_numpy(dtype=float)
+        )
+        # Two-frame constraint (the R2 era caveat, escalated): the OOF pool is train-era, the
+        # gate is later-era. exp2's MLB rerun showed a trial can be recal-fixable in-era yet
+        # demand an extreme, non-transferring (c, s) on the validation era (serve fit
+        # c=1.80/s=-2.82 → test g4 0.104 at model_weight 0.05). The validation leg prices each
+        # trial on the same frame the serve fit will use; the fold-booster ensemble keeps it
+        # refit-free.
+        preds_val = predict_cv_ensemble_params(
+            cvbooster, opt_rounds, splits["X_validation"], start_values_val, dist_obj
+        )
+        ks_val = sn_frame_ks(
+            preds_val,
+            splits["X_validation"],
+            splits["y_validation"]["Result"].to_numpy(dtype=float),
+            splits["B_validation"]["EV"].to_numpy(dtype=float),
+        )
+        return max(ks_oof, ks_val)
+
+    def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
         decoded = decode_predictive_mean(preds, dist)
         shape_ceiling = dist_info["shape_ceiling"]
         if dist == "DPO":
@@ -1280,7 +1500,7 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             lambda c: _dispersion_pit_ks_loss(
                 c,
                 dist=dist,
-                y_val_arr=y_val,
+                y_val_arr=y_pool,
                 val_weighted_mean=decoded.ev,
                 gate_blend_val=decoded.gate,
                 r_blend_val=decoded.r,
@@ -1289,13 +1509,28 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             ),
             bounds=(0.1, upper),
             method="bounded",
+            # xatol 0.01: each loss eval prices the whole lattice CDF over the pool x 25
+            # draws; default tolerance burns ~3x the evals refining c digits the
+            # constraint ranking never uses. The production serve fit stays full precision.
+            options={"xatol": _TRIAL_XATOL},
         ).x
         frame = _count_pit_frame(
             dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
         )
-        return _randomized_pit_ks(frame, dist, y_val, strategy=TARGET_NORM_NONE)
+        return _randomized_pit_ks(frame, dist, y_pool, strategy=TARGET_NORM_NONE)
 
     if dist == "SkewNormal":
+        carrier_val = SimpleNamespace()
+        set_model_start_values(
+            carrier_val,
+            dist,
+            splits["X_validation"],
+            shape_ceiling=dist_info["shape_ceiling"],
+            normalized=dist_info["normalize"],
+            offset_mode=dist_info["offset_mode"],
+            sn_param=dist_info["sn_param"],
+        )
+        start_values_val = carrier_val.start_values
         return served_pit_ks
     return count_pit_ks
 
@@ -1315,9 +1550,9 @@ def _step_select_hyperparams(
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
     When ``calibration_penalty`` is given (Lever 1, calibrated HP selection) the Optuna
-    objective is search-gated on validation PIT-KS and the paths return every completed trial (a
-    list) for the caller's :func:`_pick_calibrated_candidate` final pick; every other case returns
-    the single best param dict as before.
+    sampler is feasibility-constrained on the out-of-fold PIT-KS and the paths return every
+    completed trial (a list) for the caller's :func:`_pick_calibrated_candidate` final pick;
+    every other case returns the single best param dict as before.
 
     Args:
         X_train: Training feature matrix (used to size ``min_child_weight`` upper).
@@ -1782,15 +2017,17 @@ def _step_compute_mode_stats(
     """Compute the legacy prec/acc/sharp/ll/over_pct/under_prec arrays (length-3).
 
     Index 0 = raw, 1 = no_filt (post-blend, pre-temp), 2 = filt (post-temp).
-    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``.
+    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``; tie rows are left out.
     """
+    settled = y_class != PUSH
+    y_class = y_class[settled].astype(int)
     prec = np.zeros(3)
     acc = np.zeros(3)
     sharp = np.zeros(3)
     ll = np.zeros(3)
     over_pct = np.zeros(3)
     under_prec = np.zeros(3)
-    for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
+    for i, y_proba in enumerate(p[settled] for p in (y_proba_raw, y_proba_no_filt, y_proba_filt)):
         y_pred = (y_proba > 0.5).astype(int)[:, 1]
         mask = np.max(y_proba, axis=1) > _MODE_CONFIDENCE_THRESHOLD
         prec[i] = precision_score(y_class[mask], y_pred[mask])
@@ -1975,11 +2212,13 @@ def _step_compute_diagnostics(
         ``model_shape``, ``empirical_shape``, ``start_mean``, ``model_ev``,
         ``mean_line``, ``ev_minus_line``, ``result_mean``, ``median_ev_diff``,
         ``frac_ev_gt_line``, ``over_pct_ev_gt``, ``over_pct_ev_lt``,
-        ``cf_over_pct``, ``ev_meanyr_corr``, ``result_meanyr_corr``).
+        ``cf_over_pct``, ``ev_meanyr_corr``, ``result_meanyr_corr``,
+        ``n_authentic_validation``, ``n_blend_fit_clusters``).
     """
     X_test = splits["X_test"]
     y_test = splits["y_test"]
     B_test = splits["B_test"]
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
     test_mean_yr = X_test["MeanYr"].mean()
     test_std_yr = X_test["STDYr"].mean()
@@ -2041,6 +2280,8 @@ def _step_compute_diagnostics(
         "cf_over_pct": diag_cf_over_pct,
         "ev_meanyr_corr": diag_ev_meanyr_corr,
         "result_meanyr_corr": diag_result_meanyr_corr,
+        "n_authentic_validation": int(authentic_val.sum()),
+        "n_blend_fit_clusters": _blend_fit_cluster_count(splits, authentic_val),
     }
 
 
@@ -2056,6 +2297,7 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
             "SkewNormal",
             sigma=decoded["sn_sigma_test"],
             skew_alpha=decoded["sn_alpha_test"],
+            step=step,
             gate=gate_test,
         )
     elif dist == "Mixture":
@@ -2182,6 +2424,8 @@ def _build_filedict(
             "result_meanyr_corr": diag["result_meanyr_corr"],
             "shape_ceiling": shape_ceiling,
             "marginal_shape": marginal_shape,
+            "n_authentic_validation": diag["n_authentic_validation"],
+            "n_blend_fit_clusters": diag["n_blend_fit_clusters"],
         },
         "params": opt_params,
         "distribution": dist,
@@ -2234,8 +2478,8 @@ def _build_filedict(
 
 
 def _persist_player_metadata(X_test: pd.DataFrame, splits: dict) -> None:
-    # Player key + game date enable the offline scorecard's player-clustered Gate-1
-    # bootstrap; the i.i.d. bootstrap over-credits repeated-player panels without them.
+    # The offline scorecard's Gate 1 takes the wider of the row and game-date (Date) bootstraps
+    # as its decisive bound and reports a player-clustered (Player) bound that never decides.
     # Guard is real — some leagues (e.g. team-level markets) omit "Player" entirely.
     if splits.get("players_test") is not None:
         X_test["Player"] = splits["players_test"]
@@ -2383,6 +2627,8 @@ def _step_persist_artifacts(
     the research harness can iterate without overwriting the production model
     dir. The test-set CSV still lives under the package ``data/test_sets/``.
     """
+    # style: allow-complexity -- a flat run of independent guards: per-family probe columns,
+    # optional audit columns, and the sandbox / deterministic / canonical output roots.
     X_test = splits["X_test"]
     y_test = splits["y_test"]
     B_test = splits["B_test"]
@@ -2394,11 +2640,24 @@ def _step_persist_artifacts(
     # Internal B_* frames use book OVER probability for validation/blending;
     # scorecard-shaped CSV artifacts define Odds as book UNDER probability.
     X_test["Odds"] = 1.0 - B_test["Odds"].values
-    # EV is the base mean the blend used, mean-corrected when a mean-stage
-    # corrector is active, so the bias gates (Gate 2/3) read the corrected value.
-    # The served shape columns below retain their separately calibrated
-    # dispersion, which the mean-stage corrector intentionally leaves alone.
+    # EV is the model's own base mean, pre-blend and pre-correction; the mean-stage
+    # corrector acts on the pool, so Blended_EV above carries it and the outcome gates
+    # (1/2/3/6) read that. The served shape columns below retain their separately
+    # calibrated dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
+    # Pre-blend probe inputs: with the book base mean and the model-only shape in absolute
+    # EV space, an offline pass re-runs fused_loc at any weight instead of inverting the
+    # served pool. _stage_family_shape_columns stays the served-shape contract.
+    X_test["Book_EV"] = B_test["EV"].values
+    if dist == "SkewNormal":
+        X_test["SN_Sigma_model"] = decoded["sn_sigma_test"]
+        X_test["SN_Alpha_model"] = decoded["sn_alpha_test"]
+    elif dist in ("NegBin", "ZINB"):
+        X_test["R_model"] = decoded["r"]
+        if dist == "ZINB":
+            X_test["Gate_model"] = decoded["gate_test"]
+    elif dist == "DPO":
+        X_test["DP_PHI_model"] = decoded["phi"]
     _stage_family_shape_columns(
         X_test,
         dist=dist,
@@ -2449,9 +2708,9 @@ def _step_persist_artifacts(
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
     # scorecard harness can score artifacts without overwriting production.
-    # Training-data parquet and the whole-suite report() stay suppressed
-    # (input is unchanged under input-freeze; report() is not per-market and
-    # would clobber the production data/training/model_stats.{parquet,csv}).
+    # The training-data parquet stays suppressed (input is unchanged under
+    # input-freeze); the whole-suite report() runs at the CLI's league
+    # boundary and skips deterministic runs there for the same reason.
     # Test-set CSVs remain inside the package data tree; only the model
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
@@ -2473,6 +2732,9 @@ def _step_persist_artifacts(
     if artifact_output is None:
         csv_filepath = pkg_resources.files(data) / f"test_sets/{csv_subdir}{filename}.csv"
         mdl_filepath = mdl_dir / f"{filename}.mdl"
+    # Before either write, so a failure to keep the outgoing model leaves the old test set and
+    # the old model a matched pair.
+    keep_prior_model(mdl_filepath, Path(str(csv_filepath)))
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
 
@@ -2591,11 +2853,13 @@ def _dispersion_pit_ks_loss(
 
 
 def _brier_temperature_loss(T: float, val_logits: np.ndarray, y_class_val: np.ndarray) -> float:
-    """Brier + (T-1)² regularization at temperature ``T``. Pure."""
+    """Brier score at temperature ``T``, deliberately with no penalty toward ``T = 1``.
+
+    A fixed-weight penalty stops the fit short of the Brier minimum at every row count
+    (docs/archive/researcher_temperature_ridge.md).
+    """
     cal = expit(val_logits / T)
-    brier = np.mean((cal - y_class_val) ** 2)
-    reg = 0.01 * (T - 1) ** 2
-    return brier + reg
+    return np.mean((cal - y_class_val) ** 2)
 
 
 def _blended_val_pit(fused: dict, y_val: np.ndarray) -> np.ndarray:
@@ -2711,15 +2975,8 @@ def _calibrate_count_dispersion(
     """NegBin/ZINB/Gamma scalar dispersion fit: scale ``r``/``alpha`` by ``c``."""
     r_blend_val = fused["r_blend_val"]
     alpha_blend_val = fused["alpha_blend_val"]
-    beta_blend_val = fused["beta_blend_val"]
-    p_val = fused["p_val"]
     gate_blend_val = fused["gate_blend_val"]
-
-    val_weighted_mean = (
-        r_blend_val * (1 - p_val) / p_val
-        if dist in ("NegBin", "ZINB")
-        else alpha_blend_val / beta_blend_val
-    )
+    val_weighted_mean = fused["weighted_mean_val"]
 
     mean_shape = np.mean(r_blend_val) if dist in ("NegBin", "ZINB") else np.mean(alpha_blend_val)
     max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
@@ -2755,6 +3012,53 @@ def _calibrate_count_dispersion(
     out["c_opt"] = c_opt
     out["val_weighted_mean"] = val_weighted_mean
     return out
+
+
+def _step_correct_fused_mean(
+    fused: dict, splits: dict, dist: str, posthoc_slug: str
+) -> dict | None:
+    """Fit the mean-stage corrector on the FUSED validation mean and apply it to both splits.
+
+    A logarithmic opinion pool is not mean-preserving: it multiplies whatever mean
+    calibration its legs carry by ``rho^(1-w)``, so a corrector fitted before fusion is
+    discarded by the pool. Ranjan & Gneiting (2010, doi:10.1111/j.1467-9868.2009.00726.x)
+    Thm 1 is the general statement — recalibrate the combination, not the components. The
+    corrected object is the mean the gates score, so the fit target and the gate target
+    agree on a zero-inflated family. Runs before the dispersion fit, which reads the
+    corrected mean, and therefore before the temperature fit below it.
+
+    Every mean-dependent served parameter is re-derived downstream from
+    ``weighted_mean`` — ``NB_P``, ``DP_MU`` and ``SN_Loc`` in
+    :func:`_stage_family_shape_columns`, ``beta`` in :func:`_calibrate_count_dispersion`
+    — so only Mixture, whose components carry the location, needs re-encoding here.
+
+    Returns the fitted corrector for the pickle, or ``None`` when the cell has no
+    mean-stage slug.
+    """
+    if posthoc_slug not in posthoc.MEAN_STAGE:
+        return None
+    gate_val, gate_test = fused["gate_blend_val"], fused["gate_blend_test"]
+    blob = posthoc.fit_posthoc(
+        posthoc_slug,
+        posthoc.served_mean(fused["weighted_mean_val"], gate_val),
+        splits["y_validation"]["Result"].to_numpy(dtype=float),
+    )
+    corrected_test = posthoc.correct_fused_mean(
+        posthoc_slug, blob, fused["weighted_mean"], gate_test
+    )
+    corrected_val = posthoc.correct_fused_mean(
+        posthoc_slug, blob, fused["weighted_mean_val"], gate_val
+    )
+    if dist == "Mixture":
+        fused["mix_blend_test"] = _shift_mixture(
+            fused["mix_blend_test"], corrected_test - fused["weighted_mean"]
+        )
+        fused["mix_blend_val"] = _shift_mixture(
+            fused["mix_blend_val"], corrected_val - fused["weighted_mean_val"]
+        )
+    fused["weighted_mean"] = corrected_test
+    fused["weighted_mean_val"] = corrected_val
+    return blob
 
 
 def _step_calibrate_dispersion(
@@ -2859,38 +3163,44 @@ def _step_compute_test_probabilities(
     dist: str,
     step,
 ) -> np.ndarray:
-    """Compute ``y_proba_no_filt`` (Nx2) for the test set after dispersion calibration."""
-    B_test = splits["B_test"]
+    """Compute ``y_proba_no_filt`` (Nx2) for the test set after dispersion calibration.
+
+    Columns are ``[P(under), P(over)]``, before temperature scaling. SkewNormal and the Gamma
+    families pass the cell's ``step`` so an integer-line push is priced under the same bin
+    width ``model_prob`` serves.
+    """
+    line = splits["B_test"]["Line"].to_numpy()
     weighted_mean = fused["weighted_mean"]
     if dist == "SkewNormal":
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_test"],
             skew_alpha=calibrated["sn_alpha_blend_test"],
+            step=step,
             gate=fused["gate_blend_test"],
         )
     elif dist == "Mixture":
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             mix=calibrated["mix_blend_test"],
         )
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             r=calibrated["r_test"],
             gate=fused["gate_blend_test"],
         )
     elif dist == "DPO":
-        under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, phi=calibrated["phi_test"])
+        under = get_odds(line, weighted_mean, dist, phi=calibrated["phi_test"])
     else:
         under = get_odds(
-            B_test["Line"].to_numpy(),
+            line,
             weighted_mean,
             dist,
             alpha=calibrated["alpha_blend"],
@@ -2903,6 +3213,11 @@ def _step_compute_test_probabilities(
     return np.array([under, 1 - under]).transpose()
 
 
+# Search interval for the temperature T in expit(logit(p) / T). T >= 1 can only flatten an
+# over-probability toward 0.5, never sharpen it.
+_TEMPERATURE_BOUNDS: tuple[float, float] = (1.0, 10.0)
+
+
 def _step_calibrate_temperature(
     fused: dict,
     calibrated: dict,
@@ -2910,23 +3225,32 @@ def _step_calibrate_temperature(
     decoded: dict,
     dist: str,
     step,
-) -> tuple[float, np.ndarray, float]:
-    """Fit temperature ``T_opt`` on validation, return calibrated val probs + model_calib."""
+) -> tuple[float, np.ndarray, float, np.ndarray]:
+    """Fit temperature ``T_opt`` on the validation split.
+
+    Returns:
+        ``(T_opt, val_calibrated, model_calib, y_class_val)``: ``T_opt`` within
+        ``_TEMPERATURE_BOUNDS``, the temperature-scaled over-probability of each validation
+        row, ``model_calib`` = 1 - Brier of those, and the push-aware over labels (a push is
+        0.5) the Brier is scored against.
+    """
     B_validation = splits["B_validation"]
-    y_class_val = (splits["y_validation"]["Result"] >= B_validation["Line"]).astype(int).to_numpy()
+    y_class_val = over_label(splits["y_validation"]["Result"], B_validation["Line"])
+    line = B_validation["Line"].to_numpy()
 
     if dist == "SkewNormal":
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean_val"],
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_val"],
             skew_alpha=calibrated["sn_alpha_blend_val"],
+            step=step,
             gate=fused["gate_blend_val"],
         )
     elif dist == "Mixture":
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean_val"],
             dist,
             mix=calibrated["mix_blend_val"],
@@ -2937,7 +3261,7 @@ def _step_calibrate_temperature(
         _gate_val = fused["gate_blend_val"] if dist in ("ZINB", "ZAGamma") else None
         _phi_val = calibrated["phi_blend_val"] if dist == "DPO" else None
         val_raw_under = get_odds(
-            B_validation["Line"].to_numpy(),
+            line,
             calibrated["val_weighted_mean"],
             dist,
             alpha=_alpha_val,
@@ -2948,14 +3272,13 @@ def _step_calibrate_temperature(
         )
     # §6.1 Rung C: temperature calibrates the SERVED over-prob, so fit it on the warped CDF.
     val_raw_under = apply_cdf_recal(calibrated.get("pit_recal_blob"), val_raw_under)
-    val_raw_over_clipped = np.clip(1 - val_raw_under, 1e-6, 1 - 1e-6)
+    val_raw_over_clipped = np.clip(1 - val_raw_under, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS)
     val_logits = logit(val_raw_over_clipped)
-    result_ts = minimize_scalar(
+    T_opt = minimize_scalar(
         lambda T: _brier_temperature_loss(T, val_logits, y_class_val),
-        bounds=(1.0, 10.0),
+        bounds=_TEMPERATURE_BOUNDS,
         method="bounded",
-    )
-    T_opt = result_ts.x
+    ).x
     val_calibrated = apply_temperature(1 - val_raw_under, T_opt)
     model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
     return T_opt, val_calibrated, model_calib, y_class_val
@@ -3113,15 +3436,16 @@ def _step_decode_predictions(
 def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
     """Return a row-aligned mask for quotes that may contribute book evidence.
 
-    Current matrices carry the explicit three-state provenance contract. Legacy
-    matrices fall back to their archived/synthetic compatibility columns, and
-    truly provenance-free inputs retain their historical all-priced behavior.
+    Current matrices carry the explicit provenance contract, where only a sportsbook
+    price is book evidence: a ``pickem`` quote is a real line priced at the platform's
+    even payout. Legacy matrices fall back to their archived/synthetic compatibility
+    columns, and truly provenance-free inputs retain their historical all-priced behavior.
     """
     index = splits[f"B_{split}"].index
     authenticity = splits.get(f"quote_authenticity_{split}")
     if authenticity is not None:
         values = pd.Series(authenticity).reindex(index)
-        if values.isna().any() or not values.isin(("authentic", "derived", "synthetic")).all():
+        if values.isna().any() or not values.isin(AUTHENTICITY_VALUES).all():
             raise ValueError(f"{split} quote authenticity is missing, unaligned, or unsupported")
         return values.eq("authentic").to_numpy(dtype=bool)
 
@@ -3143,6 +3467,47 @@ def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
     return (archived_values & ~synthetic_values).to_numpy(dtype=bool)
 
 
+def _blend_fit_clusters(splits: dict, mask: np.ndarray) -> np.ndarray:
+    """Per-row cluster ids for the blend-weight fit: player identity, with the same
+    date fallback for team markets as :func:`_calibration_folds`.
+    """
+    key = splits["players_validation"]
+    if key is None:
+        key = splits["dates_validation"]
+    # The metadata series keep the Date-sorted split order while B_validation (and the mask
+    # built over its index) were index-sorted in _step_predict_splits: align by label.
+    return key.reindex(splits["B_validation"].index).to_numpy()[mask]
+
+
+def _blend_fit_cluster_count(splits: dict, mask: np.ndarray) -> int:
+    """Distinct clusters the blend-weight fit would see under ``mask``."""
+    return len(np.unique(_blend_fit_clusters(splits, mask))) if mask.any() else 0
+
+
+def _blend_fit_supported(splits: dict, mask: np.ndarray) -> bool:
+    """Whether the authentic validation rows carry enough evidence to fit a blend weight.
+
+    The floor is the one the 1-SE rule's clustered SE already uses; below it the fit is a
+    coin flip on a handful of games, and serving treats unquoted rows as model-only anyway,
+    so w = 1.0 is the honest value. Clusters, not rows: 30 rows from 2 pitchers is still no
+    evidence. Cross-fit folds apply the floor to their own ~80% share of the clusters, so a
+    cell just above it can fit ``w`` on the whole frame while its folds — and the dumped test
+    rows — serve model-only.
+    """
+    n_clusters = _blend_fit_cluster_count(splits, mask)
+    if n_clusters >= calibration._ONE_SE_MIN_CLUSTERS:
+        return True
+    if mask.any():
+        logger.warning(
+            "blend weight not fit: %d authentic validation rows over %d clusters "
+            "(floor %d); serving model-only",
+            int(mask.sum()),
+            n_clusters,
+            calibration._ONE_SE_MIN_CLUSTERS,
+        )
+    return False
+
+
 def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
     """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
@@ -3161,7 +3526,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
         else {}
     )
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             ev_validation[authentic_val],
@@ -3171,6 +3536,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
             cv=cv,
             model_sigma=decoded["sn_sigma_val"][authentic_val],
             model_skew_alpha=decoded["sn_alpha_val"][authentic_val],
+            clusters=_blend_fit_clusters(splits, authentic_val),
             **{
                 key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _fit_gate_kwargs.items()
@@ -3245,7 +3611,7 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
     authentic_test = _split_quote_authenticity_mask(splits, "test")
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             ev_validation[authentic_val],
@@ -3255,6 +3621,7 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
             cv=cv,
             model_sigma=mix_sd_val[authentic_val],
             model_skew_alpha=np.zeros(int(authentic_val.sum()), dtype=float),
+            clusters=_blend_fit_clusters(splits, authentic_val),
         )
     else:
         model_weight = 1.0
@@ -3297,7 +3664,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             decoded["ev_validation"][authentic_val],
@@ -3315,6 +3682,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
                 else None
             ),
             cv=cv,
+            clusters=_blend_fit_clusters(splits, authentic_val),
             **{
                 key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _zi_kwargs.items()
@@ -3362,10 +3730,9 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
     out.update(
         {
             "weighted_mean": r_blend_test * (1 - p_test) / p_test,
+            "weighted_mean_val": r_blend_val * (1 - p_val) / p_val,
             "r_test": r_blend_test,
             "r_blend_val": r_blend_val,
-            "p_test": p_test,
-            "p_val": p_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
         }
@@ -3385,7 +3752,7 @@ def _fuse_dpo(out, decoded, splits, cv, blending):
     authentic_test = _split_quote_authenticity_mask(splits, "test")
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_dpo_weight(
             decoded["ev_validation"][authentic_val],
             book_ev_val[authentic_val],
@@ -3393,6 +3760,7 @@ def _fuse_dpo(out, decoded, splits, cv, blending):
             decoded["phi_validation"][authentic_val],
             cv,
             blending,
+            clusters=_blend_fit_clusters(splits, authentic_val),
         )
     else:
         model_weight = 1.0
@@ -3462,9 +3830,9 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
     out.update(
         {
             "weighted_mean": alpha_blend / beta_blend,
+            "weighted_mean_val": alpha_blend_val / beta_blend_val,
             "alpha_blend": alpha_blend,
             "alpha_blend_val": alpha_blend_val,
-            "beta_blend": beta_blend,
             "beta_blend_val": beta_blend_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
@@ -3492,12 +3860,12 @@ def _step_fuse_predictions(
         blending: Blending loss slug forwarded to ``calibration.fit_blend_weight``.
 
     Returns:
-        Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,
-        ``gate_blend_val``, ``r_test``, ``r_blend_val``, ``p_test``, ``p_val``,
+        Dict with: ``model_weight``, ``weighted_mean``, ``weighted_mean_val``,
+        ``gate_blend_test``, ``gate_blend_val``, ``r_test``, ``r_blend_val``,
         ``phi_test``, ``phi_blend_val``, ``alpha_blend``, ``alpha_blend_val``,
-        ``beta_blend``, ``beta_blend_val``, ``sn_sigma_blend_test``,
-        ``sn_sigma_blend_val``, ``sn_alpha_blend_test``, ``sn_alpha_blend_val``.
-        Unused fields are None.
+        ``beta_blend_val``, ``sn_sigma_blend_test``, ``sn_sigma_blend_val``,
+        ``sn_alpha_blend_test``, ``sn_alpha_blend_val``, ``mix_blend_test``,
+        ``mix_blend_val``. Unused fields are None.
     """
     base_dist = (
         "SkewNormal"
@@ -3513,13 +3881,10 @@ def _step_fuse_predictions(
         "gate_blend_val": None,
         "r_test": None,
         "r_blend_val": None,
-        "p_test": None,
-        "p_val": None,
         "phi_test": None,
         "phi_blend_val": None,
         "alpha_blend": None,
         "alpha_blend_val": None,
-        "beta_blend": None,
         "beta_blend_val": None,
         "sn_sigma_blend_test": None,
         "sn_sigma_blend_val": None,
@@ -3551,20 +3916,14 @@ def _data_driven_dist(global_mean: float, hist_gate: float) -> str:
     return "ZINB" if hist_gate > GATE_PUBLISH_THRESHOLD else "NegBin"
 
 
-def _resolve_dist(
-    configured: str | None,
-    data_dist: str,
-    global_mean: float,
-    hist_gate: float,
-    league: str,
-    market: str,
-) -> str:
-    """The distribution family to train: the operator-configured one (authoritative — ``--dist`` flag
-    or stat_meta), or ``data_dist`` when nothing is pinned / ``"auto"``.
+def _resolve_dist(configured: str | None, data_dist: str, league: str, market: str) -> str:
+    """The distribution family to train: the configured one (authoritative — ``--dist`` flag or
+    stat_meta, where the sweep persists its gate-validated pick), or ``data_dist`` when nothing
+    is pinned / ``"auto"``.
 
-    A configured family that disagrees with the data still trains (the operator's call) but logs a loud
-    warning — forcing ``SkewNormal`` on a low-mean count stat mis-preps the target, forcing a count
-    family on a high-mean stat is usually harmless. An unrecognized family is a config error: fail loud.
+    Disagreement with the mean/zero-rate heuristic is expected, not warned — DPO and Mixture are
+    force-only, so every such cell would warn weekly. An unrecognized family is a config error:
+    fail loud.
     """
     if configured in (None, "auto"):
         return data_dist
@@ -3572,17 +3931,6 @@ def _resolve_dist(
         raise ValueError(
             f"{league} {market}: stat_meta dist {configured!r} is not a forceable family; "
             f"use one of {sorted(_FORCEABLE_DISTS)} or 'auto'"
-        )
-    if configured != data_dist:
-        logger.warning(
-            "%s %s: training forced dist=%s (data-driven pick is %s: "
-            "global_mean=%.2f, zero_rate=%.2f)",
-            league,
-            market,
-            configured,
-            data_dist,
-            global_mean,
-            hist_gate,
         )
     return configured
 
@@ -3685,14 +4033,13 @@ def _step_select_distribution(
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Family selection: ``dist_override`` (the ``meditate --dist`` sweep axis) wins over every cell when
-    not ``"auto"``; otherwise the cell's stat_meta ``dist`` is authoritative when set
-    (:func:`_resolve_dist` forces that branch and warns if it disagrees with the data); an unset /
-    ``"auto"`` cell falls back to the data-driven rule (:func:`_data_driven_dist`):
-    ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, else NegBin escalated to ZINB when
-    ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
-    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the strategy's
-    forward transform.
+    Family selection: ``dist_override`` (the ``meditate --dist`` sweep axis) wins over every
+    cell when not ``"auto"``; otherwise the cell's stat_meta ``dist`` is authoritative when set
+    (:func:`_resolve_dist` forces that branch); an unset / ``"auto"`` cell falls back to the
+    data-driven rule (:func:`_data_driven_dist`): ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``
+    → SkewNormal, else NegBin escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
+    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the
+    strategy's forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -3755,14 +4102,7 @@ def _step_select_distribution(
         if dist_override != LOSS_AUTO
         else load_distribution_config().get(league, {}).get(market)
     )
-    dist = _resolve_dist(
-        configured,
-        _data_driven_dist(global_mean, hist_gate),
-        global_mean,
-        hist_gate,
-        league,
-        market,
-    )
+    dist = _resolve_dist(configured, _data_driven_dist(global_mean, hist_gate), league, market)
     if dist in ("SkewNormal", "Mixture"):
         strategy = baselines.get_target_normalization(target_normalization)
         cv = (
@@ -3877,11 +4217,23 @@ def _step_persist_book_shape(
     isolated: bool,
 ) -> None:
     """Fit canonical book-shape config only for a live, mutable training run."""
-    if deterministic or isolated or dist != "SkewNormal":
+    if deterministic or isolated or dist not in ("SkewNormal", "DPO"):
         return
-    save_book_shape_config(
-        {league: {market: calibration.fit_book_shape(league, market, M["Result"], M["Line"])}}
-    )
+    if dist == "SkewNormal":
+        fit = calibration.fit_book_shape(league, market, M["Result"], M["Line"])
+    else:
+        # Quantile bins always fill, so unlike the line-binned SkewNormal path they cannot
+        # self-filter the synthetic fallback rows by the per-bin row floor — restrict to
+        # rows carrying a real archived quote before conditioning on the book's implied mean.
+        quoted = M[M["Archived"]] if "Archived" in M.columns else M
+        fit = calibration.fit_book_shape(
+            league,
+            market,
+            quoted["Result"],
+            quoted["EV"],
+            quantile_bins=calibration.COUNT_SHAPE_BINS,
+        )
+    save_book_shape_config({league: {market: fit}})
 
 
 def _structural_gate_inputs(
@@ -3949,7 +4301,17 @@ def _structural_gate_inputs(
         )
         posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
         if posthoc_slug in posthoc.PROB_STAGE:
-            posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
+            # Synthetic and EV-inverted quotes carry no market opinion; only real prices feed
+            # the book leg.
+            book = splits["B_validation"]["Odds"].to_numpy(dtype=float)
+            book = np.where(_split_quote_authenticity_mask(splits, "validation"), book, np.nan)
+            posthoc_blob = posthoc.fit_posthoc(
+                posthoc_slug,
+                val_calibrated,
+                y_class_val,
+                clusters=_blend_fit_clusters(splits, np.ones(len(y_class_val), dtype=bool)),
+                book=book,
+            )
             val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
         test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
         if posthoc_slug in posthoc.PROB_STAGE:
@@ -3966,10 +4328,7 @@ def _structural_gate_inputs(
             "posthoc_blob": posthoc_blob,
             "test_calibrated_over": test_calibrated_over,
         }
-    y_class_val = (
-        splits["y_validation"]["Result"].to_numpy(dtype=float)
-        >= splits["B_validation"]["Line"].to_numpy(dtype=float)
-    ).astype(int)
+    y_class_val = over_label(splits["y_validation"]["Result"], splits["B_validation"]["Line"])
     model_calib = 1.0 - float(np.mean((val_calibrated - y_class_val) ** 2))
     return {
         "calibrated": calibrated,
@@ -4054,12 +4413,14 @@ def _step_calibrate_and_serve(
 ) -> dict:
     """Decode, correct, fuse and calibrate one model's predictions into served values.
 
-    Every calibrator in this chain — the mean-stage corrector, the blend weight, the
+    Every calibrator in this chain — the blend weight, the mean-stage corrector, the
     dispersion/skew scalars, the PIT recalibration map, the temperature, and the
     prob-stage corrector — is fit on ``splits["*_validation"]`` and applied to
-    ``splits["*_test"]``. Nothing here refits the GBDT: the model's predictions arrive
-    ready in ``preds``. That is what lets :func:`_step_crossfit_calibrate_and_serve`
-    rotate the two frames over folds of a single split and pay only this chain.
+    ``splits["*_test"]``, in that order: the mean corrector sits on the fused side of
+    the pool, so the dispersion and temperature fits both see the corrected mean.
+    Nothing here refits the GBDT: the model's predictions arrive ready in ``preds``.
+    That is what lets :func:`_step_crossfit_calibrate_and_serve` rotate the two frames
+    over folds of a single split and pay only this chain.
     """
     prob_params = preds["prob_params"]
     decoded = _step_decode_predictions(
@@ -4073,22 +4434,8 @@ def _step_calibrate_and_serve(
         dist_info["denom_col"],
         hist_gate,
     )
-    # Mean-stage post-hoc (orthogonal to target_normalization and to the
-    # prob-stage corrector below): fit on the validation decoded mean, then
-    # correct both test and validation means BEFORE fusion so the correction
-    # flows through the blend into P (Gate 1/5) and into the persisted EV
-    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
-    # does not touch dispersion (Gate 4).
-    mean_posthoc_blob = None
-    if posthoc_slug in posthoc.MEAN_STAGE:
-        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
-        mean_posthoc_blob = posthoc.fit_posthoc(posthoc_slug, decoded["ev_validation"], val_result)
-        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
-        decoded["ev_validation"] = posthoc.apply_posthoc(
-            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
-        )
-
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
+    mean_posthoc_blob = _step_correct_fused_mean(fused, splits, dist, posthoc_slug)
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,
@@ -4229,7 +4576,10 @@ def _step_crossfit_calibrate_and_serve(
         served[key] = _concat_folds([fold[key] for fold in per_fold], order, target)
     served["decoded"] = {
         **whole["decoded"],
-        "ev": _concat_folds([fold["decoded"]["ev"] for fold in per_fold], order, target),
+        **{
+            key: _concat_folds([fold["decoded"][key] for fold in per_fold], order, target)
+            for key in ("ev", "sn_sigma_test", "sn_alpha_test", "gate_test", "r", "phi")
+        },
     }
     served["fused"] = {
         **whole["fused"],
@@ -4330,8 +4680,8 @@ def train_market(
         zinb_mode: Either ``"joint"`` (legacy LightGBMLSS ZINB; the default) or
             ``"hurdle"`` (use ``HurdleZINB`` from ``sportstradamus.hurdle`` — a
             two-stage model with a derived-π gate; see
-            docs/OVERCONFIDENCE_INVESTIGATION.md §2 and
-            docs/CENTERED_TARGET_NEGATIVE_RESULT.md for context). Only consulted
+            docs/archive/nba_overconfidence_investigation.md §2 and its centered-target
+            negative result for context). Only consulted
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
         dist: Distribution-family override (the WS-3 ``meditate --dist`` sweep axis).
@@ -4394,13 +4744,12 @@ def train_market(
     )
     if loaded is None:
         return
-    M, training_data_path = loaded
+    M, training_data_path, new_rows = loaded
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
-    M = _step_persist_matrix_and_comps(
+    M = _step_persist_matrix(
         M,
         training_data_path,
-        stat_data,
         deterministic=deterministic,
         full_rebuild=full_rebuild,
         immutable_input=matrix_input is not None,
@@ -4408,6 +4757,7 @@ def train_market(
         market=market,
         dist=dist,
         cv=cv,
+        new_rows=new_rows,
     )
     if full_rebuild:
         repo_root = Path(__file__).resolve().parents[3]
@@ -4540,6 +4890,8 @@ def train_market(
     # fallback leg; book_skewnormal_shape reads them there only — the served blend stays
     # symmetric per the settling verdict. fit_book_shape's per-line-bin row floor self-filters
     # the synthetic fallback lines, so binning all rows still conditions on real book lines.
+    # Double Poisson cells fit the same variance curve for book_count_dispersion, which
+    # replaces the marginal-cv variance convention when inverting a quote to a mean.
     _step_persist_book_shape(
         M,
         league,
@@ -4566,8 +4918,16 @@ def train_market(
         # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to
         # select. Mixture has no per-trial served-KS closure (its params frame doesn't fit
         # either _calibration_penalty branch); calibrated falls back to loss selection.
-        penalty = _calibration_penalty(splits, dist_info)
+        penalty = _calibration_penalty(splits, dist_info, blending=blending)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
+    elif hpo_selection == "calibrated":
+        logger.warning(
+            "%s %s: hpo_selection 'calibrated' is inert on the %s path — no HP search "
+            "consults it; drop the stat_meta pin or route the cell off this path",
+            league,
+            market,
+            "hurdle" if use_hurdle else "Mixture",
+        )
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
@@ -4580,7 +4940,9 @@ def train_market(
         penalty_threshold=penalty_threshold,
     )
     if isinstance(opt_params, list):
-        picked = _pick_calibrated_candidate(opt_params, penalty_threshold)
+        picked = _pick_calibrated_candidate(
+            opt_params, penalty_threshold, min(len(splits["X_train"]), _OOF_KS_MAX_ROWS)
+        )
         opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
     model = _step_fit_model(
         dist,
@@ -4656,6 +5018,11 @@ def train_market(
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
+    if fused["model_weight"] == 1.0:
+        # The evidence floor refused the blend fit (a fit never returns 1.0; the cap is
+        # calibration._MODEL_WEIGHT_MAX), so the same rows have no book evidence to score
+        # skill or Kelly shrinkage against either.
+        authentic_val = np.zeros_like(authentic_val)
     skill = _step_compute_skill_metrics(
         val_calibrated[authentic_val],
         y_class_val[authentic_val],
@@ -4663,9 +5030,7 @@ def train_market(
         league,
         market,
     )
-    y_class = np.ravel(
-        (splits["y_test"]["Result"] >= splits["B_test"]["Line"]).astype(int).to_numpy()
-    )
+    y_class = over_label(splits["y_test"]["Result"], splits["B_test"]["Line"])
 
     mode_stats = _step_compute_mode_stats(y_proba_raw, y_proba_no_filt, y_proba_filt, y_class)
     served_weighted_mean = fused["weighted_mean"]
@@ -4769,9 +5134,6 @@ def train_market(
         test_df = splits["X_test"].copy()
         test_df["Result"] = splits["y_test"]["Result"].to_numpy()
         compute_market_importance(league, market, model, test_df)
-
-    if not deterministic and artifact_output is None:
-        report()
 
     del filedict
     del model

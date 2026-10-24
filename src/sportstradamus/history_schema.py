@@ -43,8 +43,64 @@ OFFER_LEVEL_COLS = [
     "Close Market Prob",
     "Market CLV",
     "Model CLV",
-    # |Line - Consensus Line| > tolerance, stamped at write time (cli.py).
+    # |Line - reference line| > tolerance, stamped at write time (cli.py). The reference
+    # is Consensus Line, else the entry's line of record, which is not stored.
     "Alt Line",
+    # Full decimal payout of each side on the platform (0 = side not posted); named
+    # "Payout" because `Boost` on this frame is Underdog's raw multiplier. Underdog's are at
+    # the UNDERDOG_BOOST_BASELINE in force when the row was scored, so read a side's raw
+    # multiplier as `Payout {side} x Boost / Payout {Bet}` (where the chosen side was posted).
+    "Payout Over",
+    "Payout Under",
 ]
 
-HISTORY_COLS = PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + ["Actual"]
+# Decision-time context: what the scorer saw when it chose the side. Research reads it
+# back from history; reporting reads only the columns whose comment names the reader.
+# Offer-level, never backfilled, NaN on rows written before the column existed.
+DECISION_COLS = [
+    # One UTC stamp per prophecize run, so a row joins the archive state that run saw.
+    # realized.settled_offers counts a prop at the lines its last scoring still held.
+    "Scored At",
+    # The sportsbook consensus line, NaN when no sportsbook posts one.
+    "Consensus Line",
+    # Kickoff: an ISO UTC string on Underdog rows, "" on Sleeper's. clv.commence_times
+    # resolves it to the instant a row's close waits for and is read as of.
+    "Commence",
+    "Opponent",
+    "Home",
+    "Player position",
+    "Moneyline",
+    "O/U",
+    "DVPOA",
+    "Avg 5",
+    "Avg H2H",
+    "Push Prob",
+    "Projection STD",
+    "Books STD",
+    "Model EV",
+    "Kelly",
+    # The pickle's model/book blend weight (0.0 on the book-fallback path).
+    "Model Weight",
+    # Provenance of the book quote behind the serve; None/NaN when the leg was unquoted.
+    "Quote Source",
+    "Quote Authenticity",
+    "Quote Books",
+    "Quote Line",
+    "Quote Observed At",
+    # P(chosen side) from the model alone, before the book blend and all calibration.
+    "Standalone Prob",
+    # The skew of the SkewNormal served, Skew Cal included; Model Param holds its sigma.
+    "Served Skew",
+    # The skew shift added after the blend (skew_cal; reset to 0.0 with a diverged fit).
+    "Skew Cal",
+    # The runtime zero-rate gate no pickle records: stat_zi where the serve reads it, else 0.
+    "Hist Gate",
+    # True when no sportsbook priced the leg and Market Prob is the payout-implied price.
+    "Market Prob Implied",
+    # Scored At of the run that first wrote the key; a key older than this column stays NaN.
+    "First Scored At",
+]
+
+HISTORY_COLS = (
+    PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + DECISION_COLS + ["Actual"]
+)

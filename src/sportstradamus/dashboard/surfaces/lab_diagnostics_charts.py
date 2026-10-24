@@ -1,6 +1,5 @@
 """Chart builders for the Market Diagnostics surface."""
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -155,19 +154,6 @@ def murphy_decomp_bar(decomp_df: pd.DataFrame) -> go.Figure:
         xaxis_title="Contribution to Brier Score",
         height=max(300, len(decomp_df) * 22),
     )
-    return fig
-
-
-def crps_line(crps_daily: pd.DataFrame) -> go.Figure:
-    """Line chart of mean CRPS over time by league."""
-    fig = px.line(
-        crps_daily,
-        x="_date",
-        y="CRPS",
-        color="League",
-        labels={"_date": "Date", "CRPS": "Mean CRPS (lower=better)"},
-    )
-    fig.update_layout(height=400)
     return fig
 
 

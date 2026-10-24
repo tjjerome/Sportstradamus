@@ -22,9 +22,6 @@ class _FakeArchive:
     def get_training_book_quotes(self, *a, **k):
         return [ArchivedBookQuote("book", self._ev, self._under, self._line, None)]
 
-    def get_line(self, *a, **k):
-        return self._line
-
     def get_training_quote_inputs(self, _league, _market, _date, entities, **kwargs):
         rows = [ArchivedBookQuote("book", self._ev, self._under, self._line, None)]
         return dict.fromkeys(entities, (rows, self._line))

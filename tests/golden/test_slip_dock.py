@@ -5,12 +5,17 @@ Renders the dock in a minimal script (not the full app) so the test exercises
 the component alone; legs are seeded as canonical structured legs the way
 slip_state stores them (all LEG_FIELDS present). Offers/corr parquets aren't
 needed — score_slip prices off the leg snapshots and the corr loader's empty
-fallback.
+fallback. The refused-pair case points the pair-modifier loader at a one-row
+tmp parquet.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 from streamlit.testing.v1 import AppTest
+
+from sportstradamus.dashboard.legs import corr_key
+from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
 
 _SCRIPT = """
 import streamlit as st
@@ -72,3 +77,19 @@ def test_sheet_lists_legs_and_remove_works():
     assert "Brunson" in body
     at.button(key="slip_dock_rm_0").click().run()
     assert len(at.session_state["slip_legs"]) == 1
+
+
+def test_refused_pair_blocks_the_lock(monkeypatch, tmp_path):
+    """A pair Underdog refuses: the bar says so, the sheet warns, and the lock is off."""
+    legs = [_leg("Jalen Brunson", "PTS", "NYK"), _leg("Jayson Tatum", "PTS", "BOS")]
+    mods = tmp_path / "current_pair_modifiers.parquet"
+    pd.DataFrame(
+        [["Underdog", "NBA", "NYK/BOS", *sorted(corr_key(leg) for leg in legs), 0.0]],
+        columns=PAIR_MODIFIER_COLS,
+    ).to_parquet(mods)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_PAIR_MODIFIERS_PATH", mods)
+
+    at = _dock_test(legs, open_sheet=True)
+    assert "won't pair" in " ".join(m.value for m in at.markdown)
+    assert any("won't pair" in w.value for w in at.warning)
+    assert at.button(key="slip_dock_lock").disabled

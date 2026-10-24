@@ -7,7 +7,8 @@ the numbers, and rotates the variant by an md5 of the row key — repeat users
 see varied phrasing that never changes for the same row and date. ``Avg 5`` /
 ``Avg H2H`` are stored as average-minus-line deviations; the edge clause
 prefers explicit ``Win Prob`` vs ``Market Prob`` and falls back to the
-model/book EV multiples (``Model EV`` / ``Market EV``, payout x where > 1.0 is +EV).
+model/book EV multiples (``Model EV`` / ``Market EV``, payout x where > 1.0 is +EV);
+the MLB lineup clauses read the columns ``stories.lineup`` attaches.
 """
 
 import hashlib
@@ -18,7 +19,8 @@ import pandas as pd
 
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.bank import why_bank
-from sportstradamus.prediction.stories.legs import lower_leg, offer_index
+from sportstradamus.prediction.stories.legs import lower_leg
+from sportstradamus.prediction.stories.lineup import batting_slot
 
 # Implied-probability gap (model vs book hit prob) below which the two sides
 # effectively agree and the edge clause is dropped.
@@ -50,7 +52,8 @@ def attach_offer_why(offers: pd.DataFrame) -> pd.DataFrame:
     rows missing a feature simply contribute fewer clauses; a row with no usable
     columns gets ``""``. Built only from columns already on ``current_offers``
     (``Avg 5``, ``Avg H2H``, ``Line``, ``DVPOA``, ``Model P`` / ``Books`` /
-    ``Model``, ``Bet``). The frame is mutated in place and returned.
+    ``Model``, ``Bet``, ``Position`` / ``Bats`` / ``Opp Hand`` / ``Lineup``).
+    The frame is mutated in place and returned.
     """
     if offers.empty:
         offers["Why"] = pd.Series(dtype=str)
@@ -60,18 +63,31 @@ def attach_offer_why(offers: pd.DataFrame) -> pd.DataFrame:
 
 
 def _offer_case(row: pd.Series) -> str:
-    clauses = [c for c in (_form_clause(row), _matchup_clause(row), _edge_clause(row)) if c]
+    clauses = [
+        c
+        for c in (
+            _form_clause(row),
+            _matchup_clause(row),
+            _lineup_clause(row),
+            _edge_clause(row),
+        )
+        if c
+    ]
     if not clauses:
         return ""
     sentence = ", ".join(clauses)
     return sentence[0].upper() + sentence[1:] + "."
 
 
-def _val(row: pd.Series, col: str) -> float | None:
-    if col not in row.index:
-        return None
-    v = row[col]
-    return None if pd.isna(v) else float(v)
+def _num(row: Mapping, col: str) -> float | None:
+    v = row.get(col)
+    return None if v is None or pd.isna(v) else float(v)
+
+
+def _text(row: Mapping, col: str) -> str:
+    """A string column read where missing and NaN both mean "no fact"."""
+    v = row.get(col)
+    return "" if v is None or pd.isna(v) else str(v)
 
 
 def _pick(variants: Sequence[str], seed: str) -> str:
@@ -84,10 +100,13 @@ def _why_variant(row: Mapping, clause: str, branch: str) -> str:
     return _pick(why_bank()["why"][clause][branch], f"{clause}|{key}")
 
 
-def _form_branch(deviation: float) -> str:
+def _form_branch(deviation: float, bet: str) -> str:
+    """``for`` when the deviation points the bet's way (above on an Over, below on an Under)."""
     if abs(deviation) < _FORM_AT_LINE:
         return "at_line"
-    return "above" if deviation > 0 else "below"
+    above = deviation > 0
+    side = "for" if above == (bet == "Over") else "against"
+    return ("above_" if above else "below_") + side
 
 
 def _pronoun(row: pd.Series) -> str:
@@ -100,29 +119,59 @@ def _pronoun(row: pd.Series) -> str:
 def _form_clause(row: pd.Series) -> str:
     """Form vs the line. ``Avg 5`` / ``Avg H2H`` are stored as average-minus-line.
 
+    The last-5 read says whether form backs the bet or cuts against it; the
+    head-to-head tail only says which side of the line its average sits on.
     ``Avg H2H == 0`` is the no-head-to-head-history sentinel (set in
     ``model_prob`` when ``H2HPlayed == 0``), so an exact 0.0 H2H is dropped
     rather than read as "even with the line".
     """
-    avg5, line = _val(row, "Avg 5"), _val(row, "Line")
+    avg5, line = _num(row, "Avg 5"), _num(row, "Line")
     if avg5 is None or line is None:
         return ""
-    clause = _why_variant(row, "form", _form_branch(avg5)).format(
+    clause = _why_variant(row, "form", _form_branch(avg5, row.get("Bet"))).format(
         dev=f"{abs(avg5):g}", line=f"{line:g}", pronoun=_pronoun(row)
     )
-    h2h = _val(row, "Avg H2H")
+    h2h = _num(row, "Avg H2H")
     if h2h is not None and abs(h2h) >= _FORM_AT_LINE:
-        tail = _why_variant(row, "form_h2h", _form_branch(h2h)).format(dev=f"{abs(h2h):g}")
+        h2h_branch = "above" if h2h > 0 else "below"
+        tail = _why_variant(row, "form_h2h", h2h_branch).format(dev=f"{abs(h2h):g}")
         clause += f", {tail}"
     return clause
 
 
 def _matchup_clause(row: pd.Series) -> str:
-    dvpoa = _val(row, "DVPOA")
+    """What the defense does with the stat, true on either side: the edge clause names the bet."""
+    dvpoa = _num(row, "DVPOA")
     if dvpoa is None or abs(dvpoa) < _DVPOA_NOTE_FLOOR:
         return ""
-    favorable = (dvpoa > 0) == (row.get("Bet") == "Over")
-    return _why_variant(row, "matchup", "favorable" if favorable else "tough")
+    return _why_variant(row, "matchup", "gives" if dvpoa > 0 else "takes")
+
+
+def _lineup_clause(row: pd.Series) -> str:
+    """Batting slot, plus the platoon read against tonight's probable starter.
+
+    A ``"usual"`` slot is the modal one ``get_depth`` fell back to before the card
+    is posted, so it reads as habit ("usually 3rd") from the ``lineup_usual``
+    family rather than asserting tonight's order. Guarded on ``Lineup`` as well as
+    the slot label: ``attach_lineup_columns`` fills it only for MLB hitters, which
+    keeps an NBA bench label (``B1`` is a bench rank there) out of baseball prose.
+    """
+    slot, lineup = batting_slot(row.get("Position")), _text(row, "Lineup")
+    if slot is None or not lineup:
+        return ""
+    throws = _text(row, "Opp Hand")
+    clause = "lineup" if lineup == "posted" else "lineup_usual"
+    return _why_variant(row, clause, _lineup_branch(_text(row, "Bats"), throws)).format(
+        slot=slot, throws=why_bank()["hands"].get(throws, "")
+    )
+
+
+def _lineup_branch(bats: str, throws: str) -> str:
+    if not bats or not throws:
+        return "slot_only"
+    if bats == "S":
+        return "switch"
+    return "same_side" if bats == throws else "platoon_edge"
 
 
 def _edge_clause(row: pd.Series) -> str:
@@ -134,7 +183,7 @@ def _edge_clause(row: pd.Series) -> str:
     > 1.0 is +EV); when no consensus book exists those two are equal and the
     clause is dropped.
     """
-    model_p, book_p = _val(row, "Win Prob"), _val(row, "Market Prob")
+    model_p, book_p = _num(row, "Win Prob"), _num(row, "Market Prob")
     if book_p is not None and model_p is not None:
         gap = model_p - book_p
         if abs(gap) < _EDGE_CLAUSE_FLOOR:
@@ -149,7 +198,7 @@ def _edge_clause(row: pd.Series) -> str:
 
 
 def _ev_clause(row: pd.Series) -> str:
-    model_ev, book_ev = _val(row, "Model EV"), _val(row, "Market EV")
+    model_ev, book_ev = _num(row, "Model EV"), _num(row, "Market EV")
     if model_ev is None:
         return ""
     if book_ev is None or abs(model_ev - book_ev) < _EV_GAP_FLOOR:
@@ -159,18 +208,25 @@ def _ev_clause(row: pd.Series) -> str:
     return _why_variant(row, "ev", "vs_book").format(ev=f"{model_ev:.2f}", book_ev=f"{book_ev:.2f}")
 
 
-def story_dek(core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame) -> str:
+def story_dek(
+    core_bet_ids: Sequence[int], sctx, index: Mapping[tuple, Mapping], lead_player: str
+) -> str:
     """A story card's one-line dek: cluster strength, anchor form, matchup.
 
     Built from the legs shared by both of the story's presets, so it stays
-    valid whichever mode chip is active. Clause-guarded and empty-safe — a
-    sub-2-leg core carries no cluster clause and missing offer facts drop
-    their clauses; everything deterministic via the md5 rotation.
+    valid whichever mode chip is active. ``index`` is ``legs.offer_index`` of
+    the offers frame, built once per game by the menu. A led story's dek is
+    about ``lead_player``'s own leg, like its headline; an unled one (``""``)
+    keeps the core's highest-conviction leg. Clause-guarded and empty-safe — a
+    sub-2-leg core carries no cluster clause and missing offer facts drop their
+    clauses; everything deterministic via the md5 rotation.
     """
-    descs = [leg_label(lower_leg(sctx.bet_df[i])) for i in core_bet_ids]
+    # The label reads the display Market, so the seed needs no platform map to
+    # resolve the slug lower_leg carries for enrich_legs.
+    descs = [leg_label(lower_leg(sctx.bet_df[i], {})) for i in core_bet_ids]
     seed_tail = "|".join(sorted(descs)) + f"|{sctx.date}"
     clauses = _cluster_clause(core_bet_ids, sctx, seed_tail)
-    anchor = _dek_anchor(core_bet_ids, sctx, offers)
+    anchor = _dek_anchor(core_bet_ids, sctx, index, lead_player)
     if anchor is not None:
         clauses += _anchor_clauses(*anchor, seed_tail)
     return " · ".join(clauses)
@@ -188,37 +244,60 @@ def _cluster_clause(core_bet_ids: Sequence[int], sctx, seed_tail: str) -> list[s
 
 
 def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
-    """Form + matchup dek clauses for the core's anchor leg, each fact-guarded."""
+    """Form, matchup, and lineup dek clauses for the anchor leg, each fact-guarded.
+
+    Only a read that backs the bet is said here: form running against it and a
+    matchup opposing it stay on the per-offer Why, never in a story's dek.
+    """
     bank = why_bank()["dek"]
+    bet = match.get("Bet")
     clauses = []
-    avg5, line = match.get("Avg 5"), match.get("Line")
-    if avg5 is not None and line is not None and not pd.isna(avg5) and not pd.isna(line):
-        clauses.append(
-            _pick(bank["form"][_form_branch(float(avg5))], f"dek.form|{seed_tail}").format(
-                p=player, dev=f"{abs(float(avg5)):g}", line=f"{float(line):g}"
+    avg5, line = _num(match, "Avg 5"), _num(match, "Line")
+    if avg5 is not None and line is not None:
+        branch = _form_branch(avg5, bet)
+        if not branch.endswith("_against"):
+            clauses.append(
+                _pick(bank["form"][branch], f"dek.form|{seed_tail}").format(
+                    p=player, dev=f"{abs(avg5):g}", line=f"{line:g}"
+                )
             )
-        )
-    dvpoa = match.get("DVPOA")
-    if dvpoa is not None and not pd.isna(dvpoa) and abs(float(dvpoa)) >= _DVPOA_NOTE_FLOOR:
-        favorable = (float(dvpoa) > 0) == (match.get("Bet") == "Over")
-        clauses.append(
-            _pick(
-                bank["matchup"]["favorable" if favorable else "tough"],
-                f"dek.matchup|{seed_tail}",
-            ).format(p=player)
-        )
+    dvpoa = _num(match, "DVPOA")
+    if dvpoa is not None and abs(dvpoa) >= _DVPOA_NOTE_FLOOR:
+        gives = dvpoa > 0
+        if gives == (bet == "Over"):
+            branch = "gives" if gives else "takes"
+            clauses.append(
+                _pick(bank["matchup"][branch], f"dek.matchup|{seed_tail}").format(p=player)
+            )
+    lineup_clause = _dek_lineup_clause(player, match, seed_tail)
+    if lineup_clause:
+        clauses.append(lineup_clause)
     return clauses
 
 
+def _dek_lineup_clause(player: str, match: Mapping, seed_tail: str) -> str:
+    """The anchor's batting slot, said as posted or usual and named with the starter's hand."""
+    slot, lineup = batting_slot(match.get("Position")), _text(match, "Lineup")
+    if slot is None or not lineup:
+        return ""
+    throws = why_bank()["hands"].get(_text(match, "Opp Hand"), "")
+    branch = f"{lineup}_hand" if throws else lineup
+    template = _pick(why_bank()["dek"]["lineup"][branch], f"dek.lineup|{seed_tail}")
+    return template.format(p=player, slot=slot, throws=throws)
+
+
 def _dek_anchor(
-    core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame
+    core_bet_ids: Sequence[int], sctx, index: Mapping[tuple, Mapping], lead_player: str
 ) -> tuple[str, Mapping] | None:
-    """The core's highest-conviction leg and its offer row — the dek's subject."""
-    if not core_bet_ids or offers.empty:
+    """The dek's subject and its offer record: the lead's leg, else the highest-conviction one."""
+    if not core_bet_ids:
         return None
-    anchor_id = max(core_bet_ids, key=lambda i: float(sctx.g.p_model[i]))
+    anchor_id = max(
+        core_bet_ids,
+        key=lambda i: (sctx.bet_df[i]["Player"] == lead_player, float(sctx.g.p_model[i])),
+    )
     row = sctx.bet_df[anchor_id]
-    match = offer_index(offers).get((row["Player"], row["Bet"], row["Line"]))
+    match = index.get((row["Player"], row["Bet"], row["Line"]))
     if match is None:
         return None
     return row["Player"], match

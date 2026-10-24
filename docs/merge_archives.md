@@ -1,14 +1,21 @@
 # Merging two odds archives
 
 The odds archive (`archive/archive.duckdb`) lives on two machines — the production
-server (continuously appending today's odds via `confer`) and a dev machine (where
-historical backfills run). They drift apart: each holds observations the other lacks.
+server (continuously appending today's odds via `confer`, and history through the
+`odds-backfill` job) and a dev machine (where by-hand historical backfills run). They
+drift apart: each holds observations the other lacks.
 
-`merge-archives` reconciles them losslessly. The archive is append-only time-series
-(the same `(league, market, game_date, entity, book)` key recurs with different
-`observed_at` timestamps), so the merge is a **set-union of full rows**: every row in
-either database is kept, and only bit-identical duplicates collapse. No observation is
-ever dropped, and distinct timestamps for the same key both survive.
+`sportstradamus admin merge-archives` reconciles them losslessly. The archive is
+append-only time-series (the same observation key recurs with different `observed_at`
+timestamps), so the merge is a **set-union** over `odds`, `lines` and `ladder`: every
+observation in either database is kept, and only duplicates collapse. `lines` and
+`ladder` dedup on the full row; `odds` dedups on the observation identity (every column
+but the derived `under_prob` / `line` quote, whose populated value is kept). No
+observation is ever dropped, and distinct timestamps for the same key both survive.
+
+`ladder` is optional — a snapshot taken off a box predating its schema merges with the
+ladder step skipped, reported as `ladder: skipped`. It is also the expensive table
+(~22.5M rows), so an in-place merge's peak disk grows by roughly its size.
 
 The source archive is opened read-only and never modified. The target is rebuilt in
 place — with a timestamped `.bak-<epoch>` written first — unless `--output` sends the
@@ -42,8 +49,8 @@ This is the usual direction: fold the server's live rows into the dev machine.
    backup is written automatically before any in-place change:
 
    ```bash
-   poetry run sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
-   poetry run sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb
+   sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
+   sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb
    ```
 
    The dry-run prints how many rows each table would gain. The real run reports the same
@@ -65,5 +72,8 @@ there with dev's snapshot as `--source`. Re-running on already-merged data is a 
 | `--dry-run` | Report row counts only; write nothing. |
 | `--no-backup` | Skip the pre-merge `.bak-<epoch>` copy of the target. |
 
-If the target is locked by a running cron, the command fails with guidance rather than
-waiting — run it during a quiet window or while holding the archive flock above.
+The command takes the shared archive flock itself (the lock `scripts/run_job.sh` holds
+for every cron job but `close-lines`, which takes it around its archive write), so it
+waits for a running cron and fails after 15 minutes. Run it
+bare: wrapped in `flock` on the same lock file, it waits out its own timeout against the
+wrapper's hold and then fails.

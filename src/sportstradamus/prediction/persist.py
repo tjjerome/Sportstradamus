@@ -17,11 +17,13 @@ from sportstradamus.helpers.io import (
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
+    CURRENT_LINE_MOVEMENT_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
+    CURRENT_PAIR_MODIFIERS_PATH,
     CURRENT_PARLAYS_PATH,
-    CURRENT_PICKEM_PATH,
+    PAIR_MODIFIER_COLS,
     _atomic_write_json,
     _atomic_write_parquet,
 )
@@ -30,11 +32,15 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # Display columns kept in current_offers.parquet. The dashboard reads:
 # - Offer details: League, Date, Team, Opponent, Home (is Team the host — orders the
 #   "{home} vs {away}" matchup label), Game (canonical matchup key),
-#   Player, Market, Platform, Bet, Line, Consensus Line (weighted-avg book line from
-#   archive.get_line — the Model-tab consensus marker, distinct from the DFS app Line), Boost
+#   Player, Market, Platform, Bet, Line, Consensus Line (the sportsbook consensus line from
+#   archive.get_line, NaN when no sportsbook posts one — the Model-tab consensus marker,
+#   distinct from the DFS app Line), Boost
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
-# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
+# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label),
+#   Star (player prominence in [0, 3], stories/lead.py),
+#   Bats / Opp Hand / Lineup (MLB hitters only — batting side, probable starter's
+#   throwing hand, and whether the batting slot is posted or the usual one)
 # - Correlations: Corr Same, Corr Opp
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups); Model Version (identity of the model that scored the leg)
@@ -70,6 +76,10 @@ _OFFER_KEEP_COLS = [
     "O/U",
     "DVPOA",
     "Position",
+    "Star",
+    "Bats",
+    "Opp Hand",
+    "Lineup",
     "Corr Same",
     "Corr Opp",
     "Why",
@@ -134,18 +144,37 @@ def write_current_offers(
 
 
 def write_current_game_corr(corr_rows: list[dict] | pd.DataFrame) -> None:
-    """Write the per-game correlation slices snapshot atomically.
+    """Write the per-game correlation and pair-modifier snapshots atomically.
 
     ``corr_rows`` is the collector list filled by ``find_correlation`` (one row
-    per game leg pair: ``League, Game, leg_a, leg_b, rho``). Deduped on the
-    matchup + leg-pair key — the same pair recurs across platforms and across a
-    player's multiple lines, and correlation is line-independent. Written even
-    when empty so the dashboard reflects the latest run.
+    per game leg pair: ``Platform, League, Game, leg_a, leg_b, rho, modifier``).
+    Splits into two files: the rho slice (``League, Game, leg_a, leg_b, rho``),
+    deduped on the matchup + leg-pair key — the same pair recurs across
+    platforms and across a player's multiple lines, and correlation is
+    platform/line-independent — written to ``CURRENT_GAME_CORR_PATH``; and the
+    sparse per-platform pair-payout-modifier slice (``PAIR_MODIFIER_COLS``, 1.0
+    rows dropped, deduped per platform since a modifier depends on position/
+    stat/direction and never on the line) written to
+    ``CURRENT_PAIR_MODIFIERS_PATH``. Both written even when empty so the
+    dashboard reflects the latest run.
     """
-    df = pd.DataFrame(corr_rows, columns=["League", "Game", "leg_a", "leg_b", "rho"])
-    if not df.empty:
-        df = df.drop_duplicates(subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True)
-    _atomic_write_parquet(df, CURRENT_GAME_CORR_PATH)
+    df = pd.DataFrame(
+        corr_rows, columns=["Platform", "League", "Game", "leg_a", "leg_b", "rho", "modifier"]
+    )
+
+    rho_df = df[["League", "Game", "leg_a", "leg_b", "rho"]]
+    if not rho_df.empty:
+        rho_df = rho_df.drop_duplicates(
+            subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True
+        )
+    _atomic_write_parquet(rho_df, CURRENT_GAME_CORR_PATH)
+
+    mod_df = df.loc[df["modifier"] != 1.0, PAIR_MODIFIER_COLS]
+    if not mod_df.empty:
+        mod_df = mod_df.drop_duplicates(
+            subset=["Platform", "League", "Game", "leg_a", "leg_b"], ignore_index=True
+        )
+    _atomic_write_parquet(mod_df, CURRENT_PAIR_MODIFIERS_PATH)
 
 
 def write_current_game_context(context: pd.DataFrame) -> None:
@@ -160,6 +189,21 @@ def write_current_game_context(context: pd.DataFrame) -> None:
     _atomic_write_parquet(context, CURRENT_GAME_CONTEXT_PATH)
 
 
+def write_line_movement(movement: pd.DataFrame) -> None:
+    """Write the per-offer DFS line-movement snapshot atomically.
+
+    ``movement`` is the ``prediction.line_movement.build_line_movement`` frame:
+    one row per ``(League, Platform, Market, Player, Date)``. The main line —
+    each poll's rung priced nearest even money — carries the open/close, net
+    move, change count and JSON sparkline ``series``; the fair line its price
+    implies carries ``fair_move``, ``fair_series`` and ``n_price_moves`` (polls
+    where only the price moved); and ``changes`` is the JSON list of polls where
+    either line changed. Column-stable on an empty slate, so a header-only
+    snapshot still writes for the dashboard to read.
+    """
+    _atomic_write_parquet(movement, CURRENT_LINE_MOVEMENT_PATH)
+
+
 def write_current_game_stories(stories: pd.DataFrame) -> None:
     """Write the per-game story-menu snapshot atomically.
 
@@ -170,7 +214,10 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
     ``list<struct>`` parquet column) that the dashboard's ``seed_from_story``
     re-resolves against current offers; ``kelly_stake`` is a standalone
     full-Kelly bankroll *fraction* — the dashboard rail re-sizes it into
-    Decimal dollars against the live bankroll.
+    Decimal dollars against the live bankroll. ``lead_side`` / ``lead_player``
+    name the side and player a led story is seeded on (``""`` when unled),
+    ``star`` is the story's max player prominence, and ``lead`` flags the one
+    story per platform/game/date the Games and Tonight tabs headline.
     ``build_game_stories`` returns a column-stable frame even with no stories, so
     an empty slate still writes a header-only snapshot the dashboard can read.
     """
@@ -187,16 +234,6 @@ def write_current_offer_details(details: pd.DataFrame) -> None:
     still writes for the dashboard to read.
     """
     _atomic_write_parquet(details, CURRENT_OFFER_DETAILS_PATH)
-
-
-def write_current_pickem(entries: pd.DataFrame) -> None:
-    """Write the current-run Underdog Pick'em entries snapshot atomically.
-
-    `entries` is the frame from `strategies._pickem_emit.entries_to_frame`
-    (bankroll-independent fields; the dashboard sizes stakes from a user
-    bankroll). Written even when empty so the dashboard reflects the latest run.
-    """
-    _atomic_write_parquet(entries, CURRENT_PICKEM_PATH)
 
 
 def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:

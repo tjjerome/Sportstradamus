@@ -1,12 +1,10 @@
 """Kelly-sized profit / ROI / Sharpe / drawdown backtest.
 
-Phase 2 of the new ship-gate plan
-([docs/ship_gate.md](../../../docs/ship_gate.md)) — lifted from
-``pages/6_Stats_Profit_Sim.py`` so the same Monte-Carlo strategy backtest
-that powers the dashboard can also size the offline supersede gate
-(S3 — paired Sharpe) and the live devel→main gate (positive Kelly ROI;
-+0.5% / 2-wk vs incumbent). Behavior is preserved relative to the page;
-the page now imports these symbols.
+One Monte-Carlo strategy backtest shared by the dashboard's profit-sim panel
+(``dashboard/components/profit_sim.py``), the nightly's precomputed grid
+(``analysis.precompute_profit_sim_summary``) and the offline supersede gate (S3 —
+paired Sharpe; [docs/ship_gate.md](../../../docs/ship_gate.md)). No promotion rule
+reads realized ROI from it.
 
 Public surface:
 
@@ -16,6 +14,8 @@ Public surface:
 - :func:`simulate_kelly_all` — deterministic single-run, no-threshold,
   Kelly-sized variant used by the ship gate (two models bet the same
   universe, so paired Sharpe is well-defined).
+- :func:`extract_sim_returns` — per-event return series of a sim run, the
+  input to the S3 paired-Sharpe test.
 - :func:`summarize_runs` — collapse a simulation result into
   ``{mean_final, roi, max_drawdown, sharpe, win_rate}``.
 
@@ -33,6 +33,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers import platform_payout
+
 # 100 MC runs is the dashboard default — enough to compute a stable 10-90 band
 # without making the Streamlit page sluggish. Gate callers override to 1.
 N_MONTE_CARLO_DEFAULT: int = 100
@@ -49,9 +51,6 @@ _DEFAULT_RNG_SEED: int = 42
 # branch never fires for the gate, so the run is fully deterministic.
 _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 
-# Underdog / default sportsbook -110 vig (100/110 payout per dollar staked).
-_DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
-
 # Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
     "Kelly": "Kelly",
@@ -64,18 +63,18 @@ def compute_payout(row: pd.Series) -> float:
     """Return the NET payout multiplier for a winning $1 bet on ``row``.
 
     Net profit per dollar staked, not gross — the win line settles
-    ``bet_size * payout``, so it must exclude the returned stake. Underdog /
-    unspecified platforms net -110 (100/110 per dollar); Sleeper's ``Boost`` is a
-    gross multiplier (stake returned with it), so its net is ``boost - 1``. The
-    per-row ``Boost`` scales the Underdog leg. A non-finite boost is unpriceable;
-    return 0.0 (no edge) so the eligibility filter and the Kelly guard drop it.
+    ``bet_size * payout``, so it must exclude the returned stake. The gross is the
+    platform's real payout (:func:`sportstradamus.helpers.platform_payout`): Underdog's
+    raw ``Boost`` scales its per-pick baseline, so an unboosted pick nets under 1; Sleeper's
+    ``Boost`` is the posted decimal payout, so its net is ``boost - 1``. Only
+    ``"Underdog"`` scales, so any other or missing platform nets as posted too. A
+    non-finite boost is unpriceable; return 0.0 (no edge) so the eligibility filter and
+    the Kelly guard drop it.
     """
     boost = float(row.get("Boost", 1))
     if not np.isfinite(boost):
         return 0.0
-    if row.get("Platform", "") == "Sleeper":
-        return boost - 1.0
-    return _DEFAULT_AMERICAN_MINUS_110_PAYOUT * boost
+    return platform_payout(boost, row.get("Platform", "")) - 1.0
 
 
 def simulate_strategy(
@@ -180,8 +179,8 @@ def simulate_kelly_all(
     Equivalent to :func:`simulate_strategy` with no thresholds, no
     Monte-Carlo sampling, Kelly sizing, and ``ranking="EV"``. Two models
     invoked against the same input frame bet on the same universe of
-    events, which is what makes the paired Sharpe (S3) and live ROI
-    comparisons well-defined.
+    events, which is what makes the paired Sharpe (S3) comparison
+    well-defined.
     """
     return simulate_strategy(
         df,
@@ -339,8 +338,8 @@ def _settle_day(
 
     ``Payout`` is net profit per dollar (see :func:`compute_payout`), so the
     Kelly branch rebuilds decimal odds as ``net + 1`` and skips only a
-    non-positive net — it previously compared the net against 1 and so discarded
-    every Underdog leg (net 0.909). ``kelly_fraction`` scales the raw fraction
+    non-positive net — comparing the net against 1 would discard every unboosted
+    Underdog leg (its net is under 1). ``kelly_fraction`` scales the raw fraction
     before the 5% cap (1.0 = full Kelly). Flat bets size off the initial bankroll
     when ``flat_off_initial`` else the current one. ``daily_exposure_cap`` (a
     fraction of bankroll, ``None`` = uncapped) bounds the day's total stake,

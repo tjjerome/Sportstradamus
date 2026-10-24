@@ -127,7 +127,7 @@ def _assert_hurdle_params_bit_reproducible(parquet_name: str, stats, market: str
     ``fit`` calls ``seed_everything`` once. The compression_eval A/B for
     ``meditate --deterministic --zinb-mode hurdle`` is meaningful only if this
     two-run bit-identity holds on every covered league; without it the A/B
-    verdict would be noise (the lesson from docs/CENTERED_TARGET_NEGATIVE_RESULT.md).
+    verdict would be noise (the lesson from docs/archive/nba_overconfidence_investigation.md).
 
     Args:
         parquet_name: Cached training matrix filename under ``data/training_data``.

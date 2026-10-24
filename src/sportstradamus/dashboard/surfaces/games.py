@@ -11,7 +11,8 @@ import html
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
+from sportstradamus.dashboard.assets import ambient_css, constellation_credit
+from sportstradamus.dashboard.components.constellation_slate import GameShape
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
@@ -24,15 +25,22 @@ from sportstradamus.dashboard.components.slip_state import (
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
-    load_current_game_corr,
     load_current_game_stories,
     load_current_meta,
     load_current_offers,
     load_current_parlays,
     load_game_ctxs,
+    load_pair_modifiers,
+    load_slate_shapes,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, game_headline, home_away
+from sportstradamus.dashboard.narrative import (
+    SHAPE_DISPLAY,
+    SHAPE_HELP,
+    context_strip,
+    game_headline,
+    home_away,
+)
 from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS, team_name
 
 # Hero shape glyph — matches the mockup's 74px .glyphwrap.
@@ -40,10 +48,13 @@ _HERO_GLYPH_SIZE = 74
 # Nebula wash (DESIGN.md §3): blue radial stop off chartSequentialColors, gold held
 # at 7% opacity, both well under the hero-card 12% gold ceiling — literal values
 # ported from the mockup's own .hero background (docs/mockups/p8-games.html:35-39).
-_HERO_BG = (
+_HERO_BG_FALLBACK = (
     f"radial-gradient(ellipse at 82% -10%, {SEQUENTIAL_COLORS[6]}29, transparent 46%),"
     f"radial-gradient(ellipse at 12% 120%, {GOLD}12, transparent 45%),#1A1D24"
 )
+# The ambient_games_hero manifest slot (the Receipts nebula, by owner request) replaces
+# the wash when its file is present; empty, this is _HERO_BG_FALLBACK unchanged.
+_HERO_BG = ambient_css("ambient_games_hero", _HERO_BG_FALLBACK)
 
 
 def _candidate_games(offers: pd.DataFrame, platform: str) -> dict[str, dict]:
@@ -100,6 +111,7 @@ def _render_hero(
     game_context: pd.DataFrame,
     parlays: pd.DataFrame,
     stories: pd.DataFrame,
+    platform: str,
     league: str,
     game: str,
     date: str,
@@ -111,15 +123,17 @@ def _render_hero(
     Blank if the game has no context row (unknown game — same graceful no-op as the
     banner this replaces). The matchup line speaks full team names
     (:func:`theme.team_name`, abbrev fallback); the prophecy subline is the story
-    engine's headline for the game (:func:`narrative.game_headline`).
+    engine's lead headline for the game on ``platform`` (:func:`narrative.game_headline`).
     """
     strip = context_strip(game_context, game=game, date=date)
     if not strip:
         return
     fav, spread = strip["fav_team"], strip["spread"]
     spread_text = f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even"
-    headline = game_headline(stories, parlays, game=game, date=date)
-    glyph = game_shape_glyph(str(strip["shape"]), size=_HERO_GLYPH_SIZE)
+    headline = game_headline(stories, parlays, game=game, date=date, platform=platform)
+    shape = str(strip["shape"])
+    glyph = game_shape_glyph(shape, size=_HERO_GLYPH_SIZE)
+    shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
     subline = (
         '<div class="celestial-headline" style="font-size:17px;margin-top:2px">'
         f"{html.escape(headline)}</div>"
@@ -130,7 +144,7 @@ def _render_hero(
         (
             _hero_stat("Total", f"{strip['game_total']:.1f}"),
             _hero_stat("Spread", spread_text),
-            _hero_stat("Shape", str(strip["shape"]).title(), title=SHAPE_HELP, mono=False),
+            _hero_stat("Shape", shape_name, title=SHAPE_HELP, mono=False),
         )
     )
     st.markdown(
@@ -148,21 +162,48 @@ def _render_hero(
     )
 
 
+def _story_menu(sub: pd.DataFrame, story_ids: list) -> tuple[dict, int]:
+    """Selectbox labels per story and the index of the story the menu opens on.
+
+    headline, lead and lead_side are story-level (identical on both objective rows):
+    the slate's lead story opens the menu (the first story when none is flagged) and
+    its side-led prefix says which way it leans.
+    """
+    heads = sub.drop_duplicates("story_id").set_index("story_id")
+    labels = {}
+    for sid in story_ids:
+        headline = str(heads.loc[sid, "headline"]) or sid
+        side = heads.loc[sid, "lead_side"]
+        labels[sid] = f"{side}-led · {headline}" if side else headline
+    opening = next((i for i, sid in enumerate(story_ids) if heads.loc[sid, "lead"]), 0)
+    return labels, opening
+
+
 def _render_story_preloader(
-    stories: pd.DataFrame, platform: str, game: str, offers: pd.DataFrame
+    stories: pd.DataFrame, platform: str, game: str, date: str, offers: pd.DataFrame
 ) -> None:
     """Optional: pre-load a story's legs into the constellation for the chosen game."""
-    sub = stories.loc[(stories["platform"] == platform) & (stories["Game"] == game)]
+    # The stories snapshot lags offers (absent until the first prophecize writes it);
+    # game_headline guards the hero the same way.
+    if stories.empty:
+        return
+    sub = stories.loc[
+        (stories["platform"] == platform)
+        & (stories["Game"] == game)
+        & (stories["Date"].astype(str) == date)
+    ]
     if sub.empty:
         return
     story_ids = sorted(
         sub["story_id"].dropna().unique(), key=lambda s: int(str(s).rsplit("#", 1)[-1])
     )
+    labels, opening = _story_menu(sub, story_ids)
 
     story_id = st.selectbox(
         "Preload a story (optional)",
         story_ids,
-        format_func=lambda sid: str(sub.loc[sub["story_id"] == sid].iloc[0]["headline"]) or sid,
+        index=opening,
+        format_func=labels.get,
         key="cascade_story",
     )
     rows = sub.loc[sub["story_id"] == story_id]
@@ -286,9 +327,8 @@ def _render_tuning_cockpit(shapes: dict[str, GameShape], focus_game: str) -> Non
 meta = load_current_meta()
 page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no run on record")))
 
-slate = load_current_offers()
-offers = sport_filtered(slate).reset_index(drop=True)
-corr = load_current_game_corr()
+offers = sport_filtered(load_current_offers()).reset_index(drop=True)
+mods = load_pair_modifiers()
 game_context = load_current_game_context()
 ctxs = load_game_ctxs()
 stories = sport_filtered(load_current_game_stories())
@@ -300,14 +340,15 @@ parlays = load_current_parlays()
 legs = st.session_state[_LEGS]
 shapes: dict[str, GameShape] = {}
 if offers.empty:
-    st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
+    st.info("No current predictions. Run `sportstradamus prophecize` to generate offers.")
     focus_game = ""
 else:
     st.session_state[_BUILDER] = "constellation"
     pcol, gcol = st.columns([1, 2])
     with pcol:
-        st.session_state[_PLATFORM] = _platform_selector(offers)
-    games = _candidate_games(offers, st.session_state[_PLATFORM])
+        platform = _platform_selector(offers)
+    st.session_state[_PLATFORM] = platform
+    games = _candidate_games(offers, platform)
     with gcol:
         focus_game, focus_date = _game_select(games, legs)
     if focus_game:
@@ -319,22 +360,26 @@ else:
         # Dealt from the whole night — every league, every platform — so a game's shape
         # can't change under the user when they switch Underdog <-> Sleeper or narrow
         # the sport filter, and two games showing at once can't wear the same shape.
-        shapes = slate_shapes(slate.loc[slate["Date"].astype(str) == focus_date], corr, focus_date)
-        _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
-        _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
+        shapes = load_slate_shapes(focus_date)
+        _render_hero(
+            game_context, parlays, stories, platform, league, focus_game, focus_date, home, away
+        )
+        _render_story_preloader(stories, platform, focus_game, focus_date, offers)
 
 st.divider()
 if focus_game:
     _render_lens_toggles()
 render_constellation_builder(
     offers,
-    corr,
     ctxs,
+    mods,
     focus_game=focus_game,
     shape=shapes[focus_game].template if focus_game in shapes else None,
 )
 if shapes:
     _render_tuning_cockpit(shapes, focus_game)
+    if credit := constellation_credit():
+        st.caption(credit)
 
 # Reconciler handoff: the Modifiers page defaults to the session rail, so the
 # current slip arrives loaded. Two legs is the reconciler's minimum.

@@ -9,8 +9,9 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-# scripts/run_job.sh wraps every cron in this lock, so holding it serializes a
-# one-off archive write against a live confer / prophecize / close-lines.
+# scripts/run_job.sh wraps every cron but close-lines in this lock, and close-lines takes
+# it here around its archive write, so holding it serializes a one-off archive write
+# against a live confer / prophecize / close-lines.
 ARCHIVE_LOCK_FILE = "/tmp/sportstradamus-archive.lock"
 
 # Held for a whole confirm/supersede walk. The walk snapshots a cell's serve-read
@@ -33,6 +34,15 @@ _POLL_S = 2
 
 # Resolved path -> the descriptor holding it, for locks kept until this process exits.
 _HELD_FOR_PROCESS: dict[str, int] = {}
+
+
+class LockTimeoutError(RuntimeError):
+    """A lock still held when the wait for it ran out.
+
+    A ``RuntimeError``, so callers that treat contention as fatal need not tell it
+    apart; a caller that can defer its work (close-lines spools its fetch) catches
+    just this.
+    """
 
 
 def _resolve(path: str) -> str:
@@ -61,7 +71,9 @@ def _acquire(path: str, timeout_s: float, label: str, contention_hint: str) -> i
             if time.monotonic() >= deadline:
                 held, waited = _holder(path), f" after {timeout_s:.0f}s" if timeout_s else ""
                 os.close(fd)
-                raise RuntimeError(f"{path} still held{held}{waited}. {contention_hint}") from None
+                raise LockTimeoutError(
+                    f"{path} still held{held}{waited}. {contention_hint}"
+                ) from None
             time.sleep(_POLL_S)
     os.ftruncate(fd, 0)
     os.write(fd, f"pid {os.getpid()}: {label}".encode())

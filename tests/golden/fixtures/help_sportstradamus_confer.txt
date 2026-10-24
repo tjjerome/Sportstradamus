@@ -3,11 +3,14 @@ Usage: sportstradamus confer [OPTIONS]
   Fetch current odds and player props into the archive.
 
 Options:
-  --close-lines                   Targeted close-line scrape only. Reads
-                                  data/upcoming_events.json and hits per-event
-                                  endpoints for games starting within the
-                                  closing window. Exits without touching archive
-                                  or API when no events are due.
+  --close-lines                   Targeted close-line scrape only. Fetches games
+                                  in data/runtime/upcoming_events.json starting
+                                  within the closing window into
+                                  data/runtime/close_line_captures.json, then
+                                  archives that spool once the archive lock
+                                  frees, else leaves it to a later run. Exits
+                                  without touching API, lock or archive when
+                                  nothing is due or spooled.
   --fixture-dir DIRECTORY         Read canned Odds API responses from this
                                   directory instead of hitting the live API.
                                   Used by the integration test suite. Skips

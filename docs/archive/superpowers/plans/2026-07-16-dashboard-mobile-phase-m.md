@@ -1354,11 +1354,11 @@ poetry run pytest -m integration -n0 && touch "$CLAUDE_PROJECT_DIR/.claude/.stat
 ```
 Expected: all clean.
 
-- [ ] **Step 3: Real-phone pass (owner, over tailscale)**
+- [x] **Step 3: Real-phone pass (owner, over tailscale)** — passed; owner verdict recorded 2026-09-11.
 
 Acceptance walk on an actual phone (spec §6): Tonight cards → tap through to Games → build a slip by tapping stars (docked card confirm) → dock expands → Lock it in! → shelf shows it; Board cards readable, Detail + Add work; no horizontal scroll on any money-loop surface; `?m=0` flips the session back to desktop layout. Record the verdict in the handoff ledger line (amend "Phase M started" → shipped once green).
 
-- [ ] **Step 4: Final commit + ledger tick**
+- [x] **Step 4: Final commit + ledger tick** — done at lane close, 2026-09-11.
 
 Tick this plan's checkboxes, amend the §10 ledger entry to record the phone-pass verdict, and commit:
 

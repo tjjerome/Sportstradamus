@@ -3,7 +3,7 @@
 
 Read by :func:`compute_gates` from the test-set CSV ``meditate`` dumps
 (``data/test_sets/{LEAGUE}_{market}.csv``) and merged into the wide
-``model_stats.parquet`` row by ``training.report.report()``. The five offline
+``model_stats.parquet`` row by ``training.report.report()``. The six offline
 gates (see ``docs/ship_gate.md``) plus the compression diagnostics live here so
 the meditate path and the standalone A/B-test harness share one implementation.
 
@@ -34,7 +34,7 @@ import importlib.resources as pkg_resources
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -60,12 +60,15 @@ from sportstradamus.helpers.integer_distribution import (
 )
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.calibration import _ONE_SE_MIN_CLUSTERS
 from sportstradamus.training.group_conditional_cdf import (
     deserialize_two_part_calibration,
     ks_supremum,
     two_part_cdf_endpoints,
 )
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
@@ -83,23 +86,24 @@ from sportstradamus.training.structural_strategies import (
 # (set first baseline | supersede incumbent) x (research->devel offline |
 # devel->main live).
 #
-#   * research -> devel, set baseline: the FIVE offline gates computed here —
-#     Gate 1 Brier-vs-book paired bootstrap, Gates 2/3 star/bench bias-vs-spread
+#   * research -> devel, set baseline: the SIX offline gates computed here —
+#     Gate 1 Brier-vs-book paired bootstrap over whole game dates (a slate's rows share
+#     game-level shocks; the row bound stays the floor), Gates 2/3 star/bench bias-vs-spread
 #     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
-#     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
+#     low-variance bench segments), Gate 4 randomized-PIT KS (the IQR ratio stays a
+#     diagnostic), Gate 5 equal-mass ECE, Gate 6 the anti-shrinkage OR of three legs.
 #     The per-cell metrics (plus an "oracle" bound) land on the wide
 #     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
-#     wires the strict starter pass/fail. Cells with no book Odds leave Gate 1
-#     blank; the ship convention is that a blank Gate 1 auto-passes — no book
-#     to beat, model wins by default. Gate 5 (model-only calibration) does NOT
-#     use Odds, so it still computes for those cells; Gate 5 blank means
-#     "couldn't compute" (no P or no Line), not auto-pass.
+#     wires the strict starter pass/fail. Cells with no book Odds, or with sportsbook
+#     (authentic) quotes below the cluster floor — a pick'em-only cell has none — leave
+#     Gate 1 blank; the ship convention is that a blank Gate 1 auto-passes — no book to
+#     beat, model wins by default. Gate 5 (model-only calibration) does NOT use Odds, so
+#     it still computes for those cells; Gate 5 blank means "couldn't compute" (no P or
+#     no Line), not auto-pass.
 #   * research -> devel, supersede: pass all six + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
-#   * devel -> main: a profitability gate on live settled data (positive Kelly-sized
-#     ROI to set a baseline; >= +0.5% ROI over >= 2 weeks to supersede an incumbent)
-#     — see scripts/check_graduation.py.
+#   * devel -> main: the live Gate 2 of training/graduation.py (`ship graduation`).
 
 # Bottom-mean QUARTILE = the bench segment (Gate 3); the top-mean DECILE (N_DECILES)
 # is the star segment (Gate 2). Bench is pooled coarser on purpose — low-volume
@@ -120,7 +124,7 @@ _CI_HIGH_PCT: float = 97.5
 _ECE_BINS: int = 10
 
 # Strict starter thresholds for the research->devel set-baseline gate (see
-# docs/ship_gate.md). The 5-gate row carries the raw measurements; these set
+# docs/ship_gate.md). The gate row carries the raw measurements; these set
 # pass/fail. A cell ships (research -> devel) iff all six pass.
 #   G1 ci_hi  < δ    : non-inferiority — 95% CI upper bound below the statistical-tie
 #                      margin δ (ensemble Brier at most δ worse than the book: a tight
@@ -131,9 +135,10 @@ _ECE_BINS: int = 10
 #                      the worst-case alt-line probability mispricing — under the larger of
 #                      the δ effect-size floor and the cell's KS sampling-noise floor
 #   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5% (Roelofs-debiased: raw - null bias offset)
-#   G6 star ratio    : (all cells; corr anchor scopes it) stable top-MeanYr pred / recent form,
-#                      clustered-CI upper bound at/above the causal real-game floor — catches the
-#                      mean-regression the holdout-scored G1-G5 are blind to; anchor-miss auto-pass
+#   G6 three legs    : (all cells) stable top-MeanYr pred / recent form, clustered-CI upper bound
+#                      at/above the causal real-game floor — catches the mean-regression the
+#                      holdout-scored G1-G5 are blind to; corr anchor scopes this leg, anchor-miss
+#                      auto-pass — plus the CITL-under and count-bench over legs (_gate6_passes)
 # G1 ships on the tie margin (intent: "ensemble at least as good as the book"); the
 # stricter ci_hi < 0 (model provably beats the book) is retained as the reported,
 # non-decisive ``g1_has_edge`` flag for sizing/prioritization. G2/G3 score the FUSED
@@ -179,15 +184,17 @@ _TWO_PART_CONTRACT_COLUMNS: frozenset[str] = frozenset(
 # Search range for the SkewNormal dispersion scalar c (fit_skewnorm_dispersion_c). Lower
 # bound permits tightening an over-wide cell; upper bound matches the count branch's hard cap.
 _DISPERSION_C_BOUNDS: tuple[float, float] = (0.1, 10.0)
-# Clamp on the Lever-4a additive skew shift s (fit_skewnorm_dispersion_skew). |s| <= 3 keeps
-# the served skewness well inside the SkewNormal's range and bounds the 2-param fit's capacity
-# at ~2k calibration rows (the skewness MLE is only n^(1/4)-consistent near alpha=0 —
-# Hallin & Ley 2014 — so an unbounded shift overfits the gate's own KS).
-_DISPERSION_SKEW_BOUNDS: tuple[float, float] = (-3.0, 3.0)
+# Clamp on the Lever-4a additive skew shift s (fit_skewnorm_dispersion_skew). Heavy-tail
+# yards cells rail the fit at |s| = 3 and still fail Gate 4; the measured PIT-KS transfer
+# is monotone in the bound and saturates near |s| = 8 (NFL receiving yards 0.0568 -> 0.0453,
+# screen matching the full-HPO ledger within +/-0.0007 — docs/archive/researcher_studentt_head.md).
+# Overfit control (the skewness MLE is only n^(1/4)-consistent near alpha=0, Hallin & Ley
+# 2014) now rests on _DISPERSION_SKEW_MIN_GAIN's val->test discount, not the clamp.
+_DISPERSION_SKEW_BOUNDS: tuple[float, float] = (-8.0, 8.0)
 # Deterministic warm starts for the joint (c, s) fit. The objective has a flat-gradient
 # Fisher singularity at s = 0, so a single Nelder-Mead seeded there stalls; spanning negative,
 # zero, and positive skew lets the arg-min escape it for either skew direction.
-_DISPERSION_SKEW_STARTS: tuple[float, ...] = (-1.5, 0.0, 1.5, 3.0)
+_DISPERSION_SKEW_STARTS: tuple[float, ...] = (-1.5, 0.0, 1.5, 3.0, 6.0)
 # Minimum PIT-KS improvement (vs scale-only) for the skew shift to be kept; below it the fit
 # returns the pure Lever-1 (c, 0), byte-identical. Set to the measured val->test discount: a
 # skew gain smaller than the discount is finite-sample noise that won't survive to the test
@@ -205,7 +212,7 @@ _GATE5_ECE_MAX: float = 0.075
 # Gate 5 debias — Roelofs (2022) "Mitigating Bias in Calibration Error
 # Estimation". Equal-mass ECE is positively biased at finite N; the bias
 # scales O(1/sqrt(N_bin)) and falsely fails ~45% of perfectly calibrated
-# NFL-N≈240 cells per the lifecycle gate audit at /tmp/researcher_lifecycle_gate_audit.md.
+# NFL-N≈240 cells per the lifecycle gate audit.
 # Fix: bootstrap-estimate the null bias by drawing y ~ Bernoulli(p_model)
 # and subtracting the mean of those null ECEs from the raw ECE.
 _GATE5_DEBIAS_RESAMPLES: int = 200
@@ -223,8 +230,7 @@ _GATE5_DEBIAS_SEED: int = 9173
 # tiny z and passes. Gate 6 instead scores the model's STABLE top-MeanYr prediction against
 # recent form (Mean10) — the one yardstick these artifacts don't suppress — and fails the cell
 # when it sits below the causal real-game floor. The corr anchor (not the normalization or
-# family) scopes it. [research-analyst /tmp/researcher_overshrinkage_gate.md, 2026-06-19;
-# scope widened to all cells 2026-06-21]
+# family) scopes it. [research-analyst brief, 2026-06-19; scope widened to all cells 2026-06-21]
 # A "stable" player = recent form within this band of the season baseline; real production
 # tracks recent form for them (noisy windows mean-revert, stable ones don't).
 _GATE6_STABLE_BAND: float = 0.12  # |Mean10/MeanYr - 1| <= this
@@ -252,7 +258,7 @@ _GATE6_STAR_REF_BASKETBALL: float = 0.95
 _GATE6_STAR_REF_NFL: float = 0.94
 
 # Breadth target — at least this fraction of each league's markets should clear the
-# 5 gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
+# six gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
 BREADTH_TARGET_FRAC: float = 0.75
 
 # Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees
@@ -267,6 +273,24 @@ N_DECILES = 10
 # per-player signal present in the dumped test-set CSV (player id is dropped).
 DECILE_COL = "MeanYr"
 ACTUAL_COL = "Result"
+
+# A combo priced as a weighted sum of its component cells' predictives has no closed-form
+# family — the sum is evaluated by Monte-Carlo — so there are no per-row family params for
+# `_infer_dist_from_columns` to key on and Gate 4 would silently fall back to the point-IQR
+# estimator. Instead the assembler persists the CDF endpoints it already sampled, and the
+# gate reads them. The four quantiles are the complete set the gate asks for
+# (`_iqr_pred_analytical` at 0.25/0.75, `_dispersion_diagnostics` at 0.10/0.25/0.75/0.90);
+# `SUM_CDF` / `SUM_PMF` are evaluated at the row's own realized outcome and nowhere else.
+COMPONENT_SUM_DIST = "ComponentSum"
+COMPONENT_SUM_QUANTILE_COLUMNS: dict[float, str] = {
+    0.10: "SUM_Q10",
+    0.25: "SUM_Q25",
+    0.75: "SUM_Q75",
+    0.90: "SUM_Q90",
+}
+COMPONENT_SUM_COLUMNS: frozenset[str] = frozenset(
+    {"SUM_CDF", "SUM_PMF", *COMPONENT_SUM_QUANTILE_COLUMNS.values()}
+)
 
 # The ship gates score the fused ``Blended_EV`` — what the parlay actually drafts and what
 # ``report.compute_gates`` scores in production (``report._SHIP_PRED_COL``). Default the CLI /
@@ -353,7 +377,8 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         ``MIX_Scale1`` / ``MIX_Scale2`` / ``MIX_W1`` for the 2-component
         Gaussian mixture, ``R`` / ``NB_P`` for NegBin/ZINB,
         ``DP_MU`` / ``DP_PHI`` for DPO, ``Alpha`` for Gamma/ZAGamma,
-        ``Gate`` for the zero-inflated variants).
+        ``Gate`` for the zero-inflated variants, :data:`COMPONENT_SUM_COLUMNS`
+        for a family-free component sum).
         Rows with non-finite values in any required column are dropped.
 
     Raises:
@@ -432,6 +457,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
                 _STRUCTURAL_F0_COL,
                 _STRUCTURAL_ROUTE_COL,
                 _STRUCTURAL_FALLBACK_COL,
+                *COMPONENT_SUM_COLUMNS,
                 *STRATEGY_IDENTITY_CSV_COLUMNS,
             }
             & set(df.columns)
@@ -499,7 +525,7 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     """Return ``(p_model, y)`` for the model-only calibration gate (Gate 5).
 
     Needs ``P`` (calibrated model over-probability), ``Line`` (the posted prop line)
-    and ``Result`` to derive ``y = Result >= Line``. Independent of the book's
+    and ``Result`` to derive ``y`` (1 over, 0 under, 0.5 at a tie). Independent of the book's
     ``Odds`` — Gate 5 only asks whether the MODEL's own probabilities are calibrated
     to outcomes; it does not compare against the book. Returns ``None`` when ``P`` or
     ``Line`` is missing or every row is non-finite.
@@ -510,19 +536,24 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     sub = df[["P", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
     if len(sub) == 0:
         return None
-    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    y = over_label(sub[ACTUAL_COL], sub["Line"])
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     return p_model, y
 
 
 def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
-    """Rows usable for the priced Brier gates: authentic, finite book evidence.
+    """Rows usable for the priced Brier gates: sportsbook-priced, finite book evidence.
 
     The single source of truth for which test rows enter Gate 1, so ancillary
-    columns (e.g. Player for the clustered bootstrap) align to the same rows.
-    Provenance-bearing artifacts fail closed to explicit authentic quotes;
-    legacy artifacts without provenance retain their historical finite-price
-    behavior.
+    columns (Date and Player for the clustered bootstraps) align to the same rows.
+    Provenance-bearing artifacts fail closed to explicit ``authentic`` quotes — a
+    ``pickem`` quote is a real line priced at the platform's even payout, so beating
+    it is beating a coin flip; legacy artifacts without provenance retain their
+    historical finite-price behavior. A one-row book is no book: below
+    :data:`~sportstradamus.training.calibration._ONE_SE_MIN_CLUSTERS` distinct
+    players (dates when the dump has no ``Player``, as team markets cluster), the
+    authentic set is too thin to call Gate 1 book-beaten rather than book-less —
+    the same floor the blend-weight fit applies to its priced rows.
     """
     if "Odds" not in df.columns:
         return None
@@ -533,10 +564,12 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
         columns.append("QuoteAuthenticity")
     sub = df[columns].replace([np.inf, -np.inf], np.nan).dropna()
     if "QuoteAuthenticity" in sub.columns:
-        allowed = ("authentic", "derived", "synthetic")
-        if not sub["QuoteAuthenticity"].isin(allowed).all():
+        if not sub["QuoteAuthenticity"].isin(AUTHENTICITY_VALUES).all():
             raise ValueError("scorecard received invalid quote authenticity")
         sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
+        key = "Player" if "Player" in df.columns else "Date"
+        if df.loc[sub.index, key].nunique() < _ONE_SE_MIN_CLUSTERS:
+            return None
     return sub if len(sub) else None
 
 
@@ -549,15 +582,15 @@ def _brier_inputs(
     top of :func:`_calibration_inputs`. The row set is re-filtered to drop rows with
     non-finite ``Odds`` (so the Brier and ECE row sets can differ when some events
     have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
-    entirely or every priced row is non-finite. Shared by
-    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`); ``index`` is the
-    surviving-row index so callers can align ancillary columns (Player) to the same
-    rows without re-deriving the filter.
+    entirely, every priced row is non-finite, or the priced rows fall below the
+    cluster floor. Shared by :func:`_brier_skill_score` and Gate 1
+    (:func:`_gate1_brier_ci`); ``index`` is the surviving-row index so callers can align
+    ancillary columns (Date, Player) to the same rows without re-deriving the filter.
     """
     sub = _priced_rows(df)
     if sub is None:
         return None
-    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    y = over_label(sub[ACTUAL_COL], sub["Line"])
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     p_book = np.clip(1.0 - sub["Odds"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     return p_model, p_book, y, sub.index
@@ -581,20 +614,20 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
 
 
 def _standalone_g1_hi(
-    df: pd.DataFrame, p_book: np.ndarray, y: np.ndarray, index: pd.Index
+    df: pd.DataFrame, p_book: np.ndarray, y: np.ndarray, index: pd.Index, dates: np.ndarray
 ) -> float | None:
     """Gate-1 CI upper bound for the *pre-blend* model probabilities (``P_standalone``).
 
     Scored on the same priced rows as the fused gate (``index`` from
-    :func:`_brier_inputs`) against the same book, so the two upper bounds are
-    directly comparable: it shows whether the standalone model or the book
-    carries the fused pass. Report-only — never a ship term. ``None`` when the
-    column is absent (CSVs predating the dump).
+    :func:`_brier_inputs`) against the same book, resampling the same game ``dates``,
+    so the two upper bounds are directly comparable: it shows whether the standalone
+    model or the book carries the fused pass. Report-only — never a ship term.
+    ``None`` when the column is absent (CSVs predating the dump).
     """
     if "P_standalone" not in df.columns:
         return None
     p_sa = np.clip(df.loc[index, "P_standalone"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
-    return _gate1_brier_ci(p_sa, p_book, y, np.random.default_rng(_GATE1_SEED))[2]
+    return _gate1_brier_ci(p_sa, p_book, y, dates)[2]
 
 
 def _segment_masks(df: pd.DataFrame, n_deciles: int = N_DECILES) -> tuple[np.ndarray, np.ndarray]:
@@ -685,8 +718,8 @@ def _bootstrap_mean_ci(
     Resamples ``values`` with replacement ``n_boot`` times (seeded ``rng`` for a
     reproducible CI) and returns the point mean plus the 95% two-sided percentile
     bounds, specialized to the mean of an already-computed per-event statistic
-    (Gate 1 here, supersede S2 later).
-    Returns ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
+    (Gate 1's row bound, supersede S2's paired Brier difference). Returns
+    ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -706,12 +739,12 @@ def _bootstrap_mean_ci_clustered(
     rng: np.random.Generator,
     n_boot: int = _GATE1_N_BOOT,
 ) -> tuple[float, float, float]:
-    """Cluster (player) block bootstrap of the mean of ``values``.
+    """Cluster (player or game date) block bootstrap of the mean of ``values``.
 
     Resamples whole clusters with replacement, so within-cluster correlation is
-    preserved and the CI is not anti-conservative on repeated-player panels.
-    ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns ``(mean, ci_lo, ci_hi)``;
-    ``(nan, nan, nan)`` if empty.
+    preserved and the CI is not anti-conservative on repeated-player panels or on
+    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns
+    ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
     """
     values = np.asarray(values, dtype=float)
     cluster_ids = np.asarray(cluster_ids)
@@ -762,16 +795,30 @@ def _bootstrap_ratio_ci_clustered(
     return float(num.sum() / den.sum()), float(lo), float(hi)
 
 
-def _gate1_brier_ci_clustered(
-    p_model: np.ndarray,
-    p_book: np.ndarray,
-    y: np.ndarray,
-    cluster_ids: np.ndarray,
-    rng: np.random.Generator,
+def _gate1_brier_ci(
+    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, dates: np.ndarray
 ) -> tuple[float, float, float]:
-    """Gate 1 paired Brier CI under a player-clustered bootstrap."""
+    """Gate 1's ship CI of the per-event (model - book) Brier difference.
+
+    ``d_i = (p_model_i - y_i)^2 - (p_book_i - y_i)^2``. Lower Brier is better, so a
+    bootstrap-mean CI entirely below 0 means the model beats the book. One slate's rows
+    share game-level shocks, so resampling whole game ``dates`` widens the bound where
+    dates are few. Over very few dates that bootstrap collapses instead (three dates allow
+    ten distinct resamples) and can read narrower than the row bootstrap, so the interval
+    with the larger upper bound decides. Returns ``(mean, ci_lo, ci_hi)``.
+    """
     d = (p_model - y) ** 2 - (p_book - y) ** 2
-    return _bootstrap_mean_ci_clustered(d, cluster_ids, rng)
+    by_rows = _bootstrap_mean_ci(d, np.random.default_rng(_GATE1_SEED))
+    by_dates = _bootstrap_mean_ci_clustered(d, dates, np.random.default_rng(_GATE1_SEED))
+    return max(by_rows, by_dates, key=lambda ci: ci[2])
+
+
+def _gate1_brier_ci_clustered(
+    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, cluster_ids: np.ndarray
+) -> tuple[float, float, float]:
+    """Gate 1 paired Brier CI under a player-clustered bootstrap (reported, never decisive)."""
+    d = (p_model - y) ** 2 - (p_book - y) ** 2
+    return _bootstrap_mean_ci_clustered(d, cluster_ids, np.random.default_rng(_GATE1_SEED))
 
 
 def _iqr(values: np.ndarray) -> float:
@@ -780,22 +827,21 @@ def _iqr(values: np.ndarray) -> float:
     return float(p75 - p25)
 
 
-# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B per the
-# research brief at /tmp/researcher_g4_audit.md. The old gate computed
-# IQR(point_pred) / IQR(actual), a sharpness-vs-calibration category error
-# (Gneiting & Raftery 2007): point predictions are conditional means and
-# always lose to realized-outcome spread on the IQR. The fix is to compute
-# the pooled IQR of the predictive distribution per-row, by inverting the
-# per-row CDF at q = 0.25 / 0.75, then taking the IQR of the concatenated
-# bag. Validated against sample-based IQR with M=1000 on five real cells
-# (/tmp/g4_iqr_experiment.py) — agrees to <=0.001 on ZINB, within 10% on
+# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B of the
+# Gate 4 research audit. The old gate computed IQR(point_pred) / IQR(actual),
+# a sharpness-vs-calibration category error (Gneiting & Raftery 2007): point
+# predictions are conditional means and always lose to realized-outcome
+# spread on the IQR. The fix is to compute the pooled IQR of the predictive
+# distribution per-row, by inverting the per-row CDF at q = 0.25 / 0.75, then
+# taking the IQR of the concatenated bag. Validated against sample-based IQR
+# with M=1000 on five real cells: agrees to <=0.001 on ZINB, within 10% on
 # SkewNormal.
 
 
 # torch's NegativeBinomial(probs=p) treats p as "probability of success" and
 # counts FAILURES; scipy.stats.nbinom(n, p) treats p the same way but counts
 # successes-needed before n failures, so the per-trial parameter is mirrored:
-# scipy_p = 1 - torch_probs. Mapping documented in /tmp/researcher_g4_audit.md.
+# scipy_p = 1 - torch_probs.
 def _zinb_ppf(q: float, r: np.ndarray, nb_p: np.ndarray, gate: np.ndarray) -> np.ndarray:
     """Vectorized inverse CDF for ZINB(``gate``, ``r``, ``nb_p``).
 
@@ -862,14 +908,20 @@ def _mix_ppf(
 def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     """Identify the distribution family from per-row parameter columns.
 
-    Returns one of ``"Mixture"``, ``"SkewNormal"``, ``"NegBin"`, ``"ZINB"``,
-    ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which params
-    ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
+    Returns one of :data:`COMPONENT_SUM_DIST`, ``"Mixture"``, ``"SkewNormal"``,
+    ``"NegBin"`, ``"ZINB"``, ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which
+    params ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
     test-set CSV (~lines 1191-1212). ``None`` for legacy / synthetic frames
     missing every distribution param — those keep the back-compat point-IQR
     semantics.
+
+    The endpoint family is checked first because the endpoints fully describe what
+    was priced: a component-sum candidate assembled from an incumbent's CSV can
+    still carry that model's params, and they no longer describe the predictive.
     """
     cols = set(df.columns)
+    if cols >= COMPONENT_SUM_COLUMNS:
+        return COMPONENT_SUM_DIST
     if {"MIX_Loc1", "MIX_Loc2", "MIX_Scale1", "MIX_Scale2", "MIX_W1"} <= cols:
         return "Mixture"
     if {"SN_Loc", "SN_Scale", "SN_Alpha"} <= cols:
@@ -971,7 +1023,19 @@ def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.nda
     dumped into the test-set CSV. ``q`` is a scalar in ``(0, 1)``; the ZINB /
     ZAGamma mixtures invert through the custom routines (a quantile at or below
     the zero gate lands on 0).
+
+    Raises:
+        ValueError: If ``dist`` is unknown, or if a component sum was asked for a
+            quantile it did not persist — an unpersisted endpoint is a missing
+            input, not something to interpolate.
     """
+    # style: allow-complexity — flat per-family quantile dispatch; each branch is one
+    # family's inversion, so splitting would only scatter them behind thin forwarders.
+    if dist == COMPONENT_SUM_DIST:
+        column = COMPONENT_SUM_QUANTILE_COLUMNS.get(q)
+        if column is None:
+            raise ValueError(f"{COMPONENT_SUM_DIST} persists no endpoint for quantile {q!r}")
+        return df[column].to_numpy(dtype=float)
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
@@ -1046,8 +1110,22 @@ def _pred_cdf_pmf(
     count / zero-inflated families. Shared by the mid-PIT and the randomized PIT
     so both read the same family parameterization; the zero-inflated mixtures
     fold the gate into both terms.
+
+    Raises:
+        ValueError: If ``dist`` is unknown, or if a component sum is evaluated
+            anywhere but at its own realized outcome — its endpoints were sampled
+            once, at ``Result``, so any other ``y`` would grade a wrong CDF.
     """
+    # style: allow-complexity — flat per-family dispatch; each branch is one family's
+    # CDF/PMF pair, so splitting would only scatter them behind thin forwarders.
     y = np.asarray(y, dtype=float)
+    if dist == COMPONENT_SUM_DIST:
+        if not np.allclose(y, df[ACTUAL_COL].to_numpy(dtype=float)):
+            raise ValueError(f"{COMPONENT_SUM_DIST} endpoints hold only at the row's own Result")
+        return (
+            df["SUM_CDF"].to_numpy(dtype=float),
+            df["SUM_PMF"].to_numpy(dtype=float),
+        )
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
@@ -1475,19 +1553,6 @@ def _dispersion_diagnostics(
     return pit_ks, tail_pit_ks, cov50, cov80
 
 
-def _gate1_brier_ci(
-    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, rng: np.random.Generator
-) -> tuple[float, float, float]:
-    """Gate 1 — paired bootstrap of the per-event (model - book) Brier difference.
-
-    ``d_i = (p_model_i - y_i)^2 - (p_book_i - y_i)^2``. Lower Brier is better, so a
-    bootstrap-mean CI entirely below 0 means the model beats the book. Returns
-    ``(mean, ci_lo, ci_hi)``.
-    """
-    d = (p_model - y) ** 2 - (p_book - y) ** 2
-    return _bootstrap_mean_ci(d, rng)
-
-
 def _gate23_segment_match(
     pred: np.ndarray, actual: np.ndarray, mask: np.ndarray
 ) -> tuple[float, float, float, float, float]:
@@ -1582,7 +1647,7 @@ def _gate5_ece_equal_mass(p_model: np.ndarray, y: np.ndarray, n_bins: int = _ECE
     if total == 0:
         return float("nan")
     # duplicates="drop" collapses ties (e.g. a spike of identical probabilities, or
-    # the deterministic 0/1 oracle) into fewer bins rather than raising. A fully
+    # the oracle's 0 / 0.5 / 1 label) into fewer bins rather than raising. A fully
     # degenerate vector (all probabilities equal) leaves no valid edges -> qcut
     # returns all-NaN; fall back to a single bin over every row.
     bins = np.asarray(pd.qcut(p_model, n_bins, labels=False, duplicates="drop"), dtype=float)
@@ -1608,9 +1673,8 @@ def _ece_debias_offset(
     The binned ECE estimator is positively biased at finite N — even a
     perfectly calibrated model produces ``_gate5_ece_equal_mass > 0``
     because sampling noise in each bin's mean-``y`` inflates
-    ``|mean_p - mean_y|``. Per the lifecycle gate audit at
-    ``/tmp/researcher_lifecycle_gate_audit.md`` this falsely fails up to
-    44.6 % of perfectly calibrated NFL-N≈240 cells.
+    ``|mean_p - mean_y|``. Per the lifecycle gate audit this falsely fails up
+    to 44.6 % of perfectly calibrated NFL-N≈240 cells.
 
     The fix: estimate the bias as the expected ECE under the null
     hypothesis that ``p_model`` IS the calibration, by drawing
@@ -1833,15 +1897,17 @@ def gate_row(
     """Compute the offline ship gates for one cell — a model row plus an oracle row.
 
     The oracle assumes the model predicted the true score exactly (``pred = Result``;
-    over-probability ``1 if Result>=Line else 0``), giving each gate's idealistic
+    over-probability = the outcome label, 0.5 at a tie), giving each gate's idealistic
     bound: Gate 1 diff = -book Brier, Gates 2/3 ``z = 0``, Gate 4 ratio ``1.0``, Gate 5
     ``ece = 0``. The σ / IQR_true denominators equal the model row, so the oracle
     columns size each gate's natural threshold. Measurement-only — no pass/fail. Gate
-    1 is **blank when ``Odds`` is missing** (no book to beat); the ship convention is
-    that a blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
+    1 is **blank when ``Odds`` is missing or the priced rows fall below the cluster
+    floor** (no book, or too thin a book, to beat); the ship convention is that a
+    blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
     ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
     blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
     """
+    # style: allow-complexity — identity check, then one blank-input branch per gate block
     identity, _ = validate_strategy_frame(df)
     if identity is not None:
         same_league = not league or league == identity.league
@@ -1887,32 +1953,26 @@ def gate_row(
     g4_pit_ks_max = _gate4_pit_ks_threshold(len(df))
     _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
 
-    # Gate 1 — paired Brier vs book. Needs Odds; blank ⇒ "no book to beat, model wins
-    # by default" (the auto-pass convention is doc'd at the module-header and applied
-    # at verdict-wiring time). Oracle p_model = y (the deterministic 1/0 prediction).
+    # Gate 1 — paired Brier vs book (the wider of the row and game-date bootstraps). Needs
+    # Odds, plus Date once priced; blank ⇒ "no book to beat, model wins by default" (the
+    # auto-pass convention is doc'd at the module-header and applied at verdict-wiring time).
+    # Oracle p_model = y (the label itself, 0.5 at a tie).
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
         g1_clustered_hi = g1_standalone_hi = None
     else:
         p_model_b, p_book, y_b, priced_index = brier_in
-        g1_mean, g1_lo, g1_hi = _gate1_brier_ci(
-            p_model_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
-        )
-        g1_mean_o, g1_lo_o, g1_hi_o = _gate1_brier_ci(
-            y_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
-        )
+        dates = df.loc[priced_index, "Date"].to_numpy()
+        g1_mean, g1_lo, g1_hi = _gate1_brier_ci(p_model_b, p_book, y_b, dates)
+        g1_mean_o, g1_lo_o, g1_hi_o = _gate1_brier_ci(y_b, p_book, y_b, dates)
         bss = _brier_skill_score(df)
         g1_clustered_hi = None
         if "Player" in df.columns:
             g1_clustered_hi = _gate1_brier_ci_clustered(
-                p_model_b,
-                p_book,
-                y_b,
-                df.loc[priced_index, "Player"].to_numpy(),
-                np.random.default_rng(_GATE1_SEED),
+                p_model_b, p_book, y_b, df.loc[priced_index, "Player"].to_numpy()
             )[2]
-        g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index)
+        g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index, dates)
 
     # Gate 5 — model-only calibration. Needs P + Line (NOT Odds) — Gate 5 checks the
     # model's probabilities against outcomes; the book doesn't enter. Blank only if
@@ -1928,8 +1988,8 @@ def gate_row(
         # raw equal-mass ECE falsely fails ~45% of perfectly calibrated
         # NFL-N≈240 cells; the debiased variant is the one apply_thresholds
         # actually checks. The model-row offset uses the model's own
-        # probabilities; the oracle row uses the deterministic 0/1 prediction
-        # ``p = y`` and so its null offset is structurally tiny.
+        # probabilities; the oracle row uses ``p = y``, deterministic off a tie,
+        # so its null offset is only the coin-flip noise of its tie rows.
         g5_ece_bias = _ece_debias_offset(p_model_c)
         g5_ece_db = (
             float(g5_ece - g5_ece_bias)
@@ -1997,7 +2057,8 @@ def _g1_within_tie_margin(hi: float | None) -> bool:
     the statistical-tie margin :data:`_GATE1_NONINF_MARGIN` — i.e. we are 95%
     confident the fused ensemble's Brier is at most ``δ`` worse than the book's. A
     tight tie or a win passes; a wildly-worse or underpowered (wide-CI) cell fails. A
-    blank bound (no ``Odds``) auto-passes — there is no book to beat.
+    blank bound (no ``Odds``, or priced rows below the cluster floor) auto-passes —
+    there is no book to beat.
     """
     return hi is None or hi < _GATE1_NONINF_MARGIN
 
@@ -2010,8 +2071,8 @@ def _below_zero_ci_bound(hi: float | None) -> bool:
     ``hi`` is stored rounded to 4 dp and round() keeps the sign bit, so a
     genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 — lands on
     -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero still beat the
-    book, so treat it as below the bound. A blank bound (no ``Odds``) is True — no
-    book to beat.
+    book, so treat it as below the bound. A blank bound (no ``Odds``, or priced rows
+    below the cluster floor) is True — no book to beat.
     """
     if hi is None:
         return True
@@ -2051,8 +2112,9 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     reports the stricter provable-superiority result without gating on it. Blank-cell
     semantics — distinct because the gates fail for different structural reasons:
 
-    * Gate 1 blank (no ``Odds``): **auto-pass** — no book to beat, model wins by
-      default. The only "no book data" auto-pass.
+    * Gate 1 blank (no ``Odds``, or priced rows below the cluster floor):
+      **auto-pass** — no book to beat, model wins by default. The only "no book
+      data" auto-pass.
     * Gate 2/3/5 blank: **fail** — the cell couldn't compute the gate (e.g. missing
       ``P`` / ``Line``), and we don't credit the model for absence of evidence.
     * Gate 4 blank (no per-row distribution params ⇒ no ``g4_pit_ks``): **fail** — the
@@ -2186,7 +2248,7 @@ def compute_gates(
 
 
 def write_gate_scorecard(rows: list[dict[str, object]], out_path: Path) -> pd.DataFrame:
-    """Write the per-cell five-gate scorecard snapshot to CSV, one row per cell.
+    """Write the per-cell six-gate scorecard snapshot to CSV, one row per cell.
 
     Overwrites ``out_path`` each call — a *snapshot* of the latest audit (the six
     gate metrics, the oracle bound, and the per-gate ``*_pass`` flags + overall
@@ -2376,9 +2438,7 @@ def _supersede_paired_brier_ci(
     c_aligned = c_aligned.loc[usable]
     p_b = np.clip(p_b[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
     p_c = np.clip(p_c[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
-    y = (
-        c_aligned["Result"].astype(float).to_numpy() >= c_aligned["Line"].astype(float).to_numpy()
-    ).astype(float)
+    y = over_label(c_aligned["Result"], c_aligned["Line"])
     brier_b = (p_b - y) ** 2
     brier_c = (p_c - y) ** 2
     d = brier_b - brier_c
@@ -2399,6 +2459,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     the fraction is unchanged) and settles winners at net, giving each event a
     well-defined Kelly stake and return. Synthetic monotonic dates make each event
     its own "day" so the resulting return series has per-event resolution.
+    A tie pushes and returns the stake, so tie rows are left out and ``Hit`` stays binary.
     Returns an empty frame when ``Odds`` / ``P`` / ``Line`` are absent.
     """
     if _calibration_inputs(df) is None or "Odds" not in df.columns:
@@ -2406,6 +2467,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     sub = (
         df[["P", "Odds", "Line", ACTUAL_COL, pred_col]].replace([np.inf, -np.inf], np.nan).dropna()
     )
+    sub = sub[sub[ACTUAL_COL] != sub["Line"]]
     if sub.empty:
         return pd.DataFrame()
     p_model_over = np.clip(sub["P"].to_numpy(dtype=float), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
@@ -2422,7 +2484,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     p_model = np.where(bet_over, p_model_over, 1.0 - p_model_over)
     p_book = np.where(bet_over, p_book_over, 1.0 - p_book_over)
     payout_decimal = 1.0 / p_book
-    hit_over = result >= line
+    hit_over = result > line
     hit = np.where(bet_over, hit_over, ~hit_over)
 
     n = len(sub)
@@ -2894,7 +2956,7 @@ def _resolve_diff_cell(
     "--scorecard/--no-scorecard",
     "write_scorecard",
     default=True,
-    help="On a full audit, write the per-cell five-gate scorecard CSV (model + oracle).",
+    help="On a full audit, write the per-cell six-gate scorecard CSV (model + oracle).",
 )
 @click.option(
     "--scorecard-out",

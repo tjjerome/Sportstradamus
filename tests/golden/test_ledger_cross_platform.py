@@ -13,8 +13,10 @@ import datetime
 from decimal import Decimal
 
 import pandas as pd
+import pytest
 
-from sportstradamus.strategies import _ledger_selection, ledger
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
+from sportstradamus.strategies import _ledger_selection, ledger, underdog_pickem
 from sportstradamus.strategies._ledger_selection import LedgerCandidate
 from sportstradamus.strategies.underdog_pickem import RecommendedEntry
 
@@ -92,10 +94,10 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
 
 
 def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
-    def _fake_live_load(config, platform):
-        return {}, pd.DataFrame()
+    def _fake_live_load(config, platform, stats):
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
 
-    def _fake_construct_entries(date, bankroll, config, *, parlay_dfs, offers_df, platform):
+    def _fake_construct_entries(bankroll, config, *, parlay_dfs, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
         return [_recommended_entry(f"{prefix}-same-1", f"{prefix.upper()} Same Player", platform)]
 
@@ -110,18 +112,161 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
             )
         ]
 
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr(ledger, "live_load", _fake_live_load)
     monkeypatch.setattr(ledger, "construct_entries", _fake_construct_entries)
     monkeypatch.setattr(ledger._ledger_cross_game, "build_cross_game_candidates", _fake_cross_game)
 
-    universe = ledger.build_candidate_universe(DATE, "morning")
+    pools = ledger.build_candidate_universe(DATE, "morning")
 
+    universe = pools["safe"]
+    assert pools["high_ev"] is universe
+    assert pools["kelly_growth"] is universe
     assert len(universe) == 4
     by_id = {c.id: c for c in universe}
     assert set(by_id) == {"ud-same-1", "ud-cross-1", "sl-same-1", "sl-cross-1"}
     for cand_id, candidate in by_id.items():
         expected_platform = "Underdog" if cand_id.startswith("ud-") else "Sleeper"
         assert candidate.platform == expected_platform
+
+
+def test_build_candidate_universe_loads_the_leagues_once_for_both_platforms(monkeypatch) -> None:
+    """Both platforms score on one league load, as they do in the board run. The load
+    updates every league from its API, and the ledger job holds the archive lock while it
+    runs."""
+    loads, handed = [], []
+
+    def _load_live_leagues():
+        loads.append({"NBA": object()})
+        return loads[-1], []
+
+    def _fake_live_load(config, platform, stats):
+        handed.append(stats)
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
+
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", _load_live_leagues)
+    monkeypatch.setattr(ledger, "live_load", _fake_live_load)
+
+    ledger.build_candidate_universe(DATE, "morning")
+
+    assert len(loads) == 1
+    assert len(handed) == len(ledger._PLATFORMS)
+    assert all(stats is loads[0] for stats in handed)
+
+
+# --- even_picks draws Underdog's recommended even picks, across games ----------
+
+
+def _same_game_parlay(players: tuple[str, str], boosts: tuple[float, float], platform: str) -> dict:
+    return {
+        "League": "NBA",
+        "Game": "BOS/LAL",
+        "Bet Size": 2,
+        "Boost": 3.5 * boosts[0] * boosts[1],
+        "Boost Pairs": (1.0,),
+        "Model EV": 1.3,
+        "legs": [
+            _canonical_leg(player, platform=platform) | {"boost": boost}
+            for player, boost in zip(players, boosts, strict=True)
+        ],
+    }
+
+
+def _offer(player: str, game: str, boost: float, platform: str, win_prob: float = 0.60) -> dict:
+    team, opponent = game.split("/")
+    return {
+        "Player": player,
+        "Team": team,
+        "Opponent": opponent,
+        "Market": "Rebounds",
+        "League": "NBA",
+        "Game": game,
+        "Platform": platform,
+        "Date": DATE.isoformat(),
+        "Line": 4.5,
+        "Bet": "Over",
+        "Win Prob": win_prob,
+        # An even pick's book sits at a coin flip, further from a read worth recommending
+        # than the shared leg gate allows. A moved multiplier's book is inside the gate.
+        "Market Prob": 0.50 if boost == 1.0 else 0.57,
+        "Boost": boost,
+    }
+
+
+def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+    """What ``live_load`` hands back: same-game parlays and offers, some all even picks,
+    some discounted or boosted, one even pick read too weakly to recommend. The Sleeper
+    frames carry 1.0 multipliers too, so a pool that admitted them on the multiplier
+    alone would show it.
+    """
+    if platform == "Sleeper":
+        parlays = [_same_game_parlay(("SL A", "SL B"), (1.0, 1.0), platform)]
+        offers = [
+            _offer("SL X", "NYK/MIA", 1.0, platform),
+            _offer("SL Y", "DAL/PHX", 1.0, platform),
+        ]
+    else:
+        parlays = [
+            _same_game_parlay(("Even A", "Even B"), (1.0, 1.0), platform),
+            _same_game_parlay(("Even C", "Discount D"), (1.0, 0.87), platform),
+            _same_game_parlay(("Boost E", "Boost F"), (1.2, 1.2), platform),
+        ]
+        offers = [
+            _offer("Even X", "NYK/MIA", 1.0, platform),
+            _offer("Even Y", "DAL/PHX", 1.0, platform),
+            _offer("Weak Even V", "BKN/ORL", 1.0, platform, win_prob=0.55),
+            _offer("Boost Z", "GSW/SAC", 1.1, platform),
+            _offer("Discount W", "CHI/DET", 0.9, platform),
+        ]
+    return {"power": pd.DataFrame(parlays), "flex": pd.DataFrame()}, pd.DataFrame(offers)
+
+
+def _load_mixed_multiplier_frames(monkeypatch) -> dict:
+    """Fake the league load and ``live_load`` with the frames above, at full model trust so
+    every cross-game combo clears the shared EV floor. Returns the frames by platform."""
+    frames = {platform: _mixed_multiplier_frames(platform) for platform in ledger._PLATFORMS}
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
+    monkeypatch.setattr(ledger, "live_load", lambda config, platform, stats: frames[platform])
+    monkeypatch.setattr(
+        ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (1.0, "training")
+    )
+    return frames
+
+
+def test_even_picks_pool_is_underdogs_recommended_even_picks_across_games(monkeypatch) -> None:
+    """One entry: no all-even same-game parlay, no weakly read even pick, no moved
+    multiplier, nothing of Sleeper's."""
+    _load_mixed_multiplier_frames(monkeypatch)
+    # No cell is trusted at all: the pool prices the served read, so its entry stands.
+    monkeypatch.setattr(
+        ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (0.0, "training")
+    )
+
+    pools = ledger.build_candidate_universe(DATE, "morning")
+
+    (entry,) = pools["even_picks"]
+    assert entry.players == frozenset({"Even X", "Even Y"})
+    assert entry.game_span == 2
+    assert entry.platform == "Underdog"
+    assert entry.model_probs == (0.60, 0.60)
+
+
+def test_shared_universe_is_every_candidate_whatever_its_multipliers(monkeypatch) -> None:
+    """The even_picks pool is built beside the shared universe, never carved out of it:
+    the other personas see what the builders give on the full frames."""
+    frames = _load_mixed_multiplier_frames(monkeypatch)
+    full_frame_candidates = [
+        candidate
+        for platform in ledger._PLATFORMS
+        for candidate in ledger._platform_candidates(*frames[platform], DATE, "morning", platform)
+    ]
+
+    pools = ledger.build_candidate_universe(DATE, "morning")
+
+    assert pools["safe"] == full_frame_candidates
+    multipliers = {leg["boost"] for c in pools["safe"] for leg in c.canonical_legs}
+    assert {0.87, 0.9, 1.0, 1.1, 1.2} <= multipliers
+    assert "Sleeper" in {c.platform for c in pools["safe"]}
 
 
 # --- run_commit draws from one shared pool/budget per persona ------------------
@@ -161,6 +306,11 @@ def _force_full_draw(monkeypatch) -> None:
     monkeypatch.setattr(_ledger_selection, "DRAW_CONTINUE_PROB", 2.0)
 
 
+def _patch_universe(monkeypatch, universe: list[LedgerCandidate]) -> None:
+    pools = dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": []}
+    monkeypatch.setattr(ledger, "build_candidate_universe", lambda date, run_slot: pools)
+
+
 def _safe_persona_records(tmp_path) -> list[dict]:
     path = tmp_path / f"{DATE.isoformat()}.jsonl"
     records = ledger._ledger_store.read_records(DATE)
@@ -171,8 +321,7 @@ def _safe_persona_records(tmp_path) -> list[dict]:
 def test_run_commit_persona_budget_shared_across_platforms(monkeypatch, tmp_path) -> None:
     _redirect_store(monkeypatch, tmp_path)
     _force_full_draw(monkeypatch)
-    universe = _six_candidate_universe()
-    monkeypatch.setattr(ledger, "build_candidate_universe", lambda date, run_slot: universe)
+    _patch_universe(monkeypatch, _six_candidate_universe())
 
     ledger.run_commit(DATE, "morning")
 
@@ -193,7 +342,7 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
     _force_full_draw(monkeypatch)
     universe = _six_candidate_universe()
     id_to_platform = {c.id: c.platform for c in universe}
-    monkeypatch.setattr(ledger, "build_candidate_universe", lambda date, run_slot: universe)
+    _patch_universe(monkeypatch, universe)
 
     ledger.run_commit(DATE, "morning")
 
@@ -206,30 +355,43 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
 # --- live_load stamps Platform on the scraped offers ---------------------------
 
 
+def _live_load_offers(monkeypatch, platform: str, boost: float) -> pd.DataFrame:
+    """``live_load``'s offers frame with the scrape and the search stubbed.
+
+    ``boost`` is what ``process_offers`` hands back for the one offer.
+    """
+    monkeypatch.setattr("sportstradamus.books.get_ud", list)
+    monkeypatch.setattr("sportstradamus.books.get_sleeper", list)
+    monkeypatch.setattr(
+        "sportstradamus.prediction.scoring.process_offers",
+        lambda *a, **k: (pd.DataFrame([{"Player": "A", "Market": "PTS", "Boost": boost}]), None),
+    )
+    monkeypatch.setattr(underdog_pickem, "_parlays_per_variant", lambda *a: {})
+
+    _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, platform, {})
+    return offers_df
+
+
 def test_live_load_stamps_platform_on_offers(monkeypatch) -> None:
     """``live_load`` is the ledger's only offers source, and ``build_leg`` /
     Sleeper flex pricing read ``Platform`` — a column ``process_offers`` never
     stamps (prophecize adds it to its own copies in prediction/cli.py). The
     fake ``live_load``s elsewhere in the suite include the column in their
     fixtures, which is exactly how the missing stamp shipped unnoticed."""
-    from sportstradamus.strategies import underdog_pickem
-
-    class _StubStats:
-        season_start = None
-
-        def load(self) -> None:
-            pass
-
-    for name in ("StatsNBA", "StatsNFL", "StatsWNBA", "StatsMLB", "StatsNHL"):
-        monkeypatch.setattr(f"sportstradamus.stats.{name}", _StubStats)
-    monkeypatch.setattr(underdog_pickem.odds_budget, "league_is_live", lambda *a: False)
-    monkeypatch.setattr("sportstradamus.books.get_ud", list)
-    monkeypatch.setattr(
-        "sportstradamus.prediction.scoring.process_offers",
-        lambda *a, **k: (pd.DataFrame([{"Player": "A", "Market": "PTS"}]), None),
-    )
-    monkeypatch.setattr(underdog_pickem, "_parlays_per_variant", lambda *a: {})
-
-    _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, "Underdog")
+    offers_df = _live_load_offers(monkeypatch, "Underdog", boost=UNDERDOG_BOOST_BASELINE)
 
     assert (offers_df["Platform"] == "Underdog").all()
+
+
+def test_live_load_returns_the_raw_pick_multiplier(monkeypatch) -> None:
+    """``process_offers`` scales an Underdog ``Boost`` by the per-pick baseline and
+    leaves Sleeper's alone. The cross-game builder prices on this frame and the
+    committed record stores its legs, so both need the multiplier the platform
+    quotes: an even pick comes back as exactly 1.0."""
+    even_pick = _live_load_offers(monkeypatch, "Underdog", boost=UNDERDOG_BOOST_BASELINE)
+    discounted = _live_load_offers(monkeypatch, "Underdog", boost=0.87 * UNDERDOG_BOOST_BASELINE)
+    sleeper = _live_load_offers(monkeypatch, "Sleeper", boost=1.9)
+
+    assert even_pick["Boost"].tolist() == [1.0]
+    assert discounted["Boost"].tolist() == pytest.approx([0.87])
+    assert sleeper["Boost"].tolist() == [1.9]

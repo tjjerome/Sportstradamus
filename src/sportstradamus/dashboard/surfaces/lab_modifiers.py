@@ -21,7 +21,7 @@ import streamlit as st
 from sportstradamus import data
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.data import load_current_offers
-from sportstradamus.dashboard.legs import find_offer_idx
+from sportstradamus.dashboard.legs import find_offer_idx, leg_cell_market
 from sportstradamus.helpers.config import apply_modifier_overrides
 from sportstradamus.helpers.io import (
     read_modifier_overrides,
@@ -69,7 +69,10 @@ def _default_key(leg: dict, offers, platform: str) -> str:
     idx = find_offer_idx(leg, offers, platform)
     position = offers.at[idx, "Position"] if idx is not None else None
     prefix = _pos_prefix(leg["league"], position)
-    return f"{prefix}.{leg['market']}" if prefix else str(leg["market"])
+    # banned_combos keys a pair by the league's own market name, the one the scorer prices
+    # it under (NHL ``C.assists``).
+    market = leg_cell_market(leg)
+    return f"{prefix}.{market}" if prefix else market
 
 
 def _removal_hints(legs: list[Leg], labels: list[str], platform_mods: dict) -> list[str]:
@@ -194,7 +197,12 @@ known = math.prod(p.value for p in pairs if p.value is not None)
 expected = (rake if rake is not None else 1.0) * product * known
 
 for p in pairs:
-    shown = "UNKNOWN" if p.value is None else f"{p.value}"
+    if p.value is not None:
+        shown = f"{p.value}"
+    elif p.disk_key:
+        shown = "0.0 on record (solving)"
+    else:
+        shown = "UNKNOWN"
     st.caption(f"pair [{p.league}/{p.relation}/{_slot_name(p.slot)}] {p.display_key}: {shown}")
 rake_note = (
     f"rake[{len(legs_input)}]={rake}"

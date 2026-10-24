@@ -8,7 +8,6 @@ parquet lands at the ``{season}/{date}/`` path.
 from __future__ import annotations
 
 from functools import partial
-from pathlib import Path
 
 import pandas as pd
 import pytest

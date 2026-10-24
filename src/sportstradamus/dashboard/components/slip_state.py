@@ -2,7 +2,7 @@
 
 Plain (non-widget) ``st.session_state`` keys hold the active slip: its legs,
 platform, builder type, bankroll, and the id of the locked slip being edited.
-This module owns seeding (from a story, offer rows, or a locked slip), the
+This module owns seeding (from a story or a locked slip), the
 add/remove/clear primitives, and the **Lock it in!** persistence to
 ``user_slips.parquet``. The render layer lives in ``slip_builder``; the rail and
 surfaces drive these functions. Money is ``Decimal`` at the scoring boundary;
@@ -19,8 +19,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.legs import find_offer_idx
+from sportstradamus.dashboard.legs import find_offer_idx, leg_cell_market
 from sportstradamus.dashboard.slip_engine import SlipScore
+from sportstradamus.helpers import archive_market
 from sportstradamus.helpers.io import upsert_user_slip
 from sportstradamus.leg_schema import build_leg
 
@@ -68,13 +69,19 @@ def _legs_from_records(
     live offer row rather than trusting the stored snapshot, matching the
     seed/add-time snapshot semantics everywhere else in this module.
     """
+    # An absent offers snapshot loads as a frame with no ``League`` or ``Market`` column.
+    if offers.empty:
+        return []
+    # A leg is matched under the league's own market name (``leg_cell_market``) and the board
+    # names a market by its platform's map (NHL ``AST``), so the board's side folds too.
+    # A label its platform's map lacks reaches the board with no ``Market``: no leg matches it.
+    league_keyed = offers.assign(
+        Market=list(map(archive_market, offers["League"], offers["Market"].fillna("")))
+    )
     out: list[dict] = []
     for record in records:
-        # Story legs carry the display market name in ``market`` but the canonical code in
-        # ``stat``; find_offer_idx matches offers["Market"] (the code), so look up by the
-        # code. A dashboard-built leg already has market == stat, so this is a no-op there.
-        lookup = {**record, "market": record.get("stat") or record["market"]}
-        idx = find_offer_idx(lookup, offers, platform)
+        market = leg_cell_market(record)
+        idx = find_offer_idx({**record, "market": market}, league_keyed, platform)
         if idx is not None:
             out.append(build_leg(offers.loc[idx]))
     return out
@@ -90,17 +97,6 @@ def seed_from_story(story_legs: Sequence[Mapping], platform: str, offers: pd.Dat
     st.session_state[_LEGS] = _legs_from_records(story_legs, platform, offers)
     st.session_state[_PLATFORM] = platform
     st.session_state[_BUILDER] = "constellation"
-    st.session_state[_EDIT_ID] = None
-
-
-def seed_from_legs(rows: Sequence[Mapping], platform: str, builder: str) -> None:
-    """Seed a builder from selected offer rows (Game → constellation, Board → simple).
-
-    A slip is single-platform; rows off ``platform`` are dropped.
-    """
-    st.session_state[_LEGS] = [build_leg(r) for r in rows if r["Platform"] == platform]
-    st.session_state[_PLATFORM] = platform
-    st.session_state[_BUILDER] = builder
     st.session_state[_EDIT_ID] = None
 
 

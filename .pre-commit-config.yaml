@@ -1,5 +1,5 @@
 # Pre-commit hooks for Sportstradamus.
-# See docs/STYLE_GUIDE.md §14 for rationale.
+# See docs/STYLE_GUIDE.md §19 for rationale.
 #
 # Setup: `poetry install && poetry run pre-commit install`
 # Run on the whole tree: `poetry run pre-commit run --all-files`
@@ -24,7 +24,7 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.1
+    rev: v2.3.1
     hooks:
       - id: mypy
         # Advisory only — see pyproject.toml [tool.mypy].
@@ -53,7 +53,7 @@ repos:
       # runs only.
       - id: integration-smoke
         name: integration smoke (no APIs)
-        entry: env -u SPORTSTRADAMUS_INTEGRATION_REAL_APIS poetry run pytest tests/integration/ -m integration -q
+        entry: env -u SPORTSTRADAMUS_INTEGRATION_REAL_APIS poetry run pytest tests/integration/ -m integration -n0 -q
         language: system
         pass_filenames: false
         stages: [pre-commit]

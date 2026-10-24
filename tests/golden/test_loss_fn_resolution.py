@@ -43,23 +43,22 @@ def test_data_driven_dist_by_mean_then_zero_rate():
 
 
 def test_resolve_dist_falls_back_to_data_when_unset_or_auto():
-    assert _resolve_dist(None, "ZINB", 0.7, 0.57, "NHL", "blocked") == "ZINB"
-    assert _resolve_dist("auto", "SkewNormal", 5.0, 0.0, "NBA", "PTS") == "SkewNormal"
+    assert _resolve_dist(None, "ZINB", "NHL", "blocked") == "ZINB"
+    assert _resolve_dist("auto", "SkewNormal", "NBA", "PTS") == "SkewNormal"
 
 
-def test_resolve_dist_configured_is_authoritative_and_warns_only_on_disagreement(caplog):
+def test_resolve_dist_configured_is_authoritative_and_silent(caplog):
+    """A configured family that disagrees with the heuristic is the sweep's validated pick —
+    it trains without a warning (DPO/Mixture cells would otherwise warn every weekly run)."""
     with caplog.at_level(logging.WARNING):
-        assert _resolve_dist("ZINB", "ZINB", 0.7, 0.57, "NHL", "blocked") == "ZINB"
-    assert not caplog.records  # agreement: forced == data-driven, silent
-
-    with caplog.at_level(logging.WARNING):
-        assert _resolve_dist("SkewNormal", "ZINB", 0.7, 0.57, "NHL", "blocked") == "SkewNormal"
-    assert any("forced dist=SkewNormal" in r.getMessage() for r in caplog.records)  # trains + warns
+        assert _resolve_dist("SkewNormal", "ZINB", "NHL", "blocked") == "SkewNormal"
+        assert _resolve_dist("DPO", "ZINB", "MLB", "runs") == "DPO"
+    assert not caplog.records
 
 
 def test_resolve_dist_unknown_family_raises():
     with pytest.raises(ValueError, match="not a forceable family"):
-        _resolve_dist("Gamma", "ZINB", 0.7, 0.57, "NHL", "blocked")
+        _resolve_dist("Gamma", "ZINB", "NHL", "blocked")
 
 
 def _select_configured(dist_override: str, stat_meta_dist: str | None) -> str | None:
@@ -72,22 +71,22 @@ def _select_configured(dist_override: str, stat_meta_dist: str | None) -> str | 
 
 
 def test_dist_override_forces_family_over_stat_meta_pin():
-    # --dist NegBin on a cell pinned ZINB in stat_meta trains NegBin (emits the disagree warning).
+    # --dist NegBin on a cell pinned ZINB in stat_meta trains NegBin.
     configured = _select_configured("NegBin", "ZINB")
-    assert _resolve_dist(configured, "ZINB", 0.7, 0.57, "WNBA", "TOV") == "NegBin"
+    assert _resolve_dist(configured, "ZINB", "WNBA", "TOV") == "NegBin"
 
 
 def test_dist_override_auto_defers_to_stat_meta_then_data():
     # auto → cell config stands; an unset cell then falls through to the data-driven dist.
     assert _select_configured(LOSS_AUTO, "ZINB") == "ZINB"
     configured = _select_configured(LOSS_AUTO, None)
-    assert _resolve_dist(configured, "SkewNormal", 5.0, 0.0, "NBA", "PTS") == "SkewNormal"
+    assert _resolve_dist(configured, "SkewNormal", "NBA", "PTS") == "SkewNormal"
 
 
 def test_dist_override_invalid_family_fails_loud():
     configured = _select_configured("Gamma", "ZINB")
     with pytest.raises(ValueError, match="not a forceable family"):
-        _resolve_dist(configured, "ZINB", 0.7, 0.57, "WNBA", "TOV")
+        _resolve_dist(configured, "ZINB", "WNBA", "TOV")
 
 
 def test_deterministic_dump_suffix_keys_on_trained_arch_not_raw_zinb_mode():

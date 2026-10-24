@@ -12,15 +12,20 @@ from sportstradamus.helpers import config
 from sportstradamus.helpers.distributions import get_odds
 from sportstradamus.helpers.training_quotes import (
     AUTHENTIC,
+    COMBO_SUM_SOURCE,
     DERIVED,
     SYNTHETIC,
     ArchivedBookQuote,
+    TrainingQuote,
     archive_ev_is_runaway,
     resolve_training_quote,
 )
 from sportstradamus.scripts.inject_backfilled_odds import resolve_cached_quotes
 from sportstradamus.stats import base as base_mod
 from sportstradamus.training.data import _clip_lines
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_affine import (
+    _affine_authenticity_mask,
+)
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _explicit_quote_authenticity_mask,
 )
@@ -64,6 +69,85 @@ def test_direct_probability_uses_one_deterministic_same_line_cohort():
     assert quote.observed_at == _AT_2
     assert quote.book_count == 2
     assert quote.archived and not quote.odds_synthetic
+
+
+def test_direct_cohort_prices_off_its_sportsbooks_when_a_platform_shares_the_line():
+    """A pick'em platform beside a real book contributes neither price nor provenance.
+
+    Its implied probability is anchored near 0.5 however far the truth sits from
+    there — on MLB stolen bases the platforms archive 100% at under 0.50 where the
+    sportsbooks on the same cohort quote 0.86 and the market settles under 0.90.
+    """
+    quote = resolve_training_quote(
+        [_row("Underdog", None, 0.50, 0.5), _row("fanduel", None, 0.88, 0.5)],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.source == "book_direct"
+    assert quote.over_probability == pytest.approx(0.12)
+    assert quote.books == ("fanduel",)
+    assert quote.book_count == 1
+
+
+def test_direct_cohort_keeps_a_platform_no_sportsbook_quoted():
+    quote = resolve_training_quote(
+        [_row("Underdog", None, 0.50, 0.5), _row("Sleeper", None, 0.60, 0.5)],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.over_probability == pytest.approx(0.45)
+    assert quote.books == ("Sleeper", "Underdog")
+
+
+def test_dfs_lines_cannot_outvote_a_sportsbook_on_the_quote_line():
+    """Two platforms agreeing on their own line do not turn a priced entry into a pick'em quote."""
+    quote = resolve_training_quote(
+        [
+            _row("fanduel", None, 0.60, 1.5),
+            _row("Sleeper", None, 0.50, 2.5),
+            _row("Underdog", None, 0.50, 2.5),
+        ],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.line == 1.5
+    assert quote.over_probability == pytest.approx(0.40)
+    assert quote.authenticity == AUTHENTIC
+    assert quote.books == ("fanduel",)
+
+
+def test_dfs_lines_cannot_move_the_quote_to_a_sportsbook_minority_line():
+    """The modal line is the sportsbooks' own, however many platforms sit on another."""
+    quote = resolve_training_quote(
+        [
+            _row("betmgm", None, 0.48, 21.5),
+            _row("draftkings", None, 0.52, 20.5),
+            _row("fanduel", None, 0.56, 20.5),
+            _row("Sleeper", None, 0.50, 21.5),
+            _row("Underdog", None, 0.50, 21.5),
+        ],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+    )
+
+    assert quote.line == 20.5
+    assert quote.over_probability == pytest.approx(0.46)
+    assert quote.books == ("draftkings", "fanduel")
 
 
 def test_legacy_ev_inversion_is_explicitly_derived_and_synthetic():
@@ -195,6 +279,81 @@ def test_no_book_quote_is_model_fallback_with_honest_null_observation():
     assert quote.book_count == 0
 
 
+def _combo_sum_quote():
+    return TrainingQuote(
+        line=3.5,
+        over_probability=0.62,
+        ev=3.9,
+        source=COMBO_SUM_SOURCE,
+        authenticity=DERIVED,
+        synthetic_reason="combo_sum",
+        observed_at=_AT_1,
+        book_count=2,
+        books=("fanduel", "draftkings"),
+        sum_sd=1.7,
+        under_prob_at=lambda line: 0.38,
+    )
+
+
+def test_fallback_quote_outranks_legacy_combo_ev_inversion():
+    """The caller-built combo_sum quote returns verbatim, beating a usable fallback_ev."""
+    combo = _combo_sum_quote()
+    quote = resolve_training_quote(
+        [],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=3.0,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=combo,
+    )
+
+    assert quote is combo
+
+
+def test_direct_and_ev_inversion_rungs_outrank_fallback_quote():
+    direct = resolve_training_quote(
+        [_row("b", None, 0.55, 2.5)],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=_combo_sum_quote(),
+    )
+    derived = resolve_training_quote(
+        [_row("b", 3.0, None, None)],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=_combo_sum_quote(),
+    )
+
+    assert direct.source == "book_direct"
+    assert direct.authenticity == AUTHENTIC
+    assert derived.source == "book_ev_inversion"
+
+
+def test_as_record_excludes_combo_sum_extras():
+    """``sum_sd``/``under_prob_at`` never serialize; records keep the exact legacy columns."""
+    record = _combo_sum_quote().as_record()
+
+    assert list(record) == [
+        "Line",
+        "Odds",
+        "EV",
+        "Archived",
+        "Odds_synthetic",
+        "QuoteSource",
+        "QuoteAuthenticity",
+        "QuoteSyntheticReason",
+        "QuoteObservedAt",
+        "QuoteBookCount",
+    ]
+
+
 class _FakeArchive:
     def __init__(self, rows, line):
         self.rows = rows
@@ -203,9 +362,6 @@ class _FakeArchive:
     def get_training_book_quotes(self, *args, **kwargs):
         return self.rows
 
-    def get_line(self, *args, **kwargs):
-        return self.line
-
     def get_training_quote_inputs(self, _league, _market, _date, entities, **kwargs):
         return dict.fromkeys(entities, (self.rows, self.line))
 
@@ -213,9 +369,15 @@ class _FakeArchive:
 class _Stub:
     league = "WNBA"
     resolve_player_market_odds = base_mod.Stats.resolve_player_market_odds
+    # Bound rather than stubbed: pass 2 consults the combo kernel, and a hand-rolled
+    # stand-in would stop tracking it. On a non-combo market it returns no quotes.
+    combo_quote = base_mod.Stats.combo_quote
+    _fantasy_combo_spec = base_mod.Stats._fantasy_combo_spec
 
     def check_combo_markets(self, *args, **kwargs):
         return np.nan
+
+    depth_quoted_markets = frozenset()
 
     def window_short_logs(self, date):
         """The repair windows the logs per gameday; the stub has none to window."""
@@ -246,6 +408,34 @@ def test_repair_and_scratch_append_emit_identical_book_fields(monkeypatch, rows,
     repair = resolve_cached_quotes(_Stub(), "AST", cached).iloc[0]
 
     assert append_fields.to_dict() == repair.to_dict()
+
+
+@pytest.mark.parametrize("depth_quoted", [frozenset({"AST"}), frozenset()])
+def test_repair_runs_get_depth_only_for_depth_quoted_markets(monkeypatch, depth_quoted):
+    """A market whose combo spec reads the position ``get_depth`` writes (NFL fantasy)
+    pays one ``get_depth`` per gameday in the repair; every other market skips it."""
+    monkeypatch.setattr(base_mod, "archive", _FakeArchive([], 0.0))
+    calls = []
+
+    class _DepthStub(_Stub):
+        depth_quoted_markets = depth_quoted
+
+        def get_depth(self, offers, date):
+            calls.append((sorted(offers), date))
+
+    cached = pd.DataFrame(
+        {
+            "Player": ["P", "Q", "P"],
+            "Date": ["2026-05-08", "2026-05-08", "2026-05-09"],
+            "Avg10": [2.0, 3.0, 2.5],
+            "Line": [2.0, 3.0, 2.5],
+            "EV": [2.0, 3.0, 2.5],
+        }
+    )
+    resolve_cached_quotes(_DepthStub(), "AST", cached)
+
+    expected = [(["P", "Q"], datetime.date(2026, 5, 8)), (["P"], datetime.date(2026, 5, 9))]
+    assert calls == (expected if depth_quoted else [])
 
 
 def test_pipeline_ev_inversion_remains_explicitly_synthetic():
@@ -344,7 +534,9 @@ def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path
     matrix[_PRETRIM_LINE_COLUMN] = matrix["Line"]
     archived = matrix["Archived"]
 
-    clipped = _clip_lines(matrix, archived, int(archived.sum()))
+    clipped = _clip_lines(
+        matrix, archived, int(archived.sum()), pd.Series(True, index=matrix.index)
+    )
     assert clipped.loc[rows, "Line"] == 8.5
     assert clipped.loc[rows + 1, "Line"] == 6.5
     assert clipped.loc[rows + 2, "Line"] == 5.0
@@ -363,7 +555,10 @@ def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path
 
 
 def test_structural_pool_mask_uses_only_explicit_authenticity():
-    index = pd.Index([10, 11, 12])
-    values = pd.Series(["authentic", "derived", "synthetic"], index=index)
+    index = pd.Index([10, 11, 12, 13])
+    values = pd.Series(["authentic", "pickem", "derived", "synthetic"], index=index)
+    expected = [True, False, False, False]
 
-    assert _explicit_quote_authenticity_mask(values, index).tolist() == [True, False, False]
+    assert _explicit_quote_authenticity_mask(values, index).tolist() == expected
+    splits = {"quote_authenticity_validation": values}
+    assert _affine_authenticity_mask(splits, "validation", index).tolist() == expected

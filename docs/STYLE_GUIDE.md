@@ -206,13 +206,12 @@ calibration, EV blending, distribution fusion), also document:
   shape ceilings).
 
 ```python
-def fused_loc(model_loc, book_loc, model_weight, dist):
+def blend_loc(model_loc, book_loc, model_weight, dist):
     """Fuse a model-predicted location with a bookmaker-implied location.
 
     Uses a logarithmic opinion pool for count distributions (NegBin) and a
     precision-weighted blend for continuous distributions (Gamma, SkewNormal).
-    See the ML Pipeline notes in CLAUDE.md and `helpers/distributions.py` for
-    the mathematical justification.
+    See `helpers/distributions.py` for the mathematical justification.
 
     Args:
         model_loc: Location parameter predicted by the LightGBMLSS model.
@@ -285,8 +284,7 @@ fastest way to make a file tiring to read. The bar is high.
 module-level constant with a one-line comment naming the decision:
 
 ```python
-# Confidence cutoff from CLAUDE.md "Performance Table" — below this,
-# filter picks as too uncertain to publish.
+# Confidence cutoff — below this, filter picks as too uncertain to publish.
 MIN_CONFIDENCE: float = 0.54
 ```
 
@@ -401,10 +399,10 @@ error that fails quietly.
   is done:**
   - `poetry run ruff check src/sportstradamus/`
   - `poetry run pytest tests/golden/`
-  - `poetry run pytest -m integration` (fake-mode, no network)
+  - `poetry run pytest -m integration -n0` (fake-mode, no network)
 - Add characterization tests for current behavior before deep structural edits,
-  especially around the training pipeline, the Archive schema, and Sheets
-  export.
+  especially around the training pipeline, the Archive schema, and the
+  dashboard snapshot schemas.
 - Keep every existing test passing. A flaky test is a real test until proven
   otherwise.
 - Add a test for any new helper that affects an output, contract, or schema.
@@ -422,8 +420,8 @@ The order matters. Skipping a step is how you ship a "behavior-preserving"
 refactor that quietly changes a metric.
 
 1. **Capture baseline behavior.** Run the full suite and record the outputs you
-   intend to keep stable (training-report numbers, golden snapshots, Sheets
-   payload, archive rows).
+   intend to keep stable (training-report numbers, golden snapshots, dashboard
+   snapshot columns, archive rows).
 2. **Add or extend tests** around the weakly covered behavior at the seam.
 3. **Refactor one seam at a time.** One module per session; multi-module work
    goes to one subagent per module per CLAUDE.md.
@@ -433,7 +431,7 @@ refactor that quietly changes a metric.
    or moving a symbol means fixing every caller now and deleting the old path
    now (§18.2) — not leaving a re-export bridge behind.
 6. **Review for contract drift before committing:** signatures, key names,
-   schemas, output formats, file paths, Sheet column order.
+   schemas, output formats, file paths, snapshot column order.
 
 ---
 
@@ -492,28 +490,33 @@ A paragraph each for the terms that appear everywhere. Skim this before
 grepping the codebase for meaning.
 
 - **Offer.** A single row from a sportsbook: player, market, line, odds.
-  Produced by `books.py` scrapers and `moneylines.get_props`.
+  Produced by the `books/` scrapers and `moneylines.get_props`.
 - **Market.** A betting category for a player's performance in one game
   (e.g. "NBA: points", "NFL: receiving yards"). Each trained model corresponds
   to one market.
 - **Line.** The numeric threshold the bookmaker sets for a market. Bettors bet
   over or under it.
-- **Book (sportsbook).** A source of odds: DraftKings, FanDuel, Pinnacle,
-  Caesars, PrizePicks, Underdog, Sleeper, ParlayPlay. Per-book reliability
-  weights live in `book_weights.json`.
+- **Book (sportsbook).** A source of market odds: DraftKings, FanDuel, Pinnacle,
+  Caesars. Per-book reliability weights live in `book_weights.json`. Only
+  sportsbooks set the consensus line and the book leg of the blend.
+- **DFS platform.** A pick'em app whose entries we grade: PrizePicks, Underdog,
+  Sleeper, ParlayPlay (the full list is `DFS_PLATFORM_BOOKS` in
+  `helpers/training_quotes.py`). A model is evaluated at the platform's line,
+  but that line is never part of the consensus line and never a book leg.
 - **Archive.** The `Archive` singleton in `helpers/archive.py` — a DuckDB store
-  at `archive/archive.duckdb` with `odds(league, market, game_date, entity,
-  book, ev)` and `lines(league, market, game_date, entity, line)` tables.
-  Writes buffer in memory and flush on `Archive().write()`. Read methods:
-  `get_ev`, `get_line`, `get_moneyline`, `get_total`, `to_pandas`.
+  at `archive/archive.duckdb` with `odds`, `lines` and `ladder` tables.
+  Writes buffer in memory and flush on `Archive().write()`. The `archive.py`
+  row of [ARCHITECTURE.md](ARCHITECTURE.md) lists the `odds` columns, the
+  read and write methods, and what the two line reads return.
 - **Stats.** The `Stats` abstract base class in `stats/base.py` and its league
   subclasses — `StatsNBA` (`stats/nba.py`), `StatsWNBA` (`stats/wnba.py`,
   inherits `StatsNBA`), `StatsMLB` (`stats/mlb.py`), `StatsNFL`
   (`stats/nfl.py`), `StatsNHL` (`stats/nhl.py`). Responsible for loading league
   game logs, computing player features, and producing training matrices.
 - **Gamelog.** A per-league DataFrame of every game a player has played, keyed
-  by `(season, game_id, player_id)`. Feature engineering rolls over windows of
-  the gamelog.
+  by the league's game id and player name (`log_strings["game"]`,
+  `log_strings["player"]`). Feature engineering rolls over windows of the
+  gamelog.
 - **LightGBMLSS.** The distributional-regression wrapper around LightGBM.
   Predicts a full probability distribution over the outcome, not a point
   estimate. The distribution family per cell is set in
@@ -521,25 +524,26 @@ grepping the codebase for meaning.
 - **Comp features.** "Player comparables": a feature set built by finding the
   k nearest neighbors in a z-scored profile space and aggregating their
   historical outcomes. Weights are optimized in
-  `scripts/optimize_comp_weights.py`.
+  `src/sportstradamus/scripts/optimize_comp_weights.py`.
 - **fused_loc.** The helper in `helpers/distributions.py` that blends the
   model's predicted location with the bookmaker-implied location using a
-  distribution-specific rule. See the ML Pipeline notes in CLAUDE.md for the
-  math.
+  distribution-specific rule. Its docstring carries the math.
 - **Model stats.** The per-cell training diagnostics in
   `data/training/model_stats.parquet` (with a `.csv` mirror), written by
   `training/report.py:report()` as one wide row per `(league, market)` cell.
   This is the behavioral regression check for training and the single source of
   truth for diagnostics; the per-column schema is documented in CLAUDE.md.
-- **Meditate / Prophecize / Confer / Reflect / Dashboard.** The five CLI entry
-  points wired in `pyproject.toml`:
+- **Meditate / Prophecize / Confer / Reflect / Dashboard.** Five subcommands of
+  the `sportstradamus` console script, mapped in `cli.py`:
   - `meditate` trains models — the `training/` package, entry `training/cli.py`,
     per-market work in `training/pipeline.py:train_market`.
   - `prophecize` scores offers and writes dashboard snapshots — the `prediction/`
     package, entry `prediction/cli.py`, scoring in `prediction/model_prob.py`.
   - `confer` fetches current odds — `moneylines.py`.
-  - `reflect` analyzes parlay performance — `nightly.py`.
-  - `dashboard` serves the Streamlit UI — `dashboard.py` / `dashboard_app.py`.
+  - `reflect` runs the nightly resolution (grades history, parlays and the
+    ledger; writes the live metrics) — `nightly.py`.
+  - `dashboard` serves the Streamlit UI — `dashboard/__init__.py:run` launches
+    `dashboard/app.py`.
 
 ---
 
@@ -553,7 +557,7 @@ code that correctly does what was asked, in the style of the code already here.
 **Posture and scope:**
 
 1. **Assume no behavior changes by default.** If your patch alters an output, a
-   key name, a Sheet column, or a metric value, that is a feature change —
+   key name, a snapshot column, or a metric value, that is a feature change —
    either it was requested or you stop and ask.
 2. **Preserve output keys, file schemas, and external contracts — not old
    import paths.** Renaming or moving a symbol means updating every call site
@@ -563,8 +567,8 @@ code that correctly does what was asked, in the style of the code already here.
    forbids. A package `__init__.py` that re-exports its own submodules is fine:
    that *defines* the package's public API, it is not a bridge to a path that no
    longer exists. What stays stable is behavior the outside world depends on —
-   training-report numbers, archive rows, Sheet column order, CLI flags — never
-   the internal layout.
+   training-report numbers, archive rows, snapshot column order, CLI flags —
+   never the internal layout.
 3. **Prefer small, reviewable patches, one module at a time.** Split
    multi-module work into independent per-module changes rather than one
    sprawling diff (CLAUDE.md is authoritative on the workflow).
@@ -649,10 +653,10 @@ rules bind everyone through the second layer — CI and local `pre-commit`:
 
 | Tool | Scope | Blocking? |
 |---|---|---|
-| `ruff check` | `src/sportstradamus/`, `tests/`, `scripts/` | yes |
+| `ruff check` | `src/`, `tests/` (CI) + staged files (pre-commit) | yes |
 | `ruff format --check` | same | yes |
-| `pytest tests/golden/` | golden CLI snapshot tests | yes |
-| `pytest -m integration` | fake-mode end-to-end smoke | yes (pre-commit) |
+| `pytest` | every test outside the `integration` and `diagnostics` markers, golden included | yes (CI) |
+| `pytest -m integration` | fake-mode end-to-end smoke (`-n0` in CI) | yes (CI + pre-commit) |
 | `mypy` | `src/sportstradamus/` | advisory — warnings only |
 
 Configuration lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and

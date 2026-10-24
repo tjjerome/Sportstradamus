@@ -4,7 +4,8 @@ context-strip text helpers) and the page-change dialog reset.
 Render paths (``show_detail`` and the tab renderers in ``deep_dive_tabs``) call ``st.*``
 directly and are Streamlit-runtime — verified manually, per the dashboard-wide precedent
 (see ``test_satellite_picker.py``, ``test_constellation.py``); these pin the unit logic
-the shell depends on — the five-key join, the cross-page detail-stack reset, and the
+the shell depends on — the detail-row joins (the sidecar's five keys, the movement
+snapshot's Platform-split keys), the cross-page detail-stack reset, and the
 context-strip formatting. The tab-body unit logic lives in ``test_deep_dive_tabs.py``.
 """
 
@@ -23,6 +24,7 @@ from sportstradamus.dashboard.components.deep_dive import (
     _win_prob_text,
     drop_detail_on_page_change,
 )
+from sportstradamus.helpers.io import LINE_MOVEMENT_KEYS
 
 
 def test_stat_tooltips_config_well_formed():
@@ -97,6 +99,28 @@ def test_detail_row_five_key_join():
     )
     assert _detail_row(miss, details) is None
     assert _detail_row(row, pd.DataFrame()) is None
+
+
+def test_detail_row_movement_keys_split_platforms():
+    # Underdog and Sleeper post and move their own lines for the same prop, so the
+    # Movement tab's lookup keys on Platform: each offer gets its own app's history, and
+    # the Sleeper row sits second so a Platform-blind join would hand it Underdog's.
+    prop = {
+        "League": "NFL",
+        "Market": "rushing yards",
+        "Player": "B. Robinson",
+        "Date": "2026-09-13",
+    }
+    movement = pd.DataFrame(
+        [
+            {**prop, "Platform": "Underdog", "changes": "[underdog]"},
+            {**prop, "Platform": "Sleeper", "changes": "[sleeper]"},
+        ]
+    )
+    for platform, changes in (("Sleeper", "[sleeper]"), ("Underdog", "[underdog]")):
+        offer = pd.Series({**prop, "Platform": platform, "Opponent": "TB"})
+        hit = _detail_row(offer, movement, LINE_MOVEMENT_KEYS)
+        assert hit is not None and hit["changes"] == changes
 
 
 def test_edge_badge_sign_color():

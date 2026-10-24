@@ -1,6 +1,6 @@
 # Simulated-Bettor Ledger
 
-> Status: ACTIVE (stage 1 + stage 2 built locally, unpushed — owner review next)
+> Status: ACTIVE (stages 1–2 live from cron on `devel` — stage 3 next)
 
 ## 1. Mission & money logic
 
@@ -18,7 +18,7 @@ the evidence gate D7 (real-stake scaling) reads. Every week not logging is
 evidence permanently lost — the lane's value accrues with calendar time.
 
 The existing [`strategies/profit_sim.py`](../../src/sportstradamus/strategies/profit_sim.py)
-+ [`pages/6_Stats_Profit_Sim.py`](../../src/sportstradamus/pages/6_Stats_Profit_Sim.py)
++ the Receipts strategy simulator ([`dashboard/components/profit_sim.py`](../../src/sportstradamus/dashboard/components/profit_sim.py))
 are **retrospective** Monte Carlo over resolved history — strategy exploration
 with hindsight and selection effects. This ledger is the forward sibling, not a
 replacement: `profit_sim.py` is load-bearing for the S3 supersede gate
@@ -32,8 +32,9 @@ replacement: `profit_sim.py` is load-bearing for the S3 supersede gate
 2. [`strategies/kelly.py`](../../src/sportstradamus/strategies/kelly.py) —
    sizing the policy reuses (`fractional_kelly_stake`, shrinkage blend).
 3. [`clv.py`](../../src/sportstradamus/clv.py) +
-   [`nightly.py`](../../src/sportstradamus/nightly.py) `reflect` — the
-   settlement + CLV machinery stage 2 extends.
+   [`nightly.py`](../../src/sportstradamus/nightly.py) `run` (the `reflect`
+   command) — the settlement + CLV machinery stage 2 extended
+   (`_resolve_ledger`).
 4. [`strategies/profit_sim.py`](../../src/sportstradamus/strategies/profit_sim.py)
    — read-only; the retrospective sibling whose presets inform the policy.
 5. CLAUDE.md §Production deployment — `run_job.sh` semantics (flock,
@@ -47,24 +48,24 @@ If command output contradicts brief prose, the output wins — fix in place
 
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-ls data/recommendations/ 2>/dev/null | tail -3   # pickem-build output present?
+ls data/recommendations/ 2>/dev/null | tail -3   # `bet pickem` output present?
 ls data/ledger/ 2>/dev/null                       # prior-stage artifacts
-grep -n "pickem" scripts/run_job.sh               # cron wiring state
-poetry run sportstradamus bet pickem --help                    # CLI alive
+grep -n "ledger-commit" scripts/run_job.sh        # cron wiring state
+sportstradamus bet pickem --help                    # CLI alive
 ```
 
-Known at creation: `pickem-build` is **not** in the production crontab
-(CLAUDE.md §Production deployment lists prophecize/confer/meditate/reflect/
-close-lines/gate-status/fp-fetch only) — stage 1 adds the daily decision-time
-job; cron edits are owner-approved.
+The decision-time job is `ledger-commit` (`sportstradamus bet ledger-commit
+--run-slot {morning,afternoon}`), twice daily on the canonical schedule in
+[OPERATIONS.md](../OPERATIONS.md); `sportstradamus bet pickem` is not on that
+schedule. Cron edits are owner-approved.
 
 ### Volatile product assumptions
 
 - Underdog payout multipliers + push/void rules
   (`data/config/underdog_payouts.json`) — re-verify against the live product
   each season; settlement math inherits them.
-- Sleeper payout/push rules: `sleeper-parity` stage 4 landed 2026-07-14 (local
-  `feature/sleeper-parity`, not yet merged `devel`) — `build_candidate_universe`
+- Sleeper payout/push rules: `sleeper-parity` stage 4 landed 2026-07-14
+  (merged to `devel`, PR #85 `b9f8a95e`) — `build_candidate_universe`
   now pulls both platforms into one shared candidate pool/budget per persona;
   see `sleeper-parity.md` §10 stage-4 line for the merge-design rationale and
   two push-refund pricing bugs it fixed along the way.
@@ -85,46 +86,47 @@ job; cron edits are owner-approved.
 ## 5. Module footprint & canonical paths
 
 New `sportstradamus.strategies` module (e.g. `strategies/ledger.py`) +
-`sportstradamus.nightly` (settlement extension) + one new `pages/` view +
-`scripts/run_job.sh` job entry (owner-approved) + `tests/golden/`. Reads
-`sportstradamus.strategies.kelly` and `clv`; the dashboard page reads parquet
-snapshots only — never DuckDB (CLAUDE.md §Hard rules;
-`tests/golden/test_dashboard_no_archive_lock.py`).
+`sportstradamus.nightly` (settlement extension) + one new dashboard surface
+(`dashboard/surfaces/`) + `scripts/run_job.sh` job entry (owner-approved) +
+`tests/golden/`. Reads `sportstradamus.strategies.kelly` and `clv`; the
+dashboard surface reads parquet snapshots only — never DuckDB (CLAUDE.md
+§Hard rules; `tests/golden/test_dashboard_no_archive_lock.py`).
 
 ## 6. Stage plan
 
 0. **Policy spec v1 → D6.** Draft the reasonable-bettor policy for owner
    sign-off: max entries/day, EV floor, allowed entry sizes/variants,
    quarter-Kelly sizing via `fractional_kelly_stake` with its shrinkage blend,
-   fixed paper bankroll, one decision snapshot per day (at the daily
-   `pickem-build` run). Acceptance: owner flips D6. 1 session.
+   fixed paper bankroll, decision cadence (policy v1 settled it at two runs
+   a day, §10 Cadence). Acceptance: owner flips D6. 1 session.
    *If it stalls:* park lane `BLOCKED (on: D6)`.
 1. **Commit path.** `policy_v1` selects from the day's recommendations and
    appends to `data/ledger/entries/{date}.jsonl`: legs, lines, model probs,
    book devig, stake, policy version, git SHA, `committed_at`. Idempotent
-   (re-runs don't duplicate); wired as a daily job through `run_job.sh`
-   (owner approves crontab line). Acceptance: two consecutive live days
-   produce entries; re-run produces no dupes. 2 sessions.
+   (re-runs don't duplicate); wired as the twice-daily `ledger-commit` job
+   through `run_job.sh` (owner approves crontab lines). Acceptance: two
+   consecutive live days produce entries; re-run produces no dupes. 2 sessions.
    *If recommendations are empty on quiet days:* that's data, not failure —
    log the empty decision.
-2. **Settlement.** Extend `nightly.py:reflect`: resolve each ledger entry's
-   legs, apply push/void rules and the payout curve, join per-leg CLV via
-   `clv.fill_from_archive`, write `data/ledger/bankroll.parquet` (daily
-   series) + settled-entry parquet. Resolve the *union of distinct legs*
-   once per day and map outcomes onto every replicate entry that cites
-   them — never per entry (§10 Ensemble sizing; keeps settlement cost flat
-   across the 40-replicate ensemble). Acceptance: hand-checked settlement
-   of a known day matches; CLV populated for ≥ 90% of settled legs.
-   2 sessions.
-3. **Analytics + dashboard.** New page (parquet only): bankroll curve, ROI,
-   CLV per segment, drawdown; circuit-breaker state written to a small file
-   the daily job reads — drawdown > 20% from peak ⇒ policy halves stakes,
-   > 30% ⇒ halt new entries until owner reset (reads **replicate 0's**
-   lived drawdown, never the ensemble mean — §10 Ensemble sizing). Reports
-   each persona's ensemble-mean ROI/CLV/bankroll plus an IQR/±1 SE spread
-   band, labeled as selection-policy spread, not outcome uncertainty; a
-   one-time knee-check (ensemble-mean ROI vs `M` at `M ∈ {10,20,40,80,160}`,
-   after ~2 weeks live) validates or revises `LEDGER_REPLICATES = 40`.
+2. **Settlement.** Extend `nightly.py` `run` (the `reflect` command): resolve
+   each ledger entry's legs, apply push/void rules and the payout curve, join
+   per-leg CLV via `clv.fill_from_archive`, write
+   `data/ledger/bankroll.parquet` (daily series) + settled-entry parquet.
+   Resolve the *union of distinct legs* once per day and map outcomes onto
+   every replicate entry that cites them — never per entry (§10 Ensemble
+   sizing; keeps settlement cost flat across the 40-replicate ensemble).
+   Acceptance: hand-checked settlement of a known day matches; CLV populated
+   for ≥ 90% of settled legs. 2 sessions.
+3. **Analytics + dashboard.** New dashboard surface (parquet only): bankroll
+   curve, ROI, CLV per segment, drawdown; circuit-breaker state written to a
+   small file the `ledger-commit` job reads — drawdown > 20% from peak ⇒
+   policy halves stakes, > 30% ⇒ halt new entries until owner reset (reads
+   **replicate 0's** lived drawdown, never the ensemble mean — §10 Ensemble
+   sizing). Reports each persona's ensemble-mean ROI/CLV/bankroll plus an
+   IQR/±1 SE spread band, labeled as selection-policy spread, not outcome
+   uncertainty; a one-time knee-check (ensemble-mean ROI vs `M` at
+   `M ∈ {10,20,40,80,160}`, after ~2 weeks live) validates or revises
+   `LEDGER_REPLICATES = 40`.
    Acceptance: breaker state flips on a synthetic drawdown fixture.
    1–2 sessions.
 4. **Hindsight-proofing tests.** Golden tests: `committed_at` strictly before
@@ -144,8 +146,9 @@ loosen only via `policy_v2` with owner sign-off, never silently.
 - Owner is open to improvements on the Monte Carlo methodology — propose in a
   ledger note or dispatch `research-analyst` (Opus) for breaker-threshold /
   policy-design literature; don't improvise silent changes.
-- Timestamps UTC; one decision snapshot per day — intraday re-runs replace
-  nothing, they no-op (idempotency).
+- Timestamps UTC; two decision runs per day (morning and afternoon slots, §10
+  Cadence) — a re-run of a slot replaces nothing and adds nothing
+  (idempotency, §10 Policy v4 Retry).
 
 ## 8. Escalation & stop conditions
 
@@ -172,7 +175,9 @@ the five CLAUDE.md triggers.
 - Never push `devel` directly — the curator carves ship PRs.
 - Durable non-obvious lesson? Offer a memory capture.
 
-## 10. Policy v1
+## 10. Policy
+
+### Policy v1
 
 Three independent simulated-bettor personas, each run as a **40-replicate
 Monte Carlo ensemble** (§ Ensemble sizing) against its own fixed $5,000
@@ -193,15 +198,14 @@ capital path (§ Ensemble sizing); replicates 1–39 are notional, for
 variance measurement only.
 
 **Candidate universe (shared).** Power (2–3 legs) + Flex (4+ legs) only —
-Rivals excluded (unpriced leg type, not a contest — `dfs-products.md` Stage
-1 still owes it a `P(A−B>k)` difference-pricer); Ladders and Game Lines out
-of scope (unimplemented — `dfs-products.md` Stages 3/4). **Scar:** when
+Rivals retired (Underdog dropped the product 2026-09-10); Ladders and Game
+Lines out of scope (unimplemented — `dfs-products.md` Stages 3/4). **Scar:** when
 either ships, policy_v2 decides whether to admit it. `PickemConfig
 .entry_sizes = (2, 3, 4, 5, 6)` (widened from the live dashboard's `(3, 5)`
 default), `contest_variants = ("power", "flex")`, `min_ev = 0.05` (upstream
 default, unchanged), `top_k = 100` (raised from the live default of 20 so
 the size/variant partition — keep `power` + size∈{2,3}, keep `flex` +
-size≥4, drop everything else, including any rivals-tagged candidate — never
+size≥4, drop everything else — never
 truncates a valid candidate before it's evaluated; `underdog_payouts.json`
 currently defines a flex-3 tier this partition treats as not applicable to
 selection, flagged not fixed).
@@ -399,8 +403,257 @@ LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 
 # replicate 0 drives the circuit breaker + hindsight tests; 1-39 are the variance envelope only
 ```
 
+### Policy v2
+
+Policy v1 with the changes below; whatever v1 states and this section does
+not replace still holds. The commit path stamps every new record
+`policy_v2`.
+
+**Payouts.** Candidates are priced, and entries settled, on the platform's
+live payout table, and no Underdog same-game pair modifier exceeds 1.0
+([`underdog_api.md`](../underdog_api.md) §6.8 holds the table, the
+modifiers and the payout formula). A settled entry pays its table tier for
+the real outcome, times the pick multipliers the platform quotes that tier
+on, times the entry's pair modifier. One function,
+`prediction.payouts.outcome_payouts`, applies that rule to the pricers'
+sampled outcomes and to settlement's real one, so an entry is scored the
+way it was priced; its docstring carries the push and refund cases.
+Sleeper pays its own curve times the product of its posted multipliers.
+**Scar:** a Sleeper Flex entry settles on the stand-in table
+(`payout_curve_for("Sleeper", "flex")`), which has no loss tiers; the
+per-entry curve the search prices it on is not on the record.
+
+**Records.** Each `canonical_legs` entry's `boost` is the platform's raw
+multiplier for that pick, on the same-game and the cross-game path alike,
+and the record adds `pair_modifier`: the product of the entry's same-game
+pair modifiers as the search priced it, 1.0 for a cross-game entry.
+
+**Cross-game candidates.** Priced on each pick's raw multiplier, pick by
+pick rather than as one fused product, so their Flex loss tiers follow the
+settlement rule. v1 priced an Underdog pick on its multiplier scaled by
+the per-pick baseline, which overstated every cross-game Underdog EV. A
+side the platform does not post is never a leg. A cross-game candidate is
+sized, ranked and recorded as a same-game one: `payout_multiplier` is what
+the entry pays when every pick hits (table tier × pick multipliers) and
+`joint_prob` the win probability that payout makes worth the priced EV.
+v1 sized on the bare table tier and the all-hit probability, blind to the
+pick multipliers and the Flex loss tiers: every Sleeper cross-game entry
+and nearly every Flex one sized to $0, and a $0 stake ranks first for the
+EV-per-dollar personas.
+
+**Personas.** A fourth, *Even-picks* (`even_picks`), takes only Underdog
+entries whose every pick carries a raw multiplier of exactly 1.00 and
+ranks them as High-EV does. Its pool is built beside the shared universe,
+by the same builders under the same shared config, from Underdog's even
+picks alone: the all-even parlays of the same-game search, and cross-game
+combos over the even-pick offers. The shared universe filtered to even
+picks would hold only what the `top_k` cut and the cross-game beam keep
+after ranking those picks against every other leg. Building the pool
+leaves the shared universe as it is, and entry sizes, the Power/Flex
+split, the daily budget and same-game stake sizing are those of v1. Even-picks
+draws last on each replicate's shared stream, so for a given
+`(date, run_slot, replicate_id)` the first three personas draw exactly
+what they would without it. **Scar:** the pool is thin on many days all
+the same: the same-game search's EV floors and the shared `min_ev` bind
+on even picks before any cut does.
+
+**Versions stay apart.** `policy_v1` records stay in the store as
+committed and settle as they always have: on the bare tier of the live
+table, with no pick multiplier and no pair modifier. Settlement never
+reads a v1 record's `boost` (on a v1 cross-game Underdog leg it is the raw
+multiplier scaled by the per-pick baseline). Every settled row carries its
+`policy_version`, and `bankroll.parquet` keeps one trajectory per
+`(policy_version, persona, replicate_id)`, so a v2 replicate starts from
+the $5,000 seed instead of continuing a v1 balance. Stage-3 analytics
+report the versions apart, never pooled (§4).
+
+**Store scar (v1 to v3).** `_ledger_store.append_entries` refuses a
+record whose `id` is already in the day's file, whichever bettor wrote
+it. Replicate 0's morning draw is therefore whole, and every later draw
+(replicates 1–39, the afternoon run) keeps only the entries no bettor
+committed earlier that day: the store holds close to one replicate plus a
+de-duplicated union, not 40 independent ledgers. Keying the check on
+`(id, persona, replicate_id)` restores the ensemble: Policy v4, below.
+
+### Policy v3
+
+Policy v2 with the Even-picks bettor rebuilt and one key fixed; whatever
+v1 and v2 state and this section does not replace still holds. The commit
+path stamps every new record `policy_v3`. No `policy_v2` record exists:
+v2 committed nothing before it was replaced (2026-10-05).
+
+**Even-picks.** This replaces v2's paragraph on the bettor. It takes the
+Underdog even picks the product recommends for games on the slate date:
+a side whose raw multiplier is exactly 1.00 and whose edge at the
+per-pick payout clears the Receipts floor (`realized.recommended`: served
+`Win Prob` × 1.83 − 1 ≥ 0.05, a read of .574 or more). Its legs skip the
+shared leg gate and the trust haircut and are priced, sized and recorded
+at the served read, because the bettor exists to put the recommendation
+rule on paper as real entries (honest-receipts decision 12). Entries are
+dealt evenly: up to 200 at each size from 2 to 6, each a random set of
+the day's legs with a game per leg, so the table payout is exact and no
+leg carries the pool. The pool holds no same-game entry. Pricing on the
+pooled curve, the `min_ev` floor, quarter Kelly under the 0.5 % cap, the
+High-EV ranking and the daily budget of five entries are v2's cross-game
+path.
+
+**Why v2's pool was empty.** v2 built the pool behind the shared leg
+gate (`filter_legs`: read and book both above .5 and within .04 of each
+other). A recommended leg has the model well away from the book. On
+production's morning board of 2026-10-05, 25 of the 155 even picks were
+recommended and none of the 25 passed the gate; the 12 even picks that
+did pass priced a best entry of +0.8 % after the haircut, against the
++5 % floor. Replayed on that board, v3's pool holds 99 candidates (25
+two-pick, 38 three-pick, 28 four-pick, 8 five-pick) over the day's 8
+recommended even picks in 5 games: every entry those legs allow. A first
+cut that reused the shared beam (the 200 entries with the highest joint
+read at each size, legs of any game date) put one leg in 53 % of its
+candidates and would have re-entered a Sunday leg on every commit day of
+the week; hence the even deal and the game-day rule.
+
+**Scars.** Measured by running the commit path on two boards production
+saved on 2026-10-05 (99 and 735 candidates), into a scratch store. (1)
+The draw still ranks as High-EV does, so it leans inside the pool: the
+stronger half of the legs held 55 % and 59 % of the leg slots, and on
+the larger board the four-pick Flex took 45 % of the 104 records against
+27 % of the candidates, the six-pick one record against 15 %. In the five
+weeks before the bettor started the strongest reads hit no better than
+the rest (honest-receipts §7). (2) A slate needs recommended even
+picks in two games to give an entry and in six to give a six-pick, and a
+game that starts before the morning run (14:05 UTC) is missed. (3) The
+pool is scored at commit time, while Receipts grades the stored snapshot.
+For games before 2026-10-09 that was an earlier one for half of a
+game-day board, so the two recommended sets differ there (honest-receipts
+decision 15). (4) The store scar above cost more on a small pool: from
+the 99 candidates the store kept 58 records where forty independent
+copies hold 113 (Policy v4), and ten copies held none.
+
+**Cross-game leg keys.** A cross-game leg's `stat`, and the shared
+path's trust lookup, use the league's own market key
+(`helpers.cell_market`). An NHL Assists leg carries `assists`, the
+gamelog's column; v1 and v2 wrote `AST`, which the gamelog lacks and
+settlement would have read as a push. NHL Points moves the same way
+(`PTS` to `points`), and NBA and WNBA Underdog fantasy points move to
+the model cell's key, a column that holds the same number. No stored
+record holds an NHL leg.
+
+**The three shared bettors are unchanged but for that key, and
+silent**; their last entries are dated 2026-09-20. On the 2026-10-05
+board 598 of the 1,267 Underdog rows passed the leg gate, at a mean pick
+multiplier of 0.71 and 2 % even picks: discounted favorites. The trust
+figure (`resolve_market_shrinkage`) was 0 for 81 % of them, so a mean read of
+.681 became .505, and the best two-pick the beam kept priced at −24.9 %
+(−17.5 % at the served read; Sleeper −19.3 % and −12.5 %). Across the 70
+served cells the figure is 0 in 34, at most .05 in 27 more and above .3
+in four (NFL receptions .475, NFL rushing yards .455, NHL goals .361,
+NHL skater fantasy points .331). Training skill is above 0 in 40 of the
+70, and the live rung sets 24 of those to 0. That rung is
+`clip(2 × (share of closed legs that beat the close − .5))`; a line that
+did not move counts as not beaten (20 % of 498,882 closed rows, against
+39.5 % moved for the bet side and 40.1 % against), and on rows closed
+before 2026-10-09 the close it reads was stamped before the game
+(honest-receipts decision 15).
+
+### Policy v4
+
+Policy v3 with the store's forty copies made independent and the bankroll
+chain repaired; whatever v1 to v3 state and this section does not replace
+still holds. The commit path stamps every new record `policy_v4`.
+
+**Forty copies.** Within a slate date an entry is its candidate `id`
+plus the copy holding it (`_ledger_store.entry_key`: `id`, `persona`,
+`replicate_id`). The store refuses a record only when that copy already
+holds that candidate that day, on disk or earlier in the same batch. A
+candidate's `id` is the same whoever draws it, so two copies that draw
+one candidate each hold an entry of their own. This closes the store scar
+of v1 to v3.
+
+**Retry.** A commit run leaves alone a replicate that already holds a
+record from the slot (`_ledger_store.committed_replicates`). Drawn again,
+it would count its first draw against the daily budget and add other
+entries. On the same board a re-run adds nothing; after a crash it
+completes the replicates that had not written.
+
+**Settlement match.** A v4 record is matched to its settled row on the
+same key. Records of v1 to v3 keep the match on `id` alone
+(`_ledger_settlement._ID_KEYED_POLICIES`): production's `policy_v1` files
+of August 2026 carry empty leg labels, so every entry of one size shares
+an `id`, and 80 committed v1 records have no settled row because that id
+held them back. Matched by copy, 42 of them would settle now, two months
+late. On copies of production's tables the new code settles exactly the
+rows the old code settles, and the 301 settled rows and 165 bankroll rows
+already written are untouched.
+
+**Bankroll chain.** A trajectory continues from the last row written for
+it. The lookup used to take the first row at the trajectory's latest
+date, which loses a pass whenever one slate date settles in two (the
+entries of 2026-10-05 settled 42 one night and 61 the next, behind the
+Monday-night NFL game) or a late pass of an older date is written after a
+newer date's row. Rows written before the change keep their numbers:
+production holds 7 broken links, and 5 of its 74 trajectories end away
+from the seed plus their settled P&L (v1 safe, copy 0: $4,482.97 against
+$4,382.97). A late pass keeps its slate date, so the table is not in date
+order and a trajectory is read in row order.
+
+**Payout table.** The 4-pick Flex pays 1.4× with one miss, as the owner
+read it in the app on 2026-10-08; the file held 1.8×, a September
+capture. The 59 v3 four-pick Flex rows with one miss through 2026-10-07
+settled at 1.8, $590 above the true payout: the 456 v3 entries settled
+through that date returned $15,425 on $11,400 staked at the table then
+on file and $14,835 at the corrected tier, over three nights of shared
+legs, which is no evidence either way. A v3 entry of 2026-10-08 settles
+at 1.4.
+
+**Replay.** The commit path into a scratch store, on the two boards
+production saved on 2026-10-05. Afternoon board: 117 records against v3's
+104; all forty copies hold one and 12 hold the full five; 100 distinct
+candidates, 15 of them held by two or three copies, none twice by one
+copy; a second run adds none. Morning then afternoon in one store:
+113 + 58 = 171, with 25 copies at five and none above.
+
+**Scars.** (1) A candidate's `id` carries no platform, so an Underdog
+and a Sleeper entry with identical leg labels share one and a copy keeps
+only the first. (2) An afternoon draw that lands on an entry the copy
+already holds is refused, not redrawn. (3) A re-run still scrapes before
+it skips. (4) `nightly` writes the settled rows and then the bankroll
+rows; a crash between the two leaves P&L in the settled table that never
+reaches a trajectory. (5) At the corrected tier a four-pick entry reads
+higher as a 12× Power than as Flex once its legs read above .5385 a pick,
+which every four-pick entry of the replay does (modeled EV +0.61 as
+Flex, +0.83 as Power), while four to six picks are built as Flex
+(`payouts.POWER_MAX_SIZE` = 3). The two kinds break even within .0003 of
+each other; left as built (honest-receipts §8). (6) The shared bettors'
+same-game pool comes from the dashboard's parlay search, whose trust
+lookup now uses the league's own market key (honest-receipts decision
+23), so their pool gains NBA Underdog fantasy-points legs when the NBA
+opens.
+
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-10-08 · policy_v4 (`0c464fae`) · entry = id + copy, so each of the
+  forty copies keeps what it drew · per-replicate retry guard ·
+  settlement match by copy from v4, v1 to v3 on id · bankroll chains
+  from the last row written · 4-pick Flex one-miss tier 1.4 (owner's app
+  read; v3 rows through 10-07 settled at 1.8) · replay: 117 records
+  against 104 · detail §10 Policy v4 · next: first production run, the
+  morning slot of 2026-10-09
+- 2026-10-05 · policy_v3 (`6adcfae8`) · Even-picks rebuilt on the
+  recommendation rule at the served read: game-day legs, entries dealt
+  evenly, a game per leg · v2's pool sat behind the shared leg gate,
+  which no recommended leg passes (0 of 25 on the 2026-10-05 board), and
+  v2 committed nothing · cross-game `stat` and trust lookup on the
+  league's own key · shared bettors unchanged, silent since 2026-09-20
+  (trust figure 0 in 34 of 70 served cells) · replay on that board: 99
+  candidates · detail §10 Policy v3 · next: first production runs, then
+  the four-week read
+- 2026-10-05 · policy_v2 built (local, unpushed) · settle = table × pick
+  multipliers × pair modifier, one rule shared with pricers; record
+  +`pair_modifier`; cross-game priced per pick on raw multipliers; persona
+  `even_picks` (dev data, 53 days with parlay history: own pool under 5
+  candidates on 23, shared universe's even entries under 5 on 27);
+  cross-game stake on the all-hit payout and the priced EV; bankroll per
+  version; v1 keeps bare table · store scar found (replicate 0 holds 223
+  of 341 live records) · detail §10 Policy v2 · next: owner review + push
 - 2026-07-14 · cross-lane note (sleeper-parity stage 4, landed on
   `feature/sleeper-parity`, not yet merged `devel`) · Sleeper candidates now
   flow through this ledger: `build_candidate_universe`/`run_commit` draw both

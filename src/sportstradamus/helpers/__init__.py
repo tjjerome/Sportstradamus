@@ -5,9 +5,8 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.config` — loads every JSON in ``data/`` and
   ``creds/`` at import time and exposes the resulting dicts as module-level
   constants. Changing a JSON shape means touching this file.
-* :mod:`sportstradamus.helpers.text` — name normalization and small
-  collection helpers (``remove_accents``, ``merge_dict``, ``hmean``,
-  ``get_trends``, ``get_mlb_pitchers``).
+* :mod:`sportstradamus.helpers.text` — name normalization and the MLB
+  schedule readers (``remove_accents``, ``ABBR_MAP``, ``get_mlb_pitchers``).
 * :mod:`sportstradamus.helpers.distributions` — the distributional math
   that the model/bookmaker fusion runs on: ``get_ev``, ``get_odds``,
   ``fused_loc``, ``set_model_start_values``, ``decode_predictive_mean``,
@@ -21,21 +20,26 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.market_display` — ``market_display_name``, the
   render-only market-slug-to-prose lookup.
 
-Every legacy ``from sportstradamus.helpers import <name>`` keeps working
-because this module re-exports the full public surface below. Prefer the
-submodule path in new code.
+The package re-exports the shared public names listed in ``__all__``;
+``from sportstradamus.helpers import <name>`` is the canonical import path for
+them.
 """
 
 import requests
 
-from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
+from sportstradamus.helpers.archive import (
+    Archive,
+    LazyArchive,
+    archive_market,
+    cell_market,
+    clean_archive,
+)
 from sportstradamus.helpers.config import (
     abbreviations,
     banned,
     book_gate,
     book_skewnormal_shape,
     book_weights,
-    books,
     combo_props,
     feature_filter,
     name_map,
@@ -52,7 +56,10 @@ from sportstradamus.helpers.config import (
 )
 from sportstradamus.helpers.distributions import (
     GATE_PUBLISH_THRESHOLD,
+    MAX_FAVORED_PAYOUT,
     NONZERO_DENOM_GATE,
+    UNDERDOG_BOOST_BASELINE,
+    UNDERDOG_EVEN_PICK_MULTIPLIER,
     DecodedParams,
     apply_cdf_recal,
     apply_temperature,
@@ -68,35 +75,26 @@ from sportstradamus.helpers.distributions import (
     negbin_crps,
     no_vig_odds,
     odds_to_prob,
+    platform_payout,
+    predictive_std,
     prob_to_odds,
     set_model_start_values,
+    shape_from_moments,
     skewnorm_crps,
     skewnormal_loc_from_mean,
 )
 from sportstradamus.helpers.logging import JsonFormatter, get_logger
 from sportstradamus.helpers.market_display import market_display_name
 from sportstradamus.helpers.scraping import Scrape
-from sportstradamus.helpers.text import (
-    get_mlb_pitchers,
-    get_trends,
-    hmean,
-    merge_dict,
-    remove_accents,
-)
-
-# Per-pick fair payout for an unboosted Underdog Power pick: power[4] ** (1/4)
-# = 10 ** 0.25 ≈ 1.778. Used by model_prob to convert the raw promo multiplier
-# from the Underdog API into a payout-inclusive value so ``Model = P * Boost``
-# yields true per-$1 expected return; consumers that want the raw modifier
-# (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
-# ``correlation.py``) divide it back out.
-UNDERDOG_BOOST_BASELINE: float = 1.78
-
+from sportstradamus.helpers.text import ABBR_MAP, get_mlb_pitchers, remove_accents
 
 __all__ = [
+    "ABBR_MAP",
     "GATE_PUBLISH_THRESHOLD",
+    "MAX_FAVORED_PAYOUT",
     "NONZERO_DENOM_GATE",
     "UNDERDOG_BOOST_BASELINE",
+    "UNDERDOG_EVEN_PICK_MULTIPLIER",
     "Archive",
     "DecodedParams",
     "JsonFormatter",
@@ -105,11 +103,12 @@ __all__ = [
     "abbreviations",
     "apply_cdf_recal",
     "apply_temperature",
+    "archive_market",
     "banned",
     "book_gate",
     "book_skewnormal_shape",
     "book_weights",
-    "books",
+    "cell_market",
     "clean_archive",
     "combo_props",
     "decode_predictive_mean",
@@ -124,20 +123,20 @@ __all__ = [
     "get_mlb_pitchers",
     "get_odds",
     "get_push_prob",
-    "get_trends",
-    "hmean",
     "market_display_name",
-    "merge_dict",
     "name_map",
     "negbin_crps",
     "nhl_goalies",
     "no_vig_odds",
     "odds_api",
     "odds_to_prob",
+    "platform_payout",
+    "predictive_std",
     "prob_to_odds",
     "remove_accents",
     "requests",
     "set_model_start_values",
+    "shape_from_moments",
     "skewnorm_crps",
     "skewnormal_loc_from_mean",
     "sleeper_payouts",

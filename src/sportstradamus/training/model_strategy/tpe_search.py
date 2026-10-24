@@ -151,12 +151,19 @@ class CellSearchState:
             self._best[family] = max(self._best[family], slack)
             self._cell_best = max(self._cell_best, slack)
 
-    def observe(self, family: str, slack: float) -> None:
+    def observe(self, family: str, slack: float, *, sampled: bool = True) -> None:
+        """Record a retrained corner; ``sampled=False`` (an enqueued corner) never ages patience.
+
+        The enqueue prefix (seeds, incumbent, gate-axis frontier) is deterministic coverage, not
+        sampler search — a run of non-improving enqueued corners says nothing about whether TPE
+        has stopped finding improvements, and counting them could stop the study before its first
+        own proposal.
+        """
         self._seen[family] += 1
         self._best[family] = max(self._best[family], slack)
         if slack > self._cell_best:
             self._cell_best, self._stale = slack, 0
-        else:
+        elif sampled:
             self._stale += 1
 
     def abandoned(self, family: str) -> bool:
@@ -181,7 +188,7 @@ class CellSearchState:
 def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.Study:
     """One resumable conditional-TPE study per cell and family pool, journalled under ``research/``.
 
-    ``multivariate=True, group=True`` is the only Optuna 3.5 configuration that models a conditional
+    ``multivariate=True, group=True`` is the only Optuna configuration that models a conditional
     space — with either off the sampler falls back to independent per-parameter sampling and cannot
     learn that a normalization value only means something under a continuous family. The journal
     lives under gitignored ``research/``, so resume state is machine-local by design.
@@ -191,15 +198,19 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     raises ``CategoricalDistribution does not support dynamic value space`` and kills the run. That is
     not hypothetical — dropping Mixture invalidated every journal on disk, and a ``--dist-class``
     run would collide with a full-pool journal the same way. Keying on the pool starts a fresh study
-    instead, and lets narrowed runs keep their own resumable state alongside the full one.
+    instead, and lets narrowed runs keep their own resumable state alongside the full one. Each
+    family's axis grid is in the key for the same reason: adding a value to an axis (a new posthoc
+    slug) changes that categorical's choices and would poison every journal written before it.
 
-    All three of those APIs are marked experimental, and each announces itself once per cell. The
-    warnings carry nothing actionable — the choices are deliberate, and the ``optuna >=3.5,<3.6``
-    pin is what stops "the interface can change in the future" from reaching us — so they are
-    silenced here rather than left to bury a real failure in a 30-cell run's output.
+    ``multivariate`` and ``group`` are still marked experimental, and each announces itself
+    once per cell. The warnings carry nothing actionable — the choices are deliberate, and
+    the ``optuna >=4.9,<5`` pin is what stops "the interface can change in the future" from
+    reaching us — so they are silenced here rather than left to bury a real failure in a
+    30-cell run's output.
     """
     _STUDY_ROOT.mkdir(parents=True, exist_ok=True)
-    pool = hashlib.sha256("|".join(families).encode()).hexdigest()[:8]
+    space = "|".join(f"{slug}{sorted(get_strategy(slug).axes.items())}" for slug in families)
+    pool = hashlib.sha256(space.encode()).hexdigest()[:8]
     path = _STUDY_ROOT / f"{market_file_slug(league, market)}.{pool}.log"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)
@@ -207,6 +218,8 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
             study_name=f"{league}__{market}__{pool}",
             direction="minimize",
             sampler=optuna.samplers.TPESampler(multivariate=True, group=True, seed=_TPE_SEED),
-            storage=optuna.storages.JournalStorage(optuna.storages.JournalFileStorage(str(path))),
+            storage=optuna.storages.JournalStorage(
+                optuna.storages.journal.JournalFileBackend(str(path))
+            ),
             load_if_exists=True,
         )

@@ -2,31 +2,33 @@
 
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
-2. Fill in Actual column in history (parquet primary, .dat fallback)
-3. Fill in Close Books P / Market CLV / Model CLV per offer
-4. Fill in Legs Resolved/Misses columns in parlay_hist
+2. Fill in Actual column in history
+3. Fill in Close Market Prob / Market CLV / Model CLV per offer; persist CLV segments
+4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
+7. Persist the realized-by-side, live-gap, profit-sim and calibration summaries; fold the
+   modifier overlay
 
-Schedule with cron after games finish, e.g.:
-    0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
+Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
+``docs/OPERATIONS.md``.
 """
 
 import importlib.resources as pkg_resources
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 import click
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import clv, data
+from sportstradamus import clv, data, realized
 from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
     annotate_offer_outcomes,
-    calibration_summary,
     check_bet,
     compute_book_brier_skill_score,
     precompute_profit_sim_summary,
@@ -36,8 +38,11 @@ from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
+    LIVE_GAP_PATH,
     LIVE_METRICS_PATH,
+    PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
+    REALIZED_BY_SIDE_PATH,
     _atomic_write_parquet,
     read_history,
     read_parlay_hist,
@@ -47,8 +52,10 @@ from sportstradamus.helpers.io import (
     write_user_slips,
 )
 from sportstradamus.helpers.parlay_modifiers import fold_overlay
+from sportstradamus.realized import calibration_summary, compute_realized_by_side, settled_offers
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
+from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
 
 logger = get_logger("reflect")
 
@@ -81,6 +88,29 @@ LIVE_METRICS_COLUMNS = (
     "profit_sim_yield",
     "profit_sim_kelly_yield",
 )
+# live_gap_per_cell.parquet, the live half of the selected-tail read
+# (docs/handoffs/train-live-gap.md): the recommended cohort's (read - hit) per cell.
+LIVE_GAP_COLUMNS = (
+    "league",
+    "market",
+    "computed_at",
+    "window_days",
+    "live_n",
+    "live_gap",
+    "live_gap_lo",
+    "live_gap_hi",
+)
+# Pinned so a run with nothing recommended writes the same parquet schema as a full one.
+_LIVE_GAP_DTYPES = {
+    "league": "object",
+    "market": "object",
+    "computed_at": "datetime64[ns]",
+    "window_days": "int16",
+    "live_n": "int64",
+    **dict.fromkeys(["live_gap", "live_gap_lo", "live_gap_hi"], "float64"),
+}
+# Fixed bootstrap seed: reruns on the same history print the same intervals.
+_LIVE_GAP_SEED = 0
 # Minimum offers needed in a window before _top_decile_mae returns a value;
 # below this, the top decile would be a single row and the metric is noise.
 _TOP_DECILE_MIN_OFFERS = 10
@@ -91,10 +121,14 @@ _TOP_DECILE_MIN_OFFERS = 10
 _MIN_BETS_FOR_PRECISION = 30
 # Clip bookmaker probabilities to avoid divide-by-zero in fair-odds payouts.
 _BOOKS_P_CLIP = 1e-3
-# Phase 4 live ship-gate (set-baseline -> main): Kelly stake fraction cap, mirroring
+# Kelly stake fraction cap of the live profit sim (display only, never a ship gate), mirroring
 # the offline S3 sim's 5% per-bet ceiling. The live ROI is the dollar-weighted
 # realized return on the staked dollars within the rolling window.
 _KELLY_LIVE_CAP_FRAC: float = 0.05
+# Below ~150 settled offers a proportion's se (~0.04) makes the warn gap indistinguishable from noise.
+_CAL_DIVERGENCE_MIN_N = 150
+# The 2026-08 WNBA PRA consensus poisoning ran a ~0.10 predicted-vs-empirical gap; 0.08 catches a repeat.
+_CAL_DIVERGENCE_WARN_GAP = 0.08
 
 
 def _empty_live_metrics_frame() -> pd.DataFrame:
@@ -118,19 +152,30 @@ def _empty_live_metrics_frame() -> pd.DataFrame:
     )
 
 
-def _side_precision(group: pd.DataFrame, side: str) -> float:
-    """Hit rate among ``Bet == side`` rows (i.e. precision of side recommendations).
+def _bettable(group: pd.DataFrame) -> pd.DataFrame:
+    """Rows whose side the platform posted, with a legacy NaN ``Boost`` read as the flat 1.0.
 
-    ``side`` is ``"Over"`` or ``"Under"``. Returns NaN when fewer than
-    :data:`_MIN_BETS_FOR_PRECISION` rows recommended that side — the conditional
-    hit rate is too noisy at small n to gate a graduation decision.
+    ``Boost == 0`` is the persisted marker for a side the platform never offered, so the
+    row was never a bet and belongs in neither precision nor the profit sims.
     """
-    side_mask = (group["Bet"] == side).to_numpy()
-    n_side = int(side_mask.sum())
-    if n_side < _MIN_BETS_FOR_PRECISION:
+    bets = group.assign(Boost=group["Boost"].fillna(1.0))
+    return bets[bets["Boost"] > 0]
+
+
+def _side_precision(group: pd.DataFrame, side: str) -> float:
+    """Hit rate among posted ``Bet == side`` rows (i.e. precision of side recommendations).
+
+    Unposted rows (``Boost == 0``) are excluded because they hit ~83% and would mask every
+    Under failure now that Gate 2 demotes on either side's precision. ``side`` is
+    ``"Over"`` or ``"Under"``. Returns NaN when fewer than :data:`_MIN_BETS_FOR_PRECISION`
+    posted rows recommended that side — the conditional hit rate is too noisy at small n
+    to gate a graduation decision.
+    """
+    bets = _bettable(group)
+    bets = bets[bets["Bet"] == side]
+    if len(bets) < _MIN_BETS_FOR_PRECISION:
         return float("nan")
-    side_hits = ((group["Bet"] == side) & (group["Result"] == side)).sum()
-    return float(side_hits / n_side)
+    return float((bets["Result"] == side).mean())
 
 
 def _top_decile_mae(group: pd.DataFrame) -> float:
@@ -150,46 +195,45 @@ def _top_decile_mae(group: pd.DataFrame) -> float:
     return float((top["Projection"] - top["Actual"]).abs().mean())
 
 
+def _fair_payout(bets: pd.DataFrame) -> np.ndarray:
+    books_p = bets["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    # Sleeper's Boost is the posted payout, not a promo multiplier: the fair-odds sim prices
+    # every leg at 1 / book probability, promo-scaled only where a promo multiplier exists.
+    return np.where(bets["Platform"] == "Underdog", bets["Boost"], 1.0) / books_p
+
+
 def _profit_sim_yield(group: pd.DataFrame) -> float:
     """Flat $1-stake realized ROI at fair-odds payouts (locked decision #7).
 
-    Payout multiplier on win = boost / books_p for Over bets (since the bet
-    cashes when Result == Over and the book's implied prob of Over is books_p);
-    boost / (1 - books_p) for Under bets. ``yield`` = (sum(payout * Hit) - n) / n.
-    Returns NaN when the window has no settled offers — distinguishable from
-    "broke even" by the n_settled column.
+    ``Market Prob`` on the history frame is already the bet side's book probability,
+    Over or Under alike, so every winning row pays :func:`_fair_payout` — no Under
+    inversion. Rows with ``Boost == 0`` are excluded: the platform never posted that side,
+    so there was no bet. ``yield`` = (sum(payout * Hit) - n) / n over the bettable rows;
+    NaN when the window has none.
     """
-    n = len(group)
+    bets = _bettable(group)
+    n = len(bets)
     if n == 0:
         return float("nan")
-    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
-    boost = group["Boost"].fillna(1.0).to_numpy()
-    hit = group["Hit"].fillna(0).to_numpy()
-    is_over = (group["Bet"] == "Over").to_numpy()
-    payout = np.where(is_over, boost / books_p, boost / (1 - books_p))
+    payout = _fair_payout(bets)
+    hit = bets["Hit"].fillna(0).to_numpy()
     return float((np.sum(payout * hit) - n) / n)
 
 
 def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
-    """Kelly-sized realized ROI — Phase 4 set-baseline -> main live gate.
+    """Kelly-sized realized ROI, for display: realized money is never a ship gate.
 
-    Per offer: ``decimal_odds = boost / books_p_for_bet_side`` (same convention as
-    :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0,
-    0.05)`` where ``p`` is the model's probability on the bet side. ROI is the
-    dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
-    sum(stake)`` — so cells with different bet counts are comparable. Returns
-    NaN when no offer attracted a positive Kelly stake (no +EV bets in the
-    window).
+    Per bettable offer (``Boost > 0``, see :func:`_bettable`): ``d`` is :func:`_fair_payout`
+    and ``p`` is ``Win Prob``, both for the bet side whichever side it is (same convention
+    as :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0, 0.05)``.
+    ROI is the dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
+    sum(stake)`` — so cells with different bet counts are comparable. Returns NaN when no
+    offer attracted a positive Kelly stake (no +EV bets in the window).
     """
-    n = len(group)
-    if n == 0:
-        return float("nan")
-    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
-    boost = group["Boost"].fillna(1.0).to_numpy()
-    hit = group["Hit"].fillna(0).to_numpy()
-    is_over = (group["Bet"] == "Over").to_numpy()
-    model_p = group["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
-    decimal_odds = np.where(is_over, boost / books_p, boost / (1 - books_p))
+    bets = _bettable(group)
+    hit = bets["Hit"].fillna(0).to_numpy()
+    model_p = bets["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
+    decimal_odds = _fair_payout(bets)
     b = decimal_odds - 1.0
     # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.
     raw_kelly = np.where(b > 0, (model_p * decimal_odds - 1.0) / b, 0.0)
@@ -262,13 +306,24 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _settled_offers(history: pd.DataFrame):
-    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled."""
+    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled.
+
+    Only decided offers survive: ``Result`` in Over/Under (needs Actual and
+    Line; drops pushes, which the platforms void) plus non-null ``Bet`` and
+    ``Win Prob``. ~13k legacy pre-flat-schema rows carry Actual with NaN
+    Line/Bet/Win Prob — their outcome is underivable, deflating both over
+    rates and NaN-poisoning the Kelly profit sim.
+    """
     if history.empty:
         return None
     exploded = annotate_offer_outcomes(history)
     if exploded.empty or "Actual" not in exploded.columns:
         return None
-    settled = exploded[exploded["Actual"].notna()].copy()
+    settled = exploded[
+        exploded["Result"].isin(("Over", "Under"))
+        & exploded["Bet"].notna()
+        & exploded["Win Prob"].notna()
+    ].copy()
     if settled.empty:
         return None
     settled["_date"] = pd.to_datetime(settled["Date"], errors="coerce")
@@ -312,6 +367,31 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
     return _enforce_live_metrics_dtypes(pd.DataFrame(rows))
 
 
+def _warn_calibration_divergence(metrics: pd.DataFrame) -> None:
+    """WARN per cell whose 30-day bet mix diverges from realized outcomes.
+
+    The 2026-08 WNBA PRA consensus poisoning sat invisible for ~4 weeks: CLV
+    monitoring shares the poisoned consensus, but this frame already carries
+    the smoking gun (predicted vs empirical over rate). Surface it nightly.
+    """
+    window = metrics[
+        (metrics["window_days"] == max(LIVE_METRICS_WINDOWS))
+        & (metrics["n_settled"] >= _CAL_DIVERGENCE_MIN_N)
+    ]
+    gap = (window["predicted_over_rate"] - window["empirical_over_rate"]).abs()
+    for row in window[gap > _CAL_DIVERGENCE_WARN_GAP].itertuples():
+        logger.warning(
+            "Calibration divergence: %s %s predicted_over_rate=%.3f "
+            "empirical_over_rate=%.3f n_settled=%d window_days=%d",
+            row.league,
+            row.market,
+            row.predicted_over_rate,
+            row.empirical_over_rate,
+            row.n_settled,
+            row.window_days,
+        )
+
+
 def _precompute_profit_sim(history):
     summary = precompute_profit_sim_summary(annotate_offer_outcomes(history))
     _atomic_write_parquet(summary, PROFIT_SIM_SUMMARY_PATH)
@@ -321,10 +401,70 @@ def _precompute_profit_sim(history):
 
 
 def _precompute_calibration(history):
-    summary = calibration_summary(annotate_offer_outcomes(history))
+    summary = calibration_summary(settled_offers(history))
     _atomic_write_parquet(summary, CALIBRATION_SUMMARY_PATH)
     logger.info(
         f"Calibration: wrote {len(summary)} bin-split rows to {CALIBRATION_SUMMARY_PATH.name}"
+    )
+
+
+def _precompute_realized_by_side(history):
+    ledger = compute_realized_by_side(history)
+    _atomic_write_parquet(ledger, REALIZED_BY_SIDE_PATH)
+    window = max(LIVE_METRICS_WINDOWS)
+    by_side = ledger[
+        (ledger["window_days"] == window)
+        & (ledger["cohort"] == "recommended")
+        & (ledger["split"] == "side")
+    ].set_index("side")["roi"]
+    roi = {s: f"{by_side[s]:+.1%}" if s in by_side.index else "n/a" for s in ("Over", "Under")}
+    logger.info(
+        f"Realized by side: wrote {len(ledger)} rows to {REALIZED_BY_SIDE_PATH.name}; "
+        f"{window}d recommended ROI Over {roi['Over']} Under {roi['Under']}"
+    )
+
+
+def recommended_gap_by_cell(
+    offers: pd.DataFrame, *, window_days: int, now: datetime, rng: np.random.Generator
+) -> pd.DataFrame:
+    """The recommended cohort's read minus hit per (league, market) over a trailing window.
+
+    Over the ``Recommended`` rows of ``realized.window(offers, window_days, now)``:
+    ``live_n`` counts them, ``live_gap`` is the mean of ``Win Prob - Hit`` (the chosen
+    side's read minus what happened, so positive reads high) and ``live_gap_lo`` /
+    ``live_gap_hi`` its 95% day-block bootstrap interval, resampling game dates whole so
+    one slate's shared swing is not counted as independent legs. A cell with no
+    recommended settled row in the window is absent. ``computed_at`` is ``now``, tz-naive.
+
+    Returns:
+        ``LIVE_GAP_COLUMNS`` in order, one row per cell; empty, same dtypes, when nothing
+        qualifies.
+    """
+    now_ts = pd.Timestamp(now).tz_localize(None)
+    recent = realized.window(offers, window_days, now_ts)
+    recent = recent[recent["Recommended"]]
+    rows = []
+    for (league, market), cell in recent.groupby(["League", "Market"]):
+        gap, lo, hi = _bootstrap_mean_ci_clustered(
+            (cell["Win Prob"] - cell["Hit"]).to_numpy(), cell["Date"].to_numpy(), rng
+        )
+        rows.append((league, market, now_ts, window_days, len(cell), gap, lo, hi))
+    return pd.DataFrame(rows, columns=LIVE_GAP_COLUMNS).astype(_LIVE_GAP_DTYPES)
+
+
+def _precompute_live_gap(history):
+    window_days = max(LIVE_METRICS_WINDOWS)
+    gaps = recommended_gap_by_cell(
+        settled_offers(history),
+        window_days=window_days,
+        now=datetime.now(UTC),
+        rng=np.random.default_rng(_LIVE_GAP_SEED),
+    )
+    _atomic_write_parquet(gaps, LIVE_GAP_PATH)
+    high, low = (gaps["live_gap_lo"] > 0).sum(), (gaps["live_gap_hi"] < 0).sum()
+    logger.info(
+        f"Live gap: wrote {len(gaps)} cell rows to {LIVE_GAP_PATH.name}; "
+        f"{window_days}d recommended read runs high in {high} cells, low in {low}"
     )
 
 
@@ -359,6 +499,9 @@ def run(league, skip_update, history_only, log_level):
     metrics = _compute_live_metrics(history)
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
+    _warn_calibration_divergence(metrics)
+    _precompute_realized_by_side(history)
+    _precompute_live_gap(history)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)
@@ -446,26 +589,42 @@ def _resolve_and_clv_history(stats):
 
 
 def _resolve_parlays(stats, history_only):
-    n_resolved_parl = 0
-    if not history_only:
-        parlays = read_parlay_hist()
-        stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
+    if history_only:
+        return 0
+    if Path(str(PARLAY_HIST_PATH)).is_file():
+        # Legacy single-file history still present: full write migrates it into day
+        # partitions before the partition-scoped read below can miss its rows.
+        write_parlay_hist(read_parlay_hist())
 
-        unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
-        n_before_parl = len(unresolved)
-        logger.info(f"Resolving {n_before_parl} pending parlay rows")
+    # Only a handful of days ever carry unresolved rows, so find them from the two
+    # scalar columns and load just those partitions. Reading the whole history
+    # rebuilds every nested `legs` list as Python objects -- ~16 GB of transient
+    # allocation to grade a few thousand rows, which OOMs the production box.
+    pending = read_parlay_hist(columns=["Date", "Legs Resolved"])
+    unresolved_days = (
+        sorted(pending.loc[pending["Legs Resolved"].isna(), "Date"].unique())
+        if not pending.empty
+        else []
+    )
+    n_before_parl = 0 if pending.empty else int(pending["Legs Resolved"].isna().sum())
+    logger.info(
+        f"Resolving {n_before_parl} pending parlay rows across "
+        f"{len(unresolved_days)} day partitions"
+    )
+    if not unresolved_days:
+        return 0
 
-        if n_before_parl > 0:
-            tqdm.pandas(desc="Resolving parlays")
-            results = unresolved.progress_apply(
-                lambda bet: check_bet(bet, stats, stat_map), axis=1
-            ).tolist()
-            parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
-            write_parlay_hist(parlays)
-            n_resolved_parl = sum(
-                1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
-            )
-            logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
+    parlays = read_parlay_hist(days=unresolved_days)
+    unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
+    tqdm.pandas(desc="Resolving parlays")
+    results = unresolved.progress_apply(lambda bet: check_bet(bet, stats), axis=1).tolist()
+    parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
+    # Whole partitions were loaded, so this rewrites their resolved rows too.
+    write_parlay_hist(parlays, days=unresolved_days)
+    n_resolved_parl = sum(
+        1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
+    )
+    logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
     return n_resolved_parl
 
 

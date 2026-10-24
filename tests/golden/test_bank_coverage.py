@@ -8,7 +8,10 @@ are narrative (thrive/fade/split), so literal bet-side words are banned
 outside ``mistakes`` cells — where the literal word must be the *flipped*
 side, because a negative market's thriving bet is the Under. Every cell in
 both banks carries at least ``_MIN_VARIANTS_PER_CELL`` variants so the md5
-rotation has room to keep a slate's headlines distinct.
+rotation has room to keep a slate's headlines distinct. The register pins
+(live-verb floor, still-word ceiling, star-led and daily-cell depth) score
+each voice on its own, so one voice cannot keep the calm cadence while the
+rest move.
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from sportstradamus.helpers.config import stat_map, stat_meta
+from sportstradamus.prediction.stories import bank as bank_module
 from sportstradamus.prediction.stories import engine, legs
 from sportstradamus.prediction.stories.bank import _bank, bank_cell, why_bank
 from sportstradamus.prediction.stories.engine import _DIRECTIONS_BY_ARCHETYPE
@@ -28,6 +33,8 @@ _SPORT_VOICES = tuple(sorted(set(_LEAGUE_VOICE.values())))
 _VOICES = {*_SPORT_VOICES, "shared"}
 _SHAPES = ("shootout", "grind", "blowout", "coinflip", "even")
 _CATEGORIES = (*legs._STAT_CATEGORY, "production", "mistakes")
+# stat_words.json's per-family schema — the parts an {up}/{down} clause is built from.
+_STAT_WORD_CLAUSES = ("noun", "thrive", "fade", "owned_thrive", "owned_fade")
 
 # Every reachable (archetype, direction) pair, straight from the engine.
 _ARCH_DIRS = [
@@ -40,10 +47,14 @@ _ARCH_DIRS = [
 # rotation and the slate-uniqueness bump have real room to move.
 _MIN_VARIANTS_PER_CELL = 6
 
+# The guide's authoring target is six to fourteen *rendered* words; a slot costs
+# one word here and renders wider, so this ceiling only catches run-ons.
+_MAX_TEMPLATE_WORDS = 16
+
 _ALLOWED_SLOTS = {
     "player": {"p", "g"},
     "game-script": {"g"},
-    "unit": {"team", "grp", "opp"},
+    "unit": {"team", "grp", "opp", "g"},
     "stack": {"n", "g", "p"},
 }
 
@@ -53,6 +64,121 @@ _SLOT_RE = re.compile(r"\{([^{}]*)\}")
 _BET_WORD_RE = re.compile(r"\b(over|overs|under|unders)\b", re.I)
 _OVER_WORD_RE = re.compile(r"\b(over|overs)\b", re.I)
 _UNDER_WORD_RE = re.compile(r"\b(under|unders)\b", re.I)
+# One thought per headline: an em-dash or a semicolon splices a second one in.
+_BANNED_PUNCT_RE = re.compile("[—;]")
+# The live register states a read; it never sells one.
+_HYPE_WORD_RE = re.compile(r"\b(smash|smashes|hammer|hammers|cash|cashes|lock|locks)\b", re.I)
+# A sentence break inside a template: a period, space, then a capital or a slot.
+_INNER_BREAK_RE = re.compile(r"\.\s+(?=[A-Z{])")
+
+# Register "live analyst": a headline moves on a concrete action verb. Only the
+# present-tense form a star-as-agent sentence conjugates to counts (drives, carries,
+# goes cold), so a stem never credits its -ing or -ed forms.
+_LIVE_VERB_STEMS = (
+    "drive",
+    "pour",
+    "pile",
+    "carry",
+    "run",
+    "climb",
+    "stack",
+    "flood",
+    "feed",
+    "fire",
+    "bury",
+    "drag",
+    "hunt",
+    "swarm",
+    "rip",
+    "press",
+    "push",
+    "pull",
+    "spin",
+    "roll",
+    "surge",
+    "crack",
+    "pound",
+    "rack",
+    "haul",
+    "chase",
+    "close",
+    "own",
+    "attack",
+    "punish",
+    "smother",
+    "choke",
+    "clamp",
+    "stall",
+    "starve",
+    "drain",
+    "strangle",
+    "muzzle",
+    "flatten",
+    "shrink",
+    "sag",
+    "fade",
+    "erupt",
+    "rain",
+    "grind",
+    "wear",
+    "shut",
+    "break",
+    "light",
+    "take",
+    "keep",
+    "fall",
+    "come",
+    "bog",
+)
+# Phrasal verbs the contract names, base form with the verb first; the head takes the
+# same -s tolerance, so "goes cold" counts while a bare "goes" (as in "goes quiet") never does.
+_LIVE_VERB_PHRASES = (
+    "take over",
+    "keep coming",
+    "go cold",
+    "dry up",
+    "fall flat",
+    "come up short",
+    "bog down",
+    "grind down",
+    "wear down",
+    "shut down",
+    "run dry",
+    "break loose",
+    "light up",
+    "pile up",
+    "pile on",
+    "rack up",
+)
+
+
+def _live_verb_pattern(entry):
+    """``carry`` → ``carr(?:y|ies)``; ``take over`` → ``take(?:s|es)? over``."""
+    verb, _, tail = entry.partition(" ")
+    stem = verb[:-1] + "(?:y|ies)" if verb.endswith("y") else verb + "(?:s|es)?"
+    return (stem + " " + tail).rstrip()
+
+
+_LIVE_VERB_RE = re.compile(
+    r"\b(?:" + "|".join(map(_live_verb_pattern, (*_LIVE_VERB_STEMS, *_LIVE_VERB_PHRASES))) + r")\b",
+    re.I,
+)
+# Per-voice floor on variants carrying a live verb; shared is scored like the sport voices
+# because it terminates every fallback chain.
+_MIN_LIVE_VERB_SHARE = 0.60
+# The calm register's still words, rationed rather than banned: one variant in ten.
+_STILL_WORD_RE = re.compile(
+    r"\b(sits|settles|rests|still|quiet|calm|gentle)\b|nothing to force|no need to chase", re.I
+)
+_MAX_STILL_SHARE = 0.10
+# Star-led: {p} within the first three tokens ("{p}'s" counts) makes the star the agent, and
+# the Over-led story a game headlines is seeded on that star.
+_STAR_LEAD_TOKENS = 3
+_MIN_STAR_LED_VARIANTS = 3
+# player/<shape>/Over/{scoring,production} fire daily as every game's Over-led headline, so
+# slate-wide dedup needs more room there than the generic floor gives.
+_DAILY_CATEGORIES = ("scoring", "production")
+_MIN_VARIANTS_DAILY_CELL = 8
 
 
 def _walk_variants():
@@ -115,9 +241,53 @@ def test_every_voice_cell_carries_min_variants():
 def test_variants_reference_only_their_archetype_slots():
     for voice, archetype, shape, direction, category, variants in _walk_variants():
         allowed = _ALLOWED_SLOTS[archetype]
+        if direction == "Mixed":
+            allowed = allowed | {"up", "down"}
         for variant in variants:
             tokens = set(_SLOT_RE.findall(variant))
             assert tokens <= allowed, (voice, archetype, shape, direction, category, variant)
+
+
+def test_mixed_variants_name_both_effects():
+    """A Mixed headline is one cause and two named effects, never a vague split.
+
+    ``{up}`` and ``{down}`` render as whole clauses, so a template that leads
+    with either opens the headline lowercase ("the strikeouts pile up").
+    """
+    for voice, archetype, shape, direction, category, variants in _walk_variants():
+        if direction != "Mixed":
+            continue
+        key = (voice, archetype, shape, direction, category)
+        for variant in variants:
+            assert variant.count("{up}") == 1, (key, variant)
+            assert variant.count("{down}") == 1, (key, variant)
+            assert not variant.startswith(("{up}", "{down}")), (key, variant)
+
+
+def test_stat_words_cover_every_voice_and_family():
+    """Every ``{up}``/``{down}`` clause a Mixed headline can ask for is authored.
+
+    ``noun`` plus ``thrive``/``fade`` compose a subjectless clause ("the
+    strikeouts" + "pile up"), so those three carry no slots of their own. When
+    both sides of a split share a family the engine names the players instead,
+    which is what the owned forms and their ``{who}``/``{what}`` are for.
+    """
+    words = _bank("stat_words.json")
+    assert set(words) == _VOICES
+    for voice in _VOICES:
+        families = words[voice]
+        assert set(_CATEGORIES) <= set(families), voice
+        for family in _CATEGORIES:
+            clauses = families[family]
+            for clause in _STAT_WORD_CLAUSES:
+                text = clauses.get(clause)
+                assert isinstance(text, str) and text, (voice, family, clause)
+            assert clauses["noun"].startswith("the "), (voice, family)
+            for clause in ("noun", "thrive", "fade"):
+                assert "{" not in clauses[clause], (voice, family, clause)
+            for clause in ("owned_thrive", "owned_fade"):
+                slots = set(_SLOT_RE.findall(clauses[clause]))
+                assert slots == {"who", "what"}, (voice, family, clause)
 
 
 class _AnySlot(dict):
@@ -175,22 +345,117 @@ def test_literal_bet_words_only_in_mistakes_cells():
                 assert not wrong_side.search(variant), (key, variant)
 
 
-def test_v1_player_bank_preserved_in_basketball():
-    """The v1 basketball player bank survives in spirit: at least its 44
-    Over/Under cells and 107 variants, and the flagship line verbatim. The
-    letter-for-letter pin was retired because 12 v1 variants were broken
-    "against {g}" strings (treating the game slug as an opponent) that had to
-    be rewritten 1:1, and every cell has since been deepened."""
+def test_no_em_dash_or_semicolon():
+    """A headline gets one comma or one colon. An em-dash or a semicolon is a
+    second thought pushed into a template built to carry one."""
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert not _BANNED_PUNCT_RE.search(variant), (key, variant)
+    for voice, families in _bank("stat_words.json").items():
+        for family, clauses in families.items():
+            for clause, text in clauses.items():
+                assert not _BANNED_PUNCT_RE.search(text), (voice, family, clause)
+    # why_bank["why"] is exempt: the per-offer Why sentences are outside the rewrite's scope.
+    for key, variants in _walk_why_branches():
+        if key[0] == "dek":
+            for variant in variants:
+                assert not _BANNED_PUNCT_RE.search(variant), (key, variant)
+
+
+def test_headline_templates_stay_short():
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert len(variant.split()) <= _MAX_TEMPLATE_WORDS, (key, variant)
+
+
+def test_no_hype_words():
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert not _HYPE_WORD_RE.search(variant), (key, variant)
+
+
+def _share(voice, pattern):
+    """Share of one voice's variants, every archetype and cell, that ``pattern`` matches."""
+    variants = [
+        v for bank_voice, *_node, cell in _walk_variants() if bank_voice == voice for v in cell
+    ]
+    return sum(bool(pattern.search(v)) for v in variants) / len(variants)
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_live_verb_share_per_voice(voice):
+    """Pre-rewrite (calm register) shares: shared 0.354, basketball 0.302, football 0.383,
+    hockey 0.288, baseball 0.342."""
+    share = _share(voice, _LIVE_VERB_RE)
+    assert share >= _MIN_LIVE_VERB_SHARE, (voice, round(share, 3))
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_still_word_share_per_voice(voice):
+    """Pre-rewrite (calm register) shares: shared 0.177, basketball 0.134, football 0.071,
+    hockey 0.115, baseball 0.124."""
+    share = _share(voice, _STILL_WORD_RE)
+    assert share <= _MAX_STILL_SHARE, (voice, round(share, 3))
+
+
+def _player_over_cells(voice):
+    """``{(shape, category): variants}`` over one voice's ``player/<shape>/Over/<category>`` cells."""
+    return {
+        (shape, category): variants
+        for bank_voice, archetype, shape, direction, category, variants in _walk_variants()
+        if bank_voice == voice and archetype == "player" and direction == "Over"
+    }
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_player_over_cells_are_star_led(voice):
+    """The star is the sentence's agent, not the object the board happens to favor."""
+    led = {
+        key: sum("{p}" in " ".join(v.split()[:_STAR_LEAD_TOKENS]) for v in variants)
+        for key, variants in _player_over_cells(voice).items()
+    }
+    short = {key: n for key, n in led.items() if n < _MIN_STAR_LED_VARIANTS}
+    assert not short, short
+
+
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_daily_over_cells_carry_extra_depth(voice):
+    depth = {
+        key: len(variants)
+        for key, variants in _player_over_cells(voice).items()
+        if key[1] in _DAILY_CATEGORIES
+    }
+    short = {key: n for key, n in depth.items() if n < _MIN_VARIANTS_DAILY_CELL}
+    assert not short, short
+
+
+def test_terminal_period_only_after_a_second_sentence():
+    """A headline is a card title: one sentence carries no closing period, and a
+    two-sentence headline keeps both — one voice closing every line while the
+    others do not reads as two products on one slate."""
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert variant.endswith(".") is bool(_INNER_BREAK_RE.search(variant)), (key, variant)
+
+
+def test_basketball_player_bank_depth():
+    """The depth floor outlived the v1 wording it was measured from.
+
+    No line is pinned verbatim any more: the bank has since been rewritten
+    twice — once to repair broken "against {g}" strings, once for the calm
+    register — and a letter-for-letter pin only ever recorded which sentence
+    happened to be first. The 40-cell floor is today's exact count, re-derived
+    after the unreachable ``k's`` cells were culled; the 107-variant floor is
+    still v1's measurement, left loose so re-authoring has room to trade one
+    line for another.
+    """
     cells = [
         variants
         for voice, archetype, _, direction, _, variants in _walk_variants()
         if voice == "basketball" and archetype == "player" and direction in ("Over", "Under")
     ]
-    assert len(cells) >= 44
+    assert len(cells) >= 40
     assert sum(len(variants) for variants in cells) >= 107
-    assert "In {g}'s track meet, {p} pours in the points" in bank_cell(
-        "basketball", "player", "shootout", "Over", "scoring"
-    )
 
 
 def test_unknown_voice_reads_shared():
@@ -199,13 +464,170 @@ def test_unknown_voice_reads_shared():
 
 
 def test_fallback_chain_steps_down_to_even_then_endpoint():
-    # Football authors no player/blowout boards cell and shared holds boards
-    # only under "even" — the chain must land on shared player/even boards.
-    expected = _bank()["shared"]["player"]["even"]["Over"]["boards"]
-    assert bank_cell("football", "player", "blowout", "Over", "boards") == expected
-    # No unit cell anywhere speaks k's — must land on the guaranteed endpoint.
-    endpoint = _bank()["shared"]["unit"]["even"]["Under"]["production"]
-    assert bank_cell("hockey", "unit", "grind", "Under", "k's") == endpoint
+    # Football authors no player/blowout boards cell but does author the shape,
+    # so the category degrades to production before the shape gives way.
+    assert (
+        bank_cell("football", "player", "blowout", "Over", "boards")
+        is _bank()["football"]["player"]["blowout"]["Over"]["production"]
+    )
+    # No voice authors a shaped unit cell, and shared's shaped scoring copy
+    # outranks its own shaped production copy.
+    assert (
+        bank_cell("basketball", "unit", "shootout", "Over", "scoring")
+        is _bank()["shared"]["unit"]["shootout"]["Over"]["scoring"]
+    )
+    # Same node, a category shared doesn't speak: shared's shaped production
+    # copy still outranks the voice's own even-keyed boards cell.
+    assert (
+        bank_cell("basketball", "unit", "shootout", "Over", "boards")
+        is _bank()["shared"]["unit"]["shootout"]["Over"]["production"]
+    )
+    # An even-shaped lookup for a vocabulary no unit cell speaks: with the shape
+    # already "even", the shared-production step and the endpoint are one key.
+    assert (
+        bank_cell("hockey", "unit", "even", "Under", "k's")
+        is _bank()["shared"]["unit"]["even"]["Under"]["production"]
+    )
+
+
+def test_endpoint_answers_a_bank_that_authors_nothing_else(monkeypatch):
+    """The terminal return is unreachable for every mapped league today, so it
+    takes a bank stripped to the endpoint cell to exercise it."""
+    endpoint = ["the only copy there is"]
+    monkeypatch.setattr(
+        bank_module,
+        "_bank",
+        lambda *_a, **_k: {"shared": {"player": {"even": {"Over": {"production": endpoint}}}}},
+    )
+    assert bank_cell("basketball", "player", "shootout", "Over", "boards") is endpoint
+
+
+@pytest.mark.parametrize("shape", [s for s in _SHAPES if s != "even"])
+@pytest.mark.parametrize(("archetype", "direction"), _ARCH_DIRS)
+@pytest.mark.parametrize("voice", _SPORT_VOICES)
+def test_shape_never_falls_through_to_even(voice, archetype, direction, shape):
+    """Shape outranks both voice and category, for every reachable lookup.
+
+    Every (voice, archetype, non-even shape, direction) node must be authored
+    somewhere, and every category under it must resolve to that node's copy —
+    a shape-blind fall-through is how a shootout ended up telling readers the
+    game had a low ceiling. Excludes ``mistakes``: a mistakes read prefers
+    valence over shape by design.
+    """
+    shaped = [
+        cell
+        for bank_voice in (voice, "shared")
+        for cell in _bank()[bank_voice]
+        .get(archetype, {})
+        .get(shape, {})
+        .get(direction, {})
+        .values()
+    ]
+    assert shaped, "no cell authored for this shape and direction"
+    for category in _CATEGORIES:
+        if category == "mistakes":
+            continue
+        returned = bank_cell(voice, archetype, shape, direction, category)
+        assert any(returned is cell for cell in shaped), category
+
+
+def _chain_candidates(bank, voice, shape, archetype, direction, category):
+    """Cells bank_cell's (voice/shared × shape/even) probe can return for one category."""
+    shared = bank["shared"]
+    voiced = bank.get(voice, shared)
+    return [
+        cell
+        for phrases, shape_key in (
+            (voiced, shape),
+            (shared, shape),
+            (voiced, "even"),
+            (shared, "even"),
+        )
+        for cell in [phrases.get(archetype, {}).get(shape_key, {}).get(direction, {}).get(category)]
+        if cell
+    ]
+
+
+@pytest.mark.parametrize("direction", ("Over", "Under"))
+@pytest.mark.parametrize("archetype", ("player", "stack", "game-script"))
+def test_shared_authors_even_mistakes_for_every_headline_archetype(archetype, direction):
+    """The mistakes probe ends on shared's ``even`` cell, so a TOV stack or a mistakes-led
+    game script in a voice that authors neither still reads mistakes copy instead of
+    inheriting production copy."""
+    cell = _bank()["shared"][archetype]["even"][direction]["mistakes"]
+    assert len(cell) >= _MIN_VARIANTS_PER_CELL
+
+
+@pytest.mark.parametrize("direction", ("Over", "Under"))
+@pytest.mark.parametrize("archetype", ("player", "stack", "game-script"))
+@pytest.mark.parametrize("shape", _SHAPES)
+@pytest.mark.parametrize("voice", _SPORT_VOICES)
+def test_mistakes_never_degrades_to_production(voice, shape, archetype, direction):
+    """A mistakes lookup resolves to a mistakes cell, never a production cell.
+
+    Mistakes cells are authored only under ``even`` (docs/story_voice.md), so this
+    pins the valence-before-shape probe for a negative-market leg in a shaped game;
+    shared's ``even`` mistakes cells make every archetype reachable, so nothing skips.
+    """
+    bank = _bank()
+    mistakes = _chain_candidates(bank, voice, shape, archetype, direction, "mistakes")
+    assert mistakes, (voice, archetype, shape, direction)
+
+    returned = bank_cell(voice, archetype, shape, direction, "mistakes")
+    assert returned in mistakes
+
+    production = _chain_candidates(bank, voice, shape, archetype, direction, "production")
+    assert returned not in production
+
+
+# Where the board's shape and the model's direction disagree, every voice owes
+# the tension its own copy rather than shape-blind even-keyed filler.
+_CONTRARIAN_CELLS = (
+    ("game-script", "shootout", "Under"),
+    ("game-script", "grind", "Over"),
+    ("stack", "shootout", "Under"),
+    ("stack", "grind", "Over"),
+)
+
+
+@pytest.mark.parametrize(("archetype", "shape", "direction"), _CONTRARIAN_CELLS)
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_contrarian_cells_exist(voice, archetype, shape, direction):
+    cell = _bank()[voice][archetype][shape][direction]["production"]
+    assert len(cell) >= _MIN_VARIANTS_PER_CELL
+
+
+def test_every_shaped_node_carries_production():
+    """The chain probes only ``category`` then ``production`` under a shape node,
+    so a node authored without a production cell would drop its shape for every
+    other category."""
+    for voice, archetypes in _bank().items():
+        for archetype, shapes in archetypes.items():
+            for shape, directions in shapes.items():
+                for direction, categories in directions.items():
+                    assert "production" in categories, (voice, archetype, shape, direction)
+
+
+def test_every_pipeline_league_has_a_voice():
+    """A league the pipeline trains but the engine doesn't map reads shared copy
+    silently — ``stat_meta`` is the canonical per-league cell catalogue."""
+    assert set(stat_meta) <= set(_LEAGUE_VOICE)
+
+
+def test_lead_case_matches_direction():
+    """One register for every headline, in every direction.
+
+    A story renders its thesis on its own, so a lowercase lead reads as the
+    back half of a sentence whose front half never arrives — and the md5
+    rotation would give the same game a capital one day and a fragment the
+    next. Mixed and Contrast* cells used to be authored as fragments; they are
+    headlines now, and a slot lead is the one exception ({p} supplies its own
+    proper noun).
+    """
+    for voice, archetype, shape, direction, category, variants in _walk_variants():
+        key = (voice, archetype, shape, direction, category)
+        for variant in variants:
+            assert variant[0] == "{" or variant[0].isupper(), (key, variant)
 
 
 def _cell_text(voice, archetype, shape, direction, category):
@@ -232,6 +654,49 @@ def test_football_voice_speaks_football():
     assert any(w in contrast for w in ("field", "drive", "chain", "boundary", "clock"))
     mistakes = _cell_text("football", "player", "even", "Under", "mistakes")
     assert any(w in mistakes for w in ("sack", "pick", "fumble", "pocket"))
+
+
+def test_football_voice_authors_no_stops_cell():
+    """No NFL market reads as ``stops``, so the football voice carries no ``stops`` cell.
+
+    The defensive-looking NFL slugs (``sacks taken``, ``interceptions``) are negative
+    markets and read as ``mistakes`` — on the slug and on every Underdog/Sleeper display
+    name behind it. A cell no route reaches is dead prose; the first assertion is the
+    reachability fact, the second the authoring rule that follows from it.
+    """
+    nfl_slugs = set(stat_meta["NFL"])
+    names = nfl_slugs | {
+        name
+        for platform in ("Underdog", "Sleeper")
+        for name, slug in stat_map[platform].items()
+        if slug in nfl_slugs
+    }
+    assert "stops" not in {legs._stat_category(name) for name in names}
+    authored = {category for voice, *_node, category, _ in _walk_variants() if voice == "football"}
+    assert "stops" not in authored
+
+
+def test_basketball_voice_authors_no_ks_cell():
+    """No NBA or WNBA market reads as ``k's``, so the basketball voice carries no ``k's`` cell.
+
+    Both leagues share the voice, so the reachability fact has to hold over the union
+    of their slugs and display names. ``blocks`` is the near miss: it carries the
+    ``ks`` needle and only lands in ``stops`` because ``_STAT_CATEGORY`` is
+    insertion-ordered and ``block`` is checked first, so reordering that dict would
+    resurrect six cells of rim-protection prose no route ever asked for.
+    """
+    hoops_slugs = set(stat_meta["NBA"]) | set(stat_meta["WNBA"])
+    names = hoops_slugs | {
+        name
+        for platform in ("Underdog", "Sleeper")
+        for name, slug in stat_map[platform].items()
+        if slug in hoops_slugs
+    }
+    assert "k's" not in {legs._stat_category(name) for name in names}
+    authored = {
+        category for voice, *_node, category, _ in _walk_variants() if voice == "basketball"
+    }
+    assert "k's" not in authored
 
 
 def test_hockey_voice_speaks_hockey():
@@ -264,24 +729,38 @@ def test_baseball_voice_speaks_baseball():
 # a list-valued clause (dek.cluster) carries branch None. Every variant must
 # use exactly these slots — the facts are the clause.
 _WHY_SLOTS = {
-    ("why", "form", "above"): {"dev", "line", "pronoun"},
-    ("why", "form", "below"): {"dev", "line", "pronoun"},
+    ("why", "form", "above_for"): {"dev", "line", "pronoun"},
+    ("why", "form", "above_against"): {"dev", "line", "pronoun"},
+    ("why", "form", "below_for"): {"dev", "line", "pronoun"},
+    ("why", "form", "below_against"): {"dev", "line", "pronoun"},
     ("why", "form", "at_line"): {"line", "pronoun"},
     ("why", "form_h2h", "above"): {"dev"},
     ("why", "form_h2h", "below"): {"dev"},
     ("why", "form_h2h", "at_line"): set(),
-    ("why", "matchup", "favorable"): set(),
-    ("why", "matchup", "tough"): set(),
+    ("why", "matchup", "gives"): set(),
+    ("why", "matchup", "takes"): set(),
     ("why", "edge", "model_ahead"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "edge", "book_back"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "ev", "solo"): {"ev"},
     ("why", "ev", "vs_book"): {"ev", "book_ev"},
+    ("why", "lineup", "platoon_edge"): {"slot", "throws"},
+    ("why", "lineup", "same_side"): {"slot", "throws"},
+    ("why", "lineup", "switch"): {"slot", "throws"},
+    ("why", "lineup", "slot_only"): {"slot"},
+    ("why", "lineup_usual", "platoon_edge"): {"slot", "throws"},
+    ("why", "lineup_usual", "same_side"): {"slot", "throws"},
+    ("why", "lineup_usual", "switch"): {"slot", "throws"},
+    ("why", "lineup_usual", "slot_only"): {"slot"},
     ("dek", "cluster", None): {"n", "rho"},
-    ("dek", "form", "above"): {"p", "dev", "line"},
-    ("dek", "form", "below"): {"p", "dev", "line"},
+    ("dek", "form", "above_for"): {"p", "dev", "line"},
+    ("dek", "form", "below_for"): {"p", "dev", "line"},
     ("dek", "form", "at_line"): {"p", "line"},
-    ("dek", "matchup", "favorable"): {"p"},
-    ("dek", "matchup", "tough"): {"p"},
+    ("dek", "matchup", "gives"): {"p"},
+    ("dek", "matchup", "takes"): {"p"},
+    ("dek", "lineup", "posted"): {"p", "slot"},
+    ("dek", "lineup", "posted_hand"): {"p", "slot", "throws"},
+    ("dek", "lineup", "usual"): {"p", "slot"},
+    ("dek", "lineup", "usual_hand"): {"p", "slot", "throws"},
 }
 
 
@@ -291,6 +770,26 @@ def test_why_bank_branch_inventory_and_slots():
     for key, variants in seen.items():
         for variant in variants:
             assert set(_SLOT_RE.findall(variant)) == _WHY_SLOTS[key], (key, variant)
+
+
+def test_why_bank_side_words_follow_the_branch():
+    """A bet-relative form branch implies one side (above_for and below_against are
+    Overs), so its prose may name that side, never the other. Matchup branches read
+    the defense, true on either side, so they name neither. The dek carries no
+    against branch: a story's dek never argues against its own bet."""
+    bank = why_bank()
+    over_branches = {"above_for", "below_against"}
+    assert set(bank["dek"]["form"]) == {"above_for", "below_for", "at_line"}
+    for section in ("why", "dek"):
+        for branch, variants in bank[section]["form"].items():
+            if branch == "at_line":
+                continue
+            wrong_side = _UNDER_WORD_RE if branch in over_branches else _OVER_WORD_RE
+            for variant in variants:
+                assert not wrong_side.search(variant), (section, branch, variant)
+        for branch, variants in bank[section]["matchup"].items():
+            for variant in variants:
+                assert not _BET_WORD_RE.search(variant), (section, branch, variant)
 
 
 def test_why_bank_depth_and_mid_sentence_style():
@@ -311,6 +810,13 @@ def test_why_bank_pronouns():
     assert all(isinstance(v, str) and v for v in pronouns.values())
 
 
+def test_why_bank_hands():
+    """Both throwing hands decode to a word — a missing key renders "a -hander"."""
+    hands = why_bank()["hands"]
+    assert set(hands) == {"L", "R"}
+    assert all(isinstance(v, str) and v.islower() for v in hands.values())
+
+
 def test_no_prose_literals_in_stories_source():
     """Prose lives in the JSON banks, never in code (owner directive).
 
@@ -320,7 +826,8 @@ def test_no_prose_literals_in_stories_source():
     the bank contract); the eyeball pass remains the real gate.
     """
     slot_re = re.compile(
-        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct|gap|side|ev|book_ev|rho)\}"
+        r"\{(?:p|g|n|team|grp|opp|up|down|who|what|dev|line|pronoun|model_pct|book_pct"
+        r"|gap|side|ev|book_ev|rho|slot|throws)\}"
     )
     package_dir = Path(engine.__file__).parent
     for source_path in sorted(package_dir.glob("*.py")):

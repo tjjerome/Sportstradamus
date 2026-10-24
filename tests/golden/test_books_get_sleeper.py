@@ -1,21 +1,23 @@
-"""Characterization of ``books.get_sleeper`` — the Sleeper payload parser.
+"""Characterization of ``books.sleeper.get_sleeper`` — the Sleeper payload parser.
 
 ``get_sleeper`` is network-bound and stubbed (``-> dict``) in the integration
 suite, so it has no behavioral coverage. This pins its output on a hand-built
 payload that exercises every parse seam — the games map (dict-form vs
 string-form team metadata), the ``available`` + ``alt`` line merge, per-line
-outcome padding (over-only and under-only), opponent resolution, and the
-unknown-player skip — so the CC-19 decomposition can be proven behavior
-preserving.
+outcome padding (over-only and under-only), opponent resolution, the
+unknown-player skip, and the missing-game skip — so the CC-19 decomposition
+can be proven behavior preserving. A second test pins the opponent of a team
+whose code ``ABBR_MAP`` remaps.
 """
 
 from __future__ import annotations
 
+import copy
 from http import HTTPStatus
 
 import pytest
 
-from sportstradamus import books
+from sportstradamus.books import sleeper
 
 _PLAYERS_NBA = {
     "p1": {"first_name": "LeBron", "last_name": "James", "team": "LAL"},
@@ -60,6 +62,16 @@ _AVAILABLE = [
             {"outcome": "over", "outcome_value": 1.5, "payout_multiplier": 1.0},
         ],
     },
+    {
+        "sport": "NBA",
+        "subject_id": "p2",
+        "game_id": "g9",
+        "wager_type": "Blocks",
+        "options": [
+            {"outcome": "over", "outcome_value": 1.5, "payout_multiplier": 1.0},
+            {"outcome": "under", "outcome_value": 1.5, "payout_multiplier": 1.0},
+        ],
+    },
 ]
 
 _ALT = [
@@ -75,10 +87,10 @@ _ALT = [
 ]
 
 _ROUTES = {
-    books.SLEEPER_AVAILABLE_URL: _AVAILABLE,
-    books.SLEEPER_ALT_URL: _ALT,
-    books.SLEEPER_GAMES_URL: _GAMES,
-    books.SLEEPER_PLAYERS_URL.format(league="NBA"): _PLAYERS_NBA,
+    sleeper.SLEEPER_AVAILABLE_URL: _AVAILABLE,
+    sleeper.SLEEPER_ALT_URL: _ALT,
+    sleeper.SLEEPER_GAMES_URL: _GAMES,
+    sleeper.SLEEPER_PLAYERS_URL.format(league="NBA"): _PLAYERS_NBA,
 }
 
 
@@ -88,7 +100,10 @@ class _FakeResponse:
         self._payload = payload
 
     def json(self):
-        return self._payload
+        # requests parses a fresh object per call. Handing back the shared fixture
+        # lets get_sleeper's ``res.extend(alt)`` append to it permanently, so a
+        # second call in the same module would see the alt lines twice.
+        return copy.deepcopy(self._payload)
 
 
 class _FakeRequests:
@@ -143,6 +158,54 @@ _EXPECTED = {
 
 
 def test_get_sleeper_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(books, "requests", _FakeRequests)
+    monkeypatch.setattr(sleeper, "requests", _FakeRequests)
 
-    assert books.get_sleeper() == _EXPECTED
+    assert sleeper.get_sleeper() == _EXPECTED
+
+
+def test_get_sleeper_skips_prop_whose_game_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sleeper, "requests", _FakeRequests)
+
+    offers = sleeper.get_sleeper()
+
+    assert "Blocks" not in offers["NBA"]
+    assert offers == _EXPECTED
+
+
+@pytest.mark.parametrize(
+    ("player_code", "home", "away", "team", "opponent"),
+    [
+        ("WSH", "WSH", "NYR", "WAS", "NYR"),
+        ("WSH", "NYR", "WSH", "WAS", "NYR"),
+        ("NYR", "WSH", "NYR", "NYR", "WAS"),
+        ("NYR", "NYR", "WSH", "NYR", "WAS"),
+    ],
+)
+def test_sleeper_opponent_of_a_remapped_team_code(
+    player_code: str, home: str, away: str, team: str, opponent: str
+) -> None:
+    """A team whose code is remapped (WSH to WAS) is never its own opponent, home or away."""
+    games = sleeper._sleeper_games_map(
+        [
+            {
+                "sport": "NHL",
+                "game_id": "g1",
+                "metadata": {"home_team": home, "away_team": away},
+                "date": "2026-10-11",
+            }
+        ]
+    )
+    players = {"p1": {"first_name": "Tom", "last_name": "Wilson", "team": player_code}}
+    prop = {
+        "subject_id": "p1",
+        "game_id": "g1",
+        "wager_type": "Goals",
+        "options": [
+            {"outcome": "over", "outcome_value": 0.5, "payout_multiplier": 1.0},
+            {"outcome": "under", "outcome_value": 0.5, "payout_multiplier": 1.0},
+        ],
+    }
+
+    (offer,) = sleeper._sleeper_prop_offers(prop, players, "NHL", games)
+
+    assert (offer["Team"], offer["Opponent"]) == (team, opponent)

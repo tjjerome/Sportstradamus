@@ -10,6 +10,8 @@ from scipy.stats import skewnorm
 from sportstradamus.helpers import skewnormal_loc_from_mean
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _skewnormal_cdf_endpoints,
+    _step_apply_two_part_groupcdf_candidate,
+    _two_part_support_rows,
     pin_two_part_grouping,
 )
 from sportstradamus.training.structural_context import build_two_part_context
@@ -135,3 +137,46 @@ def test_pin_two_part_grouping_fails_the_corner_when_neither_grouping_is_support
 
     with pytest.raises(ValueError, match="no two-part grouping is supported"):
         pin_two_part_grouping(splits, context, [index])
+
+
+def test_two_part_step_runs_on_tie_rows_and_counts_each_as_half_an_over():
+    rows = 3000
+    splits, context, index = _supported_splits(rows)
+    # Outcomes drawn from the same gated SkewNormal the step is handed, so every guard passes and
+    # the step returns; one row in sixty lands exactly on its line.
+    rng = np.random.default_rng(11)
+    gate_rates = {"low": 0.30, "high": 0.10}
+    gate = context["routes"]["validation"].map(gate_rates).to_numpy(dtype=float)
+    mean, sigma, alpha = rng.uniform(25.0, 70.0, rows), np.full(rows, 22.0), np.full(rows, 1.5)
+    loc = skewnormal_loc_from_mean(mean, sigma, alpha)
+    result = skewnorm.rvs(alpha, loc, sigma, random_state=rng)
+    result[rng.random(rows) < gate] = 0.0
+    line = np.round(mean * (1.0 - gate)) + 0.5
+    tie = np.arange(rows) % 60 == 0
+    result[tie] = line[tie]
+    book = (1.0 - gate) * skewnorm.sf(line, alpha, loc, sigma) + rng.normal(0.0, 0.08, rows)
+    priced = pd.DataFrame({"Line": line, "Odds": np.clip(book, 0.02, 0.98)}, index=index)
+    frame = splits["X_validation"].assign(MeanYr=mean * (1.0 - gate), Mean10=mean * (1.0 - gate))
+    splits["X_validation"] = splits["X_test"] = frame
+    splits["B_validation"] = splits["B_test"] = priced
+    splits["y_validation"] = pd.DataFrame({"Result": result}, index=index)
+    splits["dates_validation"] = pd.Series(pd.date_range("2020-01-01", periods=rows), index=index)
+    splits["quote_authenticity_test"] = splits["quote_authenticity_validation"]
+    context["routes"]["test"] = context["routes"]["validation"]
+    context |= {"status": "active", "gate_rates": gate_rates, "positions": [2, 3, 4]}
+    context |= dict.fromkeys(["thresholds", "role_columns", "support", "fallback_gate"])
+    fused = {"model_weight": 1.0, "weighted_mean_val": mean, "weighted_mean": mean}
+    for split in ("val", "test"):
+        fused |= {f"sn_sigma_blend_{split}": sigma, f"sn_alpha_blend_{split}": alpha}
+
+    assert set(_two_part_support_rows(splits, context, index)[1][tie]) == {0.5}
+    context["pinned_grouping"] = pin_two_part_grouping(splits, context, [index])
+    calibrated, _ = _step_apply_two_part_groupcdf_candidate({}, fused, splits, context)
+
+    # Both numbers move if a tie is scored as an Over: it would join class 1, and cost the book
+    # (1 - p)^2 where half an Over costs it (0.5 - p)^2.
+    blob = calibrated["structural_calibration_blob"]
+    support = blob["support"]["nested_calibration"]["temperature_support"][0]
+    assert support["class_0_rows"] + support["class_1_rows"] == rows - tie.sum()
+    book_brier = np.mean((priced["Odds"] - np.where(tie, 0.5, result > line)) ** 2)
+    assert blob["validation_audit"]["gate1"]["book_brier"] == pytest.approx(book_brier)

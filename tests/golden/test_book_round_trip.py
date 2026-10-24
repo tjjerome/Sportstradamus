@@ -1,8 +1,10 @@
 """The book-odds encode/decode round trip must not manufacture an edge.
 
 `get_ev` encodes a bookmaker (line, under-prob) to a mean stored in the archive;
-`get_odds` decodes a mean back to a probability in `book_fallback_prob`. The two
-must be inverses, and the zero-inflation gate must be applied symmetrically, or a
+`get_odds` decodes a mean back to a probability on the model path's book leg
+(`_book_over_prob`; `book_fallback_prob` runs its own shape-consistent
+invert+decode pair off `resolve_training_quote` cohorts). Encode and decode must
+be inverses, and the zero-inflation gate must be applied symmetrically, or a
 book-only leg shows a fake edge that buries the genuinely-modeled markets.
 """
 
@@ -99,6 +101,25 @@ def test_zinb_even_money_book_not_overconfident(league, market, line):
     ev = get_ev(line, 0.5, cv, dist=dist, gate=gate)
     p_under = get_odds(line, ev, dist, cv=cv, step=step, gate=gate)
     assert p_under < 0.65
+
+
+@pytest.mark.parametrize("line", [1.5, 2.5])
+def test_dpo_even_money_book_not_overconfident(line):
+    """An even-money DPO book price must round-trip back to ~0.5.
+
+    WNBA FG3M left the named-ZINB guard above when 47805e38 reshipped it as
+    DPO, dropping the cell's round-trip coverage; this pin restores it under
+    the new family. DPO is ungated (`book_gate` covers ZINB/ZAGamma only), so
+    unlike the ZINB floor there is no structural-zero mass and the decode must
+    land on 0.5 itself. Named, not discovered: if the cell is ever re-familied
+    again, the `dist` assertion fails loudly and this guard moves with it.
+    """
+    dist, cv, gate, step = _book_cell_params("WNBA", "FG3M")
+    assert dist == "DPO"
+    assert not gate
+    ev = get_ev(line, 0.5, cv, dist=dist, gate=gate)
+    p_under = get_odds(line, ev, dist, cv=cv, step=step, gate=gate)
+    assert p_under == pytest.approx(0.5, abs=0.02)
 
 
 # Realistic game-line points: NBA/NFL/MLB totals and a spread. The even-money

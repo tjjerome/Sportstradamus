@@ -10,9 +10,12 @@ import pytest
 from sklearn.metrics import brier_score_loss
 
 from sportstradamus.analysis import (
+    annotate_offer_outcomes,
     compute_book_brier_skill_score,
     compute_brier_skill_score,
 )
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
+from sportstradamus.realized import RECOMMENDED_PAYOUT_MAX
 
 
 def _seeded_subset(n: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -176,3 +179,41 @@ def test_compute_book_brier_skill_score_does_not_crash_when_passes_outnumber_bet
 def test_compute_brier_skill_score_does_not_crash_when_passes_outnumber_bets():
     subset = _seeded_subset_with_passes(n_bet=20, n_pass=80, seed=8)
     assert math.isfinite(compute_brier_skill_score(subset))
+
+
+def _annotated(platform: str, boost: float, win_prob: float) -> pd.Series:
+    offer = {"Platform": platform, "Boost": boost, "Win Prob": win_prob, "Market Prob": 0.5}
+    return annotate_offer_outcomes(pd.DataFrame([offer])).iloc[0]
+
+
+@pytest.mark.parametrize(
+    ("platform", "boost", "payout"),
+    [
+        # Underdog persists its raw multiplier: 1.0 pays the per-pick baseline.
+        ("Underdog", 1.0, UNDERDOG_BOOST_BASELINE),
+        # Sleeper's Boost is already its posted payout.
+        ("Sleeper", 1.5, 1.5),
+        # The window is closed at the cap.
+        ("Sleeper", RECOMMENDED_PAYOUT_MAX, RECOMMENDED_PAYOUT_MAX),
+    ],
+)
+def test_kelly_sizes_at_the_platform_payout(platform, boost, payout):
+    out = _annotated(platform, boost, win_prob=0.75)
+    assert out["Model EV"] == pytest.approx(0.75 * payout)
+    assert out["Kelly"] == pytest.approx((0.75 * payout - 1) / (payout - 1))
+    assert out["Kelly"] > 0
+
+
+@pytest.mark.parametrize(
+    ("platform", "boost"),
+    [
+        # Even money: the old rule divided by zero here.
+        ("Sleeper", 1.0),
+        # A 0.99x payout, just under even; the old rule's two negatives made Kelly +11.
+        ("Underdog", 0.99 / UNDERDOG_BOOST_BASELINE),
+        # Past the favored-payout cap, where the edge claim is not trusted.
+        ("Sleeper", RECOMMENDED_PAYOUT_MAX + 0.5),
+    ],
+)
+def test_kelly_is_zero_outside_the_payout_window(platform, boost):
+    assert _annotated(platform, boost, win_prob=0.9)["Kelly"] == 0.0

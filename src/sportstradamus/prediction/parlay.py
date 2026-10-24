@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from operator import itemgetter
-from typing import Literal
 
 import numpy as np
 from tqdm import tqdm
 
-from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import no_vig_odds, sleeper_payouts, stat_cv, stat_std
+from sportstradamus.helpers import (
+    cell_market,
+    no_vig_odds,
+    sleeper_payouts,
+    stat_cv,
+    stat_map,
+    stat_std,
+)
 from sportstradamus.leg_schema import build_leg
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.payouts import (
@@ -135,25 +140,34 @@ def _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_bo
     return boost
 
 
-def _parlay_fun(bet, league):
-    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count."""
-    return np.sum(
-        [
-            3 - (np.abs(leg["Line"]) / stat_std.get(league, {}).get(leg["Market"], 1))
-            if ("H2H" in leg["Market"])
-            else 2
-            - 1 / stat_cv.get(league, {}).get(leg["Market"], 1)
-            + leg["Line"] / stat_std.get(league, {}).get(leg["Market"], 1)
-            for leg in bet
-            if (leg["Bet"] == "Over") or ("H2H" in leg["Market"])
-        ]
-    )
+def _parlay_fun(bet, league, stat_by_label):
+    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count.
+
+    A market's spread is filed under the league's own key, not the label the leg
+    carries. A cell with no stored spread scores on a unit one.
+    """
+    stds, cvs = stat_std.get(league, {}), stat_cv.get(league, {})
+    fun = 0.0
+    for leg in bet:
+        stat = resolve_leg_stat(leg["Market"], stat_by_label)
+        # stat_std holds None for a cell meditate has not calibrated yet.
+        line_in_stds = leg["Line"] / (stds.get(stat) or 1)
+        if "H2H" in leg["Market"]:
+            fun += 3 - abs(line_in_stds)
+        elif leg["Bet"] == "Over":
+            fun += 2 - 1 / cvs.get(stat, 1) + line_in_stds
+    return fun
 
 
-def resolve_leg_stat(market: str, new_map: dict) -> str:
-    """Gamelog stat key for a leg's display ``Market``, mirroring the ``cMarket`` idiom."""
+def leg_market_map(league: str, platform: str) -> dict[str, str]:
+    """Each of ``platform``'s market labels mapped to ``league``'s own cell key."""
+    return {label: cell_market(league, platform, label) for label in stat_map[platform]}
+
+
+def resolve_leg_stat(market: str, stat_by_label: dict) -> str:
+    """Gamelog stat key for a leg's display ``Market``: the league's own name, ``H2H`` dropped."""
     stripped = market.replace("H2H ", "")
-    return new_map.get(stripped, stripped)
+    return stat_by_label.get(stripped, stripped)
 
 
 def _is_sleeper_flex_candidate(info, bet_size):
@@ -195,24 +209,23 @@ def _leg_boost_payout(
     payout_base,
     full_refund_below_size,
 ):
-    """Price a Max/Underdog candidate via the per-leg boost array push-repricing path."""
+    """Price a Max/Underdog candidate on its legs' own multipliers and the pair-modifier product."""
     boosts_leg = g.boosts[np.ix_(bet_id)]
-    leg_boost = boosts_leg.copy()
-    # Fold M's pairwise product into one slot so prod(leg_boost) == boost
-    # exactly when no leg pushes. Division is safe: _parlay_admissible
-    # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg entry
-    # can be zero here without the candidate already rejected.
-    leg_boost[0] *= boost / np.prod(boosts_leg)
     return parlay_payout_prob(
         p,
         g.p_push[np.ix_(bet_id)],
         SIG,
         bet_size,
-        leg_boost,
+        boosts_leg,
         payout,
         full_payouts,
         payout_base,
         full_refund_below_size=full_refund_below_size,
+        # M's pairwise product, passed apart from the per-leg multipliers so a
+        # Flex loss tier can rank them. Division is safe: _parlay_admissible
+        # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg
+        # entry can be zero here without the candidate already rejected.
+        pair_modifier=boost / np.prod(boosts_leg),
     )
 
 
@@ -244,7 +257,7 @@ def _evaluate_parlay(
     team,
     opp,
     leg_teams,
-    new_map,
+    stat_by_label,
     full_refund_below_size=None,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
@@ -293,7 +306,7 @@ def _evaluate_parlay(
             {
                 **leg,
                 "Platform": info["Platform"],
-                "Stat": resolve_leg_stat(leg["Market"], new_map),
+                "Stat": resolve_leg_stat(leg["Market"], stat_by_label),
             }
         )
         for leg in bet
@@ -309,9 +322,10 @@ def _evaluate_parlay(
         "Bet ID": bet_id,
         "P": prev_p,
         "PB": prev_pb,
-        # Transient — used only for the Fun sort in _append_parlay_rows and
-        # dropped by persist._PARLAY_DROP_COLS before current_parlays.parquet.
-        "Fun": _parlay_fun(bet, info["League"]),
+        # One of the three sort keys _append_parlay_rows keeps the top rows by. Stored
+        # in the parlay history; persist._PARLAY_DROP_COLS drops it only from
+        # current_parlays.parquet.
+        "Fun": _parlay_fun(bet, info["League"], stat_by_label),
         "Bet Size": bet_size,
         "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
         "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
@@ -330,9 +344,7 @@ def beam_search_parlays(
     info,
     team,
     opp,
-    stat_map,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
@@ -353,13 +365,8 @@ def beam_search_parlays(
         max_boost: Max allowed product boost for a parlay.
         bet_df: Dict of leg metadata keyed by DataFrame index.
         info: ``{Game, Date, League, Platform}`` metadata dict.
-        team: Home team abbreviation.
-        opp: Away team abbreviation.
-        stat_map: ``{platform: {display_market: gamelog_stat}}`` — resolved once
-            per game into the league-specific leg ``Stat`` lookup via
-            :func:`sportstradamus.analysis._leg_market_map`.
-        contest_variant: Underdog contest variant. Affects payout curve
-            interpretation in :func:`payouts.expected_payout_with_pushes`.
+        team: One of the game's two team abbreviations.
+        opp: The other; a parlay must hold a leg of each.
         full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
             — entries at or below this size refund in full on any push
             (Sleeper's 2-pick divergence). ``None`` keeps the generic
@@ -368,25 +375,24 @@ def beam_search_parlays(
     Returns:
         list[dict]: Parlay candidate dicts ready for DataFrame construction.
     """
-    K = _BEAM_WIDTH
     max_bet_size = len(payouts) + 1
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
     leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
-    new_map = _leg_market_map(info["League"], info["Platform"], stat_map)
+    stat_by_label = leg_market_map(info["League"], info["Platform"])
 
     candidates = [(i,) for i in leg_indices]
-    all_results = []
+    parlay_rows = []
 
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
         top_candidates = _expand_candidates(
-            candidates, leg_indices, leg_players, g.EV, target_size, K
+            candidates, leg_indices, leg_players, g.EV, target_size, _BEAM_WIDTH
         )
         payout_base = payouts[target_size - 2]
         for parlay in top_candidates:
-            result = _evaluate_parlay(
+            row = _evaluate_parlay(
                 parlay,
                 target_size,
                 payout_base,
@@ -398,11 +404,11 @@ def beam_search_parlays(
                 team,
                 opp,
                 leg_teams,
-                new_map,
+                stat_by_label,
                 full_refund_below_size,
             )
-            if result is not None:
-                all_results.append(result)
+            if row is not None:
+                parlay_rows.append(row)
         candidates = top_candidates
 
-    return all_results
+    return parlay_rows

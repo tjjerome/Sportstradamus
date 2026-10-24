@@ -139,8 +139,10 @@ def test_fused_loc_skewnormal_default_unchanged():
         sigma=np.array([3.5]),
         skew_alpha=np.array([1.2]),
     )
-    assert float(ev[0]) == pytest.approx(10.82731187571877, abs=1e-9)
-    assert float(sig[0]) == pytest.approx(4.060653952180996, abs=1e-9)
+    # Pinned under the precision-pool scale floor (model sigma 3.5 sits just under
+    # 0.8 x the 4.4 book scale, so the pool sees 3.52).
+    assert float(ev[0]) == pytest.approx(10.838451175474876, abs=1e-9)
+    assert float(sig[0]) == pytest.approx(4.069976152553347, abs=1e-9)
     assert float(skew[0]) == pytest.approx(0.36, abs=1e-9)
     assert gate is None
 
@@ -181,7 +183,7 @@ _OVER_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
 
 
 def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
-    from sportstradamus.prediction.model_prob import _book_over_prob
+    from sportstradamus.prediction.offer_records import book_over_prob
 
     league, market = "WNBA", "AST"
     cv = config.stat_cv[league][market]
@@ -191,7 +193,7 @@ def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", None)
     df = pd.DataFrame({"Line": [2.5, 1.5], "Market Projection": [2.2, 1.1]})
 
-    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+    got = book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
 
     expected = [
         1 - get_odds(ln, mp, "SkewNormal", cv=cv, step=0.5, sigma=mp * cv, skew_alpha=0, gate=None)
@@ -201,14 +203,14 @@ def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
 
 
 def test_book_over_prob_fitted_uses_shape(monkeypatch):
-    from sportstradamus.prediction.model_prob import _book_over_prob
+    from sportstradamus.prediction.offer_records import book_over_prob
 
     league, market = "WNBA", "AST"
     cv = config.stat_cv[league][market]
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _OVER_SHAPE)
     df = pd.DataFrame({"Line": [2.5], "Market Projection": [2.2]})
 
-    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+    got = book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
 
     sigma, skew = config.book_skewnormal_shape(league, market, 2.2)
     expected = 1 - get_odds(
@@ -227,7 +229,7 @@ def test_book_over_prob_fitted_uses_shape(monkeypatch):
 # --- Settling verdict: the served blend collapses-to-cv (book shape does NOT enter) -------
 # The WS2 settling experiment found the shaped book loses the served blend OOS, so
 # _blend_with_book keeps the symmetric book leg — its output must be independent of a fitted
-# book_shape, even though the book-only _book_over_prob path does read the shape.
+# book_shape, even though the book-only book_over_prob path does read the shape.
 
 
 def _sn_blend_df():
@@ -287,3 +289,135 @@ def test_skewnormal_model_gate_does_not_contaminate_book_endpoint():
     np.testing.assert_allclose(base, book)
     np.testing.assert_allclose(frame["Projection"], book)
     np.testing.assert_allclose(frame["Model Gate"], 0.0)
+
+
+def _synth_counts(means, a, b, n_per_bin, rng):
+    """Draw counts whose conditional variance follows ``var = a·mu^b`` at each mean.
+
+    NegBin is only the generator here — the fit reads moments, not families. All rows
+    share one line, which is the situation count cells are actually in.
+    """
+    out_ev, out_results = [], []
+    for mu in means:
+        r = mu**2 / (a * mu**b - mu)
+        out_results.append(rng.negative_binomial(r, r / (r + mu), n_per_bin).astype(float))
+        out_ev.append(np.full(n_per_bin, mu))
+    return np.concatenate(out_results), np.concatenate(out_ev)
+
+
+def test_fit_book_shape_quantile_bins_fit_a_cell_that_quotes_one_line():
+    """Deciles of the book's implied mean fit a cell whose single line cannot."""
+    a, b = 1.4, 1.0
+    means = np.array([0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 1.8, 2.2, 2.6, 3.0])
+    rng = np.random.default_rng(20260830)
+    results, ev = _synth_counts(means, a, b, 4000, rng)
+
+    # Every row is quoted at 0.5, so line-binning yields one bin — below the bin floor.
+    assert fit_book_shape("MLB", "hits", results, np.full(results.size, 0.5)) is None
+
+    fit = fit_book_shape("MLB", "hits", results, ev, quantile_bins=10)
+
+    assert fit["n_bins"] == 10
+    assert fit["a"] == pytest.approx(a, rel=0.10)
+    assert fit["b"] == pytest.approx(b, abs=0.08)
+
+
+def test_fit_book_shape_survives_a_cell_with_no_quoted_rows():
+    """An unquoted count cell has no rows to take quantiles of, and must not raise."""
+    empty = np.array([], dtype=float)
+
+    assert fit_book_shape("WNBA", "DREB", empty, empty, quantile_bins=10) is None
+
+
+def _count_cell(monkeypatch, dist, coeffs):
+    monkeypatch.setitem(config.stat_dist, "TESTLG", {"TESTMK": dist})
+    monkeypatch.setitem(config.stat_meta, "TESTLG", {"TESTMK": {"cv": 0.5, "book_shape": coeffs}})
+
+
+def test_book_count_dispersion_unfitted_cell_keeps_the_convention(monkeypatch):
+    _count_cell(monkeypatch, "DPO", None)
+
+    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) == (None, None)
+
+
+def test_book_count_dispersion_skips_a_family_with_no_count_dispersion(monkeypatch):
+    coeffs = {"a": 0.9, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "Gamma", coeffs)
+
+    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) == (None, None)
+
+
+def test_book_count_dispersion_returns_the_fitted_precision(monkeypatch):
+    coeffs = {"a": 0.9, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "DPO", coeffs)
+    mean, cv = 2.0, 0.5
+
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+
+    # var = 0.9*2 = 1.8 against the convention's 2*(1+0.5*2) = 4.0, so the fit wins.
+    assert r is None
+    assert float(phi) == pytest.approx(mean / 1.8, rel=1e-9)
+    assert float(phi) > 1.0 / (1.0 + cv * mean)
+
+
+def test_book_count_dispersion_returns_the_fitted_negbin_r(monkeypatch):
+    """NBA REB recovers a mean 19.4% high on the convention and 0.0% high on the fit."""
+    coeffs = {"a": 1.5, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "NegBin", coeffs)
+    mean, cv = 2.0, 0.5
+
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+
+    # Fitted var = 3.0 sits between Poisson (2.0) and the convention's 2*(1+0.5*2) = 4.0,
+    # so r = mean^2 / (var - mean) = 4, double the convention's r = 1/cv = 2.
+    assert phi is None
+    assert float(r) == pytest.approx(mean**2 / (3.0 - mean), rel=1e-9)
+    assert float(r) > 1.0 / cv
+
+
+def test_book_count_dispersion_keeps_the_convention_below_poisson_variance(monkeypatch):
+    """``var <= mean`` has no NegBin representation — r would be infinite."""
+    coeffs = {"a": 0.4, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "NegBin", coeffs)
+    cv = 0.5
+
+    _, r = config.book_count_dispersion("TESTLG", "TESTMK", 2.0, cv)
+
+    assert float(r) == pytest.approx(1.0 / cv, rel=1e-9)
+
+
+@pytest.mark.parametrize("dist", ["DPO", "NegBin"])
+def test_book_count_dispersion_ignores_a_fit_that_raises_the_variance(monkeypatch, dist):
+    """Every contaminant in the estimator inflates variance, so only cuts are trusted."""
+    coeffs = {"a": 3.0, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, dist, coeffs)
+    mean, cv = 0.5, 0.5
+
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+
+    # Fitted var = 1.5 exceeds the convention's 0.5*(1+0.25) = 0.625 — keep the convention.
+    if dist == "DPO":
+        assert float(phi) == pytest.approx(1.0 / (1.0 + cv * mean), rel=1e-9)
+    else:
+        assert float(r) == pytest.approx(mean**2 / (0.625 - mean), rel=1e-9)
+
+
+def test_get_ev_phi_round_trips_through_get_odds():
+    """The count analogue of the WS2 sigma passthrough: fix the shape across invert/decode."""
+    line, under, cv, phi = 2.5, 0.62, 0.5, 0.85
+
+    ev = get_ev(line, under, cv, dist="DPO", phi=phi)
+
+    assert get_odds(line, ev, "DPO", cv=cv, step=1, phi=phi) == pytest.approx(under, abs=1e-6)
+    # The passthrough must actually bind — the cv convention implies a different mean.
+    assert get_ev(line, under, cv, dist="DPO") != pytest.approx(ev, rel=1e-3)
+
+
+def test_get_ev_r_round_trips_through_get_odds():
+    """NegBin's analogue of the phi passthrough, so invert and decode share one shape."""
+    line, under, cv, r = 4.5, 0.52, 0.53, 14.4
+
+    ev = get_ev(line, under, cv, dist="NegBin", r=r)
+
+    assert get_odds(line, ev, "NegBin", cv=cv, step=1, r=r) == pytest.approx(under, abs=1e-6)
+    assert get_ev(line, under, cv, dist="NegBin") != pytest.approx(ev, rel=1e-3)

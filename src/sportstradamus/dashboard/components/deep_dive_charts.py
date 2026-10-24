@@ -3,10 +3,9 @@
 import altair as alt
 import numpy as np
 import pandas as pd
-import streamlit as st
 from scipy import stats
 
-from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
+from sportstradamus.dashboard.data import load_gamelog
 from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
 from sportstradamus.helpers.distributions import apply_cdf_recal, dp_pmf_curve
 
@@ -24,36 +23,52 @@ DIST_PARAM_COLS = {
     "Gate": "gate",
 }
 
+# A value on the line is a push: the stake comes back, so the game is neither an Over nor an
+# Under and both charts draw it in the neutral gray, not a settled side's green or red. The
+# split keys off position against the line, so a color legend would be chart junk (mockup rev 3).
+_SIDE_COLOR = alt.Color(
+    "Side:N",
+    scale=alt.Scale(domain=["Over", "Under", "Push"], range=[GREEN, RED, GRAY]),
+    legend=None,
+)
+
+
+def _side(values, line: float) -> np.ndarray:
+    return np.select([values > line, values < line], ["Over", "Under"], "Push")
+
+
+def app_line_rule(line: float, channel: str) -> alt.Chart:
+    """The offer's own line as the dialog's white dashed rule, on ``channel`` (``"x"``/``"y"``).
+
+    One definition so every deep-dive chart marks the line the user would bet the same way:
+    the History bars and the Movement steps run it across (``"y"``), the Model curve up it
+    (``"x"``).
+    """
+    return (
+        alt.Chart(pd.DataFrame({"Line": [line]}))
+        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
+        .encode(**{channel: "Line:Q"})
+    )
+
 
 def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
     """Bar chart of recent games with a dashed betting-line rule and gold line tag.
 
-    ``df`` must have columns ``Label`` (ordered x-axis string),
-    ``StatValue`` (y), and ``Hit`` (bool).  The most-recent game should be
-    last so the bars read left-to-right chronologically.  Bars over the line
-    read green, under it red (``Hit`` is ``StatValue >= line``); the white
-    dashed rule sits in front, gold-tagged with its value.
+    ``df`` must have columns ``Label`` (ordered x-axis string), ``StatValue`` (y) and
+    ``Side`` (``"Over"`` / ``"Under"`` / ``"Push"``, each value read against the line by
+    :func:`_side`). The most-recent game should be last so the bars read left-to-right
+    chronologically. Bars over the line read green, under it red and a push gray; the
+    white dashed rule sits in front, gold-tagged with its value.
     """
-    df = df.copy()
-    df["color"] = np.where(df["Hit"], "Over", "Under")
     bars = (
         alt.Chart(df)
         .mark_bar()
         .encode(
             x=alt.X("Label:N", sort=None, title="", axis=alt.Axis(labelAngle=-40)),
             y=alt.Y("StatValue:Q", title=""),
-            color=alt.Color(
-                "color:N",
-                scale=alt.Scale(domain=["Over", "Under"], range=[GREEN, RED]),
-                legend=None,
-            ),
+            color=_SIDE_COLOR,
             tooltip=["Label:N", "StatValue:Q"],
         )
-    )
-    rule = (
-        alt.Chart(pd.DataFrame({"Line": [line]}))
-        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
-        .encode(y="Line:Q")
     )
     # Gold "line {x}" callout anchored to the leftmost bar at the line's height.
     tag_df = pd.DataFrame(
@@ -64,7 +79,7 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
         .mark_text(align="left", baseline="bottom", dx=-14, dy=-3, color=GOLD, fontWeight="bold")
         .encode(x=alt.X("Label:N", sort=None), y="Line:Q", text="tag:N")
     )
-    return bars + rule + tag
+    return bars + app_line_rule(line, "y") + tag
 
 
 def _recal_density(xs: np.ndarray, cdf: np.ndarray, recal_blob: dict) -> np.ndarray:
@@ -146,29 +161,8 @@ def distribution_frame(
     else:
         xs, vals = _discrete_curve(dist, ev, std, params, recal_blob)
         y_title = "Probability"
-    df_pdf = pd.DataFrame(
-        {
-            "x": xs,
-            "P": vals,
-            "Side": ["Over" if x >= line else "Under" for x in xs],
-        }
-    )
+    df_pdf = pd.DataFrame({"x": xs, "P": vals, "Side": _side(xs, line)})
     return df_pdf, y_title, is_continuous
-
-
-def resolve_std(projection_std, ev: float, cv: float) -> float:
-    """A positive, finite spread for the distribution x-range.
-
-    Prefers the model's ``Projection STD``; book-fallback offers carry none, so it
-    falls back to the CV-implied ``ev * cv`` (``cv`` is always present), then ``ev * 0.3``.
-    The NaN guard matters: ``NaN or default`` keeps the NaN (NaN is truthy), which blanks
-    the x-range and renders the curve invisible.
-    """
-    if pd.notna(projection_std) and projection_std > 0:
-        return float(projection_std)
-    if pd.notna(cv) and cv > 0:
-        return float(ev) * float(cv)
-    return float(ev) * 0.3
 
 
 def _projection_overlay(df_pdf: pd.DataFrame, projection: float) -> tuple[alt.Chart, alt.Chart]:
@@ -203,21 +197,14 @@ def distribution_chart(
     projection: float | None = None,
     consensus_line: float | None = None,
 ) -> alt.Chart:
-    # Over green / under red keys off position relative to the line, so the color
-    # legend is redundant chart junk (mockup rev 3) — drop it, keep the mass split.
-    color_enc = alt.Color(
-        "Side:N",
-        scale=alt.Scale(domain=["Over", "Under"], range=[GREEN, RED]),
-        legend=None,
-    )
     if is_continuous:
         x_enc = alt.X("x:Q", title=market)
         y_enc = alt.Y("P:Q", title=y_title)
         chart = alt.layer(
             alt.Chart(df_pdf)
             .mark_area(opacity=0.3)
-            .encode(x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]),
-            alt.Chart(df_pdf).mark_line(strokeWidth=2).encode(x=x_enc, y=y_enc, color=color_enc),
+            .encode(x=x_enc, y=y_enc, color=_SIDE_COLOR, tooltip=["x:Q", "P:Q", "Side:N"]),
+            alt.Chart(df_pdf).mark_line(strokeWidth=2).encode(x=x_enc, y=y_enc, color=_SIDE_COLOR),
         )
     else:
         # Discrete: touching bars via explicit half-integer boundaries.
@@ -230,16 +217,11 @@ def distribution_chart(
                 x=alt.X("x_start:Q", title=market, axis=alt.Axis(tickMinStep=1)),
                 x2="x_end:Q",
                 y=alt.Y("P:Q", title=y_title),
-                color=color_enc,
+                color=_SIDE_COLOR,
                 tooltip=["x:Q", "P:Q", "Side:N"],
             )
         )
-    betting_line = (
-        alt.Chart(pd.DataFrame({"Line": [line]}))
-        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
-        .encode(x="Line:Q")
-    )
-    chart = chart + betting_line
+    chart = chart + app_line_rule(line, "x")
     # Consensus market line: solid GRAY rule, distinct from the white dashed app line,
     # and carrying no color encoding so it never re-splits the over/under shading.
     if consensus_line is not None and not pd.isna(consensus_line):
@@ -271,7 +253,7 @@ def _history_frame(label_vals, stat_vals, line, opp_vals) -> pd.DataFrame:
         {
             "Label": label_vals,
             "StatValue": stat_vals,
-            "Hit": stat_vals >= line,
+            "Side": _side(stat_vals, line),
             "Opponent": opp_vals,
         }
     )

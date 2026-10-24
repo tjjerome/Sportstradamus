@@ -65,22 +65,25 @@ def parlay_payout_prob(
     payout_base,
     *,
     full_refund_below_size=None,
+    pair_modifier=1.0,
 ):
     """Expected payout for a parlay, routing to the analytical or push-aware path.
 
     The fast analytical ``mvn.cdf`` path only ever gives P(all hit), so any
-    curve with a payout at more than one miss-count (Underdog flex/insurance)
-    or any leg with a non-floor push probability must route to the Monte-Carlo
+    curve with a payout at more than one miss-count (Underdog flex) or any leg
+    with a non-floor push probability must route to the Monte-Carlo
     :func:`expected_payout_with_pushes` path instead.
 
-    ``boost`` may be a per-leg ``np.ndarray`` (push-repricing, see
-    :func:`expected_payout_with_pushes`) as well as a scalar; ``full_refund_below_size``
-    passes straight through to that function unchanged.
+    ``boost`` may be the per-leg ``np.ndarray`` of pick multipliers (see
+    :func:`expected_payout_with_pushes`) as well as a scalar;
+    ``full_refund_below_size`` and ``pair_modifier`` pass straight through to
+    that function. The analytical path needs neither: ``payout`` already
+    includes the pair modifier and no push can refund.
     """
     has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
-    # Curves with payouts at multiple miss-counts (e.g. Underdog flex and
-    # insurance) need the MC path even with zero pushes — the analytical
-    # mvn.cdf only gives P(all hit), discarding the partial-hit tiers.
+    # Curves with payouts at multiple miss-counts (e.g. Underdog flex) need the
+    # MC path even with zero pushes — the analytical mvn.cdf only gives
+    # P(all hit), discarding the partial-hit tiers.
     curve = full_payouts.get(bet_size, [payout_base, 0.0])
     multi_tier = sum(1 for v in curve if v > 0) > 1
     if has_pushes or multi_tier:
@@ -92,5 +95,6 @@ def parlay_payout_prob(
             boost=boost,
             payout_curve=full_payouts,
             full_refund_below_size=full_refund_below_size,
+            pair_modifier=pair_modifier,
         )
     return payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)

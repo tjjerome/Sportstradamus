@@ -1,4 +1,4 @@
-"""Unit tests for the gate-driven generate-ship-config CLI + helpers."""
+"""Unit tests for the gate-driven ``ship config`` CLI + helpers."""
 
 from __future__ import annotations
 
@@ -147,7 +147,7 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
             }
         },
     )
-    # The devel branch enforces serve-iff-ship against model_stats; without an
+    # The devel branch reports served-but-failing cells against model_stats; without an
     # explicit fixture the CLI reads the real production parquet.
     ms = tmp_path / "ms.parquet"
     pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": True}]).to_parquet(
@@ -158,6 +158,22 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
     assert result.exit_code == 0, result.output
     assert "active=1" in result.output
     assert "withheld=1" in result.output
+    assert meta_path.read_text() == before
+
+
+def test_cli_devel_warns_on_failing_served_cell_without_failing(tmp_path):
+    """A served cell with ship=False is reported, not fatal — the cull is the human's decision."""
+    meta_path = tmp_path / "stat_meta.json"
+    _write(meta_path, {"NBA": {"PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr")}})
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": False}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
+    before = meta_path.read_text()
+    result = _invoke(["--branch", "devel", "--meta", str(meta_path), "--model-stats", str(ms)])
+    assert result.exit_code == 0, result.output
+    assert "WARN NBA/PTS" in result.output
+    assert "1 served cell(s) fail the ship gate" in result.output
     assert meta_path.read_text() == before
 
 
@@ -301,6 +317,7 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
     monkeypatch.setattr(io_mod, "MODELS_DIR", models)
     (models / "NBA_PTS.mdl").write_text("x")  # active -> kept
     (models / "NBA_REB.mdl").write_text("x")  # withheld -> pruned
+    (models / "NBA_MIN.mdl").write_text("x")  # withheld volume denominator -> kept
 
     meta_path = tmp_path / "stat_meta.json"
     _write(
@@ -309,6 +326,7 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
             "NBA": {
                 "PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
                 "REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
+                "MIN": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
             }
         },
     )
@@ -331,3 +349,49 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert (models / "NBA_PTS.mdl").exists()
     assert not (models / "NBA_REB.mdl").exists()
+    assert (models / "NBA_MIN.mdl").exists()
+
+
+def test_cli_prune_dry_run_lists_but_keeps_the_withheld_pickles(tmp_path, monkeypatch):
+    import sportstradamus.helpers.io as io_mod
+
+    models = tmp_path / "models"
+    models.mkdir()
+    monkeypatch.setattr(io_mod, "MODELS_DIR", models)
+    (models / "NBA_PTS.mdl").write_text("x")  # active
+    (models / "NBA_REB.mdl").write_text("x")  # withheld: named, not deleted
+    (models / "NBA_MIN.mdl").write_text("x")  # withheld volume denominator: never pruned
+
+    meta_path = tmp_path / "stat_meta.json"
+    _write(
+        meta_path,
+        {
+            "NBA": {
+                "PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
+                "REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
+                "MIN": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
+            }
+        },
+    )
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": True}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
+    result = _invoke(
+        [
+            "--branch",
+            "devel",
+            "--meta",
+            str(meta_path),
+            "--model-stats",
+            str(ms),
+            "--prune",
+            "--dry-run",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert "would prune NBA/REB" in result.output
+    assert "NBA/MIN" not in result.output
+    assert (models / "NBA_REB.mdl").exists()
+    assert (models / "NBA_PTS.mdl").exists()
+    assert (models / "NBA_MIN.mdl").exists()

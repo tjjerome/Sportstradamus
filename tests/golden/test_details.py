@@ -12,6 +12,7 @@ import datetime as dt
 import json
 
 import pandas as pd
+import pytest
 
 from sportstradamus.prediction.stories.details import (
     build_offer_details,
@@ -406,6 +407,51 @@ def test_build_offer_details_nfl_volume_stat_by_position():
     wr = json.loads(out.loc["Catcher"]["volume_trend"])
     assert wr["stat"] == "targets"  # WR1 → targets
     assert wr["series"] == [7.0, 9.0] and wr["value"] == 8.0
+
+
+@pytest.mark.parametrize(
+    ("league", "market", "stat", "column"),
+    [
+        ("NHL", "AST", "assists", "NHL_assists"),
+        ("NFL", "receiving yards", "receiving yards", "NFL_receiving-yards"),
+    ],
+)
+def test_build_offer_details_reads_importances_under_the_cells_file_slug(
+    league, market, stat, column
+):
+    """The importance table names a column the way a model file is named: the league's
+    own market key, spaces hyphenated. The board's ``Market`` is neither for an NHL
+    ``AST`` row, and misses the hyphen on any market of two words."""
+    offers = pd.DataFrame(
+        [
+            {
+                "League": league,
+                "Date": "2026-06-15",
+                "Player": "Star",
+                "Market": market,
+                "Opponent": "PHI",
+                "Position": "C1",
+                "Stat": stat,
+            }
+        ]
+    )
+    gamelog = pd.DataFrame(
+        [{"PLAYER": "Star", "OPP": "PHI", "DATE": "2026-06-01", stat: 1.0, "shots": 4.0}]
+    )
+    league_data = {
+        league: {
+            "comp_pairs": pd.DataFrame(columns=["player", "comp"]),
+            "gamelog": gamelog,
+            "cols": _COLS,
+            "volume_stat": "",
+        }
+    }
+    importances = pd.DataFrame({column: {stat: 9.0, "shots": 3.0}})
+
+    out = build_offer_details(offers, league_data, importances, exclude=set(), today=_TODAY)
+
+    # The market's own stat ranks first and is left out: the panel shows the others.
+    assert [entry["stat"] for entry in json.loads(out.loc[0, "other_stats"])] == ["shots"]
 
 
 def test_build_offer_details_empty_safe():

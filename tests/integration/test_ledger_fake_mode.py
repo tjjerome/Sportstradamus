@@ -17,7 +17,7 @@ small synthetic slate. Faking at this seam still exercises the real
 ``construct_entries``'s real ranking/sizing, ``_ledger_cross_game``'s real
 beam search + pooled-curve pricing, ``run_commit``'s real draw/budget/dedup
 logic, and ``_ledger_store``'s real JSONL write -- everything except the
-scrape + correlation search themselves. ``test_ledger_cross_platform.py``
+league load, the scrape and the correlation search. ``test_ledger_cross_platform.py``
 (golden suite) already patches this same seam for platform-merge coverage;
 this file's addition is driving it through the CLI and asserting on the
 JSONL that actually lands on disk.
@@ -120,7 +120,7 @@ _PRICING_BY_PLATFORM = {
 
 
 def _fake_live_load(
-    config: PickemConfig, platform: str
+    config: PickemConfig, platform: str, stats: dict
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """Stand-in for the real ``live_load``: no scrape, no correlation search.
 
@@ -146,6 +146,7 @@ def _fake_live_load(
         "Game": "BOS/LAL",
         "Bet Size": 2,
         "Boost": boost,
+        "Boost Pairs": (1.0,),
         "Model EV": model_ev,
         "Leg 1": f"{player} Over 22.5 points - 60.0%, 3.0x",
         "Leg 2": f"{platform} Second Leg Over 10.5 rebounds - 58.0%, 3.0x",
@@ -160,7 +161,8 @@ def _fake_live_load(
 
 @pytest.fixture
 def _fake_mode_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect the ledger JSONL store under ``tmp_path`` and fake ``live_load``.
+    """Redirect the ledger JSONL store under ``tmp_path`` and fake the league load and
+    ``live_load``.
 
     Shared by both tests in this file so the CLI-invocation shape (fake
     scrape + on-disk store) isn't duplicated. Returns the entries directory
@@ -170,6 +172,7 @@ def _fake_mode_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(
         _ledger_store, "entries_path", lambda date: entries_dir / f"{date.isoformat()}.jsonl"
     )
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr(ledger, "live_load", _fake_live_load)
     return entries_dir
 

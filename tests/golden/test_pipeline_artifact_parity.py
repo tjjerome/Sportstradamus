@@ -20,6 +20,7 @@ SERVED_MEAN = np.array([2.4, 7.8])
 SERVED_R = np.array([3.2, 11.0])
 SERVED_GATE = np.array([0.12, 0.37])
 SERVED_PHI = np.array([0.7, 1.6])
+PREBLEND_R = np.array([5.5, 19.0])
 INTEGER_LINES = np.array([1.0, 8.0])
 
 
@@ -104,23 +105,28 @@ def _stage_count_shape(
 
 
 def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp_path):
-    index = pd.Index([11, 29])
-    book_over = np.array([0.2, 0.65])
+    # The scorecard's priced-row reader drops an authentic set below its cluster floor (dates,
+    # with no Player column), so the round-trip below needs a wider book than the two-row shape
+    # fixtures above.
+    reps = 6
+    index = pd.Index(range(11, 11 + 2 * reps))
+    book_over = np.tile([0.2, 0.65], reps)
+    authenticity = ["authentic"] * (2 * reps - 1) + ["synthetic"]
+    book_ev = np.tile(SERVED_MEAN, reps)
+    served_mean = book_ev + 0.5
+    preblend_r = np.tile(PREBLEND_R, reps)
     splits = {
-        "X_test": pd.DataFrame({"MeanYr": [3.0, 8.0]}, index=index),
-        "y_test": pd.DataFrame({"Result": [1.0, 10.0]}, index=index),
+        "X_test": pd.DataFrame({"MeanYr": np.tile([3.0, 8.0], reps)}, index=index),
+        "y_test": pd.DataFrame({"Result": np.tile([1.0, 10.0], reps)}, index=index),
         "B_test": pd.DataFrame(
-            {"Line": INTEGER_LINES, "Odds": book_over, "EV": SERVED_MEAN},
+            {"Line": np.tile(INTEGER_LINES, reps), "Odds": book_over, "EV": book_ev},
             index=index,
         ),
         "players_test": None,
-        "dates_test": np.array(["2026-01-04", "2026-01-11"]),
-        "quote_authenticity_test": pd.Series(
-            ["authentic", "synthetic"],
-            index=index,
-        ),
+        "dates_test": [f"2026-01-{day:02d}" for day in range(1, 2 * reps + 1)],
+        "quote_authenticity_test": pd.Series(authenticity, index=index),
     }
-    model_over = np.array([0.4, 0.7])
+    model_over = np.tile([0.4, 0.7], reps)
     matrix_hash = "b" * 64
     selected_controls = {
         "dist": "NegBin",
@@ -147,9 +153,9 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     pipe._step_persist_artifacts(
         filedict=filedict,
         splits=splits,
-        prob_params=_raw_params().set_axis(index),
-        decoded={"ev": np.array([2.0, 7.0])},
-        weighted_mean=SERVED_MEAN,
+        prob_params=pd.concat([_raw_params()] * reps).set_axis(index),
+        decoded={"ev": np.tile([2.0, 7.0], reps), "r": preblend_r},
+        weighted_mean=served_mean,
         y_proba_filt=np.column_stack([1.0 - model_over, model_over]),
         y_proba_raw=np.column_stack([1.0 - model_over, model_over]),
         dist="NegBin",
@@ -161,7 +167,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         sn_scale_test=None,
         sn_skew_test=None,
         mix_test=None,
-        r_test=SERVED_R,
+        r_test=np.tile(SERVED_R, reps),
         gate_blend_test=None,
         phi_test=None,
         global_mean=5.0,
@@ -171,11 +177,16 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
 
     persisted = pd.read_csv(tmp_path / "test_sets" / "NFL_artifact_parity.csv")
     np.testing.assert_allclose(persisted["Odds"], 1.0 - book_over)
-    assert persisted["QuoteAuthenticity"].tolist() == ["authentic", "synthetic"]
+    # Pre-blend probe inputs: the book base mean the pool consumed and the model-only shape.
+    np.testing.assert_allclose(persisted["Book_EV"], book_ev)
+    assert not np.array_equal(persisted["Book_EV"], persisted["EV"])
+    np.testing.assert_allclose(persisted["R_model"], preblend_r)
+    assert not np.array_equal(persisted["R_model"], persisted["R"])
+    assert persisted["QuoteAuthenticity"].tolist() == authenticity
     brier_inputs = _brier_inputs(persisted)
     assert brier_inputs is not None
     _, recovered_book_over, _, _ = brier_inputs
-    np.testing.assert_allclose(recovered_book_over, book_over[:1])
+    np.testing.assert_allclose(recovered_book_over, book_over[:-1])
     saved_model = pd.read_pickle(tmp_path / "models" / "NFL_artifact_parity.mdl")
     identity = validate_strategy_artifacts(
         get_strategy("NegBin"),
@@ -432,3 +443,27 @@ def test_missing_served_count_shape_fails_loudly(
             gate_blend_test=gate_blend_test,
             phi_test=phi_test,
         )
+
+
+def test_metrics_count_a_tie_as_half_in_the_means_and_no_row_in_the_hit_or_miss_stats():
+    over = np.array([0.9, 0.8, 0.3, 0.2, 0.7, 0.4])
+    label = np.array([1.0, 1.0, 0.0, 1.0, 0.5, 0.5])
+    metrics = pipe._compute_metrics(over, label)
+    settled = pipe._compute_metrics(over[:4], label[:4])
+
+    assert metrics["brier_score"] == pytest.approx(np.mean((over - label) ** 2))
+    assert metrics["empirical_over_rate"] == pytest.approx(4 / 6)
+    for key in ("log_loss", "nll", "roc_auc", "accuracy", "precision_over", "precision_under"):
+        assert metrics[key] == settled[key]
+    assert metrics["accuracy"] == 0.75
+    assert (metrics["precision_over"], metrics["precision_under"]) == (1.0, 0.5)
+
+
+def test_mode_stats_leave_tie_rows_out():
+    over = np.array([0.9, 0.8, 0.3, 0.2, 0.7, 0.4])
+    proba = np.column_stack([1 - over, over])
+    label = np.array([1.0, 1.0, 0.0, 1.0, 0.5, 0.5])
+    stats = pipe._step_compute_mode_stats(proba, proba, proba, label)
+    settled = pipe._step_compute_mode_stats(proba[:4], proba[:4], proba[:4], label[:4])
+    for key, values in stats.items():
+        np.testing.assert_array_equal(values, settled[key])

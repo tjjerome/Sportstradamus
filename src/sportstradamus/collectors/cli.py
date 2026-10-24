@@ -4,8 +4,8 @@
 source-specific closures — into a ``click.Group`` with the standard ``run`` /
 ``list`` / ``verify`` subcommands (plus ``backfill`` and ``refresh-auth`` when
 the source supports them). The per-command builders live in
-:mod:`collectors.commands`; source-only commands (e.g. a ``discover`` /
-``import-curl``) are attached by the source after building.
+:mod:`collectors.commands`; source-only commands (e.g. ``import-curl``) are
+attached by the source after building.
 """
 
 from __future__ import annotations
@@ -37,13 +37,17 @@ class Source:
     default_context: Callable[[int | None, int | None], dict[str, Any]]
     path_for: Callable[..., Path]
     dispatch: Callable[..., Any]
-    transform: Callable[[Any], Any]
+    transform: Callable[..., Any]
     report_prefix: str
     # Week-source-only (Fantasy Points): the request-body renderer for the run
     # report, and the parquet spot-check verifier. Date sources leave these
     # ``None`` — their run has no request body and their ``verify`` is generic.
     render_request_body: Callable[..., Any] | None = None
     verify_fn: Callable[..., dict[str, list]] | None = None
+    # Sources whose credential can be minted from stored login details set
+    # this; it returns a fresh cookie and persists it. Tried before the
+    # interactive curl prompt, so cron self-heals instead of failing.
+    renew_auth: Callable[[], str] | None = None
     auth_fields: AuthFields | None = None
     env_prefix: str | None = None
     modes: tuple[str, ...] | None = None

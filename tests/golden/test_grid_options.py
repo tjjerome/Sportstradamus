@@ -20,7 +20,12 @@ from sportstradamus.dashboard.columns import (
     CONSENSUS_EDGE,
     LABELS,
     MODEL_EDGE,
+    MOVE,
+    MOVE_SPARK,
+    MOVE_SUMMARY,
+    MOVE_TEXT,
     add_edges,
+    add_line_movement,
     add_market_display,
     add_match_column,
 )
@@ -31,7 +36,9 @@ from sportstradamus.dashboard.components.grid import (
     _OBSIDIAN_CSS,
     build_themed_grid_options,
 )
+from sportstradamus.dashboard.data import _load_current_line_movement_cached
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
+from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
 _GRID_DF = pd.DataFrame(
@@ -233,6 +240,27 @@ def test_add_market_display_keeps_slug_column() -> None:
     # An unmapped slug falls back to itself (helpers.market_display_name's own contract).
 
 
+def test_add_market_display_reads_a_board_name_as_the_leagues_own_label() -> None:
+    # The second row is a snapshot written while Stat still copied Market.
+    df = pd.DataFrame(
+        {
+            "League": ["NHL", "NHL", "NBA"],
+            "Market": ["AST", "AST", "fantasy points underdog"],
+            "Stat": ["assists", "AST", "fantasy points prizepicks"],
+        }
+    )
+    out = add_market_display(df)
+    assert out["Market Display"].tolist() == ["Assists", "Assists", "Fantasy Points"]
+    assert out["Market"].tolist() == df["Market"].tolist()
+
+
+def test_add_market_display_leaves_a_row_with_no_market_name_blank() -> None:
+    # The board maps a platform's label through its stat_map, so a label the map lacks
+    # arrives with no Market, and reading an NBA name under the league's key is a string method.
+    df = pd.DataFrame({"League": ["NBA", "NBA"], "Market": ["PTS", None]})
+    assert add_market_display(df)["Market Display"].tolist() == ["Points", ""]
+
+
 def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
     df = pd.DataFrame({"Line": [23.5, 8.5], "Bet": ["Over", "Under"], "Market": ["PTS", "AST"]})
     options = build_themed_grid_options(
@@ -246,6 +274,247 @@ def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
     assert "getGui" in renderer, "arrow renderer is not class-based (would escape the SVG)"
     assert defs["Bet"]["hide"] is True
     assert defs["Market"]["hide"] is True
+
+
+def test_spark_col_draws_the_hidden_svg_column_and_keeps_the_value_sortable() -> None:
+    """The Board's Move column (L1): the cell's *value* stays the signed fair-line delta so
+    the column click-sorts, while the finished sparkline SVG rides in a hidden column the
+    cellRenderer reads — the same split ``arrow_col`` uses to leave Line sorting numerically.
+    """
+    df = pd.DataFrame({MOVE: [1.5, -2.0], MOVE_SPARK: ["<svg/>", "<svg/>"]})
+    options = build_themed_grid_options(
+        df, numeric_cols=[MOVE], spark_col=MOVE, spark_svg_col=MOVE_SPARK, hidden_cols=[MOVE_SPARK]
+    )
+    defs = _column_defs(options)
+    renderer = defs[MOVE]["cellRenderer"].js_code
+    # Must be a class renderer exposing getGui — a plain-function renderer returning an SVG
+    # string renders it as escaped markup in AG Grid 34 (the P8 Board arrow bug, again).
+    assert "getGui" in renderer, "spark renderer is not class-based (would escape the SVG)"
+    assert MOVE_SPARK in renderer, "spark renderer does not read the hidden SVG column"
+    assert defs[MOVE_SPARK]["hide"] is True
+    # fit_columns_on_grid_load would otherwise size this column off its 4-letter header and
+    # clip the fixed-width trace.
+    assert defs[MOVE]["minWidth"] == defs[MOVE]["width"] > 78
+
+
+def test_spark_col_formatter_is_a_plain_signed_number_not_a_percent() -> None:
+    """A fair-line delta is +0.16 TDs, not +0.16% — the spark column brings its own signed
+    formatter rather than colliding with the edge columns' signed-percent one. It prints two
+    decimals: a price-only move on a TD prop shifts the fair line by hundredths, which one
+    decimal would round to "+0.0".
+    """
+    df = pd.DataFrame({MOVE: [1.5], MODEL_EDGE: [6.0], MOVE_SPARK: ["<svg/>"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[MOVE, MODEL_EDGE],
+        signed_percent_cols=[MODEL_EDGE],
+        spark_col=MOVE,
+        spark_svg_col=MOVE_SPARK,
+    )
+    defs = _column_defs(options)
+    spark_fmt = defs[MOVE]["valueFormatter"].js_code
+    assert ">0?'+'" in spark_fmt and "%" not in spark_fmt
+    assert "toFixed(2)" in spark_fmt
+    assert "%" in defs[MODEL_EDGE]["valueFormatter"].js_code
+
+
+def test_spark_svg_colors_stay_out_of_grid_options() -> None:
+    """The sparkline's green/red live in the DataFrame the renderer reads, never in
+    gridOptions — so the hex-allowlist and never-centered goldens above still bind on a
+    spark-configured grid.
+    """
+    df = pd.DataFrame({MOVE: [1.5], MOVE_SPARK: [f'<svg><polyline stroke="{theme.GREEN}"/></svg>']})
+    dumped = _dumps(
+        build_themed_grid_options(df, numeric_cols=[MOVE], spark_col=MOVE, spark_svg_col=MOVE_SPARK)
+    )
+    assert not _HEX.findall(dumped), "the spark path baked a color into gridOptions"
+    assert "center" not in dumped
+
+
+def test_spark_col_noop_without_the_svg_column_kwarg() -> None:
+    df = pd.DataFrame({MOVE: [1.5]})
+    options = build_themed_grid_options(df, numeric_cols=[MOVE], spark_col=MOVE)
+    assert "cellRenderer" not in _column_defs(options)[MOVE]
+
+
+_KEY = {
+    "League": "NBA",
+    "Platform": "Underdog",
+    "Market": "PTS",
+    "Player": "A",
+    "Date": "2026-07-04",
+}
+_MOVE_CELLS = [MOVE_SPARK, MOVE_SUMMARY, MOVE_TEXT]
+
+
+def _snapshot(*rows: dict) -> pd.DataFrame:
+    """``current_line_movement`` rows on ``_KEY`` unless a row overrides a key, reindexed
+    onto the real schema the way the loader does — a hand-copied column list drifts the
+    moment a column is added, which is exactly how this fixture went stale once already.
+    """
+    return pd.DataFrame([{**_KEY, **row} for row in rows]).reindex(columns=LINE_MOVEMENT_COLS)
+
+
+def test_add_line_movement_attaches_the_fair_move_its_spark_summary_and_phone_text() -> None:
+    """``Move`` is the fair line's sortable delta, not the posted line's; ``Move Spark`` the
+    grid's SVG, titled with ``Move Summary``; ``Move Text`` the phone card's posted-line
+    text. An offer with no movement row — most of a same-day board — degrades to NaN/empty
+    rather than crashing the join.
+    """
+    offers = pd.DataFrame(
+        [{**_KEY, "Bet": "Over"}, {**_KEY, "Market": "AST", "Player": "B", "Bet": "Under"}],
+        index=[7, 9],
+    )
+    movement = _snapshot(
+        {
+            "move": 2.5,
+            "n_moves": 2,
+            "series": "[21.0, 22.0, 23.5]",
+            "n_price_moves": 1,
+            "fair_move": 2.1,
+            "fair_series": "[21.2, 22.1, 23.3]",
+        }
+    )
+    out = add_line_movement(offers, movement)
+    # The Board reads back through this index (detail_stack holds row labels), so the
+    # join must not renumber the frame.
+    assert out.index.tolist() == [7, 9]
+    assert out.loc[7, MOVE] == pytest.approx(2.1)
+    summary = "Fair 21.2 → 23.3 (+2.1) · line 21 → 23.5"
+    assert out.loc[7, MOVE_SUMMARY] == summary
+    assert out.loc[7, MOVE_SPARK].startswith("<svg")
+    assert f"<title>{summary}</title>" in out.loc[7, MOVE_SPARK]
+    assert out.loc[7, MOVE_TEXT] == "Line `21 → 23.5` ▲"
+    assert pd.isna(out.loc[9, MOVE])
+    assert out.loc[9, _MOVE_CELLS].tolist() == ["", "", ""]
+
+
+def test_add_line_movement_held_offer_draws_a_rule_but_says_nothing_on_the_phone() -> None:
+    """ "The app never moved this line or its price" is the common case and is itself an
+    answer: the grid still draws a flat rule, while the phone card omits its movement line.
+    """
+    movement = _snapshot(
+        {
+            "move": 0.0,
+            "n_moves": 0,
+            "series": "[23.5, 23.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.0,
+            "fair_series": "[23.5, 23.5]",
+        }
+    )
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert "<line" in out.loc[0, MOVE_SPARK] and "polyline" not in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Held at 23.5"
+    assert out.loc[0, MOVE_TEXT] == ""
+
+
+def test_add_line_movement_price_only_move_draws_a_trace_but_no_phone_text() -> None:
+    """A UD NFL TD prop: the multiplier moved, the line never did. ``n_price_moves`` has to
+    reach ``movement_svg`` through the join or the cell falls back to the held rule — and
+    the phone text stays blank, since it names the posted line only.
+    """
+    movement = _snapshot(
+        {
+            "move": 0.0,
+            "n_moves": 0,
+            "series": "[0.5, 0.5, 0.5]",
+            "n_price_moves": 3,
+            "fair_move": 0.16,
+            "fair_series": "[0.5, 0.58, 0.66]",
+        }
+    )
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert out.loc[0, MOVE] == pytest.approx(0.16)
+    assert "polyline" in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Fair 0.5 → 0.66 (+0.16) · line held at 0.5"
+    assert out.loc[0, MOVE_TEXT] == ""
+
+
+def test_add_line_movement_carries_n_moves_through_to_a_trace() -> None:
+    """A line that moved and came back between two resample ticks leaves both series flat,
+    so only ``n_moves`` tells it from a held line — it has to reach ``movement_svg`` through
+    the join. This pins the wiring, not just the drawing.
+    """
+    movement = _snapshot(
+        {
+            "move": 0.0,
+            "n_moves": 4,
+            "series": "[23.5, 23.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.0,
+            "fair_series": "[23.5, 23.5]",
+        }
+    )
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert "polyline" in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Fair back at 23.5 · line back at 23.5"
+
+
+def test_add_line_movement_phone_arrow_follows_the_posted_line_not_the_fair_line() -> None:
+    """The fair line folds in the multiplier, so it can run against the posted line — a line
+    raised a point while the Over's price swung harder the other way. The phone text names
+    the posted line, so its arrow is the posted line's own, whatever ``Move`` says.
+    """
+    offers = pd.DataFrame([{**_KEY, "Bet": "Over"}, {**_KEY, "Player": "B", "Bet": "Over"}])
+    movement = _snapshot(
+        {
+            "move": 1.0,
+            "n_moves": 1,
+            "series": "[21.5, 22.5]",
+            "n_price_moves": 0,
+            "fair_move": -0.3,
+            "fair_series": "[22.4, 22.1]",
+        },
+        {
+            "Player": "B",
+            "move": -1.0,
+            "n_moves": 1,
+            "series": "[22.5, 21.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.3,
+            "fair_series": "[22.1, 22.4]",
+        },
+    )
+    out = add_line_movement(offers, movement)
+    assert out[MOVE].tolist() == pytest.approx([-0.3, 0.3])
+    assert out[MOVE_TEXT].tolist() == ["Line `21.5 → 22.5` ▲", "Line `22.5 → 21.5` ▼"]
+
+
+def test_add_line_movement_old_schema_snapshot_leaves_every_cell_blank() -> None:
+    """A snapshot written before the fair-line columns — on disk until the next prophecize,
+    and after a ``sync_from_prod`` — reads back with them blank. Its posted-only numbers
+    must not stand in: they would draw every price move as held.
+    """
+    old = _snapshot({"move": 2.5, "n_moves": 2, "series": "[21.0, 22.0, 23.5]"})
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), old)
+    assert pd.isna(out.loc[0, MOVE])
+    assert out.loc[0, _MOVE_CELLS].tolist() == ["", "", ""]
+
+
+def test_add_line_movement_with_no_export_leaves_every_cell_empty() -> None:
+    """The export lands later than this column; an absent file reaches the loader as a
+    column-stable empty frame and the Board must render with every Move cell blank.
+    """
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), _snapshot())
+    assert pd.isna(out.loc[0, MOVE])
+    assert out.loc[0, _MOVE_CELLS].tolist() == ["", "", ""]
+
+
+def test_line_movement_loader_reindexes_an_old_snapshot_onto_the_current_schema(tmp_path) -> None:
+    """The dashboard reads whatever snapshot is on disk, and the smoke goldens read the real
+    one: an old-schema file loads with the fair-line columns present and blank and its own
+    columns intact, and an absent file loads column-stable and empty.
+    """
+    path = tmp_path / "current_line_movement.parquet"
+    old_row = {**_KEY, "move": 2.5, "n_moves": 2, "series": "[21.0, 22.0, 23.5]"}
+    pd.DataFrame([old_row]).to_parquet(path)
+    loaded = _load_current_line_movement_cached(path, path.stat().st_mtime)
+    assert loaded.columns.tolist() == LINE_MOVEMENT_COLS
+    assert loaded.loc[0, "move"] == 2.5
+    assert loaded[["n_price_moves", "fair_move", "fair_series", "changes"]].isna().all().all()
+    absent = _load_current_line_movement_cached(tmp_path / "absent.parquet", 0.0)
+    assert absent.empty and absent.columns.tolist() == LINE_MOVEMENT_COLS
 
 
 def test_arrow_col_noop_without_bet_column() -> None:
@@ -388,8 +657,8 @@ def test_market_display_labels_back_to_market_header() -> None:
 
 
 def test_board_grid_omits_team_opponent_kelly_date() -> None:
-    """Board 14->10: Team/Opponent/Bet/Kelly/Date must never resurface as displayed
-    grid columns — Match/Market/Platform/League already cover what a viewer needs
+    """Board 14->10 (+Move at L1): Team/Opponent/Bet/Kelly/Date must never resurface as
+    displayed grid columns — Match/Market/Platform/League already cover what a viewer needs
     (Tonight lens covers the recency Date carried). Mirrors surfaces/board.py's own
     MAIN_COLS + hidden-cols contract without executing the Streamlit script (importing
     board.py runs the whole page against real snapshot data).
@@ -400,6 +669,7 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
         "Player",
         "Market Display",
         "Line",
+        MOVE,
         "Boost",
         "Win Prob",
         "Model Edge",
@@ -411,6 +681,7 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
             **{c: ["x", "y"] for c in main_cols},
             "Bet": ["Over", "Under"],
             "Market": ["PTS", "AST"],
+            MOVE_SPARK: ["<svg/>", ""],
             # Columns that must NOT survive into display_cols even if present upstream.
             "Team": ["NYK", "LVA"],
             "Opponent": ["SAS", "IND"],
@@ -418,16 +689,19 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
             "Date": ["2026-07-04", "2026-07-05"],
         }
     )
-    display_cols = [c for c in [*main_cols, "Bet", "Market"] if c in df.columns]
+    display_cols = [c for c in [*main_cols, "Bet", "Market", MOVE_SPARK] if c in df.columns]
     grid_df = df[display_cols].rename(columns={"Market": "Market Slug"})
     grid_df = grid_df.rename(columns=LABELS)
     options = build_themed_grid_options(
         grid_df,
-        numeric_cols=["Line", "Boost"],
+        numeric_cols=["Line", MOVE, "Boost"],
         arrow_col="Line",
-        hidden_cols=["Bet", "Market Slug"],
+        spark_col=MOVE,
+        spark_svg_col=MOVE_SPARK,
+        hidden_cols=["Bet", "Market Slug", MOVE_SPARK],
     )
     defs = _column_defs(options)
     for dropped in ("Team", "Opponent", "Kelly", "Date"):
         assert dropped not in defs, f"{dropped} leaked into the Board grid's columnDefs"
     assert "Match" in defs and "Market" in defs
+    assert defs[MOVE_SPARK]["hide"] is True and defs[MOVE].get("hide") is None

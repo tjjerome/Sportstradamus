@@ -1,5 +1,9 @@
 # P8 Phase D — Loose Constellation Shapes Implementation Plan
 
+> **Status: SHIPPED 2026-08-06.** The owner pass afterwards grew the bank to 100 templates (the
+> goldens pin floors, not the 49 counted below), cut the nameplate, and walled leagues to their
+> own gear; the shape half was carved into `constellation_slate.py`.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [x]`) syntax for tracking. This phase is sized for an **Opus-class implementer**:

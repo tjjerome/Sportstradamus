@@ -22,8 +22,10 @@ Fields per cell drive shipping + training:
   pipeline branch consumes the target-normalization slug.
 * ``shipped`` — release surface:
 
-  - ``"withheld"`` — never shipped; ``meditate`` skips training and prunes
-    the production pickle so inference dark-outs the market.
+  - ``"withheld"`` — never shipped; ``meditate`` still refreshes the cell's
+    training matrix (so a later sweep runs from a warm cache) but skips
+    training and prunes the production pickle; serving prices the cell's
+    offers at the book consensus.
   - ``"devel"`` — passed Gate 1; ships on the ``devel`` branch that the
     production server tracks. Has not yet graduated through Gate 2 to
     ``main``.
@@ -43,9 +45,12 @@ Fields per cell drive shipping + training:
 
 Shipping a cell that has cleared Gate 1 is a one-field edit to
 ``stat_meta.json``: set ``shipped`` from ``"withheld"`` to ``"devel"`` (or
-``"main"`` after Gate 2 graduation). Inference never reads this file — it
-decodes the strategy from the self-describing pickle — so training config
-and inference cannot drift.
+``"main"`` after Gate 2 graduation). Inference never reads this config for
+*how* to serve — the strategy is decoded from the self-describing pickle, so
+training config and inference cannot drift — but serving
+(``prediction.scoring.match_offers``) sends a cell whose ``shipped`` is
+:data:`WITHHELD` to the book consensus, even when a missed ``meditate`` prune
+leaves a stale pickle on disk.
 """
 
 from __future__ import annotations
@@ -235,7 +240,8 @@ def resolve_cell_target_normalization(
 
     Returns:
         A strategy slug, :data:`TARGET_NORM_NONE`, or :data:`WITHHELD` (the
-        caller prunes the pickle and skips training in the last case).
+        caller refreshes the matrix, prunes the pickle, and skips training
+        in the last case).
     """
     mapped = config.get(league, {}).get(market)
     if mapped is None:

@@ -22,6 +22,7 @@
         --gray: #8a91a0;
         --gold: #c9a227;
         --primary: #2e6be6;
+        --orange: #f5a524;
       }
       html,
       body {
@@ -32,8 +33,43 @@
         color: var(--text);
         overflow: visible;
       }
+      /* The map is three stacked layers (main.js): the static engraving, the SVG edges, then
+         the interactive stars. The stars' div stays in flow and sizes the stage, and its
+         position: relative paints it above its absolutely placed siblings. The stage clips
+         the wider lens's glide, which scales the engraving past its own box. */
+      #stage {
+        position: relative;
+        overflow: hidden;
+      }
+      #layers {
+        position: relative;
+      }
+      #lower {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      #edges {
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+      }
+      #edges line {
+        stroke: var(--gold);
+      }
       #chart {
+        position: relative;
         width: 100%;
+      }
+      /* A wider glide starts each star where the old figure drew it, which a figure that shrinks
+         leaves outside its new plot, so plotly's clips give way to the stage's (main.js). */
+      .cst-gliding #chart svg,
+      .cst-gliding #edges {
+        overflow: visible;
+      }
+      .cst-gliding #chart .plot {
+        clip-path: none;
       }
       .cst-card {
         position: absolute;
@@ -47,6 +83,11 @@
         pointer-events: auto;
         font-size: 13px;
         line-height: 1.35;
+      }
+      /* A fresh desktop card lets presses through to the stars under it; main.js adds
+         .cst-held once the pointer has rested on the card's star (HOLD_MS). */
+      .cst-card:not(.cst-docked):not(.cst-held) {
+        pointer-events: none;
       }
       .cst-hidden {
         display: none;
@@ -62,6 +103,7 @@
         width: 34px;
         height: 34px;
         border-radius: 50%;
+        object-fit: cover;
         background: var(--border);
         color: var(--gray);
         display: flex;
@@ -85,6 +127,7 @@
       .cst-kelly {
         color: var(--gold);
       }
+      /* The last-five fallback: a leg the gamelog can't answer for. */
       .cst-scar {
         border: 1px dashed var(--border);
         color: var(--gray);
@@ -93,6 +136,31 @@
         text-align: center;
         font-size: 11px;
         margin-bottom: 8px;
+      }
+      /* The "won't pair" row: the platform refuses this leg beside one in the slip. The
+         text carries it alone, since the iframe loads no icon font. */
+      .cst-ban {
+        color: var(--orange);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      /* The card's two chart rows, last-five form then line movement: Python hands over a
+         finished 78x22 <svg> for each, so this only has to seat it beside its caption. Both
+         draw with preserveAspectRatio="none", which means a flex squeeze would silently
+         distort the bars or the trace — hence flex: 0 0 auto. */
+      .cst-spark {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 6px 8px;
+        margin-bottom: 8px;
+        color: var(--gray);
+        font-size: 11px;
+      }
+      .cst-spark svg {
+        flex: 0 0 auto;
       }
       .cst-btn {
         width: 100%;
@@ -134,7 +202,13 @@
     </style>
   </head>
   <body>
-    <div id="chart"></div>
+    <div id="stage">
+      <div id="layers">
+        <div id="lower"></div>
+        <svg id="edges"><g class="lens"></g><g class="base"></g></svg>
+        <div id="chart"></div>
+      </div>
+    </div>
     <div id="card" class="cst-card cst-hidden" aria-hidden="true"></div>
     <script src="./main.js"></script>
   </body>

@@ -1,47 +1,53 @@
 """Stats base class: shared data loading, feature engineering, and prediction API."""
 
+import dataclasses
 import importlib.resources as pkg_resources
-import json
 import os.path
 import pickle
 import warnings
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
-from io import StringIO
+from functools import partial
 from pathlib import Path
-from time import sleep
 
 import line_profiler
-import nba_api.stats.endpoints as nba
-import nfl_data_py as nfl
-import nflreadpy as nflr
 import numpy as np
 import pandas as pd
-import requests
-import statsapi as mlb
-from scipy.stats import iqr, norm, poisson
-from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
     LazyArchive,
     Scrape,
-    abbreviations,
     book_weights,
     combo_props,
     feature_filter,
     get_ev,
-    get_mlb_pitchers,
     get_odds,
     odds_budget,
+    predictive_std,
     remove_accents,
     set_model_start_values,
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.archive import TRAINING_LOOKBACK
+from sportstradamus.helpers.archive import GAME_LINE_TRAINING_CUTOFF, TRAINING_LOOKBACK
+from sportstradamus.helpers.combined_markets import (
+    ComboComponent,
+    combo_sum_quote,
+    load_same_player_rho,
+)
 from sportstradamus.helpers.io import read_gamelog
-from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS, resolve_training_quote
+from sportstradamus.helpers.training_quotes import (
+    COMBO_SUM_SOURCE,
+    DERIVED,
+    DFS_PLATFORM_BOOKS,
+    PROVENANCE_COLUMNS,
+    TrainingQuote,
+    archive_ev_is_runaway,
+    quote_pricing_params,
+    resolve_training_quote,
+)
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE, load_model_dependency
@@ -88,9 +94,8 @@ _COMP_RECENCY_HALFLIFE_DAYS: float = 45.0
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
 _VOLUME_SCALE_RATIO_CAP: float = 10.0
 
-# Players with fewer than this many games get a zero trend — the vectorized
-# reimplementation of helpers.text.get_trends, which returns zeros below the
-# same floor (the trailing-window slope is too noisy on <3 points).
+# Players with fewer than this many games get a zero trend — the trailing-window
+# slope is too noisy on so few points.
 _MIN_GAMES_FOR_TRENDS: int = 3
 
 # Participation floor for defense/usage profiling: keep only players whose
@@ -102,9 +107,14 @@ _MIN_PARTICIPATION_RATE: float = 0.1
 # calendar year. Aug+ rolls the season year forward for fall/winter leagues.
 _SEASON_ROLLOVER_MONTH: int = 8
 
-# Days ahead (including today) that fetch_upcoming_games scrapes. Three days
-# covers today + tomorrow + day-after so late-night runs don't miss next-day
-# tip-offs.
+# No league's season, playoffs included, runs this long: a feed opener further than this past
+# the season start a class holds opens a new season, a nearer one is a mid-season capture, and
+# a season start further than this behind today belongs to a season that is over.
+SEASON_MAX_DAYS: int = 300
+
+# Days ahead (including today) that the NBA, WNBA and MLB schedule fetches cover.
+# Three days covers today + tomorrow + day-after so late-night runs don't miss
+# next-day tip-offs, and an offer dated a day or two ahead finds its own game.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
 
 # A "blowout" is a game lopsided enough to suppress a starter's volume. Each
@@ -158,6 +168,14 @@ _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanC
 _TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
 _TRAINING_WINDOW_ROWS_DEFAULT = 21_500
 
+# Days of logs before a date that its profile and rolling features read; trim_gamelog cuts
+# the gamelog this many days before the first training day so that day keeps its window.
+_SHORT_LOG_WINDOW_DAYS: int = 300
+
+# Four years of gamelog (4 * 365 + 1): the NBA, MLB and the NHL prune older rows on each
+# update to bound the file. The NFL keeps six, by its own constant.
+GAMELOG_RETENTION_DAYS: int = 1461
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.
@@ -202,8 +220,8 @@ _BASE_STAT_COLUMNS = [
 archive = LazyArchive()
 scraper = Scrape()
 
-# When True, forces a full reload of all cached CSVs on the next load() /
-# update() call. Flipped manually by operators to clear corrupt gamelog state.
+# When True, every league's update runs its whole-gamelog clean pass (see
+# Stats._full_clean_due). Flipped by hand to repair a gamelog.
 clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
@@ -260,6 +278,83 @@ def flatten_offers(offers: dict | list, market: str) -> dict | list:
     return flat
 
 
+def earliest_last(offers: Iterable[dict]) -> list[dict]:
+    """Order ``offers`` so a dict built over them keeps each key's earliest game.
+
+    A feature row is one per player and call, so a player offered on two dates is
+    built for the earlier one, and every per-player or per-team map has to pick
+    that same game. Later dates come first (``Date`` is ``YYYY-MM-DD`` text, which
+    orders as dates do), and before them an offer with no date, which so stands
+    only where no dated one does.
+    """
+    return sorted(
+        offers, key=lambda offer: (not offer.get("Date"), offer.get("Date") or ""), reverse=True
+    )
+
+
+def earliest_game_dates(offers: Iterable[dict]) -> dict[str, str | None]:
+    """Each offered player's earliest game date; a combo leg dates each of its players."""
+    dates = {}
+    for offer in earliest_last(offers):
+        for name in offer["Player"].replace(" vs. ", " + ").split(" + "):
+            dates[name] = offer.get("Date")
+    return dates
+
+
+def apply_volume_budget(
+    player_profile: pd.DataFrame,
+    market: str,
+    index: pd.Index,
+    *,
+    target: float,
+    per_player_cap: float,
+) -> None:
+    """Redistribute one team's volume projections onto ``target``, in place.
+
+    The precision-weighted adjustment is the minimum-information-loss solution to:
+        minimise  sum_i (d_i / sigma_i)^2
+        subject to  sum_i (mu_i + d_i) = target
+        -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
+    Players we are most uncertain about absorb the correction; confidently
+    projected players are left largely untouched. Each new mean is clipped to
+    ``per_player_cap``, and the SD is scaled by the same ratio so every player's
+    coefficient of variation survives. A team already projecting zero total volume
+    has no shares to redistribute and is left alone.
+
+    Args:
+        player_profile: Frame carrying ``"proj {market} mean"`` and
+            ``"proj {market} std"``; both are written back for ``index``.
+        market: Stat name used to construct the column key (e.g. ``"MIN"``).
+        index: The team's player rows.
+        target: Total volume the team's projections should sum to.
+        per_player_cap: Hard ceiling clipped onto each player's new mean before
+            the ratio rescale.
+    """
+    means = player_profile.loc[index, f"proj {market} mean"]
+    stds = player_profile.loc[index, f"proj {market} std"]
+
+    total = means.sum()
+    if total <= 0:
+        return
+
+    variances = stds**2
+    total_var = variances.sum()
+    if total_var > 0:
+        adjustments = variances / total_var * (target - total)
+    else:
+        adjustments = means / total * (target - total)
+
+    new_means = (means + adjustments).clip(lower=0, upper=per_player_cap)
+    ratio = (
+        (new_means / means.replace(0, np.nan))
+        .fillna(1.0)
+        .clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
+    )
+
+    player_profile.loc[index, f"proj {market} mean"] = new_means
+    player_profile.loc[index, f"proj {market} std"] = stds * ratio
+
+
 def scale_team_volume_to_budget(
     player_profile: pd.DataFrame,
     market: str,
@@ -270,14 +365,11 @@ def scale_team_volume_to_budget(
     per_player_floor: float,
     per_player_cap: float,
 ) -> None:
-    """Rescale per-player SkewNormal volume projections to a team minutes budget.
+    """Rescale per-player volume projections to a team minutes budget.
 
-    For each team, distributes the (budget - modeled-total) deficit across the
-    team's modeled players precision-weighted by variance, clips each player to
-    ``per_player_cap``, and rescales loc/scale together to preserve every
-    player's coefficient of variation. Mutates ``player_profile`` in place.
     Shared by the NBA and NHL volume models, which differ only in the per-league
-    ``budget_mean`` derivation and the rotation/floor/cap parameters.
+    ``budget_mean`` derivation and the rotation/floor/cap parameters. Rows with
+    ``team == 0`` are unassigned players and are skipped.
 
     Two real-world constraints complicate a simple minutes cap:
 
@@ -290,19 +382,9 @@ def scale_team_volume_to_budget(
        means some minutes go to players we have no projection for. We reserve:
            unmodeled_reserve = max(0, typical_rotation - N) * avg_unmodeled_min
 
-    The precision-weighted adjustment is the minimum-information-loss solution to:
-        minimise  sum_i (d_i / sigma_i)^2
-        subject to  sum_i (mu_i + d_i) = target
-        -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
-    Players we are most uncertain about absorb the correction; confidently
-    projected players are left largely untouched.
-
     Args:
-        player_profile: DataFrame with columns ``"team"``, ``"proj {market} loc"``,
-            ``"proj {market} scale"``, and optionally ``"proj {market} alpha"``.
-            Rows with ``team == 0`` are skipped (unassigned players).
-            Writes back ``"proj {market} loc"``, ``"proj {market} scale"``,
-            ``"proj {market} mean"``, and ``"proj {market} std"`` in place.
+        player_profile: DataFrame with a ``"team"`` column plus the projection
+            columns :func:`apply_volume_budget` reads and writes.
         market: Stat name used to construct the column key (e.g. ``"MIN"``).
         budget_mean: Expected total team volume (minutes or TOI) per game,
             including overtime expectation.  Units match ``per_player_cap``.
@@ -317,69 +399,38 @@ def scale_team_volume_to_budget(
     """
     teams = player_profile.loc[player_profile["team"] != 0].groupby("team")
     for _team, team_df in teams:
-        loc = team_df[f"proj {market} loc"].copy()
-        scale = team_df[f"proj {market} scale"].copy()
-        sn_alpha = (
-            team_df[f"proj {market} alpha"].copy()
-            if f"proj {market} alpha" in team_df.columns
-            else pd.Series(0, index=loc.index, dtype=loc.dtype)
+        modeled = len(team_df)
+        unmodeled_reserve = max(0, typical_rotation - modeled) * avg_unmodeled_min
+        apply_volume_budget(
+            player_profile,
+            market,
+            team_df.index,
+            target=max(budget_mean - unmodeled_reserve, modeled * per_player_floor),
+            per_player_cap=per_player_cap,
         )
-        N = len(team_df)
-
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_vars = scale**2
-
-        total = true_means.sum()
-        if total <= 0:
-            continue
-
-        unmodeled_count = max(0, typical_rotation - N)
-        unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-        upper_target = budget_mean - unmodeled_reserve
-        lower_target = N * per_player_floor
-        target = max(upper_target, lower_target)
-
-        deficit = target - total
-        total_var = true_vars.sum()
-        if total_var > 0:
-            adjustments = true_vars / total_var * deficit
-        else:
-            adjustments = true_means / total * deficit
-
-        new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-        ratio = new_means / true_means.replace(0, np.nan)
-        ratio = ratio.fillna(1.0).clip(
-            lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
-        )
-        new_scale = scale * ratio
-        new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-        player_profile.loc[loc.index, f"proj {market} loc"] = new_loc
-        player_profile.loc[scale.index, f"proj {market} scale"] = new_scale
-        player_profile.loc[loc.index, f"proj {market} mean"] = new_means
-        player_profile.loc[scale.index, f"proj {market} std"] = new_scale
 
 
-def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict[str, dict]:
-    """Map each team to its next matchup from the stats.nba.com schedule.
+def fetch_upcoming_games(
+    league_id: str, season: str | int, today: date
+) -> tuple[dict[str, dict], dict[tuple[str, str], dict]]:
+    """Map each team to its next matchup, and to each matchup by day, from stats.nba.com.
 
     Scrapes the ``internationalbroadcasterschedule`` endpoint for ``today`` and
     the next two days. Shared by the NBA and WNBA ``update`` paths, which differ
     only in ``league_id`` ("00" vs "10") and the ``season`` value interpolated
     into the URL. Returns ``{team_abbr: {"Opponent": str, "Home": bool}}`` keyed
-    by the first date a team is seen.
+    by the first date a team is seen, then the same entries for every game seen,
+    keyed ``(team_abbr, "YYYY-MM-DD")`` by the day asked for.
 
     ``Scrape.get`` swallows network errors and returns ``{}`` on exhausted
     retries, so an unavailable endpoint surfaces here as a ``KeyError`` while
     indexing the empty response; that and the sibling ``IndexError`` /
-    ``TypeError`` from a malformed payload yield an empty mapping. This is the
+    ``TypeError`` from a malformed payload yield empty mappings. This is the
     historical bare-except behavior, narrowed to the exceptions the block can
     actually raise (§ E722).
     """
     upcoming_games: dict[str, dict] = {}
+    games_by_date: dict[tuple[str, str], dict] = {}
     try:
         ug_res = []
         for offset in range(_SCHEDULE_LOOKAHEAD_DAYS):
@@ -389,43 +440,59 @@ def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict
                 f"?LeagueID={league_id}&Season={season}&RegionID=1"
                 f"&Date={day.strftime('%m/%d/%Y')}&EST=Y"
             )
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
+            day_games = scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
+            ug_res.extend((day.isoformat(), game) for game in day_games)
 
-        for game in ug_res:
-            if game["vtAbbreviation"] not in upcoming_games:
-                upcoming_games[game["vtAbbreviation"]] = {
-                    "Opponent": game["htAbbreviation"],
-                    "Home": False,
-                }
-            if game["htAbbreviation"] not in upcoming_games:
-                upcoming_games[game["htAbbreviation"]] = {
-                    "Opponent": game["vtAbbreviation"],
-                    "Home": True,
-                }
+        for day, game in ug_res:
+            away = {"Opponent": game["htAbbreviation"], "Home": False}
+            home = {"Opponent": game["vtAbbreviation"], "Home": True}
+            games_by_date[game["vtAbbreviation"], day] = away
+            games_by_date[game["htAbbreviation"], day] = home
+            upcoming_games.setdefault(game["vtAbbreviation"], away)
+            upcoming_games.setdefault(game["htAbbreviation"], home)
     except (KeyError, IndexError, TypeError):
         pass
-    return upcoming_games
+    return upcoming_games, games_by_date
+
+
+@dataclasses.dataclass(frozen=True)
+class ComboSpec:
+    """Pure config for one derived market: no instance data access at build time."""
+
+    marginals: tuple[tuple[str, float], ...]  # book-quoted components: (submarket, weight)
+    sampled: tuple[str, ...] = ()  # book-quoted, weight-0 (post-visible only)
+    bernoulli: tuple[tuple[str, float], ...] = ()  # (name, weight); p via _combo_bernoulli_p
+    assumable: frozenset[str] = frozenset()  # marginals allowed to fall back to a trailing rate
+    post_builder: Callable | None = None  # (stats_obj, player, date) -> post fn | None
+    analytics: tuple[str, ...] = ()  # provenance labels (e.g. "hit_shares", "win_map", "hbp")
+
+
+# A sum still counts as a book quote while at most a quarter of its component markets are
+# carried by `Stats._assumed_component` rather than priced. Past that the book information
+# no longer dominates and the result is a model, which belongs to the component-model blend
+# lane and its scorecard, not to this layer's quote ladder.
+_MAX_ASSUMED_COMPONENT_SHARE: float = 0.25
+
+
+def _relocated_under_prob(under_prob: Callable, shift: float, line: float) -> float:
+    """The component sum's CDF moved to a new location: ``F_new(x) = F(x - shift)``."""
+    return under_prob(line - shift)
 
 
 class Stats:
     """A parent class for handling and analyzing sports statistics.
 
     Attributes:
-        gamelog (list): A list of dictionaries representing game logs.
-        archive (dict): A dictionary containing archived statistics.
-        players (dict): A dictionary containing player specific data.
-        season_start (datetime): The start date of the  season.
-        playerStats (dict): Dictionary containing player statistics.
-        edges (list): List of edges.
-        dvp_index (dict): Dictionary containing DVP index data.
+        gamelog (pd.DataFrame): Player game logs.
+        players (dict): Player specific data; a DataFrame in the NFL class.
+        season_start (date): The start date of the season.
 
     Methods:
-        parse_game(game): Parses a game and updates the gamelog.
+        parse_game(game): Hook: parses one game. No-op on base.
         load(): Loads game logs from a file.
         update(): Updates the gamelog with new game data.
-        bucket_stats(market): Groups statistics into buckets based on market type.
-        get_stats(offer, game_date): Retrieves statistics for a given offer and game date.
-        get_training_matrix(market): Retrieves the training data matrix and target labels for a specified market.
+        get_stats(market, offers, date): Builds the feature rows for the offered players.
+        get_training_matrix(market, cutoff_date): Builds the training matrix for a market.
     """
 
     def __init__(self):
@@ -444,18 +511,23 @@ class Stats:
         self.profile_latest_date = datetime(year=1900, month=1, day=1).date()
         self.profiled_market = ""
         self.volume_stats = []
+        # Markets whose combo quote reads the position get_depth writes to playerProfile
+        # (NFL's fantasy hook); inject_backfilled_odds runs get_depth only for these.
+        self.depth_quoted_markets: frozenset[str] = frozenset()
         self.playerProfile = pd.DataFrame()
         self.defenseProfile = pd.DataFrame()
         self.teamProfile = pd.DataFrame()
         self.upcoming_games = {}
+        # Every scheduled game the league's update saw, by (team, "YYYY-MM-DD"): the map
+        # above holds one game a team, so a later-dated offer cannot read its own there.
+        self.upcoming_games_by_date: dict[tuple[str, str], dict] = {}
         self.usage_stat = ""
         self.tiebreaker_stat = ""
         self.comps = {}
         # Per-week comp cache (training matrix path). ``_ensure_comps(date)``
         # routes the active ``self.comps`` to the entry keyed by the
         # ``(season, week-of-Wednesday)`` bucket that contains ``date``, and
-        # rebuilds on cache miss. ``date=None`` (inference / cron) keeps the
-        # legacy lazy-once snapshot.
+        # rebuilds on cache miss.
         self._comps_by_week: dict = {}
         self._current_comps_key = None
         # Per-comp-pool cache of the static (player, comp, position, dist,
@@ -564,23 +636,34 @@ class Stats:
         (full rebuilds, historical backfills); the bypass also pins
         ``season_start``, so replay tools keep manual control.
 
-        When the activity feed has observed the season's opening night
-        (:func:`odds_budget.season_opener`) and it is newer than the
-        hand-set constant, it is adopted before fetching — season-year API
-        params, ``DaysIntoSeason``, and the early-season scoring gate then
-        track the real calendar without an annual code edit.
+        When the activity feed has observed an opening night
+        (:func:`odds_budget.season_opener`) more than ``SEASON_MAX_DAYS``
+        after the season start held, it opens a new season and is adopted
+        before fetching — season-year API params and ``DaysIntoSeason`` then
+        track the real calendar without an annual code edit. A nearer one
+        falls inside the season already held and is ignored: it was captured
+        mid-season, when a league came back from a break.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):
             logger.info(f"{self.league} update skipped: outside season window")
             return
         if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
             opener = odds_budget.season_opener(self.league)
-            if opener is not None and opener > self.season_start:
+            if opener is not None and (opener - self.season_start).days > SEASON_MAX_DAYS:
                 self._set_season_start(opener)
         self._update()
 
     def _update(self):
         """League-specific fetch behind the :meth:`update` season gate."""
+
+    def _full_clean_due(self) -> bool:
+        """Whether an update runs the league's clean pass over its whole gamelog.
+
+        Due once the season held is over (it began more than ``SEASON_MAX_DAYS`` ago),
+        or at any time while ``clean_data`` is set.
+        """
+        oldest_live_start = datetime.today().date() - timedelta(days=SEASON_MAX_DAYS)
+        return self.season_start < oldest_live_start or clean_data
 
     def _enrich_team_markets(
         self,
@@ -598,6 +681,10 @@ class Stats:
         lookups across a full-history gamelog ran into the millions of
         serial queries and took minutes. The bulk path is two queries plus
         an in-Python dict lookup per row.
+
+        Lines are read as of :data:`GAME_LINE_TRAINING_CUTOFF` on each row's
+        game date. The newest quote the archive holds for a finished game is
+        often one taken during play, which serving never sees.
 
         Args:
             df: Frame to enrich. Must have a date column and a team column;
@@ -620,8 +707,12 @@ class Stats:
             return
         subset = df.loc[mask]
         unique_dates = subset[date_col].unique()
-        ml_map = archive.get_team_market_map(self.league, "Moneyline", dates=unique_dates)
-        tot_map = archive.get_team_market_map(self.league, "Totals", dates=unique_dates)
+        ml_map = archive.get_team_market_map(
+            self.league, "Moneyline", dates=unique_dates, cutoff=GAME_LINE_TRAINING_CUTOFF
+        )
+        tot_map = archive.get_team_market_map(
+            self.league, "Totals", dates=unique_dates, cutoff=GAME_LINE_TRAINING_CUTOFF
+        )
         default_total = archive.default_totals.get(self.league, 1)
         keys = list(zip(subset[date_col].astype(str).str[:10], subset[team_col], strict=False))
         df.loc[mask, "moneyline"] = [ml_map.get(k, 0.5) for k in keys]
@@ -664,8 +755,12 @@ class Stats:
             }
         return comps
 
-    def update_player_comps(self, year=None):
-        return
+    def update_player_comps(self) -> None:
+        """League hook: refresh external data the comp build reads. Default no-op.
+
+        Only MLB overrides it — its comps come from downloaded Statcast affinity
+        tables rather than a BallTree fitted from the gamelog.
+        """
 
     def _compute_comps(self, target_game_date: "date | None" = None) -> None:
         """Build comps from loaded data. Override in subclass.
@@ -680,7 +775,7 @@ class Stats:
                 and the legacy lookahead leakage is not yet addressed.
         """
 
-    def _comp_target_key(self, date: "date | None") -> "int | None":
+    def _comp_target_key(self, date: "date") -> int:
         """Cache key for the comp pool active at ``date``.
 
         Default heuristic: the week index of the most-recent Wednesday on or
@@ -688,31 +783,21 @@ class Stats:
         within a Wed→Wed window all gamedays share the same comp pool,
         matching live retrain cadence. Subclasses with schedule semantics
         (NFL) may override to return a (season, schedule-week) tuple.
-
-        Returns ``None`` when ``date`` is ``None`` -- the inference path keys
-        on the lazy-once snapshot instead.
         """
-        if date is None:
-            return None
         wed_offset = (date.weekday() - 2) % 7  # Monday=0..Sunday=6; Wednesday=2
         most_recent_wed = date - timedelta(days=wed_offset)
         return most_recent_wed.toordinal() // 7
 
-    def _ensure_comps(self, date: "date | None" = None) -> None:
+    def _ensure_comps(self, date: "date") -> None:
         """Materialize ``self.comps`` for the comp pool active at ``date``.
 
-        Two modes:
-
-        * ``date is None`` (inference, cron, dashboards): lazy-once. Build
-          comps if ``self.comps`` is empty, otherwise reuse the cached
-          snapshot for the lifetime of the ``Stats`` instance.
-        * ``date`` provided (training matrix path): route ``self.comps`` to
-          the per-week cache entry containing ``date``. Cache key comes from
-          :meth:`_comp_target_key`. First visit to a (season, week) bucket
-          calls :meth:`_compute_comps` with the date so per-league code can
-          bound the comp pool point-in-time; subsequent visits to the same
-          bucket are O(1) swaps. This eliminates the look-ahead leakage where
-          a 2023 training row's comps "know" the 2025 player population.
+        Routes ``self.comps`` to the per-week cache entry containing ``date``,
+        keyed by :meth:`_comp_target_key`. The first visit to a (season, week)
+        bucket calls :meth:`_compute_comps` with the date so per-league code can
+        bound the comp pool point-in-time; later visits to the same bucket are
+        O(1) swaps. This eliminates the look-ahead leakage where a 2023 training
+        row's comps "know" the 2025 player population. Inference passes
+        ``today()``, so it builds one pool per process and reuses it.
         """
         # TODO(comp-leakage-mlb): StatsNFL, StatsNBA, StatsWNBA, and StatsNHL
         # all honor ``target_game_date`` and gate their comp pool on the
@@ -724,11 +809,6 @@ class Stats:
         # every gameday. A true fix needs historical baseballsavant exports
         # (the published CSV is current-state only) so this leakage stays
         # open until that data source is wired in.
-        if date is None:
-            if not self.comps:
-                self._compute_comps()
-            return
-
         target_key = self._comp_target_key(date)
         if self._current_comps_key == target_key and self.comps:
             return
@@ -833,14 +913,6 @@ class Stats:
                 out[i] = np.interp(q, cum_norm[s:e], vals[s:e])
             results[q] = pd.Series(out, index=players_idx)
         return results
-
-    def save_comps(self):
-        """Write current comps to the league's JSON file for inspection."""
-        if not self.comps:
-            return
-        filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
-        with open(filepath, "w") as f:
-            json.dump(self.comps, f, indent=4)
 
     def _join_fp_team_features(self, date) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
         """League hook: return ``(team_features, defense_features)`` for ``date``.
@@ -1007,17 +1079,17 @@ class Stats:
         The cheap prefix of ``base_profile``: quote resolution and the combo-market
         fallbacks need only this window, not the profile frames built from it.
         """
-        one_year_ago = pd.Timestamp(date - timedelta(days=300))
+        window_start = pd.Timestamp(date - timedelta(days=_SHORT_LOG_WINDOW_DAYS))
         target_date = pd.Timestamp(date)
 
         gameDates = self._gamelog_dates()
-        short_mask = (one_year_ago <= gameDates) & (gameDates < target_date)
+        short_mask = (window_start <= gameDates) & (gameDates < target_date)
         self.short_gamelog = self.gamelog[short_mask].copy()
         _pc = self.log_strings["player"]
         self.short_gamelog[_pc] = self._normalized_gamelog_players().loc[short_mask].to_numpy()
         gameDates = self._teamlog_dates()
         self.short_teamlog = self.teamlog[
-            (one_year_ago <= gameDates) & (gameDates < target_date)
+            (window_start <= gameDates) & (gameDates < target_date)
         ].copy()
 
     def base_profile(self, date=datetime.today().date()):
@@ -1029,6 +1101,9 @@ class Stats:
             return
 
         self.profile_latest_date = date
+        # The frames rebuilt below hold no market's columns, so the market profiled last must
+        # be profiled again, also when a caller other than profile_market moved the date.
+        self.profiled_market = ""
 
         self.playerProfile = pd.DataFrame(
             columns=[
@@ -1097,7 +1172,7 @@ class Stats:
         # Pass ``date`` so the training-matrix iteration rebuilds the comp
         # pool whenever the advancing date crosses into a new Wednesday-keyed
         # week (see :meth:`_ensure_comps`). The inference / cron path passes
-        # today() and hits the lazy-once snapshot path.
+        # today(), so it builds one pool on the first market and reuses it.
         self._ensure_comps(date=date)
         _pairs = self._comp_pairs()
         if not _pairs.empty:
@@ -1187,6 +1262,7 @@ class Stats:
         self.profiled_market = market
         return date
 
+    @line_profiler.profile
     def profile_market(self, market, date=datetime.today().date()):
         date = self._begin_profile_market(market, date)
         if date is None:
@@ -1332,32 +1408,57 @@ class Stats:
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
 
+    def _season_roster_rows(self, season):
+        """The rows of a stored season's roster; none for a season the store does not hold."""
+        if self.league == "NHL":
+            return list(self.players.get(season, {}).values())
+        # NBA keys a season "2025-26", WNBA by its year.
+        key = f"{season}-{season - 1999}" if self.league == "NBA" else season
+        return [
+            {self.log_strings["player"]: name, self.log_strings["team"]: team} | attrs
+            for team, roster in self.players.get(key, {}).items()
+            for name, attrs in roster.items()
+        ]
+
     def _roster_player_df(self, season):
-        if self.league == "NBA":
-            season = "-".join([str(season), str(season - 1999)])
-
-        if "NBA" in self.league:
-            player_df = []
-            season_players = (
-                self.players.get(season)
-                if self.players.get(season)
-                else self.players.get(season - 1)
-            )
-            for team, roster in season_players.items():
-                roster = [
-                    {self.log_strings["player"]: k, self.log_strings["team"]: team} | v
-                    for k, v in roster.items()
-                ]
-                player_df.extend(roster)
-
-            player_df = pd.DataFrame(player_df)
-        elif self.league == "NHL":
-            player_df = pd.DataFrame(self.players[season].values())
+        if self.league in ("NBA", "WNBA", "NHL"):
+            # A season's roster can lack a player until that player's first game in it. Last
+            # season's row then stands in, so the game is priced from the model and not by the
+            # book alone; a player who changed teams reads on the old team for it.
+            player_col = self.log_strings["player"]
+            rows = self._season_roster_rows(season)
+            held = {row[player_col] for row in rows}
+            stand_ins = [
+                row for row in self._season_roster_rows(season - 1) if row[player_col] not in held
+            ]
+            player_df = pd.DataFrame(rows + stand_ins)
         elif self.league == "NFL":
             player_df = self.players.reset_index().rename(columns={"name": "player display name"})
         else:
             player_df = self.players
         return player_df
+
+    def _merge_season_roster(self, season_key, fresh):
+        """Fold a freshly fetched roster into the season's stored one, entry by entry.
+
+        An entry is a team's players in the NBA and the WNBA and one player's row in the
+        NHL. One the season does not hold yet is added whole: a season's first update can
+        hold only the teams that have played. One the pull lacks is kept, so a pull that
+        comes back empty changes nothing.
+        """
+        stored = self.players.get(season_key, {})
+        self.players[season_key] = {
+            entry: stored.get(entry, {}) | fresh.get(entry, {}) for entry in stored | fresh
+        }
+
+    def upcoming_game(self, team: str, date: str | None) -> dict:
+        """The schedule entry of ``team``'s game on ``date``, else of its next game.
+
+        ``upcoming_games`` holds one game a team, so read alone it hands a later-dated
+        offer the wrong game, or none when the team is off today. The NFL and the NHL
+        fill no dated map, and an offer can lack a date: both read the next game.
+        """
+        return self.upcoming_games_by_date.get((team, date), self.upcoming_games.get(team, {}))
 
     def get_depth(self, offers, date=datetime.today().date()):
         players = list(offers.keys()) if isinstance(offers, dict) else [x["Player"] for x in offers]
@@ -1386,8 +1487,11 @@ class Stats:
                     self.log_strings["position"],
                 ],
             ]
+            # Left: the gamelog row proves the player took the field, so the roster only
+            # contributes attributes. An inner merge dropped every player absent from the
+            # roster on the day the matrix was built from every past gameday.
             player_df = old_player_df.merge(
-                player_df, on=self.log_strings["player"], suffixes=[None, "_obs"]
+                player_df, on=self.log_strings["player"], how="left", suffixes=[None, "_obs"]
             )
             player_df.drop(
                 columns=[col for col in player_df.columns if "_obs" in col], inplace=True
@@ -1399,12 +1503,15 @@ class Stats:
         player_df = player_df.loc[~player_df.index.duplicated()]
 
         self.profile_market(self.usage_stat, date=date)
-        usage = pd.DataFrame(self.playerProfile[[self.usage_stat + " short", self.tiebreaker_stat]])
+        usage_col = self.usage_stat + " short"
+        usage = pd.DataFrame(self.playerProfile[[usage_col, self.tiebreaker_stat]])
         player_df = player_df.join(usage, how="left").fillna(0).infer_objects(copy=False)
+        # One column is ranked, not the frame: a roster's text attribute holds a filled-in 0
+        # for a player with no roster row, and ranking it would compare text with a number.
         ranks = (
             player_df.sort_values(self.tiebreaker_stat, ascending=False)
-            .groupby([self.log_strings["team"], self.log_strings["position"]])
-            .rank(ascending=False, method="first")[self.usage_stat + " short"]
+            .groupby([self.log_strings["team"], self.log_strings["position"]])[usage_col]
+            .rank(ascending=False, method="first")
             .astype(int)
         )
 
@@ -1418,6 +1525,7 @@ class Stats:
 
         self.playerProfile.fillna(0, inplace=True)
 
+    @line_profiler.profile
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         self._ensure_comps(date=date)
@@ -1460,6 +1568,9 @@ class Stats:
             teams = {k: v["Team"] for k, v in offers.items()}
             opponents = {k: v["Opponent"] for k, v in offers.items()}
         else:
+            # The row's date is the player's earliest, so his team and opponent are
+            # that game's too.
+            offers = earliest_last(offers)
             players = [x["Player"] for x in offers]
             teams = {x["Player"]: x["Team"] for x in offers}
             opponents = {x["Player"]: x["Opponent"] for x in offers}
@@ -1537,8 +1648,9 @@ class Stats:
         total) and the derived Spread / GameTotal / Blowout. Historical (``date``
         in the past) reads the realized ``gamelog`` row and rebinds ``teams`` /
         ``opponents`` (and MLB ``pitchers``) from it, taking OppTotal from the same
-        frame; upcoming reads ``upcoming_games`` plus the archived moneyline/total
-        and an extra ``get_total`` for the opponent. Returns the (possibly rebound)
+        frame; upcoming reads the schedule entry of each player's earliest offered
+        game (:meth:`upcoming_game`) plus the archived moneyline/total and an extra
+        ``get_total`` for the opponent. Returns the (possibly rebound)
         ``(stats, teams, opponents, pitchers)``; ``pitchers`` is ``None`` for
         non-MLB leagues.
         """
@@ -1558,33 +1670,15 @@ class Stats:
             if self.league == "MLB":
                 pitchers = todays_games["opponent pitcher"].to_dict()
         else:
+            dates = earliest_game_dates(offers)
+            games = {x: self.upcoming_game(teams[x], dates[x]) for x in stats.index}
             if self.league == "MLB":
-                pitchers = {
-                    x: self.upcoming_games.get(teams[x], {}).get("Opponent Pitcher")
-                    for x in stats.index
-                }
-                battingOrder = {
-                    x: self.upcoming_games.get(teams[x], {}).get("Batting Order").index(x) + 1
-                    if x in self.upcoming_games.get(teams[x], {}).get("Batting Order", [])
-                    else 0
-                    for x in stats.index
-                }
-                self.playerProfile.depth = battingOrder
-
-            dates = {x["Player"]: x["Date"] for x in offers}
-            for player in list(dates.keys()):
-                if " + " in player.replace(" vs. ", " + "):
-                    split_players = player.replace(" vs. ", " + ").split(" + ")
-                    dates[split_players[0]] = dates[player]
-                    dates[split_players[1]] = dates[player]
-                    dates.pop(player)
+                pitchers = {x: games[x].get("Opponent Pitcher") for x in stats.index}
 
             # Explicit False (not the blanket fillna(0) below) keeps a missing
             # upcoming_games entry from writing an int into this otherwise-bool
             # column -- pyarrow rejects a mixed bool/int object column at parquet write.
-            stats["Home"] = [
-                self.upcoming_games.get(teams[x], {}).get("Home", False) for x in stats.index
-            ]
+            stats["Home"] = [games[x].get("Home", False) for x in stats.index]
             stats["Moneyline"] = [
                 archive.get_moneyline(self.league, dates[x], teams[x]) for x in stats.index
             ]
@@ -1993,40 +2087,34 @@ class Stats:
 
         return stats
 
-    def load_volume_model_params(
-        self, offers, market, date, rename_map=None, position_filter=None
-    ) -> bool:
-        """Join a volume model's predicted distribution parameters into playerProfile.
+    def load_volume_model_params(self, offers, market, date, position_filter=None) -> bool:
+        """Join a volume model's decoded projection into playerProfile.
 
-        Shared head of ``StatsMLB`` / ``StatsNHL`` / ``StatsNFL`` ``get_volume_stats``:
-        flattens ``offers``, profiles the market, loads the cached
-        ``models/{league}_{market}.mdl`` pickle, predicts the per-player
-        distribution parameters, and joins them into ``self.playerProfile`` under
-        ``rename_map`` (the per-league difference besides ``market``). Returns
-        ``True`` on success, ``False`` when the gamelog is empty or the pickle is
-        absent so callers with post-join work (NHL/NFL budget scaling) can abort.
+        Shared head of ``StatsNBA`` / ``StatsMLB`` / ``StatsNHL`` / ``StatsNFL``
+        ``get_volume_stats``: flattens ``offers``, profiles the market, loads the
+        cached ``models/{league}_{market}.mdl`` pickle, predicts the per-player
+        distribution parameters, and writes ``proj {market} mean`` /
+        ``proj {market} std`` into ``self.playerProfile``. Returns ``True`` on
+        success, ``False`` when the gamelog is empty or the pickle is absent so
+        callers with post-join work (NBA/NHL/NFL budget scaling) can abort.
+
+        Seeding and decode both run through the artifact's own
+        ``normalized`` / ``target_normalization`` / ``offset_meta`` metadata, so a
+        volume projection lands on the stat scale by the same route
+        ``prediction.model_prob`` takes for a market model. The family algebra
+        stays in ``decode_model_params`` — this path is family-agnostic, which the
+        DPO ``carries`` model requires.
 
         Args:
             offers: Sportsbook offers dict or list passed through from the caller.
             market: The volume stat market name (e.g. ``"carries"``).
             date: Game date used for profiling and stats lookup.
-            rename_map: Column rename applied to the raw model output before the
-                join, e.g. ``{"loc": "proj carries loc", ...}``. Defaults to the
-                SkewNormal ``loc``/``scale``/``alpha`` map (``proj {market} loc``
-                etc.) shared by NFL and NHL; MLB passes its own ``mean``/``std`` map.
             position_filter: When not ``None``, restrict predicted rows to players
                 whose ``"Player position"`` value is in this collection before the
                 join. NFL passes a per-market list of depth-chart position numbers
-                (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). MLB and NHL
+                (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). The other leagues
                 pass ``None`` and skip the filter.
         """
-        if rename_map is None:
-            rename_map = {
-                "loc": f"proj {market} loc",
-                "scale": f"proj {market} scale",
-                "alpha": f"proj {market} alpha",
-            }
-
         flat_offers = flatten_offers(offers, market)
 
         self.profile_market(market, date)
@@ -2037,34 +2125,10 @@ class Stats:
             logger.warning(f"Gamelog missing - {date}")
             return False
 
-        filename = "_".join([self.league, market]).replace(" ", "-")
-        if self._volume_model_cache is None:
-            self._volume_model_cache = {}
-        if filename not in self._volume_model_cache:
-            dependency_root = getattr(self, "model_dependency_root", None)
-            if dependency_root is not None:
-                dependency = load_model_dependency(
-                    dependency_root,
-                    self.league,
-                    market,
-                    namespace=getattr(
-                        self,
-                        "model_dependency_namespace",
-                        DEPENDENCY_NAMESPACE,
-                    ),
-                )
-                self._volume_model_cache[filename] = dependency.payload
-                self.model_dependency_inventory[market] = dependency.sha256
-            else:
-                filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-                if os.path.isfile(filepath):
-                    with open(filepath, "rb") as infile:
-                        self._volume_model_cache[filename] = pickle.load(infile)
-                else:
-                    logger.warning(f"{filename} missing")
-                    return False
+        filedict = self._load_volume_model(market)
+        if filedict is None:
+            return False
 
-        filedict = self._volume_model_cache[filename]
         expected_columns = filedict["expected_columns"]
         if getattr(self, "snapshot_only_rebuild", False):
             # A cold downstream rebuild can legitimately predate the first
@@ -2077,8 +2141,8 @@ class Stats:
             # Keep serving strict: an unexpected live schema gap must not be
             # silently converted into a historical-snapshot fallback.
             playerStats = playerStats[expected_columns]
-        model = filedict["model"]
         dist = filedict["distribution"]
+        target_normalization = filedict.get("target_normalization", "ratio_meanyr")
 
         categories = ["Home", "Player position"]
         if "Player position" not in playerStats.columns:
@@ -2086,25 +2150,85 @@ class Stats:
         for c in categories:
             playerStats[c] = playerStats[c].astype("category")
 
-        set_model_start_values(model, dist, playerStats)
+        # training/__init__ imports training.cli, which imports this package, so the
+        # decode registry can only be reached once sportstradamus.stats is loaded.
+        from sportstradamus.training.baselines import decode_model_params, serve_offset_mode
 
-        prob_params = model.predict(playerStats, pred_type="parameters")
+        set_model_start_values(
+            filedict["model"],
+            dist,
+            playerStats,
+            normalized=filedict.get("normalized", False),
+            offset_mode=serve_offset_mode(dist, target_normalization),
+            sn_param=filedict.get("sn_param", "direct"),
+        )
+
+        prob_params = filedict["model"].predict(playerStats, pred_type="parameters")
         prob_params.index = playerStats.index
 
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
         if position_filter is not None:
-            prob_params = prob_params.loc[playerStats["Player position"].isin(position_filter)]
+            # The normalization decode reads its denominator out of playerStats, so
+            # the two frames have to be filtered together, not just prob_params.
+            playerStats = playerStats.loc[playerStats["Player position"].isin(position_filter)]
+            prob_params = prob_params.loc[playerStats.index]
 
-        # gate is a ZI-model artifact; callers consume only the distribution parameters.
-        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
+        decoded = decode_model_params(
+            prob_params,
+            dist,
+            playerStats,
+            hist_gate=filedict.get("hist_gate", 0.0),
+            offset_meta=filedict.get("offset_meta"),
+            target_normalization=target_normalization,
+        )
         self.playerProfile = self.playerProfile.join(
-            prob_params.rename(columns=rename_map), lsuffix="_obs"
+            pd.DataFrame(
+                {
+                    f"proj {market} mean": decoded.ev,
+                    f"proj {market} std": predictive_std(dist, decoded),
+                },
+                index=prob_params.index,
+            ),
+            lsuffix="_obs",
         )
         self.playerProfile.drop(
             columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
         )
         return True
+
+    def _load_volume_model(self, market: str) -> dict | None:
+        """Return the cached volume pickle for ``market``, or ``None`` when absent.
+
+        Resolves through ``model_dependency_root`` when a training rebuild pinned
+        one — recording the artifact's digest in ``model_dependency_inventory`` —
+        and falls back to the packaged ``data/models`` pickle at serve time.
+        """
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        if self._volume_model_cache is None:
+            self._volume_model_cache = {}
+        if filename in self._volume_model_cache:
+            return self._volume_model_cache[filename]
+
+        dependency_root = getattr(self, "model_dependency_root", None)
+        if dependency_root is not None:
+            dependency = load_model_dependency(
+                dependency_root,
+                self.league,
+                market,
+                namespace=getattr(self, "model_dependency_namespace", DEPENDENCY_NAMESPACE),
+            )
+            self._volume_model_cache[filename] = dependency.payload
+            self.model_dependency_inventory[market] = dependency.sha256
+            return dependency.payload
+
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if not os.path.isfile(filepath):
+            logger.warning(f"{filename} missing")
+            return None
+        with open(filepath, "rb") as infile:
+            self._volume_model_cache[filename] = pickle.load(infile)
+        return self._volume_model_cache[filename]
 
     def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
         """Return volume artifacts required to build ``target_market``."""
@@ -2175,7 +2299,7 @@ class Stats:
         Base implementation keeps all rows. Position-locked leagues (NFL) override
         this to drop players whose position never accrues the stat, which would
         otherwise enter the matrix as all-zero rows that depress the marginal mean
-        and inflate the zero fraction (docs/gbdt_mean_regression_plan.md Stage A1.6).
+        and inflate the zero fraction (docs/archive/gbdt_mean_regression_plan.md Stage A1.6).
         """
         return gamelog
 
@@ -2204,8 +2328,15 @@ class Stats:
 
         Reads only ``stats.index`` and ``stats["Avg10"]``, so a cached matrix can be
         re-resolved through this same path without rebuilding its feature columns.
+
+        Players the books left unpriced get a second pass offering both combo paths.
+        ``combo_quote`` prices the weighted component sum through the NORTA kernel and
+        outranks the legacy ``check_combo_markets`` scalar, which stays as the lower
+        rung: the kernel emits a real tail from real component quotes where the scalar
+        fabricates one from the cell's generic cv. It is batched over the whole
+        unpriced set because each spec component costs one archive read per gameday,
+        not one per player.
         """
-        records = []
         cv = stat_cv[self.league].get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         weights = book_weights.get(self.league, {}).get(market, {})
@@ -2216,38 +2347,52 @@ class Stats:
             list(stats.index),
             at=target_at,
         )
+        # dist/cv/weights price the (league, market) cell and never change per
+        # player; only the line inputs do, so the two live in separate dicts.
+        market_kwargs = {"dist": dist, "cv": cv, "weights": weights}
+        quotes, line_kwargs, unpriced = {}, {}, []
         for player in stats.index:
             rows, legacy_line = quote_inputs[player]
-            quote_kwargs = {
+            line_kwargs[player] = {
                 "legacy_line": legacy_line,
                 "fallback_line": max(float(stats.loc[player, "Avg10"]), 0.5),
-                "dist": dist,
-                "cv": cv,
-                "weights": weights,
             }
             quote = resolve_training_quote(
-                rows,
-                fallback_ev=None,
-                **quote_kwargs,
+                rows, fallback_ev=None, **market_kwargs, **line_kwargs[player]
             )
+            quotes[player] = quote
             if quote.source in ("neutral_fallback", "model_fallback"):
-                quote = resolve_training_quote(
-                    rows,
-                    fallback_ev=self.check_combo_markets(market, player, date),
-                    **quote_kwargs,
-                )
-            records.append(quote.as_record())
-        return pd.DataFrame(records, index=stats.index)
+                unpriced.append(player)
+
+        combo_quotes = self.combo_quote(market, unpriced, date, target_at) if unpriced else {}
+        for player in unpriced:
+            # The legacy scalar is the lower rung, so a kernel quote makes it dead weight —
+            # and it costs a per-player archive read on the leagues that implement it.
+            combo = combo_quotes.get(player)
+            quotes[player] = resolve_training_quote(
+                quote_inputs[player][0],
+                fallback_ev=None if combo else self.check_combo_markets(market, player, date),
+                fallback_quote=combo,
+                **market_kwargs,
+                **line_kwargs[player],
+            )
+        return pd.DataFrame(
+            [quotes[player].as_record() for player in stats.index], index=stats.index
+        )
 
     def get_training_matrix(self, market, cutoff_date=None):
-        """Retrieves the training data matrix and target labels for a specified market.
+        """Retrieves the training data matrix for a specified market.
 
         Args:
             market (str): The market type to retrieve training data for.
+            cutoff_date (date): Only gamedays after this date and before today are
+                used. Defaults to 850 days before today.
 
         Returns:
-            X (pd.DataFrame): The training data matrix.
-            y (pd.DataFrame): The target labels.
+            pd.DataFrame: A row is one player on one gameday: the ``get_stats`` features,
+            the quote and provenance columns of ``resolve_player_market_odds``, and
+            ``Result`` (the target), ``Player``, ``Date`` and ``GameTime``. Empty when
+            no gameday yields a row.
         """
         # style: allow-complexity — one gameday loop assembling every matrix source in order:
         # offers, volume dispatch, features, usage, quotes, then the MLB book-first split.
@@ -2355,7 +2500,7 @@ class Stats:
         return frame.infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
     def trim_gamelog(self):
-        """Trims the gamelog to the league's training-window rows plus one year."""
+        """Trims the gamelog to the league's training-window rows plus the log window they read."""
         ROWS = _TRAINING_WINDOW_ROWS.get(self.league, _TRAINING_WINDOW_ROWS_DEFAULT)
 
         usable_gamelog = self.gamelog[
@@ -2373,7 +2518,7 @@ class Stats:
         last_training_day = pd.to_datetime(
             usable_gamelog.iloc[-ROWS][self.log_strings["date"]]
         ).date()
-        cutoff_date = last_training_day - timedelta(days=300)
+        cutoff_date = last_training_day - timedelta(days=_SHORT_LOG_WINDOW_DAYS)
         self.gamelog = self.gamelog.loc[
             pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date > cutoff_date
         ].copy()
@@ -2389,7 +2534,7 @@ class Stats:
         sub_cv = stat_cv.get(self.league, {}).get(submarket, 1)
         sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
         v = archive.get_ev(self.league, submarket, date, player)
-        subline = archive.get_line(self.league, submarket, date, player)
+        subline = archive.get_reference_line(self.league, submarket, date, player)
         v = self._convert_to_market_dist(v, subline, sub_cv, sub_dist, dist, cv)
         return v, subline, sub_cv, sub_dist
 
@@ -2413,3 +2558,266 @@ class Stats:
             under = (player_games[submarket] < subline).mean()
             return get_ev(subline, under, sub_cv, dist=sub_dist) * weight, False
         return 0, False
+
+    def _fantasy_combo_spec(self, market: str, player: str) -> ComboSpec | None:
+        """Hook: component spec for a league's fantasy-score markets; base has none.
+
+        Takes the player because NFL runs one all-position fantasy market whose
+        quoted components differ by position (see ``StatsNFL``); the leagues that
+        split their fantasy markets by role ignore it.
+        """
+        return None
+
+    def _combo_bernoulli_p(self, name: str, player: str, date) -> float:
+        """Hook: success probability for a named Bernoulli combo component."""
+        raise NotImplementedError(f"{type(self).__name__} has no Bernoulli component {name!r}")
+
+    def _assumed_component(self, market: str, weight: float, player: str) -> ComboComponent | None:
+        """An unquoted component carried as the player's own trailing rate.
+
+        Rare stats (MLB ``stolen bases``) are priced on a minority of the board,
+        and under all-or-nothing admission one missing quote rejects the whole
+        player. The substitute is the player's trailing *frequency*, not a point
+        mass at its mean: a scaled Bernoulli whose ``p`` is the share of trailing
+        games recording the stat and whose weight is rescaled by ``rate / p``, so
+        ``E[term] == weight * rate`` exactly while the term keeps a real spread.
+
+        Measured on MLB hitter fantasy over the 1345 player-gamedays where a
+        sportsbook *did* price stolen bases, so every arm is paired against the
+        real quote: PIT KS 0.0670 real / **0.0540** Bernoulli / 0.1115
+        deterministic offset, PIT mean 0.5047 / 0.5066 / 0.4924. The
+        deterministic arm's loss is the lost variance rather than the lost quote,
+        which is why this returns a distribution. Per-row disagreement with the
+        real quote is -0.085 points on a 9.6-point mean, 0.1% of rows moving more
+        than half a point.
+
+        A stand-in never displaces a real quote: the books see more than the
+        gamelog does, so this runs only where no sportsbook priced the component,
+        and ``_MAX_ASSUMED_COMPONENT_SHARE`` bounds how much of a spec it may carry.
+
+        ``None`` when the player never recorded the stat in the trailing window --
+        a zero contribution, which the sum expresses by omitting the component.
+        """
+        games = self.short_gamelog
+        games = games[games[self.log_strings["player"]] == player][market]
+        p = float((games >= 1).mean()) if not games.empty else 0.0
+        if p <= 0:
+            return None
+        return ComboComponent(market, float(weight) * float(games.mean()) / p, p, "Bernoulli", 0.0)
+
+    def _book_mean_shift(self, combo, market: str, combo_inputs: dict, player: str) -> float:
+        """Half the distance from the component-sum mean to the market's own quoted mean.
+
+        A fantasy spec is an *approximation* of the platform's settlement formula —
+        proxied components, terms no book quotes — so the component sum carries a
+        residual the market's own line does not, and the market's line carries one
+        the sum does not. Averaging the two halves both residuals. Measured on MLB hitter
+        fantasy (n=1345, quotes read at first pitch), against the same NORTA shape:
+        PIT KS 0.221 component-sum / 0.072 book-only / **0.067 averaged**, PIT mean
+        0.435 / 0.521 / **0.505**, mean |claimed-hit| over +/-1.5 sd offset lines
+        0.024 / 0.022 / **0.012**.
+
+        Simple ``combo_props`` sums are excluded because their spec is *exact*, so
+        the sum is already unbiased and averaging only pulls it off centre: the
+        component sum wins PIT KS on all five graded simple combos (WNBA PRA/RA/PR/PA,
+        MLB hits+runs+rbi) against this blend.
+
+        The market's own quote is admitted from any book including the DFS platforms,
+        unlike a component quote. On a fantasy market the platform's posted line is
+        the only quote in existence and it is a projection; the even-money price
+        beside it is not, and the ``book_direct`` inversion reads the line.
+        """
+        rows, legacy_line = combo_inputs.get(player, ([], None))
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
+        cv = stat_cv.get(self.league, {}).get(market, 1)
+        quote = resolve_training_quote(
+            rows,
+            legacy_line=legacy_line,
+            fallback_line=0.0,
+            fallback_ev=None,
+            dist=dist,
+            cv=cv,
+            weights=book_weights.get(self.league, {}).get(market, {}),
+        )
+        if quote.source != "book_direct":
+            return 0.0
+        book_mean = quote_pricing_params(quote, self.league, market, dist, cv).mean
+        return 0.5 * (book_mean - combo.mean)
+
+    def combo_quote(self, market, players, date, at, lines=None) -> dict[str, TrainingQuote]:
+        """Price a combo market as an honest weighted component sum, per player.
+
+        Resolves each spec component's own modal-line book quote — one batched
+        ``archive.get_training_quote_inputs`` call per distinct submarket — and
+        prices the weighted sum through the NORTA kernel
+        (``helpers.combined_markets``). Admission is strict: every marginal and
+        sampled component must resolve ``source == "book_direct"`` off at least
+        one real sportsbook, and every Bernoulli p must be a finite open-interval
+        probability, else the player is omitted entirely — never a mix of real
+        and fabricated components. A spec may name components as ``assumable``,
+        which the books price too rarely to reject a whole player over: those
+        fall back to ``_assumed_component`` and are named in ``synthetic_reason``.
+        A real quote always wins over the fallback, and no more than
+        ``_MAX_ASSUMED_COMPONENT_SHARE`` of a spec's component markets may be
+        carried that way — past it the player is omitted like any other
+        inadmissible row.
+        A registered ``combo_props`` market prices every player off one simple
+        sum; a fantasy market takes its spec per player from
+        ``_fantasy_combo_spec``, so NFL's one all-position market can carry a
+        different component list per position. Submarket fetches are batched over
+        the union of the specs in play. A fantasy sum is then relocated halfway to
+        the market's own quoted mean where one exists (``_book_mean_shift``); the
+        shape is the component sum's either way.
+        The combo line is ``lines[player]`` when a mapping is given, else the
+        combo market's own archived reference line; no positive line, no quote,
+        and none for an archived line the component sum dwarfs.
+        Component inversions pass ``gate=None``: this layer's book-quote
+        convention is ungated end to end (see ``_authentic_quote``), and a
+        population zero-gate on top of an ungated inversion would break
+        ``decode(invert(p)) == p`` at the component's own quote line.
+        """
+        # style: allow-complexity — one strict-admission-and-pricing pass per player;
+        # extracting the admission loop from the quote build would scatter one policy.
+        simple = market in combo_props
+        if simple:
+            simple_sum = ComboSpec(marginals=tuple((m, 1.0) for m in combo_props[market]))
+            specs = dict.fromkeys(players, simple_sum)
+        else:
+            specs = {p: self._fantasy_combo_spec(market, p) for p in players}
+            specs = {p: s for p, s in specs.items() if s is not None}
+        if not specs:
+            return {}
+
+        players = list(specs)
+        submarkets = {
+            sub
+            for spec in specs.values()
+            for sub in [name for name, _ in spec.marginals] + list(spec.sampled)
+        }
+        sub_cfg = {
+            sub: (
+                stat_dist.get(self.league, {}).get(sub, "Gamma"),
+                stat_cv.get(self.league, {}).get(sub, 1),
+                book_weights.get(self.league, {}).get(sub, {}),
+            )
+            for sub in submarkets
+        }
+        inputs = {
+            sub: archive.get_training_quote_inputs(self.league, sub, date, players, at=at)
+            for sub in sub_cfg
+        }
+        combo_inputs = (
+            {}
+            if simple and lines is not None
+            else archive.get_training_quote_inputs(self.league, market, date, players, at=at)
+        )
+        lines_are_archived = lines is None
+        if lines_are_archived:
+            lines = {player: combo_inputs.get(player, ([], None))[1] for player in players}
+        rho = load_same_player_rho(self.league)
+
+        quotes: dict[str, TrainingQuote] = {}
+        for player in players:
+            line = lines.get(player)
+            if line is None or not np.isfinite(line) or float(line) <= 0:
+                continue
+            spec = specs[player]
+            slots = list(spec.marginals) + [(sub, 0.0) for sub in spec.sampled]
+            components, component_quotes, assumed = [], [], []
+            admitted = True
+            for sub, weight in slots:
+                sub_dist, sub_cv, sub_weights = sub_cfg[sub]
+                rows, legacy_line = inputs[sub].get(player, ([], None))
+                quote = resolve_training_quote(
+                    rows,
+                    legacy_line=legacy_line,
+                    fallback_line=0.0,
+                    fallback_ev=None,
+                    dist=sub_dist,
+                    cv=sub_cv,
+                    weights=sub_weights,
+                )
+                # A component priced only by pick'em platforms carries their even-money
+                # anchor, not a price: MLB stolen bases archive 100% at under 0.50 where
+                # the sportsbooks quote 0.86 and the market settles under 0.90. The sum
+                # weights that mean by 4, so one platform-only component moves the combo
+                # further than every honest one together.
+                if quote.source != "book_direct" or not any(
+                    book not in DFS_PLATFORM_BOOKS for book in quote.books
+                ):
+                    if sub not in spec.assumable:
+                        admitted = False
+                        break
+                    stand_in = self._assumed_component(sub, weight, player)
+                    if stand_in is not None:
+                        components.append(stand_in)
+                    assumed.append(sub)
+                    continue
+                mean, sigma, skew, phi, r = quote_pricing_params(
+                    quote, self.league, sub, sub_dist, sub_cv
+                )
+                components.append(
+                    ComboComponent(
+                        sub,
+                        float(weight),
+                        mean,
+                        sub_dist,
+                        sub_cv,
+                        sigma=sigma,
+                        skew=skew,
+                        phi=phi,
+                        r=r,
+                    )
+                )
+                component_quotes.append(quote)
+            if admitted:
+                for name, weight in spec.bernoulli:
+                    p = self._combo_bernoulli_p(name, player, date)
+                    if not (np.isfinite(p) and 0.0 < p < 1.0):
+                        admitted = False
+                        break
+                    components.append(
+                        ComboComponent(name, float(weight), float(p), "Bernoulli", 0.0)
+                    )
+            n_components = len(spec.marginals) + len(spec.sampled) + len(spec.bernoulli)
+            if not admitted or len(assumed) > _MAX_ASSUMED_COMPONENT_SHARE * n_components:
+                continue
+            post = spec.post_builder(self, player, date) if spec.post_builder else None
+            combo = combo_sum_quote(components, rho, post=post)
+            shift = 0.0 if simple else self._book_mean_shift(combo, market, combo_inputs, player)
+            # An archived combo line the component sum dwarfs is some other market's
+            # line (NFL "qb yards" 6.5 under a 239-yard passing + rushing sum). The
+            # pair is the runaway EV the matrix audit rejects, so it earns no quote.
+            if lines_are_archived and archive_ev_is_runaway(combo.mean + shift, line):
+                continue
+            under_prob_at = (
+                partial(_relocated_under_prob, combo.under_prob, shift)
+                if shift
+                else combo.under_prob
+            )
+            observed = [q.observed_at for q in component_quotes if q.observed_at is not None]
+            weakest = min(
+                component_quotes,
+                key=lambda q: sum(book not in DFS_PLATFORM_BOOKS for book in q.books),
+            )
+            reason = "component_sum"
+            if spec.analytics:
+                reason += "+" + ",".join(spec.analytics)
+            if assumed:
+                reason += "+assumed:" + ",".join(assumed)
+            if shift:
+                reason += "+book_mean"
+            quotes[player] = TrainingQuote(
+                line=float(line),
+                over_probability=1.0 - under_prob_at(float(line)),
+                ev=combo.mean + shift,
+                source=COMBO_SUM_SOURCE,
+                authenticity=DERIVED,
+                synthetic_reason=reason,
+                observed_at=min(observed, default=None),
+                book_count=min(q.book_count for q in component_quotes),
+                books=weakest.books,
+                sum_sd=combo.sd,
+                under_prob_at=under_prob_at,
+            )
+        return quotes

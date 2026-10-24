@@ -15,13 +15,13 @@ whenever the queue changes; git holds the history.
 3. The three yards markets (passing / rushing / receiving yards) are the priority ships beyond
    the current candidate set — owner wants **all three**. Interceptions is the lowest-priority
    NFL cell (least popular market).
-4. No denominator pruning. Bookless cells must beat the coin flip (g1–g3 vs synthetic 0.5
-   stand as computed).
+4. No denominator pruning. Bookless cells (no sportsbook quote; a DFS-only cohort is `pickem`)
+   ship on gates 2–6 with Gate 1 blank (owner decision 2026-09-29 superseded the coin-flip rule).
 5. ≤5 distribution types in play (ZINB, NegBin, DPO, SkewNormal direct+centered). Adding a
-   6th requires an owner ask with pilot evidence. Current standing: a 6th type is endorsed
-   in principle, contingent on the compositional-architecture smoke test (NFL end-game
-   step 4) — compound count×severity first; generic Mixture only as the fallback if the
-   compound test shows no merit. ZAGamma stays retired (dominated — fixes the wrong defect).
+   6th requires an owner ask with pilot evidence. Current standing: the endorsed 6th type is
+   the Mixture head, which sits in the sweep's continuous pool; the compound count×severity
+   smoke test the endorsement waited on showed no merit (NFL end-game step 4). ZAGamma stays
+   retired (dominated — fixes the wrong defect).
 6. The six offline ship gates are inviolable; deterministic boards rank, full-HPO confirms ship.
 7. Never push devel directly — devel-ship-curator PR, human approves. Review stat_meta diffs
    after any `--yes` confirm.
@@ -30,41 +30,20 @@ whenever the queue changes; git holds the history.
 
 | League | Shipped | Target (75%) | Status |
 |---|---|---|---|
-| WNBA | 14/18 | 14 | **DONE** |
-| NBA | 16/21 | 16 | **DONE** |
-| MLB | 14/19 | 15 | +1 needed |
-| NHL | 10/15 | 12 | +2 needed |
-| NFL | 9/20 | 15 | +6 needed — priority |
+| WNBA | 14/18 | 14 | **DONE** — MIN shipped 6/6 (cdf_recal mechanism, repro-verified) |
+| NBA | 18/21 | 16 | **DONE** |
+| MLB | 15/19 | 15 | **DONE** |
+| NHL | 12/15 | 12 | **DONE** |
+| NFL | 19/20 | 15 | **DONE** — the ship-15 campaign's seven flips committed `8dfbe48c` (2026-10-10); passing yards is the one withheld cell; lane [nfl-ship15-recovery.md](nfl-ship15-recovery.md) |
 
 ## In flight right now
 
-- **Mixture pilot RUN — verdict: PROMISING on receiving yards, g1-walled on rushing.**
-  Board-only, and now out of the sweep pool entirely: `SWEEP_CAPABILITIES` requires
-  `CAP_CONFIRM`, so a family with no serving path spends no trial budget. It was the
-  rank-1 corner on 3 of the first 4 holdout-blind cells and skipped at nomination every
-  time; see model_improvement_track.md §8.2 hole #0a for the put-it-back trigger.
-  Deterministic 6-corner Mixture boards vs the cells' SN boards:
-  - receiving yards: best Mixture corner (centered_additive_mean10 / crps blend) is the
-    cell's **rank-1 corner overall**, g4 pit_ks 0.0552 vs bar 0.050 (SN best 0.0629 —
-    60% of the g4 excess removed), g1 CI-hi +0.0064 (SN best +0.0050), g2/g3/g5/g6 all
-    pass. Deterministic undersells a new family (30 rounds, no HPO) — full-HPO confirm
-    is the decider once serving lands.
-  - rushing yards: Mixture also halves the g4 excess (0.0703 vs SN 0.0868) but g1 is a
-    real wall (CI-hi +0.0143, bss −0.0245 vs SN −0.0027) — book-bound beyond the family.
-  - Pre-registered sharp-book kill (g4 clears while g1 stays positive) NOT triggered.
-  - Build hardening that made it trainable: component-scale clamp to
-    [0.02, 20]×label-std (Hathaway-style — kills the σ→0 likelihood spike and the
-    dead-head exp-overflow), stabilization None→L2, and per-fit floors
-    min_child_weight≥0.1 / lambda_l2≥1.0 (near-dead components have ~zero hessian and
-    unregularized Newton leaf steps explode).
-  - Next: build the Mixture serve path (model_prob decode + blend + dashboard deep-dive
-    + live-path integration test), then full-HPO confirm receiving yards.
-- **NFL chain complete**: receptions + yards shipped to devel (committed) → NFL 9/20.
-  Revert gates now known: carries g1, qb yards g3 (not g4 — bss +0.118), targets g2.
-  Count-board candidates (targets NegBin +0.149, qb tds hurdle-ZINB +0.064) still queued
-  for the post-fix re-run; receptions NegBin is moot (SN ship banked).
+- Nothing for breadth: every league is at target. The NFL's open work — passing yards, still
+  withheld, and the send of the 2026-10-15 retrain — lives in
+  [nfl-ship15-recovery.md](nfl-ship15-recovery.md); this file keeps the standing rules and the
+  history below.
 
-## NFL end-game (7 → 15)
+## NFL end-game (history — reached 20/20 on 2026-09-01; superseded by the 2026-09 rebuild)
 
 1. **Six candidates through confirm** (in flight + re-run): the five SN confirms above, plus
    the count re-runs. If a confirm reverts, its recovery levers in order: g4-only calibrated
@@ -76,7 +55,7 @@ whenever the queue changes; git holds the history.
    ship_config validation rejects an SN slug on a non-SN cell and validates the whole file, so
    one bad entry kills every meditate. Add golden. Flip scripts set the slug too.
 3. **Count re-run**: re-flip receptions/targets/carries (dist=ZINB **and**
-   target_normalization=none) → `model-strategy-sweep --dist-class count --league NFL
+   target_normalization=none) → `sportstradamus ship sweep --dist-class count --league NFL
    --confirm --yes` → revert unshipped flips. Board evidence stands; only the confirms were
    lost to the crash.
 4. **Yards trio** (research verdict; brief archived at
@@ -84,7 +63,10 @@ whenever the queue changes; git holds the history.
    priority, two different problems.
    - **receiving + rushing yards**: g4 fails on **upper-tail under-dispersion** (right-tail
      PIT mass 0.21–0.25 vs nominal 0.05; boom games land far more often than a single-mode
-     SkewNormal tail allows). NOT the zero atom — positive-only KS ≈ full KS, so
+     SkewNormal tail allows). *(Superseded 2026-08-26: under the post-fusion corrector and
+     the joint `(c, s)` calibrator the incumbent's far tail is now too heavy — cov80 0.851 —
+     so the residual is asymmetry + support, not raw tail weight;
+     `docs/archive/researcher_studentt_head.md`.)* NOT the zero atom — positive-only KS ≈ full KS, so
      ZAGamma/hurdle would fix the wrong defect. **Compound/compositional architecture
      (count × per-event severity) SMOKE-TESTED — PARTIAL/NO-MERIT, not the lever.** With
      real play-by-play severities and the pre-registered bar (right-tail PIT ≤ 0.10 AND
@@ -101,10 +83,13 @@ whenever the queue changes; git holds the history.
      negative (bss −0.004 / −0.007) so the g4 fix has a plausible-not-assured g1 crossing;
      pre-registered kill: g4 clears but g1 stays positive ⇒ sharp-book KILL — bank the
      evidence, do not chase.
-   - **passing yards**: NOT reachable this cycle — ~0 zeros (different cell), most
-     efficiently priced NFL prop market, g1 needs ~88× the current n with a point estimate
-     worse than the book. Routes to the pooling/TabPFN lane, not Mixture; honest KILL for
-     now.
+   - **passing yards**: SHIPPED (devel) on the seed recipe under the SkewNormal
+     precision-pool scale floor — g1 mean −0.0026, ci_hi 0.0044, BSS +0.012 at w=0.31.
+     The earlier "needs ~88× n" framing was wrong twice over: the point estimate was a
+     dead tie (not worse than the book), and the g1 mass sat in nine degenerate served
+     probabilities the un-floored precision blend produced
+     (`docs/archive/researcher_passing_g1.md`). Ships as coverage: kelly_shrinkage ≈ 0.01
+     stakes it near nothing by design.
 5. **Remaining pool**: attempts is the only favorable-point-estimate g1 cell (needs ~1.5×
    effective n — obtainable via EB-shrink partial pooling, not history; the Odds API has no
    pre-2023-05 NFL prop history). completions (8× n) and passing tds (5× n + g4) are
@@ -119,45 +104,33 @@ thinnest; carries/qb-yards/receptions healthiest. Recovery per reverter: g4-only
 retry → `cdf_recal_isotonic` (continuous cells only — NOT qb tds; the monotone CDF map
 degrades low-mean counts).
 
-## NHL queue (10 → 12), after the NFL chain
+## NHL queue (12/15 — target met)
 
 1. **saves** re-confirm — S4 unlocked its +0.011 corner (ratio_meanyr / dist_training_loss=nll
-   / direct / crps): single-cell `model-strategy-sweep --league NHL --market saves --confirm
-   --yes`.
-2. **skater fantasy** — persist the −0.230 g4-only corner (centered_additive_eb_meanyr_k10 /
-   crps / centered / nll) + `posthoc: cdf_recal_isotonic` + calibrated-HPO meditate; keep on
-   5/5 else revert. Backup: goalsAgainst count retry (−0.118).
-3. If both fail: Mixture pilot ask to owner (6th type) with full board evidence.
+   / direct / crps): single-cell `sportstradamus ship sweep --league NHL --market saves
+   --confirm --yes`.
 
-## MLB queue (14 → 15), after the NFL chain
+The queue's other cell, **skater fantasy**, shipped 2026-07-29 (`89874adc`), which retired its
+goalsAgainst backup and the Mixture-pilot ask that waited on both cells failing.
 
-1. **pitches thrown** re-confirm — S4 unlocked its +0.052 corner
-   (centered_additive_eb_meanyr_k10 / nll / centered / crps): single-cell sweep --confirm.
-2. Fallback: **pitching outs** manual walk of its two remaining +0.057 corners
-   (centered_additive_mean10 / crps / direct / crps, then centered_additive_eb_meanyr_k10 /
-   crps / direct / crps) — persist by hand, full-HPO meditate, keep on 5/5 else revert+prune.
-3. runs allowed is dead this wave (g1-only, book-side — calibration levers do not apply).
+## MLB queue (15/19 — target met)
+
+Nothing queued: **pitches thrown** shipped 2026-07-30 (`f6611558`) and **runs allowed**
+2026-08-24 (`fcf86a70`), so the **pitching outs** fallback (a manual walk of its two +0.057
+corners) was not needed; pitching outs stays withheld.
 
 ## Debt / bookkeeping queue
 
-- refactoring-specialist over every touched `.py` (sweep, confirm, cli, + the upcoming
-  norm-none fix and tests) before any push/PR/review — then re-run the three gates
-  (ruff, golden, `-m integration -n0` + touch integration_green).
-- devel-ship-curator PR for the session's ship batch (~20 stat_meta flips + S4 + fixes).
-  Never push devel directly.
 - S1: drop the joint-ZINB sweep axis (0 shipping corners across all boards, best −0.166) —
   evidence complete once MLB/WNBA boards counted; one-line registry edit + pin updates.
-- Golden-suite dashboard smoke `test_lab_modifiers_pairwise_isolation_updates_stale_pair`
-  is a cross-file xdist flake (passes isolated and file-scoped) — apply xfail(strict=False)
-  treatment if it recurs at the pre-push gate.
 - Stale `stat_meta.*.bak.json` sweep backups: delete as they appear.
 - WNBA margin board at idle (target already met).
 - Ledger line + this file updated per session boundary.
 
 ## Operating laws (every session)
 
-- `pgrep -af "[m]editate|model.strategy.(sweep|confirm)"` must be empty before any
-  sweep/confirm/meditate launch.
+- `pgrep -af "[m]editate|ship [s]weep"` must be empty before any sweep/confirm/meditate
+  launch.
 - No training-code edits while any sweep/confirm chain runs.
 - `--resume` is safe on board sweeps: it reopens each cell's Optuna journal and reuses prior rows
   per row, not per cell, rejecting any whose spec/controls/matrix identity has moved.

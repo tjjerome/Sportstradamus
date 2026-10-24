@@ -24,6 +24,7 @@ from sportstradamus.collectors.catalog import (
 from sportstradamus.collectors.cli import Source, build_source_cli
 from sportstradamus.collectors.transport import (
     CollectorAuthError,
+    CollectorAuthRecoveryError,
     CollectorDecodeError,
     CookieClient,
 )
@@ -31,6 +32,7 @@ from sportstradamus.collectors.transport import (
 __all__ = [
     "AuthFields",
     "CollectorAuthError",
+    "CollectorAuthRecoveryError",
     "CollectorDecodeError",
     "CookieClient",
     "EndpointSpec",

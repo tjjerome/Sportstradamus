@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.training.group_conditional_cdf._maps import ks_supremum
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY, get_strategy
 from sportstradamus.training.scorecard import (
     _bootstrap_mean_ci,
@@ -116,7 +117,7 @@ def _oof_brier_arrays(fit, splits: dict):
     """Priced validation outcomes and book-relative Brier CIs for a structural candidate.
 
     The two-part and affine OOF audits open with the identical setup — same
-    validation index, the same priced ``(result >= line)`` outcome, and the same
+    validation index, the same priced over label (0.5 at a tie), and the same
     seeded row/player-clustered Brier-delta CIs against ``fit.oof_pooled_over``.
     Returns ``(result, players, outcome, book, brier_delta, row_ci, player_ci)``;
     each audit's candidate-specific guards diverge after this point.
@@ -126,7 +127,7 @@ def _oof_brier_arrays(fit, splits: dict):
     line = splits["B_validation"]["Line"].reindex(index).to_numpy(dtype=float)
     book = splits["B_validation"]["Odds"].reindex(index).to_numpy(dtype=float)
     players = splits["players_validation"].reindex(index).astype(str).to_numpy()
-    outcome = (result >= line).astype(float)
+    outcome = over_label(result, line)
     brier_delta = (fit.oof_pooled_over - outcome) ** 2 - (book - outcome) ** 2
     row_ci = _bootstrap_mean_ci(brier_delta, np.random.default_rng(1729))
     player_ci = _bootstrap_mean_ci_clustered(brier_delta, players, np.random.default_rng(1729))

@@ -9,11 +9,9 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 
 from __future__ import annotations
 
-import hashlib
-import json
+import datetime
 import os.path
 import pickle
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -21,19 +19,17 @@ from scipy.stats import skewnorm
 
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
-    NONZERO_DENOM_GATE,
-    UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     apply_cdf_recal,
     apply_temperature,
+    archive_market,
     book_gate,
-    book_skewnormal_shape,
     decode_predictive_mean,
     fused_loc,
-    get_ev,
     get_odds,
     get_push_prob,
     set_model_start_values,
+    shape_from_moments,
     skewnormal_loc_from_mean,
     stat_cv,
     stat_dist,
@@ -41,9 +37,27 @@ from sportstradamus.helpers import (
     stat_zi,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
-from sportstradamus.helpers.io import market_file_slug, model_pickle_path
+from sportstradamus.helpers.io import (
+    market_file_slug,
+    model_pickle_path,
+    resolve_model_version,
+)
+from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
+from sportstradamus.prediction.book_quotes import (
+    annotate_quote_provenance,
+    book_evs_for_players,
+    price_offers_at_quotes,
+    servable_fallback_quotes,
+)
+from sportstradamus.prediction.feature_log import upsert_feature_log
+from sportstradamus.prediction.offer_records import (
+    book_over_prob,
+    col_or_none,
+    finalize_records,
+)
 from sportstradamus.spiderLogger import logger
-from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.stats.base import earliest_last
+from sportstradamus.training.baselines import decode_model_params, serve_offset_mode
 from sportstradamus.training.group_conditional_cdf import (
     LEGACY_AFFINE_SCHEMA_VERSION,
     AffinePredictive,
@@ -71,7 +85,7 @@ from sportstradamus.training.model_strategy import (
     resolve_report_identity,
     validate_strategy_selection,
 )
-from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
+from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc, correct_fused_mean
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY,
@@ -82,21 +96,10 @@ from sportstradamus.training.structural_strategies import (
 # access. See LazyArchive docstring in helpers/archive.py.
 archive = LazyArchive()
 
-# Maximum allowed model confidence before applying a boost.
-_MAX_CONFIDENCE = 0.90
-
 # Minimum bookmaker line for a "yards" market to be scored. Combo legs ("vs.")
 # are exempt; single-player yards lines at or below this are too low to model
 # reliably and are dropped.
 _MIN_YARDS_LINE = 8
-
-# Maximum Underdog boost multiplier kept when de-duplicating a player's offers.
-# Above this the promo is an outlier (e.g. a discounted special) that distorts
-# the per-player distance ranking, so it is filtered out.
-_MAX_UNDERDOG_BOOST = 3.65
-
-# Coin-flip prior used when no bookmaker price is available for an offer.
-_BOOK_PRIOR_PROB: float = 0.5
 
 # A bookmaker projected mean beyond this multiple of its own line is implausible:
 # model and book project the same stat, and a sane book mean sits within a small
@@ -127,12 +130,16 @@ _OWN_SCALE_FLOOR: float = 0.5
 # debutant, or a position player on a foreign stat line); the clamp can't help, so drop it.
 _OWN_SCALE_MIN: float = 0.1
 
-# Maximum scored offers retained per player after boost-distance deduplication.
-_MAX_OFFERS_PER_PLAYER: int = 3
-
-# Serve-time model-version cache keyed by (pickle path, mtime): the legacy synthesis
-# hashes the whole pickle file, so it runs once per model per process. See resolve_model_version.
-_MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
+# Training brackets the dispersion fit in scorecard._DISPERSION_C_BOUNDS = (0.1, 10.0); a value
+# pinned at either end is a diverged fit, not a measurement, and serving it rescales the
+# predictive shape up to 10x too narrow (SkewNormal pins at the floor, count families at the
+# cap) — the 2026-08 WNBA overconfident-unders vector. Local constants, not an import: the
+# scorecard/sweep modules (click, tabulate, Optuna) stay out of the serving import path. The
+# tolerances absorb float wobble around the bounds, mirroring sweep._DIVERGED_DISPERSION_CAL.
+# Known gap: DPO's train-time cap is dynamic (min(10, ceiling/max(phi))), so a DPO fit pinned
+# below 9.95 escapes detection; the in-family phi re-clip in _dispersion_calibrate bounds it.
+_DIVERGED_DISPERSION_FLOOR: float = 0.1005
+_DIVERGED_DISPERSION_CEIL: float = 9.95
 
 # Attribution id for a leg scored off devigged book odds (no trained model pickle).
 _BOOK_FALLBACK_VERSION = "book_fallback"
@@ -142,61 +149,13 @@ _BOOK_FALLBACK_VERSION = "book_fallback"
 _TWO_PART_SETTLEMENT_STEP = 1.0
 
 
-def resolve_model_version(filepath: str, filedict: dict) -> str:
-    """The stamped ``model_version``, or a stable ``legacy.<sha10>`` for pre-stamp pickles.
-
-    ~53 pickles trained before the train-time stamp carry no ``model_version``;
-    for those we synthesize one from a sha1 of the pickle bytes so each legacy
-    model still attributes to a distinct, reproducible id. Memoized per
-    ``(path, mtime)`` so the file-hash cost is paid once per model per process.
-    """
-    version = filedict.get("model_version")
-    if version is not None:
-        return version
-    key = (filepath, Path(filepath).stat().st_mtime)
-    cached = _MODEL_VERSION_CACHE.get(key)
-    if cached is None:
-        cached = "legacy." + hashlib.sha1(Path(filepath).read_bytes()).hexdigest()[:10]
-        _MODEL_VERSION_CACHE[key] = cached
-    return cached
-
-
 def normalize_market(league: str, market: str, platform: str) -> str:
     """Canonicalize a platform's market label to the league gamelog/model key.
 
     Applies the per-platform ``stat_map`` alias plus the NHL and NBA/WNBA
     fixups shared by ``match_offers``, ``model_prob``, and ``book_fallback_prob``.
     """
-    market = stat_map[platform].get(market, market)
-    if league == "NHL":
-        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
-    if league in ("NBA", "WNBA"):
-        market = market.replace("underdog", "prizepicks")
-    return market
-
-
-def _resolve_denom_col(offset_meta: dict | None, hist_gate: float, columns) -> str:
-    """SkewNormal decode denominator, preferring the value training persisted.
-
-    The denom (``MeanYr`` vs ``MeanYr_nonzero``) is a property of the trained model:
-    training picks it from the empirical zero-rate and stores it in the pickle. Reading
-    it back keeps serve in lockstep even when the runtime ``stat_zi`` (gitignored,
-    per-box) is stale or absent. Falls back to the legacy ``hist_gate`` recompute for
-    pre-persist pickles; the ``prior_*`` keys cover already-shipped centered pickles
-    without a retrain (mean10 stores the denom as ``prior_fallback_col``, EB as
-    ``prior_col``).
-    """
-    om = offset_meta or {}
-    persisted = om.get("denom_col") or om.get("prior_fallback_col")
-    if persisted is None and om.get("method") == "eb_additive":
-        persisted = om.get("prior_col")
-    if persisted is not None:
-        return persisted
-    return (
-        "MeanYr_nonzero"
-        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in columns)
-        else "MeanYr"
-    )
+    return archive_market(league, stat_map[platform].get(market, market))
 
 
 def _decode_skewnormal(
@@ -233,20 +192,13 @@ def _decode_skewnormal(
         ``Projection``, ``Model Sigma``, ``Model Skew``, and optional
         ``Model Gate`` columns set.
     """
-    strategy = get_target_normalization(target_normalization)
-    # ratio_projvol persists its projected-volume denominator in offset_meta;
-    # _resolve_denom_col reads it (and the centered prior_* back-compat keys),
-    # falling back to the season-mean choice for legacy pickles.
-    denom_col = _resolve_denom_col(offset_meta, hist_gate, playerStats.columns)
-    # global_mean snapshot lives in offset_meta for centered strategies; the
-    # ratio strategy ignores it (uses MeanYr from features directly).
-    global_mean = float((offset_meta or {}).get("global_mean", 0.0))
-
-    ev_loc = strategy.decode_loc(prob_params["loc"].values, playerStats, global_mean, denom_col)
-    ev_scale = strategy.decode_scale(prob_params["scale"].values, playerStats, denom_col)
-
-    decoded = decode_predictive_mean(
-        prob_params, "SkewNormal", sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
+    decoded = decode_model_params(
+        prob_params,
+        "SkewNormal",
+        playerStats,
+        hist_gate=hist_gate,
+        offset_meta=offset_meta,
+        target_normalization=target_normalization,
     )
     prob_params["Projection"] = decoded.ev
     prob_params["Model Sigma"] = decoded.sigma
@@ -284,20 +236,6 @@ def _apply_cdf_recal_over(raw_over: np.ndarray, pit_recal_blob: dict | None) -> 
     return 1.0 - apply_cdf_recal(pit_recal_blob, 1.0 - np.asarray(raw_over, dtype=float))
 
 
-def _apply_mean_posthoc(
-    model_mu: np.ndarray, posthoc_slug: str, posthoc_blob: dict | None
-) -> np.ndarray:
-    """Apply a fitted mean-stage corrector to the decoded model mean.
-
-    No-op unless the cell's slug is a :data:`MEAN_STAGE` corrector. Mirrors the
-    training-side correction in ``pipeline.train_market`` so the live blend sees
-    the same corrected mean.
-    """
-    if posthoc_slug in MEAN_STAGE:
-        return apply_posthoc(posthoc_slug, posthoc_blob, model_mu)
-    return model_mu
-
-
 def _book_cell_params(
     league: str, market: str
 ) -> tuple[str | None, float | None, float | None, float | None]:
@@ -317,283 +255,6 @@ def _book_cell_params(
     return dist, cv, gate, step
 
 
-def _book_over_prob(
-    offer_df: pd.DataFrame,
-    dist: str,
-    cv: float,
-    step: float,
-    gate: float | None,
-    league: str,
-    market: str,
-) -> pd.Series:
-    """Devigged book probability of the over per row, inverted from ``Market Projection``.
-
-    Inverts the composite book EV through the cell distribution at each row's line. Shared by
-    :func:`model_prob` and :func:`book_fallback_prob`. For SkewNormal the book ``(sigma, skew)``
-    comes from the per-cell fitted shape evaluated at the book mean (:func:`book_skewnormal_shape`);
-    an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read.
-    """
-    if dist == "SkewNormal":
-        # The archive encodes SkewNormal sportsbook EVs without the model's
-        # external hurdle. Keep the book endpoint gate-free on decode too.
-        gate = None
-
-        def _sn_over(x):
-            sigma, skew = book_skewnormal_shape(league, market, x["Market Projection"], cv)
-            return 1 - get_odds(
-                x["Line"],
-                x["Market Projection"],
-                dist,
-                cv=cv,
-                step=step,
-                sigma=float(sigma),
-                skew_alpha=float(skew),
-                gate=gate,
-            )
-
-        return offer_df.apply(_sn_over, axis=1)
-    return offer_df.apply(
-        lambda x: 1 - get_odds(x["Line"], x["Market Projection"], dist, cv, step=step, gate=gate),
-        axis=1,
-    )
-
-
-def _composite_book_evs(players, league: str, market: str, date_map: dict, stat_data) -> dict:
-    """Composite (book-weighted, vig-free) EV per player, with combo fallback.
-
-    Reads ``archive.get_ev`` for each player; when the archive has no direct
-    price, falls back to the convolved consensus from ``check_combo_markets``
-    (qb-yards / qb-tds). Players with no book price carry NaN.
-    """
-    evs = {}
-    for player in players:
-        date = date_map.get(player, "")
-        ev = archive.get_ev(league, market, date, player)
-        if np.isnan(ev):
-            ev = stat_data.check_combo_markets(market, player, date)
-        evs[player] = ev
-    return evs
-
-
-def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
-    """Set the display-only ``Model Param`` and ``Projection STD`` columns in place.
-
-    Reads the distribution-shape parameters the model emitted (``Model R`` /
-    ``Model Phi`` / ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
-    as on a book-fallback record. These columns feed the dashboard detail popup
-    only — no scoring path reads them.
-    """
-    # style: allow-complexity  flat per-distribution-family dispatch of closed-form
-    # display variances; splitting duplicates the family/param-present guards.
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model R"]
-    elif dist == "DPO" and "Model Phi" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Phi"]
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Sigma"]
-    elif "Model Alpha" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Alpha"]
-    else:
-        offer_df["Model Param"] = np.nan
-
-    _m = offer_df["Projection"].to_numpy(dtype=float)
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        _r = offer_df["Model R"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
-    elif dist == "DPO" and "Model Phi" in offer_df.columns:
-        _phi = offer_df["Model Phi"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m / np.clip(_phi, 1e-6, None), 0, None))
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
-        _sk = (
-            offer_df["Model Skew"].to_numpy(dtype=float)
-            if "Model Skew" in offer_df.columns
-            else np.zeros_like(_sg)
-        )
-        _delta = _sk / np.sqrt(1 + _sk**2)
-        offer_df["Projection STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
-    elif "Model Alpha" in offer_df.columns:
-        _a = offer_df["Model Alpha"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
-    else:
-        offer_df["Projection STD"] = np.nan
-
-
-def _finalize_records(
-    offer_df: pd.DataFrame,
-    league: str,
-    platform: str,
-    dist: str,
-    cv: float,
-    step: float,
-    temperature: float | None,
-    dispersion_cal: float,
-    model_version: str,
-    pit_recal_blob: dict | None = None,
-) -> list[dict]:
-    """Resolve the bet side, apply boosts, and project the export schema.
-
-    Shared tail of :func:`model_prob` and :func:`book_fallback_prob`. Expects
-    ``offer_df`` to already carry ``Model Over`` / ``Model Under`` (win
-    probabilities for each side), the raw ``Market EV`` over-probability, ``Push Prob``,
-    ``Projection`` and ``Market Projection``. Feature-derived passenger columns absent on a
-    book-fallback record (built without a feature matrix) are filled neutral so
-    correlation and the dashboard read sane values — ``Player position`` in
-    particular must stay an int, never NaN, or correlation's position map breaks.
-    """
-    totals_map = archive.default_totals
-    for _col in ("Avg5", "AvgH2H", "H2HPlayed", "Total", "Defense position", "Moneyline"):
-        if _col not in offer_df.columns:
-            offer_df[_col] = np.nan
-    if "Home" not in offer_df.columns:
-        # Bool, not NaN: dashboard/narrative.py's match_label does `'v' if home else '@'`,
-        # and NaN is truthy in Python — it would render every no-Home row as the host.
-        offer_df["Home"] = False
-    if "Commence" not in offer_df.columns:
-        # Only Underdog threads a tip-off timestamp (books.py::get_ud); Sleeper and
-        # book-fallback rows default to empty so the export projection stays uniform
-        # (the dashboard coerces "" → NaT → non-urgent countdown).
-        offer_df["Commence"] = ""
-
-    offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
-    offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
-
-    offer_df["Win Prob"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
-    offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
-
-    if "Boost" in offer_df.columns:
-        offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
-    offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
-        0
-    ).infer_objects(copy=False) * (UNDERDOG_BOOST_BASELINE if platform == "Underdog" else 1)
-    offer_df["Boost"] = offer_df.apply(
-        lambda x: (
-            (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
-            if not np.isnan(x["Boost_Over"])
-            else x["Boost"]
-        ),
-        axis=1,
-    )
-
-    offer_df["Model EV"] = offer_df["Win Prob"] * offer_df["Boost"]
-    offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"] = (
-        1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"]
-    )
-    offer_df["Market Prob"] = offer_df["Market EV"].fillna(_BOOK_PRIOR_PROB)
-    offer_df["Market EV"] = offer_df["Market Prob"] * offer_df["Boost"]
-    offer_df["Kelly"] = (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1)
-    offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
-    offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
-        1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
-    )
-    offer_df = (
-        offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
-        .sort_values("Distance", ascending=True)
-        .groupby("Player")
-        .head(_MAX_OFFERS_PER_PLAYER)
-    )
-
-    offer_df["Avg 5"] = offer_df["Avg5"] - offer_df["Line"]
-    offer_df["Avg H2H"] = offer_df["AvgH2H"] - offer_df["Line"]
-    offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
-    offer_df["O/U"] = offer_df["Total"] / totals_map.get(league, 1)
-    offer_df["DVPOA"] = offer_df["Defense position"]
-    if "Player position" not in offer_df:
-        offer_df["Player position"] = -1
-
-    offer_df["Player position"] = offer_df["Player position"].astype("category")
-    offer_df["Player position"] = (
-        offer_df["Player position"].cat.set_categories(range(-1, 5)).fillna(-1).astype(int)
-    )
-    _annotate_display_shape(offer_df, dist)
-
-    offer_df["Dist"] = dist
-    offer_df["CV"] = cv
-    offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
-    offer_df["Temperature"] = temperature
-    offer_df["Disp Cal"] = dispersion_cal
-    offer_df["Step"] = step
-    offer_df["Model Version"] = model_version
-    # §6.1 Rung C: the whole-CDF recal map g (a cdf_recal_isotonic cell's served
-    # warp) so the deep-dive can draw g∘F, the distribution the model actually
-    # serves. Null for every other cell — the raw parametric curve is exact there.
-    offer_df["Model PIT Recal"] = json.dumps(pit_recal_blob) if pit_recal_blob else None
-
-    return offer_df[
-        [
-            "League",
-            "Date",
-            "Commence",
-            "Team",
-            "Opponent",
-            "Home",
-            "Player",
-            "Market",
-            "Line",
-            "Boost",
-            "Boost_Over",
-            "Boost_Under",
-            "Bet",
-            "Market EV",
-            "Model EV",
-            "Avg 5",
-            "Avg H2H",
-            "Moneyline",
-            "O/U",
-            "DVPOA",
-            "Player position",
-            "Projection",
-            "Model Param",
-            "Projection STD",
-            "Win Prob",
-            "Push Prob",
-            "Market Projection",
-            "Market Prob",
-            "Kelly",
-            "Dist",
-            "CV",
-            "Gate",
-            "Temperature",
-            "Disp Cal",
-            "Step",
-            "Model Version",
-            "Model PIT Recal",
-        ]
-    ].to_dict("records")
-
-
-def _odds_from_boost(o: dict) -> np.ndarray:
-    p = [
-        _BOOK_PRIOR_PROB / o.get("Boost_Under", 1)
-        if o.get("Boost_Under", 1) > 0
-        else 1 - _BOOK_PRIOR_PROB / o.get("Boost_Over", 1),
-        _BOOK_PRIOR_PROB / o.get("Boost_Over", 1)
-        if o.get("Boost_Over", 1) > 0
-        else 1 - _BOOK_PRIOR_PROB / o.get("Boost_Under", 1),
-    ]
-    return p / np.sum(p)
-
-
-def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray | None:
-    return df[col].to_numpy() if active and col in df.columns else None
-
-
-def _serve_offset_mode(dist: str, target_normalization: str) -> bool:
-    """Whether serve seeds the SkewNormal with the centered-residual offset.
-
-    Mirrors training's ``offset_mode = strategy.start_mode_flag == "offset"``
-    (``pipeline.train_market``) so a model trained against any offset strategy seeds the
-    same way at predict time. Derived from the registry — not a hardcoded
-    ``offset_meta["method"]`` string — so a new offset strategy needs no serve-side edit.
-    Only the SkewNormal seed consumes ``offset_mode``; the ``dist`` guard short-circuits
-    the registry lookup off that path and for non-registry legacy slugs.
-    """
-    return (
-        dist == "SkewNormal"
-        and get_target_normalization(target_normalization).start_mode_flag == "offset"
-    )
-
-
 def _build_prob_params(
     filedict: dict,
     market: str,
@@ -605,14 +266,22 @@ def _build_prob_params(
     structural_strategy: str,
 ) -> pd.DataFrame:
     if market in stat_data.volume_stats:
-        prob_params = pd.DataFrame(index=playerStats.index)
-        prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} mean"])
-        if f"proj {market} std" in stat_data.playerProfile.columns:
-            prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
+        prob_params = pd.DataFrame(index=playerStats.index).join(
+            stat_data.playerProfile[[f"proj {market} mean", f"proj {market} std"]]
+        )
         prob_params.rename(
             columns={f"proj {market} mean": "Projection", f"proj {market} std": "Model Param"},
             inplace=True,
         )
+        # The volume path publishes a predictive mean/SD, but _blend_with_book reads the
+        # family's own shape column; recover it rather than let the blend see a None.
+        shape = shape_from_moments(dist, prob_params["Projection"], prob_params["Model Param"])
+        if shape is not None:
+            shape_col, shape_values = shape
+            prob_params[shape_col] = shape_values
+        if dist == "SkewNormal":
+            # No skew survives the budget rescale, so the symmetric case is exact.
+            prob_params["Model Skew"] = 0.0
         return prob_params
 
     model = filedict["model"]
@@ -633,7 +302,7 @@ def _build_prob_params(
                 dist,
                 rows,
                 normalized=normalized,
-                offset_mode=_serve_offset_mode(dist, target_normalization),
+                offset_mode=serve_offset_mode(dist, target_normalization),
                 sn_param=filedict.get("sn_param", "direct"),
             )
         params = predict_model.predict(rows, pred_type="parameters")
@@ -707,41 +376,6 @@ def _resolve_serving_strategy(filedict: dict, league: str, market: str) -> Artif
     )
     validate_strategy_selection(cell, spec, controls, required_capabilities=(CAP_SERVE,))
     return identity
-
-
-def _book_evs_for_players(
-    playerStats: pd.DataFrame,
-    offer_df: pd.DataFrame,
-    market: str,
-    dist: str,
-    cv: float,
-    hist_gate: float,
-    dateMap: dict,
-    stat_data,
-) -> list:
-    evs = []
-    for player in playerStats.index:
-        date = dateMap.get(player, "")
-        ev = archive.get_ev(stat_data.league, market, date, player)
-        line = archive.get_line(stat_data.league, market, date, player)
-        if np.isnan(ev):
-            ev = stat_data.check_combo_markets(market, player, date)
-        if line <= 0:
-            line = np.max([playerStats.loc[player, "Avg10"], 0.5])
-        missing_ev = np.isnan(ev) or ev <= 0
-        if missing_ev and player in offer_df.index:
-            o = offer_df.loc[player]
-            if isinstance(o, pd.DataFrame):
-                o = o.iloc[0]
-            ev = get_ev(
-                line,
-                _odds_from_boost(o.to_dict())[0],
-                stat_cv[stat_data.league].get(market, 1),
-                dist=dist,
-                gate=(None if dist == "SkewNormal" else hist_gate or None),
-            )
-        evs.append(ev)
-    return evs
 
 
 def _decode_model_params(
@@ -1087,10 +721,7 @@ def _apply_affine_candidate_distribution(
     if not legacy:
         if "QuoteAuthenticity" in offer_df:
             provenance = offer_df["QuoteAuthenticity"]
-            if (
-                provenance.isna().any()
-                or not provenance.isin(("authentic", "derived", "synthetic")).all()
-            ):
+            if provenance.isna().any() or not provenance.isin(AUTHENTICITY_VALUES).all():
                 raise ValueError("affine candidate received invalid quote authenticity")
             authentic = provenance.eq("authentic").to_numpy(dtype=bool)
         else:
@@ -1231,6 +862,8 @@ def _blend_with_book(
     hist_gate: float,
     league: str,
     market: str,
+    posthoc_slug: str = "none",
+    posthoc_blob: dict | None = None,
 ) -> np.ndarray:
     model_ev = offer_df["Projection"].to_numpy()
     books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
@@ -1247,15 +880,16 @@ def _blend_with_book(
         # The book leg stays the symmetric constant-CV shape (fused_loc default). The WS2
         # settling experiment found the per-cell shaped book loses in the served blend OOS
         # (the model's per-row SkewNormal already carries the shape); the shaped book ships
-        # only on the book-only fallback leg. See docs/handoffs/book_shape_ws2_handoff.md.
+        # only on the book-only fallback leg. See the WS2 handoff, deleted after it closed
+        # (`git show cf4ce951:docs/handoffs/book_shape_ws2_handoff.md`).
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
             model_weight,
             model_ev,
             books_ev,
             cv,
             "SkewNormal",
-            sigma=_col_or_none(offer_df, "Model Sigma"),
-            skew_alpha=_col_or_none(offer_df, "Model Skew"),
+            sigma=col_or_none(offer_df, "Model Sigma"),
+            skew_alpha=col_or_none(offer_df, "Model Skew"),
             **zi,
         )
         offer_df["Model Sigma"] = sigma_blend
@@ -1267,7 +901,7 @@ def _blend_with_book(
             books_ev,
             cv,
             "NegBin",
-            r=_col_or_none(offer_df, "Model R"),
+            r=col_or_none(offer_df, "Model R"),
             **zi,
         )
         base_mean = r_blend * (1 - p_blend) / p_blend
@@ -1281,7 +915,7 @@ def _blend_with_book(
             books_ev,
             cv,
             "DPO",
-            phi=_col_or_none(offer_df, "Model Phi"),
+            phi=col_or_none(offer_df, "Model Phi"),
             **zi,
         )
         offer_df["Model Phi"] = phi_blend
@@ -1292,17 +926,40 @@ def _blend_with_book(
             books_ev,
             cv,
             "Gamma",
-            alpha=_col_or_none(offer_df, "Model Alpha"),
+            alpha=col_or_none(offer_df, "Model Alpha"),
             **zi,
         )
         base_mean = alpha_blend / beta_blend
         offer_df["Model Alpha"] = alpha_blend
+    # The mean-stage corrector recalibrates the POOL, not its legs: a log opinion pool is
+    # not mean-preserving, so a pre-fusion correction is multiplied straight back down by
+    # rho^(1-w). Ranjan & Gneiting (2010) Thm 1 — recalibrate the combination. Mirrors
+    # pipeline._step_calibrate_and_serve, which corrects the same object one stage later.
+    base_mean = correct_fused_mean(posthoc_slug, posthoc_blob, base_mean, gate_blend)
     if gate_blend is not None:
         offer_df["Projection"] = (1 - gate_blend) * base_mean
         offer_df["Model Gate"] = gate_blend
     else:
         offer_df["Projection"] = base_mean
     return base_mean
+
+
+def _serving_dispersion_cal(
+    dispersion_cal: float, skew_cal: float, cell: str
+) -> tuple[float, float]:
+    """Neutralize a diverged dispersion fit at serve time; healthy values pass through.
+
+    The skew shift resets with it: (c, s) come from the same joint fit, so a
+    pinned c means s is not trustworthy either. A skew-only cell (c == 1.0,
+    s != 0) is healthy and passes through.
+    """
+    if dispersion_cal <= _DIVERGED_DISPERSION_FLOOR or dispersion_cal >= _DIVERGED_DISPERSION_CEIL:
+        logger.warning(
+            f"{cell}: dispersion_cal {dispersion_cal:.4g} pinned at its fit bound — "
+            "diverged fit, serving unscaled shape"
+        )
+        return 1.0, 0.0
+    return dispersion_cal, skew_cal
 
 
 def _dispersion_calibrate(
@@ -1333,12 +990,12 @@ def _dispersion_calibrate(
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
-    r = _col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
-    alpha = _col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
-    phi = _col_or_none(offer_df, "Model Phi", dist == "DPO")
-    sigma = _col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
-    skew = _col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
-    gate = _col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
+    r = col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
+    alpha = col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
+    phi = col_or_none(offer_df, "Model Phi", dist == "DPO")
+    sigma = col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
+    skew = col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
+    gate = col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
     line = offer_df["Line"].to_numpy()
     if dist == "SkewNormal":
         raw_under = get_odds(
@@ -1354,6 +1011,22 @@ def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, bas
         line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate, phi=phi
     )
     return 1 - raw_under, push
+
+
+def _offer_frame_for_market(offers: list[dict], market: str) -> pd.DataFrame:
+    """Player-indexed offer frame with the short-line yards filter applied.
+
+    Below-``_MIN_YARDS_LINE`` single-player yards offers are unreliable to model;
+    "vs." combo legs are exempt. Shared by :func:`model_prob` and
+    :func:`book_fallback_prob`.
+    """
+    offer_df = pd.DataFrame(offers)
+    offer_df.index = offer_df.Player
+    if "yards" in market:
+        offer_df = offer_df.loc[
+            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
+        ]
+    return offer_df
 
 
 def model_prob(
@@ -1372,12 +1045,15 @@ def model_prob(
     scaling, and returns a list of offer dicts augmented with scoring
     columns (``Model EV``, ``Market EV``, ``Projection``, ``Bet``, ``Kelly``, etc.).
 
-    Returns an empty list when no model file exists or when the joined
-    DataFrame is empty after filtering.
+    Returns an empty list when no model file exists, when the pickle's strategy
+    identity no longer validates, or when the joined DataFrame is empty after
+    filtering.
     """
     # style: allow-complexity -- top-level serving orchestrator: load pickle, build params,
     # apply posthoc/dispersion/structural calibration, blend with book, emit scoring columns.
-    dateMap = {x["Player"]: x["Date"] for x in offers}
+    # A player offered on two dates has one feature row, his earlier game's: the book leg
+    # is read for that game too.
+    date_map = {x["Player"]: x["Date"] for x in earliest_last(offers)}
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
@@ -1385,12 +1061,7 @@ def model_prob(
         logger.warning(f"{filename} missing")
         return []
 
-    offer_df = pd.DataFrame(offers)
-    offer_df.index = offer_df.Player
-    if "yards" in market:
-        offer_df = offer_df.loc[
-            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
-        ]
+    offer_df = _offer_frame_for_market(offers, market)
 
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
@@ -1398,11 +1069,18 @@ def model_prob(
     cv = filedict["cv"]
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
-    dispersion_cal = filedict.get("dispersion_cal", 1.0)
-    skew_cal = filedict.get("skew_cal", 0.0)
+    dispersion_cal, skew_cal = _serving_dispersion_cal(
+        filedict.get("dispersion_cal", 1.0), filedict.get("skew_cal", 0.0), filename
+    )
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
-    strategy_identity = _resolve_serving_strategy(filedict, league, market)
+    try:
+        strategy_identity = _resolve_serving_strategy(filedict, league, market)
+    except ValueError as e:
+        # A known-unservable cell, not a crash: warn without a traceback rather than let
+        # _match_league_offers' per-market bulkhead log this one as an unexpected failure.
+        logger.warning(f"{filename} not served: {e}")
+        return []
     structural_strategy = strategy_identity.structural_strategy
     step = filedict["step"]
     normalized = filedict.get("normalized", False)
@@ -1458,15 +1136,37 @@ def model_prob(
     if "Defense position" not in playerStats:
         playerStats["Defense position"] = playerStats["Defense avg"]
 
-    evs = _book_evs_for_players(
-        playerStats, offer_df, market, dist, cv, hist_gate, dateMap, stat_data
+    evs, sds, quotes = book_evs_for_players(
+        offer_df, league, market, dist, cv, hist_gate, date_map, stat_data, playerStats.index
     )
     playerStats["Market Projection"] = evs
-    playerStats["Books STD"] = cv * np.array(evs)
+    playerStats["Books STD"] = sds
+    annotate_quote_provenance(playerStats, quotes)
 
     _decode_model_params(
         prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization
     )
+
+    # The feature log is diagnostics, so nothing that goes wrong in it may cost the market its
+    # predictions: an exception leaving here is caught by the per-market bulkhead in
+    # scoring._match_league_offers, which drops the whole market for the run.
+    try:
+        upsert_feature_log(
+            league,
+            market,
+            platform,
+            offers,
+            stat_data,
+            playerStats,
+            prob_params,
+            quotes,
+            model_version=model_version,
+            step=step,
+            model_weight=model_weight,
+            hist_gate=hist_gate,
+        )
+    except Exception:
+        logger.exception(f"{filename} feature log not written")
 
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
@@ -1483,17 +1183,21 @@ def model_prob(
     if offer_df.empty:
         return []
 
-    offer_df["Market EV"] = _book_over_prob(
+    offer_df["Market EV"] = book_over_prob(
         offer_df, dist, cv, step, hist_gate or None, league, market
     )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
-    # Mean-stage post-hoc correction before blending, mirroring train_market so
-    # live predictions match the offline test CSV event-for-event.
-    offer_df["Projection"] = _apply_mean_posthoc(
-        offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
-    )
     _sanitize_model_ev(offer_df, dist)
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, league, market)
+    # Read before the blend, which rewrites Projection and the shape columns in place.
+    offer_df["Standalone Prob"] = _model_over_and_push(
+        offer_df, dist, cv, step, offer_df["Projection"].to_numpy()
+    )[0]
+    offer_df["Skew Cal"] = skew_cal
+    offer_df["Hist Gate"] = hist_gate
+    offer_df["Model Weight"] = model_weight
+    base_mean = _blend_with_book(
+        offer_df, dist, model_weight, cv, hist_gate, league, market, posthoc_slug, posthoc_blob
+    )
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma"):
@@ -1532,7 +1236,7 @@ def model_prob(
     offer_df["Model Under"] = 1 - cal_over
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
-    return _finalize_records(
+    return finalize_records(
         offer_df,
         league,
         platform,
@@ -1552,17 +1256,22 @@ def book_fallback_prob(
     market: str,
     platform: str,
     stat_data,
+    date: datetime.date,
 ) -> list[dict]:
-    """Score offers from book odds when no trained model exists for the cell.
+    """Score offers from the modal-line book cohort when no trained model exists.
 
-    Routed to by :func:`process_offers` whenever model scoring would otherwise
-    be empty (missing model pickle, or a model that matched no players). Treats
-    the composite, vig-free book probability — ``archive.get_ev`` inverted
-    through the cell's configured distribution — as the model prediction, so the
-    leg still flows through correlation, parlay search, and the export with no
-    claimed edge (``Model EV`` mirrors ``Market EV``). Returns an empty list when the
-    market is unknown to ``stat_meta`` (no distribution to devig with) or no leg
-    has book odds.
+    Routed to by :func:`process_offers` whenever model scoring would otherwise be
+    empty (a withheld cell, no model pickle, or no player matched). Resolves the
+    same per-player quote the training matrix uses — :func:`resolve_training_quote`
+    over the archive's latest per-book rows, native under-probabilities averaged
+    within one modal-line cohort — then inverts that quote to a mean and prices
+    every offered line under the same shape, so the leg still flows through
+    correlation, parlay search, and the export with no claimed edge (``Model EV``
+    mirrors ``Market EV``). Rows without independent support (no real sportsbook in
+    the cohort and no combo consensus) are dropped, not served at a guessed price.
+    The feature columns it joins are built as of ``date``, the date the caller's pass
+    prepared depth and volume for. Returns an empty list when the market is unknown
+    to ``stat_meta`` (no distribution to devig with) or nothing is servable.
     """
     market = normalize_market(league, market, platform)
     dist, cv, hist_gate, step = _book_cell_params(league, market)
@@ -1570,25 +1279,25 @@ def book_fallback_prob(
         return []
     gate_arg = hist_gate or None
 
-    date_map = {x["Player"]: x["Date"] for x in offers}
-    offer_df = pd.DataFrame(offers)
-    offer_df.index = offer_df.Player
-    if "yards" in market:
-        offer_df = offer_df.loc[
-            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
-        ]
+    date_map = {x["Player"]: x["Date"] for x in earliest_last(offers)}
+    offer_df = _offer_frame_for_market(offers, market)
     if offer_df.empty:
         return []
 
-    evs = _composite_book_evs(offer_df.index.unique(), league, market, date_map, stat_data)
-    offer_df["Market Projection"] = offer_df.index.map(evs)
-    offer_df = offer_df.loc[
-        offer_df["Market Projection"].notna() & (offer_df["Market Projection"] > 0)
-    ]
+    quotes = servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
+    servable = offer_df.index.isin(list(quotes))
+    if unservable := int(len(offer_df) - servable.sum()):
+        logger.warning(
+            f"{league} {market}: dropped {unservable} offer row(s) without a servable book quote"
+        )
+        offer_df = offer_df.loc[servable]
     if offer_df.empty:
         return []
 
-    playerStats = stat_data.get_stats(market, offers)
+    price_offers_at_quotes(offer_df, quotes, league, market, dist, cv, step)
+    annotate_quote_provenance(offer_df, [quotes[player] for player in offer_df.index])
+
+    playerStats = stat_data.get_stats(market, offers, date)
     if not playerStats.empty:
         playerStats = (
             playerStats[~playerStats.index.duplicated(keep="first")]
@@ -1598,7 +1307,6 @@ def book_fallback_prob(
         offer_df = offer_df.join(playerStats)
     offer_df = offer_df.reset_index(drop=True)
 
-    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, gate_arg, league, market)
     _base_ev = offer_df["Market Projection"].to_numpy()
     offer_df["Push Prob"] = np.asarray(
         get_push_prob(offer_df["Line"].to_numpy(), _base_ev, dist, cv=cv, gate=gate_arg),
@@ -1607,11 +1315,14 @@ def book_fallback_prob(
     if hist_gate:
         offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
 
-    _over = offer_df["Market EV"].to_numpy()
+    _over = np.asarray(offer_df["Market EV"], dtype=float)
     offer_df["Model Over"] = _over
     offer_df["Model Under"] = 1 - _over
     offer_df["Projection"] = offer_df["Market Projection"]
+    # The fallback serve is the weight-0 blend, so the model's share is 0, not unknown.
+    offer_df["Model Weight"] = 0.0
+    offer_df["Hist Gate"] = hist_gate or 0.0
 
-    return _finalize_records(
+    return finalize_records(
         offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION
     )

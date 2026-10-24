@@ -115,10 +115,11 @@ def _synthetic_validation():
     return predictive, result, line, book_over, position, player
 
 
-def test_probability_pool_uses_analytic_clipped_brier_optimum():
+@pytest.mark.parametrize("third", [0.0, 0.5], ids=["settled", "tie"])
+def test_probability_pool_uses_analytic_clipped_brier_optimum(third):
     candidate = np.array([0.12, 0.75, 0.58, 0.31, 0.85])
     book = np.array([0.25, 0.62, 0.44, 0.49, 0.71])
-    outcome = np.array([0.0, 1.0, 0.0, 1.0, 1.0])
+    outcome = np.array([0.0, 1.0, third, 1.0, 1.0])
     direction = candidate - book
     raw = float(np.dot(direction, outcome - book) / np.dot(direction, direction))
 
@@ -135,6 +136,8 @@ def test_probability_pool_uses_analytic_clipped_brier_optimum():
 def test_probability_pool_rejects_degenerate_and_unstable_fits():
     with pytest.raises(ValueError, match="must differ"):
         fit_probability_pool(np.full(4, 0.5), np.full(4, 0.5), np.array([0, 1, 0, 1]))
+    with pytest.raises(ValueError, match=r"over_result must lie in \[0, 1\]"):
+        fit_probability_pool(np.full(4, 0.6), np.full(4, 0.5), np.array([0, 1, 0, 1.5]))
     validate_probability_pool_weights([0.31, 0.44, 0.48, 0.39, 0.43], 0.42)
     with pytest.raises(ValueError, match="within"):
         validate_probability_pool_weights([0.19, 0.44, 0.48, 0.39, 0.43], 0.42)
@@ -319,6 +322,31 @@ def test_nested_player_cv_fit_is_finite_stable_and_reusable():
         and group_map["x"][-1] == group_map["y"][-1] == 1.0
         for group_map in fit.blob["position_cdf"].values()
     )
+
+
+def test_fit_labels_a_tie_as_half_an_over():
+    predictive, result, line, book, position, player = _synthetic_validation()
+    authentic = np.arange(len(result)) % 5 != 0
+    book[~authentic] = np.nan
+    tie = np.arange(len(result)) % 7 == 0
+
+    def pool_rho(tied_result):
+        fit = rushing.fit_affine_groupcdf(
+            predictive,
+            np.where(tie, tied_result, result),
+            line,
+            book,
+            authentic,
+            position,
+            player,
+            expected_codes=(1, 3),
+        )
+        return fit.blob["probability_pool"]["rho"]
+
+    # Only the label tells a result on its line from one a hair to either side of it.
+    over, under = pool_rho(line + 1e-6), pool_rho(line - 1e-6)
+    assert abs(over - under) > 0.1
+    assert pool_rho(line) == pytest.approx((over + under) / 2, abs=0.01)
 
 
 @pytest.mark.parametrize("codes", [(1, 2, 3, 4, 5), (1, 2, 3, 4), (1, 2, 3)])

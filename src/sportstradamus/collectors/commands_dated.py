@@ -60,8 +60,9 @@ def build_run_dated(source: Source):
         """Snapshot each catalog endpoint's current season-to-date table to disk.
 
         Writes one parquet per tool under
-        ``{player,team}_data/{LEAGUE}/{source}/{season}/{date}/``. Re-runs on the
-        same date overwrite; a later date writes a fresh dated snapshot.
+        ``{player,team}_data/{LEAGUE}/{source}/{season}/{date}/``. A re-run on the
+        same date skips each tool already holding a non-empty parquet (``--refetch``
+        downloads it again); a later date writes a fresh dated snapshot.
         """
         log = get_logger(source.name)
         log.setLevel(log_level)

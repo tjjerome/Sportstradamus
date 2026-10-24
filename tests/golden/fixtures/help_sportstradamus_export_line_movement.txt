@@ -1,0 +1,6 @@
+Usage: sportstradamus export-line-movement [OPTIONS]
+
+  Rebuild the per-offer DFS line-movement snapshot from the archive.
+
+Options:
+  --help  Show this message and exit.

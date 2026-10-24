@@ -5,6 +5,101 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ## [Unreleased]
 
+### Security
+- Dependabot fixes: Pillow 13.0, certifi 2026.10.23, Brotli 1.2.1, urllib3 2.8, setuptools 84.2;
+  dev virtualenv 21.14, filelock 4.2, tornado 6.6, Mako 1.4.3. streamlit 1.62 → 1.66.1, its
+  first release that allows Pillow 13.
+
+### Changed
+- A withheld cell's props that a sportsbook quotes serve the book consensus instead of leaving
+  the board (`prediction/scoring.py::match_offers`).
+- Gate 1's ship CI resamples game dates; the row bootstrap's interval decides when its upper
+  bound is higher.
+- `trim_matrix` reads the line, never the outcome: the `Result` band and the over/under
+  balancing that cut stars' big games from book-less cells are gone (lever T, branch `lever-t`).
+- Training's SkewNormal push probabilities use the cell's `step`, as serving does.
+
+### Added
+- `odds-backfill` cron job: buys odds history with the credit cycle's leftover, newest
+  date first. `odds_budget.backfill_allowance` grants it on the cycle's last day only
+  (balance above the governor's reserve and a day of broad runs);
+  `backfill_historical_odds` gains `--surplus-only` / `--newest-first`.
+- `backfill_historical_odds` `--key-name` / `--dates-from` / `--props-only`: fund the paid
+  calls from a named creds entry, seed game-dates from an archived market, skip the
+  sport-level game-line call; the NFL combo markets (`yards`, `qb yards`) are mapped for
+  the Odds API, so live `confer` polls 12 NFL markets.
+- `fetch fp season`: one split request per tool pulls a whole NFL season, postseason
+  included, halving on the API's row cap; ~200 calls a season instead of ~1,300.
+- NFL FantasyPoints Tier 1 batch: passing-situation splits (QB), pace ×2 (team + faced),
+  OL lineup-combos units, and the raw-count wins (xTD, RYOE, red-zone carry shares,
+  end-zone attempt rate, xYards) — 47 recipe outputs, 4 catalog entries, `ybc` revived.
+- Games constellations draw their template's art beneath the stars: a faint light-blue
+  drawing on 99 of 101 shapes, with a credit line for the CC BY game-icons.net art.
+- Dashboard slips price the apps' pair rules (`current_pair_modifiers.parquet`): a
+  refused pair prices $0, blocks Lock it in! and crosses its stars.
+
+### Fixed
+- NFL team-weeks parsed before nflverse published their FTN charting or weekly PFR rows
+  re-parse once it does (production held zeros in those columns for every 2026 week); PFR's
+  `LA` reads as the Rams' `LAR`.
+- The withheld prune keeps volume-denominator pickles (`VOLUME_STATS`: NFL targets /
+  attempts / carries, NBA and WNBA MIN, MLB pitches thrown, NHL timeOnIce / shotsAgainst);
+  a withheld denominator still serves nothing but the league's other cells keep their
+  volume projections.
+- `inject_backfilled_odds` no longer dies on NFL (`KeyError: 'position'`): the fantasy combo
+  hook answers before reading the profile, and the repair runs `get_depth` per gameday
+  only for the two depth-quoted fantasy cells.
+- LightGBMLSS start values: a row whose player has no dispersion history (`STDYr` 0, one game
+  in the window) seeds its scale head at the batch's median dispersion instead of the `1e-6`
+  clip floor, whose gradient blew the scale head up for every row sharing its leaves (the
+  deterministic WNBA PA fit drifted from scale 6.5 to 62 over 30 rounds on 25 such rows).
+- Training matrices no longer erode on every `meditate`: `trim_matrix` applies the line
+  clip only to the rows appended since the last trim
+  (`new_rows` from `_step_load_matrix`), so a cache with no new games re-trims to itself
+  (NFL fantasy prizepicks had lost 859 rows a pass, receptions 273). The floor-bounded
+  balancing is unchanged.
+- NFL play-by-play stats resolve every skill player's id, not only the roster's: players who
+  had left the league carried all-zero pbp columns (and zero `passing first downs` /
+  `sacks taken` targets) on every past game once the depth-chart fix admitted them.
+- Past-gameday depth charts are keyed on the gamelog, not the build-day roster: unrostered
+  players no longer vanish from training history (an NFL cold rebuild's population depended
+  on its run date). NFL serve-time `Player depth` is a within-team rank again (team codes
+  were mapped to NaN; the Patriots' `NEP` roster code is mapped to `NE` so the team rescale
+  no longer raises on it), and the NFL fantasy spec reads the profile position.
+- Model Lab Modifiers page no longer crashes on a banned pair; it solves the app's quote.
+
+### Changed
+- Gate 1 and the blend-weight fit count sportsbook quotes only: a cohort priced only by
+  DFS platforms is the new `pickem` provenance class (a real line, trim-protected, not
+  book evidence), so a DFS-only cell is book-less and ships on gates 2–6 at weight 1.0.
+- Training-matrix trim floor 15,000 → 20,000 rows (`pipeline._MATRIX_TRIM_FLOOR`): the six NFL
+  WR/RB/TE cells the balancing was cutting keep 2.4–5.8k more rows (+14–41%); every league's
+  matrices keep more unquoted rows from their next persist on.
+- NFL models retrained on the Tier 1 FantasyPoints feature set and the gamelog-keyed
+  training population (every NFL matrix rebuilt cold, play-by-play stats recomputed): 11/20
+  ship (12/20 after the 2026-09-27 trim-floor retrain), the nine failing cells
+  `shipped: "withheld"`; verdict in
+  `docs/handoffs/model_improvement_track.md` §10, recovery plan in
+  `docs/handoffs/nfl-ship15-recovery.md`.
+- Games constellation stars sit on their template's drawing; a narrow shape's extra stars
+  spread across the team's half.
+- Games star click ~0.9 s → ~10 ms: the star lights before the server answers (~0.25 s),
+  and quick double clicks both land. Pair maps prebuilt once, one script run per click,
+  Streamlit's post-run full GC off and websocket compression on (`.streamlit/config.toml`).
+- Games astrolabe always shows, at rest below two legs, and sweeps between prices; lens
+  changes fade and glide instead of stuttering.
+- Dependency bumps: optuna 4.9, shap 0.49.1, mypy 2.3, playwright 1.62,
+  optuna-dashboard 0.20; CI actions checkout/setup-python to v7. The Optuna 4 move
+  swaps the sweep's journal storage to `JournalFileBackend`; existing journals resume.
+- torch stays at 2.9.1 — lightgbmlss 0.6.1 caps it below 2.10.
+- numpy stays below 2.0 — the centered SkewNormal hessian overflows float32 and
+  numpy 2 moves where that stops boosting.
+- Parlay history is now one parquet per game date (`data/runtime/parlay_hist/`);
+  prophecize and reflect rewrite only the days they touch instead of the whole
+  multi-million-row file (43% of a warm prophecize run, line-profiled). The old
+  single-file store self-migrates on the first run; parlays now share the
+  history parquet's 365-day retention.
+
 ## [4.2.0] - 2026-08-09
 
 First tagged release. Five-league prediction pipeline (NBA, WNBA, MLB, NHL, NFL),
@@ -32,4 +127,3 @@ in 2023; the affected keys were rotated.
 
 ### Added
 - MIT license, security policy, code of conduct, issue/PR templates, Dependabot config.
-

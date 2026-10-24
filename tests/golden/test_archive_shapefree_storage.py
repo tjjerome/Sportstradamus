@@ -25,7 +25,7 @@ import pytest
 from sportstradamus.helpers import config
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.config import book_gate, stat_cv, stat_dist
-from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev, get_odds
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev
 from sportstradamus.helpers.training_quotes import resolve_training_quote
 from sportstradamus.scripts.migrate_archive_shapefree import _migrate_cell
 
@@ -94,7 +94,7 @@ def test_latest_book_rows_have_stable_book_order(archive):
 
     rows = archive._book_rows("WNBA", "AST", "2026-05-08", "P")
 
-    assert rows == [("alpha", 1.8), ("middle", 2.0), ("zeta", 2.2)]
+    assert rows == [("alpha", 1.8, None), ("middle", 2.0, None), ("zeta", 2.2, None)]
 
 
 def test_training_book_quotes_keep_latest_row_fields_coherent(archive):
@@ -126,22 +126,58 @@ def test_training_quote_batch_matches_scalar_rows_and_lines(archive):
         "under_prob, line) VALUES "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 2.0, ?, 0.40, 1.5), "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 3.0, ?, 0.60, 2.5), "
-        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 'alpha', 2.4, ?, 0.55, 1.5)",
-        [_TS, later, later],
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 'alpha', 2.4, ?, 0.55, 1.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 'Underdog', 3.0, ?, 0.50, 3.5)",
+        [_TS, later, later, later],
     )
     archive._connection.execute(
         "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
         "('WNBA', 'AST', DATE '2026-05-08', 'P', 2.5, ?), "
-        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 1.5, ?)",
-        [later, later],
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 1.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 3.5, ?)",
+        [later, later, later],
     )
+    entities = ["Q", "P", "Pickem", "Missing"]
 
-    batch = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", ["Q", "P", "Missing"])
+    batch = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", entities)
 
-    for entity in ("P", "Q", "Missing"):
+    for entity in entities:
         rows, line = batch[entity]
         assert rows == archive.get_training_book_quotes("WNBA", "AST", "2026-05-08", entity)
-        assert line == archive.get_line("WNBA", "AST", "2026-05-08", entity)
+        assert line == archive.get_reference_line("WNBA", "AST", "2026-05-08", entity)
+    # Only a pick'em platform lines this entry: a line of record, never a consensus.
+    assert batch["Pickem"][1] == 3.5
+    assert archive.get_line("WNBA", "AST", "2026-05-08", "Pickem") == 0.0
+
+
+def test_batch_readers_return_the_scalar_reference_line(archive):
+    """Sportsbook consensus where a sportsbook posts a line, else the line of record."""
+    for entity, book, line in (
+        ("Books", "fanduel", 4.5),
+        ("Books", "draftkings", 5.5),
+        ("Mixed", "fanduel", 4.5),
+        ("Mixed", "Underdog", 7.5),
+        ("Pickem", "Underdog", 7.5),
+    ):
+        _insert_book_row(archive, "WNBA", "AST", entity, book, 5.0, 0.5, line)
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Books', 4.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Mixed', 4.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Mixed', 7.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Pickem', 7.5, ?)",
+        [_TS] * 4,
+    )
+    # The log's own median is 4.5 for Books and 6.0 for Mixed.
+    expected = {"Books": 5.0, "Mixed": 4.5, "Pickem": 7.5}
+
+    quote_inputs = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", list(expected))
+    ev_inputs = archive.get_ev_line_inputs("WNBA", "AST", "2026-05-08", list(expected))
+
+    for entity, line in expected.items():
+        assert archive.get_reference_line("WNBA", "AST", "2026-05-08", entity) == line
+        assert quote_inputs[entity][1] == line
+        assert ev_inputs[entity][1] == line
 
 
 def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(archive):
@@ -174,7 +210,7 @@ def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(arch
     rows, quote = resolve("fantasy points underdog", "P")
     assert [row.book for row in rows] == ["Underdog"]
     assert (quote.line, quote.over_probability, quote.source) == (11.5, 0.5, "book_direct")
-    assert (quote.authenticity, quote.observed_at) == ("authentic", _TS)
+    assert (quote.authenticity, quote.observed_at) == ("pickem", _TS)
 
     # A real quote outranks the stand-in — a boost prices away from 50/50 and must survive.
     # Its mean is re-derived at the resolving cell's cv/dist, so it need not match the 10.2
@@ -244,6 +280,81 @@ def test_add_dfs_write_round_trips(archive, league, market):
     ).fetchone()
     assert under is not None and line == 3.5
     assert get_ev(line, under, cv, dist=dist, gate=gate) == pytest.approx(ev, abs=1e-6)
+
+
+def test_one_sided_discounted_offer_stores_payout_implied_under(archive):
+    """The 2026-08 Sleeper WNBA poisoning: a one-sided discounted offer (only an
+    over at decimal payout 1.35 on a moved 24.5 line) is the platform's own
+    claim and must store its payout-implied under-probability — never the
+    fabricated fair 50/50 that let the moved line read as market truth."""
+    offer = {
+        "League": "WNBA",
+        "Market": "PRA",
+        "Player": "Angel Reese",
+        "Date": "2026-08-28",
+        "Line": 24.5,
+        "Boost_Over": 1.35,
+        "Boost_Under": 0.0,
+    }
+    archive.add_dfs([offer], "Sleeper", {})
+    archive.write()
+
+    under, line = archive._connection.execute(
+        "SELECT under_prob, line FROM odds WHERE entity='Angel Reese'"
+    ).fetchone()
+    assert line == 24.5
+    assert under == pytest.approx(1 - 1 / 1.35)  # ~0.259, NOT 0.5
+
+    ladder = archive._connection.execute(
+        "SELECT line, p_over FROM ladder WHERE entity='Angel Reese'"
+    ).fetchall()
+    assert ladder == [(24.5, pytest.approx(1 / 1.35))]
+
+
+def test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier(archive):
+    """Two-plus lines for one (Player, Market): exactly one odds row — the tier
+    priced nearest even money, higher line winning the tie — while every tier's
+    (line, p_over) lands in the ladder table.
+
+    A proportional devig prices each rung at ``p_over = under_payout / (over_payout
+    + under_payout)``, so this ladder runs 0.83 / 0.67 / 0.51 over: the platform's
+    real number is the near-even 24.5 rung, and that is the rung
+    ``prediction.line_movement`` tracks. Ranking on the raw ``Boost_Over`` instead
+    would keep the cheap 20.5 rung — a full payout of 1.0 implies certainty, not a
+    neutral price.
+    """
+    base = {
+        "League": "WNBA",
+        "Market": "PRA",
+        "Player": "Tier Player",
+        "Date": "2026-08-28",
+    }
+    offers = [
+        {**base, "Line": 24.5, "Boost_Over": 1.95, "Boost_Under": 2.05},
+        {**base, "Line": 20.5, "Boost_Over": 1.20, "Boost_Under": 6.00},
+        {**base, "Line": 22.5, "Boost_Over": 1.50, "Boost_Under": 3.00},
+    ]
+    archive.add_dfs(offers, "Sleeper", {})
+    archive.write()
+
+    odds = archive._connection.execute(
+        "SELECT line, under_prob FROM odds WHERE entity='Tier Player'"
+    ).fetchall()
+    assert odds == [(24.5, pytest.approx(1.95 / (1.95 + 2.05)))]
+
+    lines = archive._connection.execute(
+        "SELECT line FROM lines WHERE entity='Tier Player'"
+    ).fetchall()
+    assert lines == [(24.5,)]
+
+    ladder = archive._connection.execute(
+        "SELECT line, p_over FROM ladder WHERE entity='Tier Player' ORDER BY line"
+    ).fetchall()
+    assert ladder == [
+        (20.5, pytest.approx(6.00 / (1.20 + 6.00))),
+        (22.5, pytest.approx(3.00 / (1.50 + 3.00))),
+        (24.5, pytest.approx(2.05 / (1.95 + 2.05))),
+    ]
 
 
 def test_merge_player_books_quotes_optional(archive):
@@ -493,6 +604,32 @@ def test_to_pandas_ignores_book_shape(archive, monkeypatch):
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
     df1 = archive.to_pandas(league, market)
     assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
+
+
+def test_to_pandas_columns_are_the_books_and_nothing_else(archive):
+    """``fit_book_weights`` weighs every column it is handed, so each one must be a book."""
+    _insert_book_row(archive, "WNBA", "AST", "P", "fanduel", 5.0, 0.62, 1.5)
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 1.5, ?)",
+        [_TS],
+    )
+
+    assert list(archive.to_pandas("WNBA", "AST").columns) == ["fanduel"]
+
+
+@pytest.mark.parametrize(
+    ("market", "kept"), [("Totals", True), ("Moneyline", True), ("AST", False)]
+)
+def test_to_pandas_keeps_old_game_lines_only(archive, market, kept):
+    """Rows before the 2023-05-03 prop-format cutoff survive for the two game-line markets only."""
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES ('WNBA', ?, DATE '2022-06-01', 'P', 'fanduel', 5.0, ?, 0.5, 1.5)",
+        [market, _TS],
+    )
+
+    assert (("2022-06-01", "P") in archive.to_pandas("WNBA", market).index) is kept
 
 
 def test_composite_under_prob_weights_books(archive):

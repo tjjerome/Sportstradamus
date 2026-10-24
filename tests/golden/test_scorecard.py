@@ -1,12 +1,10 @@
 """Unit tests for ``training.scorecard`` — the offline ship-gate harness.
 
 Exercises the numeric path (decile binning, compression ratio, scorecard, the five
-offline ship gates, and their deterministic-1/0 oracle) on synthetic test-set frames
+offline ship gates, and their outcome-label oracle) on synthetic test-set frames
 so no trained model, network, or plotting backend is required.
 """
 
-import hashlib
-import importlib.resources as pkg_resources
 import json
 import math
 from datetime import datetime, timedelta
@@ -16,7 +14,6 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from sportstradamus import data
 from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_ppf
 from sportstradamus.training import group_conditional_cdf as receiving
 from sportstradamus.training import posthoc
@@ -43,10 +40,15 @@ from sportstradamus.training.scorecard import (
     _GATE6_STAR_REF_BASKETBALL,
     _SUPERSEDE_S3_Z_MIN,
     ACTUAL_COL,
+    COMPONENT_SUM_COLUMNS,
+    COMPONENT_SUM_DIST,
+    COMPONENT_SUM_QUANTILE_COLUMNS,
     DECILE_COL,
     DEFAULT_PRED_COL,
     TARGET_NORM_NONE,
     _apply_pit_recal_by_row,
+    _brier_inputs,
+    _calibration_inputs,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
@@ -103,6 +105,11 @@ def _compressed_frame(n: int = 2000, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame({"MeanYr": meanyr, "Result": actual, "EV": pred})
 
 
+def _game_dates(n: int) -> np.ndarray:
+    """``n`` rows dealt round-robin over 100 game dates, written as the dumps write them."""
+    return np.resize(pd.date_range("2025-10-01", periods=100).strftime("%Y-%m-%d"), n)
+
+
 def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
     """A priced frame (P/Odds/Line present) with a calibrated-ish model and a noisy book."""
     rng = np.random.default_rng(seed)
@@ -119,6 +126,7 @@ def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
             "Line": line,
             "P": p_true,  # model tracks the true over-rate
             "Odds": np.full(n, 0.5),  # book under-prob 0.5 (near-random)
+            "Date": _game_dates(n),
         }
     )
 
@@ -214,7 +222,7 @@ def test_segment_masks_partition_top_decile_and_bottom_quartile():
 
 
 # ---------------------------------------------------------------------------
-# Gate 1 — Brier vs book, paired bootstrap CI.
+# Gate 1 — Brier vs book, paired bootstrap CI (the wider of rows and game dates).
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +231,7 @@ def test_gate1_ci_below_zero_when_model_beats_book():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.9, 0.1)  # close to truth
     p_book = np.full_like(y, 0.5)  # near-random
-    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, _game_dates(4000))
     assert mean < 0  # model Brier lower than book
     assert hi < 0  # 95% CI entirely below 0
 
@@ -233,7 +241,7 @@ def test_gate1_ci_above_zero_when_book_beats_model():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
     p_book = np.where(y == 1, 0.9, 0.1)  # nails it
-    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, _game_dates(4000))
     assert mean > 0
     assert lo > 0  # CI excludes 0 on the book's side
 
@@ -244,7 +252,7 @@ def test_gate1_oracle_equals_negative_book_brier():
     rng = np.random.default_rng(2)
     y = (rng.uniform(size=3000) < 0.5).astype(float)
     p_book = rng.uniform(0.2, 0.8, size=3000)
-    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, _game_dates(3000))
     assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
     assert hi < 0
 
@@ -1192,6 +1200,21 @@ def test_gate_row_full_column_set_and_oracle_identities():
     assert row["g1_brier_diff_ci_hi_oracle"] < 0  # oracle beats the (imperfect) book
 
 
+def test_gate_labels_count_a_tie_as_half_an_over():
+    df = _priced_frame(n=400)
+    tie = np.arange(len(df)) % 5 == 0
+    df.loc[tie, "Result"] = df.loc[tie, "Line"]
+    expected = np.where(tie, 0.5, df["Result"] > df["Line"])
+
+    np.testing.assert_array_equal(_calibration_inputs(df)[1], expected)
+    np.testing.assert_array_equal(_brier_inputs(df)[2], expected)
+    # The oracle predicts the label itself, so a tie costs it nothing: its ECE stays zero
+    # and its Brier diff is minus the book's Brier (a 0.5 book is exact on the tied fifth).
+    row = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
+    assert row["g5_ece_oracle"] == pytest.approx(0.0)
+    assert row["g1_brier_diff_mean_oracle"] == pytest.approx(-0.25 * 0.8)
+
+
 def test_gate_row_no_book_columns_blanks_gates_1_and_5():
     """No P/Odds/Line at all → both book-touching gates blank, price-free gates still run."""
     df = _compressed_frame()
@@ -1226,6 +1249,7 @@ def test_gate_row_no_odds_but_line_present_blanks_g1_only():
 
 def test_gate1_uses_only_explicit_authentic_book_evidence():
     df = _priced_frame()
+    df["Player"] = [f"P{i % 50}" for i in range(len(df))]
     authentic = np.arange(len(df)) % 2 == 0
     df["QuoteAuthenticity"] = np.where(authentic, "authentic", "synthetic")
     df.loc[~authentic, "P"] = 1.0 - (
@@ -1247,26 +1271,53 @@ def test_gate1_uses_only_explicit_authentic_book_evidence():
     assert full["g1_brier_skill_score"] == pytest.approx(authentic_only["g1_brier_skill_score"])
 
 
-@pytest.mark.skipif(
-    not (pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv").is_file(),
-    reason="retained historical test-set CSV is a local training artifact (gitignored)",
-)
-def test_retained_historical_passing_yards_gate1_reproduces():
-    path = pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv"
-    with path.open("rb") as stream:
-        assert (
-            hashlib.file_digest(stream, "sha256").hexdigest()
-            == "d9bc85adc753ea9aaa6fed183ada252b5c943a268366afc38673b56d6cea6b29"
-        )
-    frame = pd.read_csv(path, index_col=0)
+def _authenticity_frame(n: int, n_players: int, *, seed: int = 21) -> pd.DataFrame:
+    """A priced, fully-authentic frame spread over ``n_players`` distinct ``Player`` values."""
+    df = _priced_frame(n=n, seed=seed)
+    df["QuoteAuthenticity"] = "authentic"
+    df["Player"] = [f"P{i % n_players}" for i in range(n)]
+    return df
 
-    gates = compute_gates(frame, league="NFL", market="passing yards")
 
-    assert gates["n_validation"] == 369
-    assert gates["g1_brier_diff_mean"] == -0.0010
-    assert gates["g1_brier_diff_ci_lo"] == -0.0051
-    assert gates["g1_brier_diff_ci_hi"] == 0.0032
-    assert gates["g1_clustered_ci_hi"] == 0.0033
+def test_priced_rows_below_cluster_floor_reads_as_book_less():
+    """A one-row (or few-player) authentic book is no book: below
+    ``calibration._ONE_SE_MIN_CLUSTERS`` distinct players the priced set is too thin to
+    call Gate 1 book-beaten rather than book-less — the same floor the blend-weight fit
+    applies to its priced rows. 12 authentic rows over only 2 players must fold to the
+    blank/auto-pass convention, not a one-row "win".
+    """
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _authenticity_frame(n=12, n_players=2)
+    assert _priced_rows(df) is None
+
+    row = apply_thresholds(gate_row(df, "EV", league="NBA", market="PTS", strategy="t"))
+    assert row["g1_brier_diff_ci_lo"] is None
+    assert row["g1_brier_diff_ci_hi"] is None
+    assert row["g1_pass"] is True  # blank Gate 1 auto-passes — no book to beat
+
+
+def test_priced_rows_at_cluster_floor_returns_rows():
+    """The same shape of frame spread over 10 distinct players (the floor) clears it —
+    rows come back rather than folding to None."""
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _authenticity_frame(n=12, n_players=10)
+    sub = _priced_rows(df)
+    assert sub is not None
+    assert len(sub) == 12
+
+
+def test_priced_rows_legacy_without_authenticity_column_ignores_floor():
+    """Frames predating the provenance column keep the historical finite-price
+    behavior: the cluster floor only applies inside the provenance-bearing branch, so
+    3 rows survive even though that is far below it."""
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _priced_frame(n=3, seed=3)
+    sub = _priced_rows(df)
+    assert sub is not None
+    assert len(sub) == 3
 
 
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
@@ -1580,6 +1631,14 @@ def test_paired_brier_ci_negative_when_baseline_beats_candidate():
     assert ci_hi < 0
 
 
+def test_paired_brier_scores_a_tie_as_half_an_over():
+    b_df, c_df = _supersede_pair(n=50)
+    for frame in (b_df, c_df):
+        frame["Result"] = frame["Line"]
+    _, mean, _, _ = _supersede_paired_brier_ci(b_df, c_df)
+    assert mean == pytest.approx(np.mean((b_df["P"] - 0.5) ** 2 - (c_df["P"] - 0.5) ** 2))
+
+
 def test_paired_brier_ci_returns_none_when_inputs_lack_p():
     df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0]})
     assert _supersede_paired_brier_ci(df, df) is None
@@ -1644,23 +1703,24 @@ def test_supersede_pairing_holds_on_ambiguous_duplicate_event_identity():
 
 
 def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
-    # EV > Line ⇒ bet over ⇒ Hit = (Result >= Line); payout = 1/(1-Odds).
+    # EV > Line ⇒ bet over ⇒ Hit = (Result > Line); payout = 1/(1-Odds).
     df = pd.DataFrame(
         {
-            "MeanYr": [10.0, 10.0],
-            "Result": [12.0, 8.0],
-            "EV": [11.0, 11.0],  # both EV > Line ⇒ both bet over
-            "Line": [10.0, 10.0],
-            "Odds": [0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
-            "P": [0.6, 0.6],
+            "MeanYr": [10.0, 10.0, 10.0],
+            "Result": [12.0, 8.0, 10.0],
+            "EV": [11.0, 11.0, 11.0],  # every EV > Line ⇒ every row bets over
+            "Line": [10.0, 10.0, 10.0],
+            "Odds": [0.4, 0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
+            "P": [0.6, 0.6, 0.6],
         }
     )
     bets = _test_set_to_bet_frame(df, "EV")
+    # Row 2 ties its line: a push returns the stake, so it is no bet row.
     assert len(bets) == 2
     assert (bets["Platform"] == "Sleeper").all()
     # Boost = decimal odds = 1 / book_over_prob = 1 / 0.6 ≈ 1.667
     assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.6)
-    # Hit: row 0 Result >= Line ⇒ True; row 1 ⇒ False.
+    # Hit: row 0 Result > Line ⇒ True; row 1 ⇒ False.
     assert bool(bets["Hit"].iloc[0]) is True
     assert bool(bets["Hit"].iloc[1]) is False
 
@@ -2568,7 +2628,9 @@ def test_fit_skewnorm_dispersion_skew_recovers_underskew():
     c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
 
     assert s > 1.0
-    assert -3.0 <= s <= 3.0
+    from sportstradamus.training.scorecard import _DISPERSION_SKEW_BOUNDS
+
+    assert _DISPERSION_SKEW_BOUNDS[0] <= s <= _DISPERSION_SKEW_BOUNDS[1]
     assert (
         _sn_pit_ks(mean, sigma, skew0, y, c, s)
         < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
@@ -2980,6 +3042,7 @@ def _dpo_frame(n: int = 600, seed: int = 0) -> pd.DataFrame:
             "Line": line,
             "P": 1.0 - cdf_at_line,
             "Odds": np.full(n, 0.5),
+            "Date": _game_dates(n),
         }
     )
 
@@ -3088,6 +3151,7 @@ def _mix_frame(n: int = 200, seed: int = 4) -> pd.DataFrame:
             "MIX_Scale2": raw_scale2,
             "MIX_W1": w1,
             "DenomCol": "MeanYr",
+            "Date": _game_dates(n),
         }
     )
     median = _pred_ppf(df, "Mixture", 0.5, strategy=_MIX_STRATEGY)
@@ -3516,3 +3580,148 @@ def test_row_specific_payloads_load_and_validate_every_distinct_blob(tmp_path):
 
     with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
         load_test_set(path, "Blended_EV")
+
+
+# ---------------------------------------------------------------------------
+# Component sums — SUM_CDF / SUM_PMF / SUM_Q10 / SUM_Q25 / SUM_Q75 / SUM_Q90
+# persisted by the combo assembler in place of a closed-form family. Endpoint
+# fidelity is the load-bearing pin: a frame whose endpoints were generated from
+# a known family must reproduce that family's Gate-4 numbers exactly.
+# ---------------------------------------------------------------------------
+
+_SUM_STRATEGY = "ratio_meanyr"
+# The gate_row keys a persisted endpoint can move. gate_row rounds to 4 dp, so the
+# fidelity test pins the unrounded `_dispersion_diagnostics` beside them.
+_SUM_FIDELITY_KEYS = (
+    "g4_pit_ks",
+    "g4_tail_pit_ks",
+    "g4_iqr_pred",
+    "g4_iqr_true",
+    "g4_iqr_ratio",
+    "central50_coverage",
+    "central80_coverage",
+    "g5_ece_debiased",
+)
+
+
+def _as_component_sum(source: pd.DataFrame, dist: str, params: list[str]) -> pd.DataFrame:
+    """Re-express a closed-form frame as the endpoints a component sum would persist.
+
+    Generates the six ``SUM_*`` columns from ``source``'s own family and drops the
+    family ``params``, so both frames describe one identical predictive by two
+    routes: re-derived from parameters, and read back from sampled endpoints.
+    """
+    actual = source[ACTUAL_COL].to_numpy(dtype=float)
+    cdf, pmf = _pred_cdf_pmf(source, dist, actual, strategy=_SUM_STRATEGY)
+    endpoints = {"SUM_CDF": cdf, "SUM_PMF": pmf}
+    for q, column in COMPONENT_SUM_QUANTILE_COLUMNS.items():
+        endpoints[column] = _pred_ppf(source, dist, q, strategy=_SUM_STRATEGY)
+    return source.drop(columns=params).assign(**endpoints)
+
+
+def _skewnormal_priced_frame(n: int = 900, seed: int = 5) -> pd.DataFrame:
+    """Calibrated skewed SkewNormal frame in ``ratio_meanyr`` space, priced end to end.
+
+    ``Result`` is drawn from each row's own decoded predictive and ``P`` is that
+    predictive's over-probability, so every gate computes and the decode (both loc
+    and scale multiply through ``MeanYr``) is load-bearing rather than an identity.
+    """
+    from scipy.stats import skewnorm
+
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(4.0, 30.0, n)
+    raw_loc = rng.uniform(0.80, 1.10, n)
+    raw_scale = rng.uniform(0.25, 0.45, n)
+    alpha = rng.uniform(-1.5, 2.5, n)
+    loc, scale = raw_loc * meanyr, raw_scale * meanyr
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": skewnorm.rvs(alpha, loc=loc, scale=scale, random_state=rng),
+            "Blended_EV": skewnorm.mean(alpha, loc=loc, scale=scale),
+            "SN_Loc": raw_loc,
+            "SN_Scale": raw_scale,
+            "SN_Alpha": alpha,
+            "DenomCol": "MeanYr",
+            "Date": _game_dates(n),
+        }
+    )
+    df["Line"] = np.round(df["Blended_EV"]) + 0.5
+    cdf_at_line, _ = _pred_cdf_pmf(df, "SkewNormal", df["Line"].to_numpy(), strategy=_SUM_STRATEGY)
+    df["P"] = 1.0 - cdf_at_line
+    df["Odds"] = 0.5
+    return df
+
+
+@pytest.mark.parametrize(
+    ("source", "dist", "params", "pred_col", "market"),
+    [
+        (
+            _skewnormal_priced_frame(),
+            "SkewNormal",
+            ["SN_Loc", "SN_Scale", "SN_Alpha"],
+            "Blended_EV",
+            "PRA",
+        ),
+        (_dpo_frame(900, seed=3), "DPO", ["DP_MU", "DP_PHI"], "EV", "PR"),
+    ],
+    ids=["continuous", "count"],
+)
+def test_persisted_endpoints_reproduce_the_family_they_were_generated_from(
+    source, dist, params, pred_col, market
+):
+    """Endpoint fidelity: the distribution-free branch must grade a closed-form family
+    identically to the family's own parameters. The count case additionally covers the
+    ``SUM_PMF > 0`` path, where the seeded randomized PIT spreads each integer's jump.
+    """
+    endpoints = _as_component_sum(source, dist, params)
+    assert _infer_dist_from_columns(endpoints) == COMPONENT_SUM_DIST
+
+    cell = {"league": "NBA", "market": market, "strategy": _SUM_STRATEGY}
+    closed_form = gate_row(source, pred_col, **cell)
+    persisted = gate_row(endpoints, pred_col, **cell)
+    for key in _SUM_FIDELITY_KEYS:
+        assert persisted[key] == pytest.approx(closed_form[key], abs=1e-9), key
+
+    actual = source[ACTUAL_COL].to_numpy(dtype=float)
+    np.testing.assert_array_equal(
+        _dispersion_diagnostics(endpoints, COMPONENT_SUM_DIST, actual, strategy=_SUM_STRATEGY),
+        _dispersion_diagnostics(source, dist, actual, strategy=_SUM_STRATEGY),
+    )
+
+
+def test_component_sum_ppf_raises_on_an_unpersisted_quantile():
+    """An endpoint the assembler never sampled is a missing input, not an interpolation."""
+    endpoints = _as_component_sum(_dpo_frame(20), "DPO", ["DP_MU", "DP_PHI"])
+    np.testing.assert_array_equal(
+        _pred_ppf(endpoints, COMPONENT_SUM_DIST, 0.25, strategy=_SUM_STRATEGY),
+        endpoints["SUM_Q25"].to_numpy(),
+    )
+    with pytest.raises(ValueError, match="no endpoint for quantile"):
+        _pred_ppf(endpoints, COMPONENT_SUM_DIST, 0.5, strategy=_SUM_STRATEGY)
+
+
+def test_component_sum_cdf_raises_away_from_the_row_outcome():
+    """The endpoints were sampled at ``Result``; grading another ``y`` would score a
+    different CDF under the same numbers, so the mismatch must fail loud."""
+    endpoints = _as_component_sum(_dpo_frame(20), "DPO", ["DP_MU", "DP_PHI"])
+    actual = endpoints[ACTUAL_COL].to_numpy(dtype=float)
+    cdf, pmf = _pred_cdf_pmf(endpoints, COMPONENT_SUM_DIST, actual, strategy=_SUM_STRATEGY)
+    np.testing.assert_array_equal(cdf, endpoints["SUM_CDF"].to_numpy())
+    np.testing.assert_array_equal(pmf, endpoints["SUM_PMF"].to_numpy())
+    with pytest.raises(ValueError, match="only at the row's own Result"):
+        _pred_cdf_pmf(endpoints, COMPONENT_SUM_DIST, actual + 1.0, strategy=_SUM_STRATEGY)
+
+
+def test_load_test_set_keeps_endpoints_without_decode_or_identity_columns(tmp_path):
+    """A component sum is produced by no trained cell, so it carries no ``DenomCol``,
+    no ``TargetNormalization``, and no ``Strategy*`` identity — and must still load."""
+    endpoints = _as_component_sum(
+        _skewnormal_priced_frame(40), "SkewNormal", ["SN_Loc", "SN_Scale", "SN_Alpha"]
+    ).drop(columns="DenomCol")
+    csv = tmp_path / "NBA_PRA.csv"
+    endpoints.to_csv(csv, index=False)
+
+    loaded = load_test_set(csv, "Blended_EV")
+    assert set(loaded.columns) >= COMPONENT_SUM_COLUMNS
+    assert _infer_dist_from_columns(loaded) == COMPONENT_SUM_DIST

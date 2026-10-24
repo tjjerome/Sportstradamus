@@ -1,7 +1,7 @@
 # Dashboard Mobile — Phase M design
 
-> Status: APPROVED (owner, 2026-07-16). Lane: dashboard-ux, Phase M — follows Phase R,
-> precedes the parked Phases D ∥ E. Branch: `feature/dashboard-ux`.
+> Status: SHIPPED 2026-07-16; owner real-phone pass recorded 2026-09-11. Lane: dashboard-ux,
+> Phase M — followed Phase R; Phase D landed on top of it 2026-08-06. Work lives on `devel`.
 
 ## 1. Problem and scope
 
@@ -127,8 +127,8 @@ Native stacking plus the §2.2 caption. Out of money-loop scope.
 
 ## 5. Phase D compatibility
 
-Phase D (loose constellation shapes) is parked but must land cleanly on top of this
-work. The seam:
+Phase D (loose constellation shapes) landed on top of this work on 2026-08-06. The seam it
+had to respect:
 
 - D changes **star positions** (template vertex assignment, topology classifier, slate
   assigner, decoration traces). Mobile touches **marker sizes, label fonts, and JS

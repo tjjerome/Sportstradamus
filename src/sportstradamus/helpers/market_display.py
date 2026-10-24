@@ -10,6 +10,7 @@ import json
 from functools import cache
 
 from sportstradamus import data
+from sportstradamus.helpers.archive import archive_market
 
 
 @cache
@@ -19,5 +20,10 @@ def _market_display() -> dict:
 
 
 def market_display_name(league: str, slug: str) -> str:
-    """Display label for a market slug; the slug stays the logic key everywhere."""
-    return _market_display().get(league, {}).get(slug, slug)
+    """Display label for a market slug; the slug stays the logic key everywhere.
+
+    The label is read under the league's own key, so a board name from a platform's
+    map (NHL ``AST``, NBA ``fantasy points underdog``) reads like the league's other rows.
+    """
+    key = archive_market(league, slug)
+    return _market_display().get(league, {}).get(key, key)

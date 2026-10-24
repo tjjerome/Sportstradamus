@@ -15,19 +15,15 @@ Pattern dispatches handled by this module:
 * ``weighted_mean`` -- Pattern A variant via
   :func:`sportstradamus.stats.nfl_fp_aggregation.weighted_mean` when the
   per-game row exposes only the rate (e.g. success%, stuffs%).
+* ``top_unit_share`` -- continuity via
+  :func:`sportstradamus.stats.nfl_fp_aggregation.top_unit_share`: the share
+  of a team's snaps its single most-used OL five-man unit played.
 * ``proe_formula`` -- custom Pattern A. PROE is
   ``sum(actual_dropbacks - expected_dropbacks) / sum(expected_dropbacks)``;
   the per-game ratio is biased.
 * ``rpr_bucket_pass_rate`` -- JSON-parse ``run_pass_report``'s ``bucket``
   column to extract per-situation snap counts, then compute pass% as
   ``sum(pass_snaps) / (sum(pass_snaps) + sum(rush_snaps))`` per team.
-
-Pattern B (``line_matchups``) is handled inline in
-:func:`_load_line_matchups`: single-snapshot lookup, no aggregation; the
-row IS the feature for the target game. Team-side ``teamStats*`` columns
-go to teamProfile under the team's abbreviation; opponent-side
-``opponentStats*`` columns go to defenseProfile under the opponent's
-abbreviation.
 
 Pattern C (per-opponent x position fantasy_points_allowed) is **deferred
 to Phase 2b** -- the FP fetcher currently writes a 1-row season-to-date
@@ -47,7 +43,7 @@ reindexes them as all-NaN at consumer side.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -58,20 +54,15 @@ from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nfl_fp_team_weekly, nfl_fp_weekly
 from sportstradamus.stats.nfl_fp_aggregation import (
     TEAM_GROUP_COL,
+    top_unit_share,
     weighted_mean,
     weighted_rate,
 )
 
 # Abbreviation column the FP team-grain parquets carry alongside teamTeamId.
-# Used to re-key per-teamId aggregates back to the abbreviation index that
+# Used to re-key each window's rows onto the abbreviation index that
 # teamProfile / defenseProfile uses (matches the NFL gamelog's "team" col).
 _TEAM_ABBR_COL = "teamAbbreviation"
-
-# Opponent abbreviation column line_matchups carries instead of
-# ``opponentTeamId``. Defense-side Pattern B rows index by this directly
-# since the value is already a team-abbreviation key matching the
-# defenseProfile index in stats/base.py.
-_OPPONENT_ABBR_COL = "opponentAbbreviation"
 
 # PROE source columns. PFR-style formula:
 # ``sum(actual_dropbacks - expected_dropbacks) / sum(expected_dropbacks)``.
@@ -79,25 +70,29 @@ _OPPONENT_ABBR_COL = "opponentAbbreviation"
 _PROE_ACTUAL_COL = "teamStatsPassingDropbacksTotal"
 _PROE_EXPECTED_COL = "teamStatsPassingDropbacksExpected"
 
-# run_pass_report bucket subkeys. Each per-game row's ``bucket`` cell is a
-# JSON object carrying nested entries keyed by bucket name; each nested
-# entry has teamStatsSnapsOffensePass / teamStatsSnapsOffenseRush.
+# run_pass_report snap columns. In the archived legacy snapshots each
+# per-game row's ``bucket`` cell is a JSON object keyed by bucket name whose
+# nested entries carry these two; the current API answers one filtered
+# request per bucket and puts them at the top level of its own kind.
 _RPR_BUCKET_PASS = "teamStatsSnapsOffensePass"
 _RPR_BUCKET_RUSH = "teamStatsSnapsOffenseRush"
+_RPR_BUCKET_TOTAL = "teamStatsSnapsOffenseTotal"
 
 # Spec-aligned subset of FP's situational buckets. ``Inside20`` ≈ redzone,
 # ``Inside10`` ≈ goalline; Leading / Trailing capture game-state pass
 # tendency; FirstDown / ThirdDown capture down-state. Other available
 # buckets (FirstHalf/SecondHalf, Under5/5To9/Over10) are skipped here as
-# largely collinear with the chosen subset.
-_RPR_BUCKETS: tuple[tuple[str, str], ...] = (
-    ("redzone", "bucketInside20"),
-    ("goalline", "bucketInside10"),
-    ("neutral", "bucketNeutral"),
-    ("leading", "bucketLeading"),
-    ("trailing", "bucketTrailing"),
-    ("first_down", "bucketFirstDown"),
-    ("third_down", "bucketThirdDown"),
+# largely collinear with the chosen subset. Each entry names the output
+# suffix, the legacy nested-bucket key, and the per-bucket file kind the
+# current API's filtered pulls land in.
+_RPR_BUCKETS: tuple[tuple[str, str, str], ...] = (
+    ("redzone", "bucketInside20", "run_pass_report_redzone"),
+    ("goalline", "bucketInside10", "run_pass_report_goalline"),
+    ("neutral", "bucketNeutral", "run_pass_report_neutral"),
+    ("leading", "bucketLeading", "run_pass_report_leading"),
+    ("trailing", "bucketTrailing", "run_pass_report_trailing"),
+    ("first_down", "bucketFirstDown", "run_pass_report_first_down"),
+    ("third_down", "bucketThirdDown", "run_pass_report_third_down"),
 )
 
 
@@ -113,10 +108,11 @@ class _TeamRecipe:
         file_kind: Logical kind name from
             :data:`sportstradamus.stats.nfl_fp_team_weekly.FILE_KINDS`.
         pattern: Dispatch key: ``"weighted_rate"`` / ``"weighted_mean"`` /
-            ``"proe_formula"`` / ``"rpr_bucket_pass_rate"``.
+            ``"top_unit_share"`` / ``"proe_formula"`` / ``"rpr_bucket_pass_rate"``.
         args: Source-column tuple. ``(num, den)`` for weighted_rate /
             ``proe_formula``; ``(value, weight)`` for weighted_mean;
-            ``(bucket_key,)`` for rpr_bucket_pass_rate.
+            ``(unit, weight)`` for top_unit_share; ``(bucket_key,)`` for
+            rpr_bucket_pass_rate.
         grain: ``"team"`` -> output goes into team_features frame.
             ``"defense"`` -> output goes into defense_features frame.
     """
@@ -314,67 +310,194 @@ _RECIPES: tuple[_TeamRecipe, ...] = (
         (_PROE_ACTUAL_COL, _PROE_EXPECTED_COL),
         "team",
     ),
+    # pace -> teamProfile tempo (possession seconds over plays; plays per game and per drive)
+    _TeamRecipe(
+        "pace_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_seconds_sum", "plays_total"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_plays_per_game",
+        "pace",
+        "weighted_rate",
+        ("plays_total", "games"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_plays_per_drive",
+        "pace",
+        "weighted_rate",
+        ("drive_plays_sum", "drives"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_drives_per_game",
+        "pace",
+        "weighted_rate",
+        ("drives", "games"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_neutral_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_neutral", "plays_neutral"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_trailing_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_trail", "plays_trail"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_leading_sec_per_play",
+        "pace",
+        "weighted_rate",
+        ("top_lead", "plays_lead"),
+        "team",
+    ),
+    _TeamRecipe(
+        "pace_neutral_play_share",
+        "pace",
+        "weighted_rate",
+        ("plays_neutral", "plays_total"),
+        "team",
+    ),
+    # pace_opp -> defenseProfile tempo forced on the offenses faced
+    _TeamRecipe(
+        "def_pace_sec_per_play_forced",
+        "pace_opp",
+        "weighted_rate",
+        ("top_seconds_sum", "plays_total"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_plays_faced_per_game",
+        "pace_opp",
+        "weighted_rate",
+        ("plays_total", "games"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_plays_per_drive_allowed",
+        "pace_opp",
+        "weighted_rate",
+        ("drive_plays_sum", "drives"),
+        "defense",
+    ),
+    _TeamRecipe(
+        "def_drives_faced_per_game",
+        "pace_opp",
+        "weighted_rate",
+        ("drives", "games"),
+        "defense",
+    ),
+    # ol_combos -> teamProfile OL unit efficiency + continuity (snap-weighted over five-man units)
+    _TeamRecipe(
+        "ol_pressure_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("pressure_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_sack_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("sack_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_ybc_per_att",
+        "ol_combos",
+        "weighted_mean",
+        ("ybc_a", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_ypc",
+        "ol_combos",
+        "weighted_mean",
+        ("ypc", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_epa_per_db",
+        "ol_combos",
+        "weighted_mean",
+        ("epa_per_db", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_epa_per_rush",
+        "ol_combos",
+        "weighted_mean",
+        ("epa_per_rush", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_success_rate",
+        "ol_combos",
+        "weighted_mean",
+        ("success_rate", "snaps"),
+        "team",
+    ),
+    _TeamRecipe(
+        "ol_top_unit_share",
+        "ol_combos",
+        "top_unit_share",
+        ("row_id", "snaps"),
+        "team",
+    ),
 )
 
 
 def _rpr_bucket_recipes() -> tuple[_TeamRecipe, ...]:
+    """Two recipes per bucket -- one per era, both writing the same output column.
+
+    The filtered per-bucket kind exists only for weeks pulled from the
+    current API; the nested ``bucket`` cell only for archived legacy
+    snapshots. Whichever is on disk for a given week produces the column and
+    the other yields nothing, so a window of either era aggregates the same.
+    """
     return tuple(
-        _TeamRecipe(
-            output_col=f"rp_{suffix}_pass_pct",
-            file_kind="run_pass_report",
-            pattern="rpr_bucket_pass_rate",
-            args=(bucket_key,),
-            grain="team",
+        recipe
+        for suffix, bucket_key, bucket_kind in _RPR_BUCKETS
+        for recipe in (
+            _TeamRecipe(
+                output_col=f"rp_{suffix}_pass_pct",
+                file_kind=bucket_kind,
+                pattern="weighted_rate",
+                args=(_RPR_BUCKET_PASS, _RPR_BUCKET_TOTAL),
+                grain="team",
+            ),
+            _TeamRecipe(
+                output_col=f"rp_{suffix}_pass_pct",
+                file_kind="run_pass_report",
+                pattern="rpr_bucket_pass_rate",
+                args=(bucket_key,),
+                grain="team",
+            ),
         )
-        for suffix, bucket_key in _RPR_BUCKETS
     )
 
 
 _ALL_RECIPES: tuple[_TeamRecipe, ...] = _RECIPES + _rpr_bucket_recipes()
 
 
-def load_pattern_a_team_features(
-    pattern_a_windows: Sequence[tuple[int, int, int]],
-) -> pd.DataFrame:
-    """Pattern-A-only team features for callers that need rate stats without Pattern B.
-
-    The player-comp broadcast (``nfl_fp_weekly_aggregate.load_multi_window_one_year``)
-    needs the team's season-to-date ``off_faced_man_pct`` /
-    ``off_faced_zone_pct`` to project onto every player in the comp pool,
-    but does NOT want the matchup-specific ``lm_*`` columns Pattern B
-    would attach -- comps are season-to-date snapshots, not forecasts for
-    a specific game.
-
-    Args:
-        pattern_a_windows: Per-window ``(season, start_week, end_week)``
-            tuples to pool. Same semantics as
-            :func:`load_team_and_defense_features`.
-
-    Returns:
-        DataFrame indexed by team abbreviation with Pattern-A team
-        features only. Empty when no usable snapshots were found.
-    """
-    if not pattern_a_windows:
-        return pd.DataFrame()
-    abbr_season = max(season for season, _, _ in pattern_a_windows)
-    abbr_map = _build_team_abbreviation_map(abbr_season)
-    if abbr_map.empty:
-        return pd.DataFrame()
-    return _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
-
-
 def load_team_and_defense_features(
     pattern_a_windows: Sequence[tuple[int, int, int]],
-    pattern_b_snapshot: tuple[int, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Aggregate weekly FP team snapshots into team / defense feature frames.
 
     Pattern A kinds pool per-game team rows across every
-    ``(season, start_week, end_week)`` window, then aggregate per the
-    recipe. Pattern B (``line_matchups``) reads the single snapshot at
-    ``pattern_b_snapshot`` -- the row IS the feature for the target game.
+    ``(season, start_week, end_week)`` window, then aggregate per the recipe.
 
-    The two-input contract lets the NFL caller apply the Phase-1.5
+    The windows-list contract lets the NFL caller apply the Phase-1.5
     lookback rule (post-week-4 = current-season only;
     pre-week-5 = prior season weeks 11..18 BLENDED with current-season
     partial, raw rows pooled before per-team groupby). Both branches of
@@ -383,59 +506,26 @@ def load_team_and_defense_features(
 
     Output frames are indexed by ``teamAbbreviation`` (e.g. ``"PHI"``,
     ``"KC"``) to match the abbreviation-indexed teamProfile / defenseProfile
-    built by ``stats/base.py:base_profile``. The abbreviation map is
-    sourced from the most recent season in ``pattern_a_windows`` (or
-    ``pattern_b_snapshot[0]`` if Pattern A is empty); team relocations
-    (OAK->LV, STL->LA) are resolved to the team's *current* abbreviation
-    because the underlying ``teamTeamId`` is stable across seasons.
+    built by ``stats/base.py:base_profile``.
 
     Args:
         pattern_a_windows: Per-window ``(season, start_week, end_week)``
             tuples to pool for Pattern A rate-stat reads. Windows where
             ``start_week > end_week`` are skipped silently. Empty list
-            short-circuits to no Pattern A features.
-        pattern_b_snapshot: ``(season, week)`` of the target game's
-            line_matchups snapshot. Pattern B output is empty when the
-            snapshot is missing or has no rows.
+            short-circuits to no features.
 
     Returns:
         Tuple ``(team_features, defense_features)`` of DataFrames, each
         indexed by team abbreviation. Empty DataFrames if no usable
         snapshots were found.
     """
-    abbr_season = _pick_abbr_season(pattern_a_windows, pattern_b_snapshot)
-    abbr_map = _build_team_abbreviation_map(abbr_season)
-    if abbr_map.empty:
+    if not pattern_a_windows:
         return pd.DataFrame(), pd.DataFrame()
 
-    team_features = _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
-    defense_features = _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map)
-    team_b, defense_b = _load_line_matchups(*pattern_b_snapshot, abbr_map=abbr_map)
-    if not team_b.empty:
-        team_features = team_b if team_features.empty else team_features.join(team_b, how="outer")
-    if not defense_b.empty:
-        defense_features = (
-            defense_b if defense_features.empty else defense_features.join(defense_b, how="outer")
-        )
-    return team_features, defense_features
-
-
-def _pick_abbr_season(
-    pattern_a_windows: Sequence[tuple[int, int, int]],
-    pattern_b_snapshot: tuple[int, int],
-) -> int:
-    """Pick the season to source the teamTeamId -> abbreviation map from.
-
-    Prefer the most recent season in the Pattern A windows; fall back to
-    the Pattern B snapshot season when Pattern A is empty. Either choice
-    converges to the same mapping for NFL teams that haven't relocated;
-    for teams that have (OAK->LV in 2020), the most-recent season gives
-    the current-day abbreviation -- which matches what teamProfile /
-    defenseProfile use for live game lookups.
-    """
-    if pattern_a_windows:
-        return max(season for season, _, _ in pattern_a_windows)
-    return pattern_b_snapshot[0]
+    return (
+        _aggregate_pattern_a(pattern_a_windows, grain="team"),
+        _aggregate_pattern_a(pattern_a_windows, grain="defense"),
+    )
 
 
 def _recipes_by_kind(grain: str) -> dict[str, list[_TeamRecipe]]:
@@ -452,44 +542,47 @@ def _pool_windows(
 ) -> pd.DataFrame:
     """Pool before the per-team groupby so blended windows are treated as one sample.
 
-    Windows where ``start_week > end_week`` are skipped. Empty frame when no window
-    yields rows.
+    Each window is re-keyed from its own season's ``teamTeamId`` to the team
+    abbreviation *before* the concat: the two snapshot eras don't share an id
+    space (archived legacy pulls key teams numerically, current pulls key them
+    by abbreviation), so pooling the raw ids would split one team across two
+    groups and silently drop whichever era the map didn't cover.
+
+    Windows where ``start_week > end_week``, whose snapshots are absent, or
+    whose season has no usable abbreviation map contribute nothing. Empty frame
+    when no window yields rows.
     """
     frames = []
     for season, start_week, end_week in pattern_a_windows:
         df = nfl_fp_team_weekly.load_window_or_empty(season, start_week, end_week, file_kind)
-        if not df.empty:
-            frames.append(df)
+        if df.empty:
+            continue
+        abbr = _build_team_abbreviation_map(season)
+        if abbr.empty:
+            continue
+        keyed = df.assign(**{TEAM_GROUP_COL: df[TEAM_GROUP_COL].map(abbr)})
+        frames.append(keyed.loc[keyed[TEAM_GROUP_COL].notna()])
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
-
-
-def _rekey_to_abbr(out: pd.DataFrame, abbr_map: pd.Series) -> pd.DataFrame:
-    mapping = abbr_map.to_dict()
-    out.index = [mapping.get(idx) for idx in out.index]
-    return out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
 
 
 def _aggregate_pattern_a(
     pattern_a_windows: Sequence[tuple[int, int, int]],
     *,
     grain: Literal["team", "defense"],
-    abbr_map: pd.Series,
 ) -> pd.DataFrame:
     """Apply every recipe whose ``grain`` matches over pooled per-window per-game rows.
 
-    For each ``file_kind`` referenced by matching recipes, loads all windows,
-    concatenates the raw per-game rows (pooling across windows before the per-team
-    groupby so blended windows are treated as one sample), then dispatches to
-    ``_apply_recipes``. Results are re-keyed from ``teamTeamId`` to team
-    abbreviation via ``abbr_map``.
+    For each ``file_kind`` referenced by matching recipes, loads all windows and
+    concatenates the raw per-game rows — abbreviation-keyed by ``_pool_windows``,
+    pooled across windows before the per-team groupby so blended windows are
+    treated as one sample — then dispatches to ``_apply_recipes``.
 
     Args:
         pattern_a_windows: ``(season, start_week, end_week)`` tuples to pool.
             Windows where ``start_week > end_week`` are skipped.
         grain: ``"team"`` -> collects team-grain recipes; ``"defense"`` -> defense-grain.
-        abbr_map: Series mapping ``teamTeamId`` -> ``teamAbbreviation`` for re-keying.
 
     Returns:
         DataFrame indexed by team abbreviation. Empty when no usable snapshots found.
@@ -507,9 +600,7 @@ def _aggregate_pattern_a(
             continue
         out = kind_frame if out.empty else out.combine_first(kind_frame)
 
-    if out.empty:
-        return out
-    return _rekey_to_abbr(out, abbr_map)
+    return out
 
 
 def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataFrame:
@@ -523,8 +614,9 @@ def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataF
         recipes: Subset of ``_ALL_RECIPES`` filtered to one ``file_kind`` and ``grain``.
 
     Returns:
-        Wide DataFrame indexed by ``TEAM_GROUP_COL`` (``teamTeamId``), one column
-        per surviving recipe. Empty when all recipes return ``None``.
+        Wide DataFrame indexed by ``TEAM_GROUP_COL``, which ``_pool_windows`` has
+        already re-keyed to the team abbreviation, one column per surviving
+        recipe. Empty when all recipes return ``None``.
     """
     out = pd.DataFrame()
     for recipe in recipes:
@@ -539,18 +631,23 @@ def _missing_cols(df: pd.DataFrame, cols: Sequence[str]) -> bool:
     return any(c not in df.columns for c in cols)
 
 
+# Patterns that forward straight to a shared-shape aggregator: two source
+# columns plus ``group_col``. ``proe_formula`` and ``rpr_bucket_pass_rate``
+# need bespoke arithmetic and stay as explicit branches below.
+_TWO_COLUMN_AGGREGATORS: dict[str, Callable[..., pd.Series]] = {
+    "weighted_rate": weighted_rate,
+    "weighted_mean": weighted_mean,
+    "top_unit_share": top_unit_share,
+}
+
+
 def _dispatch(df: pd.DataFrame, recipe: _TeamRecipe) -> pd.Series | None:
     """Route a recipe to the right helper -- skip if required columns missing."""
-    if recipe.pattern == "weighted_rate":
-        num_col, den_col = recipe.args
+    aggregator = _TWO_COLUMN_AGGREGATORS.get(recipe.pattern)
+    if aggregator is not None:
         if _missing_cols(df, recipe.args):
             return None
-        return weighted_rate(df, num_col, den_col, group_col=TEAM_GROUP_COL)
-    if recipe.pattern == "weighted_mean":
-        value_col, weight_col = recipe.args
-        if _missing_cols(df, recipe.args):
-            return None
-        return weighted_mean(df, value_col, weight_col, group_col=TEAM_GROUP_COL)
+        return aggregator(df, *recipe.args, group_col=TEAM_GROUP_COL)
     if recipe.pattern == "proe_formula":
         actual_col, expected_col = recipe.args
         if _missing_cols(df, recipe.args):
@@ -621,74 +718,6 @@ def _parse_bucket_json(raw: object) -> dict:
         return {}
 
 
-def _load_line_matchups(
-    season: int,
-    target_week: int,
-    abbr_map: pd.Series,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Pattern B -- single-snapshot lookup, split team-side / opp-side cols.
-
-    ``line_matchups`` carries one row per matchup that week. Each row has
-    both the team's own protection-line baseline (``teamStats*``) and the
-    opponent's pass-rush profile (``opponentStats*``). Team-side cols join
-    into teamProfile under the team's abbreviation (resolved from
-    ``teamTeamId`` via ``abbr_map``); opp-side cols join into defenseProfile
-    under the opponent's abbreviation (taken directly from the
-    ``opponentAbbreviation`` column FP writes on line_matchups rows).
-    """
-    df = nfl_fp_team_weekly.load_snapshot(season, target_week, "line_matchups")
-    if df is None or df.empty or TEAM_GROUP_COL not in df.columns:
-        return pd.DataFrame(), pd.DataFrame()
-
-    mapping = abbr_map.to_dict()
-    team_cols = [c for c in df.columns if c.startswith("teamStats")]
-    opp_cols = [c for c in df.columns if c.startswith("opponentStats")]
-
-    team_df = _line_matchups_team_side(df, team_cols, mapping)
-    opp_df = _line_matchups_opp_side(df, opp_cols)
-    return team_df, opp_df
-
-
-def _line_matchups_team_side(
-    df: pd.DataFrame,
-    value_cols: list[str],
-    mapping: dict[int, str],
-) -> pd.DataFrame:
-    """Project the team-side of line_matchups (own OL) to an abbreviation-indexed frame.
-
-    Uses ``teamTeamId`` resolved via ``mapping`` because the team-grain
-    line_matchups frame carries ``teamTeamId`` + ``teamAbbreviation`` for
-    its own side -- both work as the index, but resolving via the id keeps
-    one canonical source-of-truth path with the Pattern-A aggregation.
-    """
-    if not value_cols:
-        return pd.DataFrame()
-    side = df[[TEAM_GROUP_COL, *value_cols]].copy()
-    side.index = [mapping.get(idx) for idx in side[TEAM_GROUP_COL]]
-    side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
-    side = side.drop(columns=[TEAM_GROUP_COL])
-    return side.add_prefix("lm_")
-
-
-def _line_matchups_opp_side(
-    df: pd.DataFrame,
-    value_cols: list[str],
-) -> pd.DataFrame:
-    """Project the opp-side of line_matchups (opp DL) to an abbreviation-indexed frame.
-
-    Uses ``opponentAbbreviation`` directly because line_matchups does NOT
-    carry ``opponentTeamId`` -- the abbreviation is the only opponent key
-    FP writes. Skips the abbr_map round-trip entirely.
-    """
-    if not value_cols or _OPPONENT_ABBR_COL not in df.columns:
-        return pd.DataFrame()
-    side = df[[_OPPONENT_ABBR_COL, *value_cols]].copy()
-    side.index = side[_OPPONENT_ABBR_COL].values
-    side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
-    side = side.drop(columns=[_OPPONENT_ABBR_COL])
-    return side.add_prefix("lm_def_")
-
-
 # Module-level cache: teamTeamId -> teamAbbreviation, keyed by season.
 # Populated lazily on first call to _build_team_abbreviation_map; avoids
 # re-reading parquets on repeated calls in a training loop.
@@ -723,19 +752,29 @@ def _build_team_abbreviation_map(season: int) -> pd.Series:
 
 
 def _abbr_from_team_grain(season: int) -> pd.Series | None:
-    """Try to build the teamTeamId -> abbreviation map from ``line_matchups``."""
+    """Try to build the teamTeamId -> abbreviation map from a team-grain snapshot.
+
+    ``coverage_matrix`` is the preferred source: current pulls put the
+    abbreviation on every team row, which makes this an identity map.
+    ``line_matchups`` is the fallback for the archived legacy seasons, whose
+    team parquets pair ``teamTeamId`` with location / nickname and nowhere
+    else carry the abbreviation. It is consulted second rather than first
+    because the kind is retired — any file still on disk for a season that
+    has since been re-pulled holds the superseded id space.
+    """
     for week in nfl_fp_team_weekly.available_snapshots(season):
-        df = nfl_fp_team_weekly.load_snapshot(season, week, "line_matchups")
-        if df is None or df.empty:
-            continue
-        if TEAM_GROUP_COL not in df.columns or _TEAM_ABBR_COL not in df.columns:
-            continue
-        return (
-            df[[TEAM_GROUP_COL, _TEAM_ABBR_COL]]
-            .dropna()
-            .drop_duplicates(subset=[TEAM_GROUP_COL])
-            .set_index(TEAM_GROUP_COL)[_TEAM_ABBR_COL]
-        )
+        for kind in ("coverage_matrix", "line_matchups"):
+            df = nfl_fp_team_weekly.load_snapshot(season, week, kind)
+            if df is None or df.empty:
+                continue
+            if TEAM_GROUP_COL not in df.columns or _TEAM_ABBR_COL not in df.columns:
+                continue
+            return (
+                df[[TEAM_GROUP_COL, _TEAM_ABBR_COL]]
+                .dropna()
+                .drop_duplicates(subset=[TEAM_GROUP_COL])
+                .set_index(TEAM_GROUP_COL)[_TEAM_ABBR_COL]
+            )
     return None
 
 
@@ -768,4 +807,4 @@ def _abbr_from_player_grain(season: int) -> pd.Series | None:
     return None
 
 
-__all__ = ("load_pattern_a_team_features", "load_team_and_defense_features")
+__all__ = ("load_team_and_defense_features",)

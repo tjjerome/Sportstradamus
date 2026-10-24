@@ -1,7 +1,7 @@
 """Pin for ``dashboard.data.get_prediction_history``'s dedup (P8 Task 0.7).
 
-The flat history frame has one row per (prediction x book offer); CRPS /
-coverage analysis needs one row per prediction. This pins that
+The flat history frame has one row per (prediction x book offer); coverage
+analysis needs one row per prediction. This pins that
 ``get_prediction_history``'s ``drop_duplicates(subset=PREDICTION_KEY,
 keep="last")`` agrees with the equivalent ``groupby(PREDICTION_KEY).last()``
 projection, and that the league/date-range filters apply before the dedup.

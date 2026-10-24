@@ -1,6 +1,6 @@
 # FP Data Coverage Matrix
 
-_as of 2026-05-25, branch model-research, FP weekly snapshots in `src/sportstradamus/data/player_data/NFL/2025/week_01/`_
+_as of 2026-05-25, branch model-research, FP weekly snapshots in `src/sportstradamus/data/player_data/NFL/2025/week_01/`. The kinds added since (`passing_situation`, `pace`, `pace_opp`, `ol_combos`) and their recipes are described in [fantasypoints_expansion.md](fantasypoints_expansion.md); they are not in the counts below. The per-kind tables record the surfaces on that date, before the Tier 1 batch and the bucket helpers in [Cheap-win candidate list](#cheap-win-candidate-list) landed; every aggregate output now reaches the asof matrix as `{col}_asof`, and the `_FP_ASOF_COLUMN_MAP` the tables cite no longer exists._
 
 ## Summary
 
@@ -15,7 +15,7 @@ Audit is read-only; no source files were modified.
 
 **Caveats**
 
-- `fantasy_points_allowed` and `fantasy_points_scored` are flagged `PLACEHOLDER_SINGLE_TILE_KINDS` in `nfl_fp_weekly.py:102` — they currently carry **one placeholder row** rather than per-game enumeration. No recipe touches them today and no recipe should be added until the fetcher's endpoint parameterisation is finalised.
+- `fantasy_points_allowed` and `fantasy_points_scored` are flagged `PLACEHOLDER_SINGLE_TILE_KINDS` in `nfl_fp_weekly.py` — they currently carry **one placeholder row** rather than per-game enumeration. No recipe touches them today and no recipe should be added until the fetcher's endpoint parameterisation is finalised.
 - `NFL_rushing-yards.parquet` is **not present** under `data/training_data/`. Surface-4 detection used the union across `NFL_passing-yards`, `NFL_receiving-yards`, `NFL_fantasy-points-prizepicks`, `NFL_passing-tds`, `NFL_receiving-tds` (5 matrices). All 21 asof + 3 delta + 2 trend/breakout names land identically in every NFL training matrix scanned, so the union vs single-matrix counts agree.
 - The four team-grain `off_faced_*` columns appear at surfaces 4 and 5 (in the matrix as `Team off_faced_*` / `Defense off_faced_*`), but **none of the 24 audited player-grain parquets is their source**. They are aggregated from `data/team_data/NFL/<season>/week_NN/coverage_matrix*.parquet` via `nfl_fp_team_weekly_aggregate._RECIPES`. The team-grain audit is out of scope for this document.
 - `playerStatsGamesPlayed` is **not** treated as a meta/ID column — it is the per-row game-count denominator for `off_snaps_Snap_pct` (recipe) and several `derive_comp_metrics` `per_game` derivations. It appears in the stat tables, marked `in_recipe yes` only in the one kind where a recipe references it directly (`offense_snap_share_report`).
@@ -851,11 +851,11 @@ All 13 route keys are parsed by `_aggregate_separation_by_routes`; helper emits 
 
 ## Cheap-win candidate list
 
-Priority-ordered by estimated LOC ascending. "Recipe LOC" assumes a single `_Recipe(...)` tuple addition to `_AGGREGATE_RECIPES` in `nfl_fp_weekly_aggregate.py` (4 LOC for `sum`/`game_mean`, 8 LOC for `weighted_rate` / `weighted_mean`). "Helper LOC" assumes the pattern of an existing bucket-parser (40–60 LOC for a new helper, ~10 LOC to add a key to an existing one). Each Tier-1 entry that you also want in the asof matrix takes ~3 more LOC (one map entry in `_FP_ASOF_COLUMN_MAP` plus the asof name in `feature_filter.json`).
+Priority-ordered by estimated LOC ascending. "Recipe LOC" assumes a single `_Recipe(...)` tuple addition to `_AGGREGATE_RECIPES` in `nfl_fp_weekly_aggregate.py` (4 LOC for `sum`/`game_mean`, 8 LOC for `weighted_rate` / `weighted_mean`). "Helper LOC" assumes the pattern of an existing bucket-parser (40–60 LOC for a new helper, ~10 LOC to add a key to an existing one). A new recipe or helper output needs no further edit to reach the training matrix: `StatsNFL._compute_fp_asof_features` renames every aggregate column to `{col}_asof`, and training takes the full candidate set.
 
-### Tier 1 — top-level columns, single `_Recipe` row (~4–8 LOC each)
+### Tier 1 — shipped: top-level columns, single `_Recipe` row (~4–8 LOC each)
 
-Flat top-level columns already in the parquet — the column exists, the recipe just doesn't reference it yet.
+Every row below is a recipe output in `_AGGREGATE_RECIPES` (`stats/nfl_fp_weekly_aggregate.py`).
 
 | parquet kind | unused column(s) | proposed recipe output | pattern | LOC | note |
 |---|---|---|---|---|---|
@@ -891,16 +891,18 @@ Flat top-level columns already in the parquet — the column exists, the recipe 
 
 ### Tier 2 — extend an existing bucket helper (~5–25 LOC each)
 
+Rows 1–3 are built: `_SEP_BY_COVERAGE_SCHEMES` carries `redzone` and `cover2`–`cover6`, and `_COVERAGE_YPRR_SCHEMES` carries `cover2`–`cover6`. Row 4 is open on the comp side only.
+
 | parquet kind | unused bucket key(s) | helper to extend | proposed output(s) | LOC |
 |---|---|---|---|---|
 | receiving_separation_by_coverage | `bucketReceivingSeparationRedZone` | `_aggregate_separation_by_coverage` (add scheme entry) | `rec_sep_vs_redzone` | 5 |
 | receiving_separation_by_coverage | `bucketReceivingSeparationCover{2,3,4,6}` | `_aggregate_separation_by_coverage` (un-fold the zone bucket) | `rec_sep_vs_cover{2,3,4,6}` | 15 |
 | wr_coverage_matchup | per-scheme YPRR for Cover2/3/4/6 (already read but currently rolled into one `zone` bucket) | extend `_aggregate_per_coverage_yprr` to emit per-scheme outputs | `rec_yprr_vs_cover{2,3,4,6}` | 20 |
-| receiving_separation_by_routes (already parses 13 keys) | `.1..12` already produced — only surface 3 / 4 / 5 wiring is needed | n/a (no helper change) — add to `playerCompStats.json` and `_FP_ASOF_COLUMN_MAP` | per-route asof family (e.g. `rec_sep_route_GO_asof`) | 5 per route added (config edits only) |
+| receiving_separation_by_routes (already parses 13 keys) | `.1..12` already produced and in the matrix as `rec_sep_route_SEP_SCORE.{i}_asof` — only surface 3 (comp) wiring is open | n/a (no helper change) — add to `playerCompStats.json` | per-route comp metrics | 5 per route added (config edits only) |
 
 ### Tier 3 — new bucket-parser helper (~40–60 LOC each)
 
-Entire JSON columns currently dead. The two existing JSON helpers (`_aggregate_separation_by_routes`, `_aggregate_separation_by_coverage`) provide copy-paste templates.
+JSON columns that had no parser on the survey date. Rows 1 and 3 are built (`_aggregate_separation_by_alignment_bucket`, `_aggregate_man_vs_zone_bucket`); row 3 kept the `rec_mz_YPRR.1` / `.2` placeholder aliases (`_derive_aggregate_metrics`) rather than replacing them. Rows 2 and 4 are open; the existing JSON helpers provide copy-paste templates.
 
 | parquet kind | bucket column | proposed helper name | output family | LOC |
 |---|---|---|---|---|

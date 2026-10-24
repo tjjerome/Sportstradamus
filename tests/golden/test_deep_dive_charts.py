@@ -1,10 +1,12 @@
 """Deep-dive History/Model chart pins: colors, line overlays, gold tag.
 
 ``distribution_chart`` overlays three references on the predictive curve — the app
-betting line (white dashed rule, unchanged), the consensus market line (a distinct
+betting line (the white dashed ``app_line_rule`` every deep-dive chart shares, run up
+the curve here and across the History bars), the consensus market line (a distinct
 solid rule), and the model projection (a dot + numeric label, not a rule). These pins
 assert the altair layer spec carries each without re-shading the over/under split, and
-that both charts encode over/under with the theme green/red (P8 Phase C rev-3 recolor).
+that both charts encode over/under with the theme green/red (P8 Phase C rev-3 recolor)
+and a push — a result on an integer line — in the neutral gray.
 """
 
 from __future__ import annotations
@@ -12,15 +14,19 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from sportstradamus.dashboard.components import deep_dive_charts
 from sportstradamus.dashboard.components.deep_dive_charts import (
+    build_recent_history,
     distribution_chart,
     distribution_frame,
     history_chart,
-    resolve_std,
 )
-from sportstradamus.dashboard.theme import GOLD, GREEN, RED
+from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
+from sportstradamus.helpers.distributions import resolve_std
 
 _APP_LINE = "#FFFFFF"
+# Over green, under red, push gray — the one Side scale both charts share.
+_SIDE_SCALE = {"domain": ["Over", "Under", "Push"], "range": [GREEN, RED, GRAY]}
 
 
 def test_resolve_std_falls_back_when_projection_std_missing():
@@ -96,6 +102,7 @@ def test_app_line_unchanged_without_overlays():
     rules = _rules(_layers(chart))
     assert len(rules) == 1
     assert rules[0]["mark"]["color"] == _APP_LINE and rules[0]["mark"].get("strokeDash")
+    assert rules[0]["encoding"] == {"x": {"field": "Line", "type": "quantitative"}}
 
 
 def test_over_under_shading_not_resplit_by_consensus():
@@ -129,8 +136,8 @@ def test_nan_overlays_skipped():
     assert not _marks_of_type(_layers(chart), "point", "circle")
 
 
-def _side_color_range(chart) -> list[str]:
-    """The green/red range of the Side color scale, wherever it sits in the layer tree."""
+def _side_scale(chart) -> dict:
+    """The Side color scale (domain and range), wherever it sits in the layer tree."""
     spec = chart.to_dict()
     stack = list(spec.get("layer", [spec]))
     while stack:
@@ -139,7 +146,7 @@ def _side_color_range(chart) -> list[str]:
             stack.extend(node["layer"])
         scale = node.get("encoding", {}).get("color", {}).get("scale")
         if isinstance(scale, dict) and "range" in scale:
-            return scale["range"]
+            return scale
     raise AssertionError("no Side color scale found")
 
 
@@ -161,15 +168,33 @@ def _history_df() -> pd.DataFrame:
         {
             "Label": ["@BOS", "vs NYK", "@PHI"],
             "StatValue": [22.0, 18.0, 26.0],
-            "Hit": [True, False, True],
+            "Side": ["Over", "Under", "Over"],
         }
     )
 
 
-def test_history_bars_green_over_red_under():
+def test_history_bars_green_over_red_under_gray_push():
     chart = history_chart(_history_df(), 20.0)
-    # Over reads green, under red — keyed on Hit (StatValue >= line), theme tokens.
-    assert _side_color_range(chart) == [GREEN, RED]
+    assert _side_scale(chart) == _SIDE_SCALE
+
+
+_GAMELOG = pd.DataFrame(
+    {
+        "PLAYER_NAME": ["Star"] * 3,
+        "GAME_DATE": ["2026-01-01", "2026-01-02", "2026-01-03"],
+        "PTS": [22.0, 20.0, 18.0],
+    }
+)
+_SCHEMA = {"player": "PLAYER_NAME", "date": "GAME_DATE"}
+
+
+def test_history_reads_a_game_on_an_integer_line_as_a_push(monkeypatch):
+    """A tie pushes and the stake comes back, so the game is neither an Over nor an Under
+    and its bar is neither green nor red."""
+    monkeypatch.setattr(deep_dive_charts, "load_gamelog", lambda _league: _GAMELOG)
+    df = build_recent_history(pd.Series({"Player": "Star"}), "NBA", "PTS", 20.0, _SCHEMA)
+    assert df["Side"].tolist() == ["Over", "Push", "Under"]
+    assert _side_scale(history_chart(df, 20.0)) == _SIDE_SCALE
 
 
 def test_history_gold_line_tag_present():
@@ -185,18 +210,28 @@ def test_history_app_line_still_white_dashed():
     rules = _rules(_layers(history_chart(_history_df(), 20.0)))
     assert len(rules) == 1
     assert rules[0]["mark"]["color"] == _APP_LINE and rules[0]["mark"].get("strokeDash")
+    assert rules[0]["encoding"] == {"y": {"field": "Line", "type": "quantitative"}}
 
 
-def test_distribution_side_recolored_green_red_continuous():
+def test_distribution_side_recolored_green_red_gray_continuous():
     df_pdf, y_title, is_cont = distribution_frame("SkewNormal", 20.0, 5.0, {}, 18.5)
     chart = distribution_chart(df_pdf, is_cont, 18.5, "PTS", y_title)
-    assert _side_color_range(chart) == [GREEN, RED]
+    assert _side_scale(chart) == _SIDE_SCALE
 
 
-def test_distribution_side_recolored_green_red_discrete():
+def test_distribution_side_recolored_green_red_gray_discrete():
     df_pdf, y_title, is_cont = distribution_frame("NegBin", 6.0, 3.0, {"r": 4.0}, 5.5)
     chart = distribution_chart(df_pdf, is_cont, 5.5, "AST", y_title)
-    assert _side_color_range(chart) == [GREEN, RED]
+    assert _side_scale(chart) == _SIDE_SCALE
+
+
+def test_distribution_frame_labels_the_mass_on_an_integer_line_a_push():
+    df_pdf, _, _ = distribution_frame("NegBin", 6.0, 3.0, {"r": 4.0}, 5.0)
+    side = df_pdf.set_index("x")["Side"]
+    assert (side[4], side[5], side[6]) == ("Under", "Push", "Over")
+    # A half-point line has no mass to push.
+    half, _, _ = distribution_frame("NegBin", 6.0, 3.0, {"r": 4.0}, 5.5)
+    assert set(half["Side"]) == {"Over", "Under"}
 
 
 def test_distribution_drops_redundant_over_under_legend():

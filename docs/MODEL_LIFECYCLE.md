@@ -11,7 +11,7 @@ battery of automatic quality checks (Is it as accurate as the sportsbook? Are it
 unbiased and well-calibrated?). A cell's release status is the `shipped` field in `stat_meta.json`,
 and it moves through three stages:
 
-- `withheld` — not served; still being worked on.
+- `withheld` — the model is not served (the board prices its props at the book consensus, and drops a prop no sportsbook quotes); still being worked on.
 - `devel` — served on the tracking server and watched on real settled bets.
 - `main` — fully live.
 
@@ -19,10 +19,11 @@ The path from "I want to improve a cell" to "it's live" is five steps.
 
 ## 1. Sweep the cell's strategy options
 
-`model-strategy-sweep` trains a quick throwaway model per candidate recipe — the knobs that move the
-cell's distribution family (target shape × training loss × blend loss × post-hoc calibrator for
-SkewNormal; count mode × dispersion objective × blend loss × calibrator for the count families) —
-and ranks them by how comfortably each would clear the ship gates, the margin it calls **slack**.
+`sportstradamus ship sweep` trains a quick throwaway model per candidate recipe — the knobs that
+move the cell's distribution family (target shape × training loss × blend loss × post-hoc
+calibrator for SkewNormal; count mode × dispersion objective × blend loss × calibrator for the
+count families) — and ranks them by how comfortably each would clear the ship gates, the margin it
+calls **slack**.
 
 The recipe space is far larger than a budget can enumerate, so each cell gets one Optuna study that
 proposes recipes rather than walking a grid, capped at `--max-trials` (48 by default). The cell's
@@ -30,22 +31,24 @@ current recipe and any corner already proven under full HPO are always evaluated
 only improve on what you have.
 
 ```bash
-poetry run sportstradamus ship sweep --league NBA --market FGM   # one cell
-poetry run sportstradamus ship sweep                             # every withheld cell with cached data
-poetry run sportstradamus ship sweep --league WNBA               # just one league's withheld cells
-poetry run sportstradamus ship sweep --include-shipped           # also re-check already-shipped cells
-poetry run sportstradamus ship sweep --resume                    # continue a crashed multi-hour run
-poetry run sportstradamus ship sweep --dry-run --resume          # what it would do, without training
-poetry run sportstradamus ship sweep --league WNBA -v            # one line per recipe (-q for less)
-poetry run sportstradamus ship sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
+sportstradamus ship sweep --league NBA --market FGM   # one cell
+sportstradamus ship sweep                             # every withheld cell with cached data
+sportstradamus ship sweep --league WNBA               # just one league's withheld cells
+sportstradamus ship sweep --include-shipped           # also re-check already-shipped cells
+sportstradamus ship sweep --resume                    # continue a crashed multi-hour run
+sportstradamus ship sweep --dry-run --resume          # what it would do, without training
+sportstradamus ship sweep --league WNBA -v            # one line per recipe (-q for less)
+sportstradamus ship sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
+sportstradamus ship sweep --confirm --min-model-weight 0.3   # ship only recipes whose fitted blend weight lands >= 0.3
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
-every **withheld** cell in `stat_meta.json` — both SkewNormal and ZINB — that has a cached training
-matrix (a "board" run), printing an up-front count of how many cells (and trainings) that is;
+every **withheld** cell in `stat_meta.json` — every family — that has a cached training matrix (a
+"board" run), printing an up-front count of how many cells (and trainings) that is;
 `--league` alone narrows the board to one league. A cell with no cached matrix is **skipped with a
 yellow warning** rather than swept — the throwaway trainings reuse the cached matrix and never
-rebuild one, so train the cell for real once first if you want it in the board. Add
+rebuild one. The weekly `meditate` keeps every active cell's matrix warm (withheld cells included —
+they skip only the fit), so this bites only a market that has never seen a weekly run. Add
 `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a better strategy for
 a live cell; that path is judged by the supersession test, and `--confirm` never auto-re-ships a live
 cell.
@@ -95,41 +98,50 @@ supersession test: it snapshots the incumbent, retrains the candidate in place, 
 (candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
 prints the comparison and swaps the live cell only when all three pass **and** you confirm the
 promotion; a loss (or a declined prompt) restores the incumbent byte-identical and it keeps serving.
+`--min-model-weight T` makes the fitted blend weight a ship criterion in both lanes; the three
+clauses (nomination, ship-time revert, S1-only waiver) live in [ship_gate.md](ship_gate.md). The
+board's `model_weight` and `n_authentic_validation` columns show each corner's fitted weight and
+the sportsbook-priced (`authentic`) validation rows behind it; `pickem` rows (DFS-only cohorts)
+count for neither.
 
 ## 2. Confirm the winner with a real training run
 
-The board's top row names the winner in three columns, but only two of them get saved. Match them
-to that cell's entry in `src/sportstradamus/data/config/stat_meta.json`:
+The board's top row names the winner in its axis columns. Each column the winner's family saves maps
+to one field of that cell's entry in `src/sportstradamus/data/config/stat_meta.json` (the per-family
+persist maps are in `training/model_strategy/specs.py`):
 
-| Board column | What it is | Where it goes in `stat_meta.json` |
+| Board column | What it is | `stat_meta.json` field |
 |---|---|---|
-| `normalization` | the target shape | the `target_normalization` field |
-| `blend` | how the model and book are combined | the `blending` field (add it if it's missing; leaving it out means the `nll` default) |
-| `dist` | the training loss — a training-time knob | **nothing** — the shipped model always uses the family default, so ignore this column |
+| `dist` | the distribution family | `dist` |
+| `normalization` | the target shape (SkewNormal) | `target_normalization`; a count-family winner saves `none` |
+| `dist_training_loss` | the training loss (`crps` or `nll`; the count families always train `nll`) | `dist_training_loss` |
+| `sn_param` | the SkewNormal head parametrization (`direct` or `centered`) | `sn_param` |
+| `zinb_mode` | the ZINB architecture (`joint` or `hurdle`) | `zinb_mode` (ZINB only) |
+| `count_dispersion_objective` | the count-branch dispersion objective | `count_dispersion_objective` (count families only) |
+| `blending_loss_fn` | how the model and book are combined | `blending` (leaving it out means the `nll` default) |
+| `posthoc` | the post-hoc calibrator | `posthoc` |
 
-Watch the name clash: the `dist` **field** already in `stat_meta.json` is the *distribution family*
-(`SkewNormal`, `ZINB`, …) — a different thing from the board's `dist` column. Leave the `dist` field
-alone. (A ZINB cell has no `normalization`; its persistable columns are `zinb_mode` and
-`count_dispersion_objective`, plus the same `blend` → `blending`.) You don't have to map columns by
-hand either way — the sweep prints the exact `field=value` line to copy for each shipping cell.
+No base family saves the board's `hpo_selection` or `stabilization` column; only the two structural
+recipes (two-part and affine) save `hpo_selection`. You don't have to map columns by hand either
+way — for each shipping cell the sweep prints the exact `field=value` line to copy
+(`→ stat_meta.json: …`).
 
-So a board winner of `centered_additive_mean10 · crps/crps` for NBA FGM makes the cell read:
+So a SkewNormal board winner of `centered_additive_mean10` with a `crps` training loss, `direct`
+heads and `crps` blending makes NBA FGM read:
 
 ```json
 "FGM": { "dist": "SkewNormal", "shipped": "withheld",
-         "target_normalization": "centered_additive_mean10", "blending": "crps", "posthoc": "none" }
+         "target_normalization": "centered_additive_mean10", "dist_training_loss": "crps",
+         "sn_param": "direct", "blending": "crps", "posthoc": "none" }
 ```
 
 Set those fields *before* you train — `meditate` reads them:
 
 ```bash
-poetry run sportstradamus meditate --league NBA --market FGM --bypass-withholding
+sportstradamus meditate --league NBA --market FGM --bypass-withholding
 ```
 
-A real training run (unlike the sweep) is the one whose result actually counts. One caveat: if the
-winning row's `dist` column is `nll` rather than `crps`, that exact corner can't be reproduced from
-`stat_meta.json` — only the `crps` default is saved — so prefer a `crps` row, or accept that you're
-confirming under `crps`.
+A real training run (unlike the sweep) is the one whose result actually counts.
 
 ## 3. Read the ship-gate scorecard
 
@@ -137,7 +149,7 @@ confirming under `crps`.
 the verdict for one cell on its own:
 
 ```bash
-poetry run sportstradamus ship scorecard --league NBA --market FGM
+sportstradamus ship scorecard --league NBA --market FGM
 ```
 
 It prints a **SHIP SUMMARY** naming any gate the cell fails. A cell that passes every gate is ready
@@ -158,27 +170,38 @@ Change the cell's `shipped` field from `"withheld"` to `"devel"` in `stat_meta.j
 sanity-check the config:
 
 ```bash
-poetry run sportstradamus ship config --branch devel   # validates and summarizes; changes nothing
+sportstradamus ship config --branch devel   # validates and summarizes; changes nothing
 ```
 
 On `devel` the server serves the model and records how it does on real settled bets.
 
+The weekly `meditate` retrains each served cell once with its persisted `stat_meta.json` config.
+A retrain that fails the fresh gates only **warns** (a SHIP-GATE WARNINGS table at the end of the
+run, echoed by `ship config --branch devel`) — the cell keeps serving until you demote it: flip
+`shipped` to `"withheld"` (the next meditate prunes the pickle) or run
+`sportstradamus ship config --branch devel --prune` to prune the pickle now.
+
 ## 5. Graduate to main
 
-Once a cell has proven itself on live bets, `check-graduation` shows where every cell stands and
-`generate-ship-config` promotes the ones that passed:
+Once a cell has proven itself on live bets, `sportstradamus ship graduation` shows where every cell
+stands and `sportstradamus ship config --branch main` promotes the ones that passed:
 
 ```bash
-poetry run sportstradamus ship graduation                      # status of every cell
-poetry run sportstradamus ship config --branch main    # promote graduated cells to fully live
+sportstradamus ship graduation              # status of every cell
+sportstradamus ship config --branch main    # promote graduated cells to fully live
 ```
 
 ## Research flags
 
-Beyond the production surface (`--league`, `--market`, `--force`, `--branch`,
-`--bypass-withholding`, `--rebuild-correlations`), `meditate` carries research,
-debug, and sandbox flags. This list is their canonical doc home; `poetry run
-meditate --help` has the full text.
+Beyond the production surface `meditate --help` lists (`--league`, `--market`,
+`--force`, `--branch`, `--rebuild-correlations`, `--matrix-only`, `--log-level`),
+`meditate` carries hidden research, debug, and sandbox flags that `--help` never
+shows. This list is their canonical doc home; each flag's full text is its
+`help=` string in `training/cli.py`.
+
+**Ship-policy override:**
+
+- `--bypass-withholding` — train every registered market whatever its `shipped` state (confirming a withheld cell, or the NFL volume cells whose pickles feed other cells' matrices).
 
 **Search axes** — each overrides the per-cell `stat_meta.json` value for every
 selected cell; the `auto` default honors what the cell has persisted:
@@ -187,10 +210,13 @@ selected cell; the `auto` default honors what the cell has persisted:
 - `--posthoc` — post-hoc calibration method (light corrector or structural).
 - `--zinb-mode` — ZINB architecture: legacy `joint` fit vs two-stage `hurdle`.
 - `--dist-training-loss` — training loss (`nll`/`crps`) instead of the per-family default.
-- `--dist` — distribution family (DPO / NegBin / ZINB / SkewNormal) over the data-driven pick.
+- `--dist` — distribution family (DPO / Mixture / NegBin / ZINB / SkewNormal) over the data-driven pick.
+  Mixture never serves ([ARCHITECTURE](ARCHITECTURE.md#adding-a-new-market)).
 - `--blending-loss-fn` — loss minimized when fitting the model↔book blend weight.
 - `--stabilization` — per-parameter gradient damping (`MAD`/`L2`) on the scale head.
 - `--hpo-selection` — Optuna trial-selection rule: lowest CV loss vs PIT-KS-aware `calibrated`.
+  The confirm walk retries a nominee failing ship on Gate 4 alone once under `calibrated` and
+  persists the winning knob per-cell; the weekly `meditate` just trains with the persisted value.
 - `--count-dispersion-objective` — objective for the count-branch dispersion fit (`crps` vs `pit_ks`).
 - `--sn-param` — SkewNormal parametrization: `direct` vs `centered` boosting heads.
 
@@ -201,10 +227,43 @@ selected cell; the `auto` default honors what the cell has persisted:
 
 **Sandbox matrix and artifact plumbing:**
 
-- `--matrix-only` — build and persist training matrices, then stop before training.
 - `--full-rebuild` — rebuild matrices from cached raw inputs without touching the canonical matrix (requires `--matrix-only` and `--matrix-output`).
 - `--matrix-output` — quarantine directory for full-rebuild parquet and manifest outputs.
 - `--dependency-root` — root containing a versioned model-dependency namespace.
 - `--frozen-matrix-dir` — train from lineage-validated matrices without rebuilding or rewriting them.
 - `--artifact-output` — isolated output directory for models and test sets from frozen-matrix training.
 - `--dependency-namespace` — dependency identity stamped onto isolated artifacts, or selected from `--dependency-root` during a full rebuild.
+
+### Rebuilding a league's matrices from scratch
+
+Appending to a cached matrix leaves any new feature column NaN on every
+historical row, so a feature-set bump rebuilds the league's matrices. The cold
+start (delete the cache, plain `meditate --force`) crashes for leagues whose
+cells depend on volume models (NFL: attempts, carries, targets); the rebuild
+resolves those from the versioned registry
+`data/model_dependencies/<namespace>/{LEAGUE}_{market}.mdl` (default namespace
+`volume-v1`), which the same run family bootstraps:
+
+```bash
+Q=/path/quarantine; A=/path/artifacts
+# 1. volume cells first: they need no dependency, and they must not be mixed
+#    with dependent cells in one invocation (the preflight would raise on the empty registry)
+sportstradamus meditate --league NFL --market 'attempts,carries,targets' --full-rebuild --matrix-only --matrix-output $Q
+python -m sportstradamus.training.matrix_audit $Q/NFL_*.parquet
+# 2. stamped volume pickles from the frozen quarantine (its manifests satisfy --frozen-matrix-dir)
+sportstradamus meditate --league NFL --market 'attempts,carries,targets' --frozen-matrix-dir $Q \
+    --artifact-output $A --dependency-namespace volume-v1 --bypass-withholding
+mkdir -p src/sportstradamus/data/model_dependencies/volume-v1 && cp $A/NFL_*.mdl src/sportstradamus/data/model_dependencies/volume-v1/
+# 3. every other cell, in ONE process so the per-week snapshot caches amortize
+sportstradamus meditate --league NFL --market '<the remaining markets>' --full-rebuild --matrix-only --matrix-output $Q \
+    --dependency-namespace volume-v1 --dependency-root src/sportstradamus/data/model_dependencies
+# 4. promote by hand (there is no promotion command), then the ordinary retrain
+cp -p $Q/NFL_*.parquet src/sportstradamus/data/training_data/ && sportstradamus meditate --league NFL --force
+```
+
+Back up `training_data/`, `models/`, `test_sets/`, `training/model_stats.*`,
+the SHAP CSVs, `stat_calibration.json` and `book_weights.json` first; every
+ship verdict re-rolls because `strategy_matrix_hash` moves. A `--deterministic`
+A/B of the old and new caches isolates the feature effect from HPO noise, but
+deterministic mode resolves `auto` target normalization to `ratio_meanyr`, so
+pass `--target-normalization` explicitly per group of cells.

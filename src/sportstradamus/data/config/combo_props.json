@@ -1,7 +1,7 @@
 {
     "qb tds": [
         "passing tds",
-        "tds"
+        "rushing tds"
     ],
     "qb yards": [
         "passing yards",
@@ -10,6 +10,10 @@
     "yards": [
         "receiving yards",
         "rushing yards"
+    ],
+    "tds": [
+        "receiving tds",
+        "rushing tds"
     ],
     "hits+runs+rbi": [
         "hits",

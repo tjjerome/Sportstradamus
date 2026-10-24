@@ -21,16 +21,17 @@ Supports MLB, NBA, NFL, NHL, and WNBA.
 
 ## How it works
 
-1. **Collect** — `confer` fetches player-prop odds from the Odds API plus
-   Underdog and Sleeper lines, into a DuckDB archive (`archive/archive.duckdb`).
+1. **Collect** — `confer` fetches sportsbook player-prop and game-line odds from
+   the Odds API into a DuckDB archive (`archive/archive.duckdb`).
 2. **Enrich** — per-league `Stats` classes pull game logs from official league
    APIs, compute rolling features, and build KNN player-comparable feature sets.
 3. **Train** — `meditate` fits a LightGBMLSS distributional regression per
    `(league, market)` cell, tunes hyperparameters with Optuna, calibrates against
    bookmaker lines, and only *ships* a cell when it clears six offline gates
    ([docs/ship_gate.md](docs/ship_gate.md)).
-4. **Predict** — `prophecize` scores every live offer, computes expected value,
-   and writes the parquet snapshots the dashboard reads.
+4. **Predict** — `prophecize` scrapes the live Underdog and Sleeper offers
+   (archiving their lines), scores each one, computes expected value, and writes
+   the parquet snapshots the dashboard reads.
 
 Architecture detail — package map, data flow, adding a league or market — lives in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -44,32 +45,39 @@ git clone https://github.com/tjjerome/Sportstradamus.git
 cd Sportstradamus
 poetry install                  # first install downloads ~1-2 GB (CPU torch)
 poetry run pre-commit install   # wires ruff lint/format into the commit hook
+
+# Puts `sportstradamus` on PATH so the commands below work as written. The stub's
+# shebang is absolute, so it needs no venv activation and runs from any directory.
+ln -sf "$(poetry env info --path)/bin/sportstradamus" ~/.local/bin/sportstradamus
 ```
+
+That symlink shortens the project CLI only; dev tools (`pytest`, `ruff`,
+`pre-commit`) still go through `poetry run`.
 
 Create `src/sportstradamus/creds/keys.json` (the `creds/` directory is
 git-ignored — see [SECURITY.md](SECURITY.md) for the credential layout):
 
 ```json
 {
+  "odds_api_plus": "<your key>",
   "odds_api": "<your key>",
-  "scrapeops": "<your key>",
-  "scrapingfish": "<your key>"
+  "scrapeops": "<your key>"
 }
 ```
 
 | Key | Service | Purpose |
 |---|---|---|
-| `odds_api` | [The Odds API](https://the-odds-api.com) | Player-prop lines + moneylines from major sportsbooks (free tier: 500 req/month) |
+| `odds_api_plus` | [The Odds API](https://the-odds-api.com) | The key `confer` polls with: player-prop lines and game lines from the major sportsbooks, paced by the credit governor (`odds_api_budget.json`) |
+| `odds_api` | [The Odds API](https://the-odds-api.com) | Fallback key `confer --close-lines` switches to when the plus key runs out; read at import, so it must be present |
 | `scrapeops` | [ScrapeOps](https://scrapeops.io) | Realistic browser-header rotation (free tier available) |
-| `scrapingfish` | [ScrapingFish](https://scrapingfish.com) | Proxy fallback for hard endpoints (pay-as-you-go) |
 
 Then run the pipeline once, in order:
 
 ```bash
-poetry run sportstradamus confer                   # fetch odds (~2-5 min)
-poetry run sportstradamus meditate --league NBA    # train one league (~10-30 min)
-poetry run sportstradamus prophecize               # score offers, write snapshots
-poetry run sportstradamus dashboard                # browse picks
+sportstradamus confer                   # fetch odds (~2-5 min)
+sportstradamus meditate --league NBA    # train one league (~10-30 min)
+sportstradamus prophecize               # score offers, write snapshots
+sportstradamus dashboard                # browse picks
 ```
 
 The first `meditate` downloads and caches player game logs per league; later
@@ -87,14 +95,16 @@ sportstradamus
 ├── meditate              train/retrain models (--league, --market, --force, ...)
 ├── reflect               nightly resolution: grade history, settle the ledger
 ├── dashboard             launch the Streamlit dashboard
+├── export-line-movement  rebuild the Board's DFS line-movement snapshot
 ├── bet
 │   ├── kelly             re-size a recommendations YAML offline
-│   ├── pickem            build Underdog Power/Flex/Rivals entries -> YAML
+│   ├── pickem            build Underdog/Sleeper Power/Flex entries -> YAML
 │   └── ledger-commit     twice-daily simulated-bettor ledger commit
 ├── fetch
 │   ├── fp ...            Fantasy Points snapshots (NFL)
 │   ├── ctg ...           Cleaning the Glass snapshots (NBA)
-│   └── savant ...        Baseball Savant snapshots (MLB)
+│   ├── savant ...        Baseball Savant snapshots (MLB)
+│   └── headshots         player-headshot cache
 ├── ship
 │   ├── scorecard         offline six-gate A/B harness
 │   ├── graduation        Gate-2 graduation check
@@ -113,13 +123,12 @@ JSON configs live in `src/sportstradamus/data/config/`. The ones you might touch
 
 | File | Updated by | Purpose |
 |---|---|---|
-| `stat_meta.json` | manual + `meditate` | Per-cell `{dist, shipped, ...}` — distribution family and release surface (`withheld`/`devel`/`main`) |
-| `stat_calibration.json` | `meditate` (gitignored) | Per-cell `{cv, std, zi}`, recomputed each run |
+| `stat_meta.json` | manual + `ship sweep --confirm` / `ship config --branch main` | Per-cell `{dist, shipped, ...}` — distribution family and release surface (`withheld`/`devel`/`main`) |
+| `stat_calibration.json` | `meditate` (gitignored) | Per-cell `{cv, std, zi, book_shape}`, recomputed each run |
 | `stat_map.json` | manual | Stat-name mappings across APIs and sportsbooks |
 | `feature_filter.json` | manual | League-shared (`Common`) + per-market locked-in (`Always`) feature lists |
-| `playerCompStats.json` | `scripts/optimize_comp_weights.py` | Learned player-comp weights per league/position |
-| `book_weights.json` | `meditate` (gitignored) | Per-sportsbook reliability weights for consensus lines |
-| `prop_books.json` | manual | Which sportsbooks to query per league |
+| `playerCompStats.json` | `src/sportstradamus/scripts/optimize_comp_weights.py` | Learned player-comp weights per league/position |
+| `book_weights.json` | `meditate` (gitignored) | Per-sportsbook reliability weights for the consensus price. Sportsbooks only: a DFS pick'em platform gets no weight |
 | `odds_api_budget.json` | manual | Odds API credit-governor knobs |
 
 Pre-computed correlation matrices land in
@@ -129,10 +138,11 @@ Pre-computed correlation matrices land in
 
 ```
 src/sportstradamus/data/
-├── models/                      # trained LightGBMLSS pickles ({LEAGUE}_{market}.pkl)
+├── models/                      # trained LightGBMLSS pickles ({LEAGUE}_{market-slug}.mdl)
 ├── training_data/               # cached feature matrices
-├── player_data/{LEAGUE}/{YEAR}/ # per-player game-log CSVs
-├── leagues/{league}/            # correlation parquets
+├── player_data/                 # roster seeds, MLB affinity CSVs, collector snapshots
+├── leagues/{league}/            # gamelog/teamlog parquets, players.json, correlation parquets
+├── runtime/                     # prediction snapshots, history, parlay store, live metrics
 ├── training/model_stats.parquet # per-cell training diagnostics (+ .csv mirror)
 ├── test_sets/                   # holdout test data
 └── config/                      # JSON configs (table above)

@@ -1,11 +1,12 @@
 """Live-path check for the count branch of ``_calibration_penalty`` (Lever 1).
 
-Builds the per-trial served-PIT-KS closure exactly as ``train_market`` does for
+Builds the per-trial served-PIT-KS evaluator exactly as ``train_market`` does for
 a count cell under ``hpo_selection="calibrated"`` and evaluates it once on real
-cached NBA_PF features: one LSS refit -> decode -> scalar dispersion-c fit ->
-randomized-PIT KS. Asserts the closure returns a finite KS in [0, 1] for both a
-plain NegBin and a joint ZINB (the gated frame path) — the contract
-``_pick_calibrated_candidate`` relies on to rank trials.
+cached NBA_PF features: a real ``model.cv(..., return_cvbooster=True)`` -> pooled
+OOF decode -> scalar dispersion-c fit -> randomized-PIT KS (no refit). Asserts the
+evaluator returns a finite KS in [0, 1] for both a plain NegBin and a joint ZINB
+(the gated frame path) — the contract ``_pick_calibrated_candidate`` relies on to
+rank trials.
 
 Marked @pytest.mark.integration. Skips cleanly if the cached PF parquet is
 absent (same policy as test_dpo_live_path).
@@ -28,8 +29,8 @@ from sportstradamus.training.pipeline import (
     _calibration_penalty,
 )
 
-# Same subsample budget as the other live-path fixtures: one closure call is one
-# 30-round fit, so two families stay well under the suite's per-test wall-time.
+# Same subsample budget as the other live-path fixtures: one evaluator call is one
+# two-fold 30-round cv, so two families stay well under the suite's per-test wall-time.
 _GATE_N_ROWS = 4000
 
 
@@ -51,6 +52,7 @@ def _splits_and_params():
     n_train = int(len(M) * 0.7)
     splits = {
         "X_train": X.iloc[:n_train],
+        "y_train": pd.DataFrame({"Result": y[:n_train]}),
         "y_train_labels": y[:n_train],
         "X_validation": X.iloc[n_train:].reset_index(drop=True),
         "y_validation": pd.DataFrame({"Result": y[n_train:]}),
@@ -60,6 +62,35 @@ def _splits_and_params():
         "monotone_constraints": [0] * X.shape[1],
     }
     return splits, params
+
+
+def _cv_artifacts(dist: str, dist_obj, splits: dict, params: dict):
+    """Real cv fold boosters for the evaluator, built as ``run_hyper_opt`` builds them.
+
+    Wraps the SAME ``dist_obj`` the closure decodes with, so the response functions the
+    boosters were trained against are the ones the OOF predict applies.
+    """
+    import lightgbm as lgb
+    from lightgbmlss.model import LightGBMLSS
+
+    from sportstradamus.helpers import set_model_start_values
+    from sportstradamus.training.hyperparams import _materialise_fold_datasets
+
+    model = LightGBMLSS(dist_obj)
+    set_model_start_values(model, dist, splits["X_train"], shape_ceiling=50.0)
+    dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
+    dtrain.free_raw_data = False
+    chunks = np.array_split(np.arange(len(splits["X_train"])), 2)
+    folds = [(chunks[1], chunks[0]), (chunks[0], chunks[1])]
+    cv_result = model.cv(
+        dict(params),
+        dtrain,
+        num_boost_round=int(params["opt_rounds"]),
+        folds=folds,
+        fpreproc=_materialise_fold_datasets,
+        return_cvbooster=True,
+    )
+    return cv_result["cvbooster"], folds
 
 
 def _dist_info(dist: str, dist_obj) -> dict:
@@ -88,9 +119,11 @@ def _dist_info(dist: str, dist_obj) -> dict:
 )
 def test_count_closure_returns_finite_ks(dist, dist_obj_factory):
     splits, params = _splits_and_params()
-    closure = _calibration_penalty(splits, _dist_info(dist, dist_obj_factory()))
+    dist_obj = dist_obj_factory()
+    closure = _calibration_penalty(splits, _dist_info(dist, dist_obj))
+    cvbooster, folds = _cv_artifacts(dist, dist_obj, splits, params)
 
-    ks = closure(params)
+    ks = closure(params, cvbooster=cvbooster, folds=folds, opt_rounds=int(params["opt_rounds"]))
 
     assert np.isfinite(ks)
     assert 0.0 <= ks <= 1.0

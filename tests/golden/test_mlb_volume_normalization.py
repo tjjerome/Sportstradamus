@@ -3,6 +3,9 @@
 The projector is structural (no trained model), so every path is testable
 without training: slot->curve mapping, home/away selection, the unresolved-slot
 fallback, and the bounded team offense adjustment.
+
+For a game still to come, each read of the schedule is of the offer's own game
+date, and a team's one multiplier describes the earliest game it is offered on.
 """
 
 from datetime import date
@@ -228,3 +231,83 @@ def test_dispatch_routes_markets_correctly(monkeypatch):
     seen.clear()
     stats._dispatch_volume_stats(offers, date(2024, 5, 1), "hits allowed")
     assert seen == {"volume": True}
+
+
+_TODAY, _TOMORROW = "2099-01-01", "2099-01-02"
+
+
+def _mlb_on_a_two_day_schedule():
+    """NYY hosts BOS today and visits TOR tomorrow; SEA is off today and hosts TEX tomorrow."""
+    stats = _bare_mlb()
+    nyy_today = {"Home": True, "Opponent Pitcher": "Bos Arm", "Batting Order": ["A", "B"]}
+    stats.upcoming_games = {"NYY": nyy_today}
+    stats.upcoming_games_by_date = {
+        ("NYY", _TODAY): nyy_today,
+        ("NYY", _TOMORROW): {"Home": False, "Opponent Pitcher": "Tor Arm", "Batting Order": []},
+        ("SEA", _TOMORROW): {"Home": True, "Opponent Pitcher": "Tex Arm", "Batting Order": []},
+    }
+    return stats
+
+
+def _offer(player, team, opponent, game_date):
+    return {"Player": player, "Team": team, "Opponent": opponent, "Date": game_date}
+
+
+def test_projector_reads_home_and_away_from_the_offers_own_game_day(monkeypatch):
+    """A's team is home today and away tomorrow; C's team is off today."""
+    stats = _mlb_on_a_two_day_schedule()
+    stats.playerProfile = pd.DataFrame({"team": [0, 0], "depth": [1.0, 1.0]}, index=["A", "C"])
+    monkeypatch.setattr(stats, "get_depth", lambda offers, d: None)
+    monkeypatch.setattr(stats, "_mlb_offense_adjustment", lambda teams, offers, d, hm: {})
+
+    stats._project_plate_appearances(
+        [_offer("A", "NYY", "TOR", _TOMORROW), _offer("C", "SEA", "TEX", _TOMORROW)],
+        date(2099, 1, 1),
+    )
+
+    pp = stats.playerProfile
+    assert pp.at["A", "proj plateAppearances mean"] == pytest.approx(mlb.SLOT_PA_AWAY[0])
+    assert pp.at["C", "proj plateAppearances mean"] == pytest.approx(mlb.SLOT_PA_HOME[0])
+
+
+def test_offense_adjustment_describes_the_earliest_game_a_team_is_offered_on(monkeypatch):
+    """One multiplier a team, so its opponent, park side and opposing starter are one game's."""
+    stats = _mlb_on_a_two_day_schedule()
+    games = {}
+    monkeypatch.setattr(
+        stats, "_obp_factor", lambda team, *game: games.__setitem__(team, game) or 1.0
+    )
+    monkeypatch.setattr(stats, "_market_factor", lambda team, d: 1.0)
+    run_date = date(2099, 1, 1)
+    offers = [
+        _offer("A", "NYY", "BOS", _TODAY),
+        _offer("B", "NYY", "TOR", _TOMORROW),
+        _offer("C", "SEA", "TEX", _TOMORROW),
+    ]
+
+    stats._mlb_offense_adjustment(
+        {"NYY", "SEA"}, offers, run_date, {"A": True, "B": False, "C": True}
+    )
+
+    assert games == {
+        "NYY": ("BOS", True, "Bos Arm", run_date),
+        "SEA": ("TEX", True, "Tex Arm", run_date),
+    }
+
+
+def test_depth_reads_the_posted_order_of_the_offers_own_game_day(monkeypatch):
+    """Today's posted order places nobody whose offer is for tomorrow's game."""
+    stats = _mlb_on_a_two_day_schedule()
+    stats.short_gamelog = pd.DataFrame({"playerName": ["A", "B"], "battingOrder": [7, 4]})
+    monkeypatch.setattr(stats, "base_profile", lambda d: None)
+
+    stats.playerProfile = pd.DataFrame(index=["A", "B"])
+    stats.get_depth(
+        [_offer("A", "NYY", "TOR", _TOMORROW), _offer("B", "NYY", "BOS", _TODAY)], date(2099, 1, 1)
+    )
+    assert stats.playerProfile["depth"].to_dict() == {"A": 7, "B": 2}
+
+    # The parlay search asks again with no date: that reads the next game, as before.
+    stats.playerProfile = pd.DataFrame(index=["A", "B"])
+    stats.get_depth([{"Player": "A", "Team": "NYY"}, {"Player": "B", "Team": "NYY"}])
+    assert stats.playerProfile["depth"].to_dict() == {"A": 1, "B": 2}

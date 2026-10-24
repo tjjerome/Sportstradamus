@@ -4,23 +4,43 @@
     "combo": "their",
     "default": "his"
   },
+  "hands": {
+    "L": "left",
+    "R": "right"
+  },
   "why": {
     "form": {
-      "above": [
-        "{dev} above a {line} line over {pronoun} last 5",
-        "clearing a {line} line by {dev} across {pronoun} last 5",
-        "{dev} clear of a {line} line over {pronoun} last 5",
-        "running {dev} past a {line} line over {pronoun} last 5",
-        "a {line} line, beaten by {dev} on average over {pronoun} last 5",
-        "{dev} of daylight above a {line} line across {pronoun} last 5"
+      "above_for": [
+        "the over goes with {pronoun} last 5 running {dev} past the {line} line",
+        "{pronoun} last 5 back the over by running {dev} above the {line} line",
+        "form sides with the over as {pronoun} last 5 run {dev} clear of the {line} line",
+        "the over has {pronoun} last 5 averaging {dev} above the {line} line",
+        "the over starts from {pronoun} last 5 already {dev} past the {line} line",
+        "the over leans on {pronoun} last 5 clearing the {line} line by {dev}"
       ],
-      "below": [
-        "{dev} below a {line} line over {pronoun} last 5",
-        "trailing a {line} line by {dev} across {pronoun} last 5",
-        "{dev} shy of a {line} line over {pronoun} last 5",
-        "running {dev} short of a {line} line over {pronoun} last 5",
-        "a {line} line, missed by {dev} on average over {pronoun} last 5",
-        "{dev} of slack below a {line} line across {pronoun} last 5"
+      "above_against": [
+        "the under bets against {pronoun} last 5 running {dev} past the {line} line",
+        "{pronoun} last 5 cut against the under by running {dev} above the {line} line",
+        "form sides against the under as {pronoun} last 5 run {dev} clear of the {line} line",
+        "the under faces {pronoun} last 5 averaging {dev} above the {line} line",
+        "the under asks for a miss on the {line} line {pronoun} last 5 cleared by {dev}",
+        "the under runs against {pronoun} last 5 clearing the {line} line by {dev}"
+      ],
+      "below_for": [
+        "the under goes with {pronoun} last 5 running {dev} short of the {line} line",
+        "{pronoun} last 5 back the under by running {dev} below the {line} line",
+        "form sides with the under as {pronoun} last 5 run {dev} shy of the {line} line",
+        "the under has {pronoun} last 5 averaging {dev} below the {line} line",
+        "the under starts from {pronoun} last 5 already {dev} short of the {line} line",
+        "the under leans on {pronoun} last 5 missing the {line} line by {dev}"
+      ],
+      "below_against": [
+        "the over bets against {pronoun} last 5 running {dev} short of the {line} line",
+        "{pronoun} last 5 cut against the over by running {dev} below the {line} line",
+        "form sides against the over as {pronoun} last 5 run {dev} shy of the {line} line",
+        "the over faces {pronoun} last 5 averaging {dev} below the {line} line",
+        "the over asks for a jump past the {line} line {pronoun} last 5 missed by {dev}",
+        "the over runs against {pronoun} last 5 missing the {line} line by {dev}"
       ],
       "at_line": [
         "sitting right on a {line} line over {pronoun} last 5",
@@ -58,21 +78,21 @@
       ]
     },
     "matchup": {
-      "favorable": [
-        "a favorable matchup on paper",
-        "a soft matchup on paper",
-        "a matchup that leans the right way",
-        "a matchup the numbers like",
-        "the matchup grades out friendly",
-        "a defense that gives this stat away"
+      "gives": [
+        "facing a matchup where this stat runs above average",
+        "against an opponent that pushes this stat above the norm",
+        "into a matchup that has been inflating this stat",
+        "against an opponent that allows this stat at an above-average rate",
+        "facing an opponent that lets this stat climb",
+        "into an opponent that gives this stat up more than most"
       ],
-      "tough": [
-        "into a tough matchup",
-        "into a stingy matchup",
-        "against a matchup that leans wrong",
-        "into a matchup the numbers dislike",
-        "the matchup grades out hostile",
-        "against a defense that takes this stat away"
+      "takes": [
+        "facing a matchup where this stat runs below average",
+        "against an opponent that holds this stat below the norm",
+        "into a matchup that has been suppressing this stat",
+        "against an opponent that allows this stat at a below-average rate",
+        "facing an opponent that keeps this stat down",
+        "into an opponent that takes this stat away more than most"
       ]
     },
     "edge": {
@@ -110,59 +130,161 @@
         "a {ev}x model read on a {book_ev}x book number",
         "the model's {ev}x stands against the book's {book_ev}x"
       ]
+    },
+    "lineup": {
+      "platoon_edge": [
+        "batting {slot} with the platoon edge on a {throws}-hander",
+        "hitting {slot} with the handedness edge on a {throws}-hander",
+        "batting {slot} and opposite-handed to a {throws}-hander",
+        "from the {slot} spot with the platoon advantage against a {throws}-hander",
+        "in the {slot} spot, holding the handedness edge on a {throws}-hander",
+        "hitting {slot} with the better side of the platoon against a {throws}-hander"
+      ],
+      "same_side": [
+        "batting {slot} but same-side against a {throws}-hander",
+        "hitting {slot} into a same-side {throws}-hander",
+        "in the {slot} spot with the platoon on the wrong side of a {throws}-hander",
+        "batting {slot} against a same-handed {throws}-hander",
+        "from the {slot} spot, matched same-side with a {throws}-hander",
+        "hitting {slot} with no platoon edge on a {throws}-hander"
+      ],
+      "switch": [
+        "switch-hitting {slot} and turning around on a {throws}-hander",
+        "batting {slot} as a switch hitter against a {throws}-hander",
+        "in the {slot} spot, switch-hitting into a {throws}-hander",
+        "hitting {slot} from the favorable box against a {throws}-hander",
+        "batting {slot} and switching sides on a {throws}-hander",
+        "from the {slot} spot, a switch hitter with the platoon on a {throws}-hander"
+      ],
+      "slot_only": [
+        "batting {slot} in the order",
+        "hitting {slot} in the lineup",
+        "in the {slot} spot in the order",
+        "penciled in {slot} tonight",
+        "carrying the {slot} spot in the lineup",
+        "posted {slot} on the card"
+      ]
+    },
+    "lineup_usual": {
+      "platoon_edge": [
+        "usually {slot} in the order with the handedness edge on a {throws}-hander",
+        "a regular in the {slot} spot and opposite-handed to a {throws}-hander",
+        "typically hitting {slot} and holding the platoon edge on a {throws}-hander",
+        "normally {slot} in the lineup with the better side of the platoon against a {throws}-hander",
+        "a fixture in the {slot} spot lately, opposite a {throws}-hander",
+        "settled in the {slot} spot with the platoon edge against a {throws}-hander"
+      ],
+      "same_side": [
+        "usually {slot} in the order but same-side against a {throws}-hander",
+        "a regular in the {slot} spot and matched same-side with a {throws}-hander",
+        "typically hitting {slot} with no platoon edge on a {throws}-hander",
+        "normally {slot} in the lineup and same-handed with a {throws}-hander",
+        "a fixture in the {slot} spot lately, into a same-side {throws}-hander",
+        "settled in the {slot} spot on the wrong side of a {throws}-hander"
+      ],
+      "switch": [
+        "usually {slot} in the order and switch-hitting against a {throws}-hander",
+        "a regular in the {slot} spot who turns around on a {throws}-hander",
+        "typically hitting {slot} as a switch hitter facing a {throws}-hander",
+        "normally {slot} in the lineup and switching sides on a {throws}-hander",
+        "a fixture in the {slot} spot lately, switch-hitting into a {throws}-hander",
+        "settled in the {slot} spot as a switch hitter against a {throws}-hander"
+      ],
+      "slot_only": [
+        "usually {slot} in the order",
+        "a regular in the {slot} spot",
+        "typically hitting {slot}",
+        "normally {slot} in the lineup",
+        "a fixture in the {slot} spot lately",
+        "settled in the {slot} spot of late"
+      ]
     }
   },
   "dek": {
     "cluster": [
-      "these {n} legs move together — {rho} average correlation",
-      "{n} legs, one current — {rho} average correlation",
+      "these {n} legs move together, {rho} average correlation",
+      "{n} legs that respond to the same conditions, {rho} average correlation",
       "a {n}-leg cluster holding {rho} average correlation",
-      "{n} legs that rise and fall together at {rho} correlation",
-      "correlation {rho} across the {n} core legs",
-      "{n} legs tied at {rho} — they tend to land together"
+      "{n} legs rise and fall together at {rho} correlation",
+      "correlation across the {n} core legs averages {rho}",
+      "{n} legs that tend to land together, {rho} average correlation"
     ],
     "form": {
-      "above": [
-        "{p} is {dev} clear of the {line} number lately",
-        "{p} runs {dev} past the {line} number lately",
-        "{p} has beaten the {line} number by {dev} of late",
-        "recent form puts {p} {dev} above the {line} line",
-        "{p} carries {dev} of cushion on the {line} number",
-        "the {line} number sits {dev} below {p}'s recent pace"
+      "above_for": [
+        "{p} runs {dev} past the {line} line across the last 5, a trend the over rides",
+        "the over has {p}'s last 5 averaging {dev} above the {line} line",
+        "{p}'s last 5 back the over, {dev} clear of the {line} line",
+        "form sides with the over as {p} runs {dev} past the {line} line",
+        "the over starts from a last 5 that put {p} {dev} above the {line} line",
+        "{p} carries {dev} of cushion on the {line} line into the over"
       ],
-      "below": [
-        "{p} sits {dev} shy of the {line} number lately",
-        "{p} runs {dev} short of the {line} number lately",
-        "{p} has missed the {line} number by {dev} of late",
-        "recent form leaves {p} {dev} below the {line} line",
-        "{p} carries a {dev} deficit to the {line} number",
-        "the {line} number sits {dev} above {p}'s recent pace"
+      "below_for": [
+        "{p} runs {dev} short of the {line} line across the last 5, a trend the under rides",
+        "the under has {p}'s last 5 averaging {dev} below the {line} line",
+        "{p}'s last 5 back the under, {dev} shy of the {line} line",
+        "form sides with the under as {p} runs {dev} short of the {line} line",
+        "the under starts from a last 5 that left {p} {dev} below the {line} line",
+        "{p} carries a {dev} deficit to the {line} line into the under"
       ],
       "at_line": [
-        "{p} lives right at the {line} number",
+        "{p} lands right at a {line} line across the last 5",
         "{p} tracks the {line} number almost exactly",
-        "{p} runs dead even with the {line} line",
-        "the {line} number reads like {p}'s recent average",
-        "{p} and the {line} line have been inseparable",
-        "{p} lands square on the {line} number night after night"
+        "{p} runs even with a {line} line across the last 5",
+        "the {line} number reads like {p}'s recent pace",
+        "{p}'s last 5 sit level with a {line} line",
+        "{p} settles on the {line} number game after game"
       ]
     },
     "matchup": {
-      "favorable": [
-        "{p} draws a soft matchup",
-        "{p} draws a matchup that leans friendly",
-        "the matchup tilts {p}'s way",
-        "{p} gets a defense that gives this stat up",
-        "paper says {p} has the edge tonight",
-        "{p} lines up against a giving matchup"
+      "gives": [
+        "{p} faces a matchup where this stat runs above average",
+        "{p} draws an opponent that pushes this stat above the norm",
+        "the matchup has been inflating this stat for {p}'s position",
+        "{p}'s opponent allows this stat at an above-average rate",
+        "{p} meets an opponent that lets this stat climb",
+        "the defense-versus-position read has this stat running above average for {p}"
       ],
-      "tough": [
-        "{p} draws a tough cover",
-        "{p} draws a matchup that leans hostile",
-        "the matchup tilts against {p}",
-        "{p} gets a defense that guards this stat well",
-        "paper says {p} works uphill tonight",
-        "{p} lines up against a stingy matchup"
+      "takes": [
+        "{p} faces a matchup where this stat runs below average",
+        "{p} draws an opponent that holds this stat below the norm",
+        "the matchup has been suppressing this stat for {p}'s position",
+        "{p}'s opponent allows this stat at a below-average rate",
+        "{p} meets an opponent that keeps this stat down",
+        "the defense-versus-position read has this stat running below average for {p}"
+      ]
+    },
+    "lineup": {
+      "posted": [
+        "{p} is posted {slot}",
+        "{p} hits {slot} in tonight's posted order",
+        "the posted card has {p} batting {slot}",
+        "{p} draws the {slot} spot on tonight's card",
+        "{p} slots {slot} in the order tonight",
+        "tonight's lineup lists {p} {slot}"
+      ],
+      "posted_hand": [
+        "{p} is posted {slot} against a {throws}-hander",
+        "{p} hits {slot} tonight opposite a {throws}-hander",
+        "the posted card has {p} batting {slot} against a {throws}-hander",
+        "{p} draws the {slot} spot with a {throws}-hander starting",
+        "{p} is penciled {slot} against a {throws}-handed starter",
+        "tonight's lineup lists {p} {slot} against a {throws}-hander"
+      ],
+      "usual": [
+        "{p} usually bats {slot}",
+        "{p} typically hits {slot} in the order",
+        "{p}'s usual spot is {slot}",
+        "{p} has been hitting {slot} of late",
+        "{p} normally slots {slot}",
+        "{p} takes the {slot} spot most nights"
+      ],
+      "usual_hand": [
+        "{p} usually bats {slot} and sees a {throws}-hander",
+        "{p} typically hits {slot}, with a {throws}-hander starting",
+        "{p}'s usual {slot} spot meets a {throws}-handed starter",
+        "{p} has been hitting {slot} and draws a {throws}-hander",
+        "{p} normally slots {slot} against a {throws}-hander",
+        "{p} takes the {slot} spot most nights and faces a {throws}-hander"
       ]
     }
   }

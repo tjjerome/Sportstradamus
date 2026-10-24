@@ -15,8 +15,32 @@ from sportstradamus.dashboard import theme
 # Game-shape gloss, shared by the Games banner and the deep-dive context strip.
 SHAPE_HELP = (
     "Projected game script: shootout (high total), grind (low total), blowout "
-    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
+    "(lopsided), coinflip (tight), or clouded (no moneyline quoted yet). It tilts "
+    "which counting stats run hot."
 )
+
+# Display name and legend caption per pipeline shape, in the Tonight legend's
+# left-to-right order. ``classify_shape`` returns "even" when no moneyline was quoted —
+# an unknown-sentinel, not a game script — so it shows as "Clouded" beside the cloud
+# glyph rather than implying a read on the game.
+SHAPE_DISPLAY = {
+    "shootout": "Shootout",
+    "blowout": "Blowout",
+    "coinflip": "Coinflip",
+    "even": "Clouded",
+    "grind": "Grind",
+}
+SHAPE_CAPTION = {
+    "shootout": "fast total",
+    "blowout": "lopsided",
+    "coinflip": "close ML",
+    "even": "unquoted",
+    "grind": "low total",
+}
+
+# A story binds legs to each other, so it takes two: below that a missing prophecy is a
+# genuinely thin game rather than a gap in the story engine.
+_STORY_FAVORED_MIN = 2
 
 # Colorblind-safe side cues (spec §3.2): shape (up/down triangle) plus color both
 # carry Over/Under, so the aggrid JsCode cell renderer in Phase B can key off shape
@@ -41,6 +65,10 @@ def match_label(team: str, opp: str, home: bool) -> str:
     return f"{team} {'v' if home else '@'} {opp}"
 
 
+def _game_date_mask(df: pd.DataFrame, game: str, date) -> pd.Series:
+    return (df["Game"] == game) & (df["Date"].astype(str) == str(date))
+
+
 def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     """The headline of the highest-EV parlay for one game (``""`` when none).
 
@@ -49,30 +77,59 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     """
     if parlays.empty or "Thesis" not in parlays.columns or "Model EV" not in parlays.columns:
         return ""
-    sub = parlays.loc[
-        (parlays["Game"] == game) & (parlays["Date"].astype(str) == str(date))
-    ].dropna(subset=["Model EV"])
+    sub = parlays.loc[_game_date_mask(parlays, game, date)].dropna(subset=["Model EV"])
     if sub.empty:
         return ""
     thesis = sub.loc[sub["Model EV"].idxmax(), "Thesis"]
     return str(thesis) if pd.notna(thesis) else ""
 
 
-def game_headline(stories: pd.DataFrame, parlays: pd.DataFrame, *, game: str, date) -> str:
-    """Story-engine headline for one game: the highest-``model_ev`` story's ``headline``.
+def _story_rows(stories: pd.DataFrame, game: str, date, platform: str | None) -> pd.DataFrame:
+    if stories.empty:
+        return stories
+    mask = _game_date_mask(stories, game, date)
+    if platform is not None:
+        mask &= stories["platform"] == platform
+    return stories.loc[mask]
 
-    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row for the game,
-    and ``""`` when both are empty. ``stories`` is ``current_game_stories`` (keyed
-    ``platform, League, Game, …`` with no ``Date``, so it matches on ``Game`` alone); the
-    ``date`` only scopes the Date-aware parlay fallback.
+
+def game_headline(
+    stories: pd.DataFrame,
+    parlays: pd.DataFrame,
+    *,
+    game: str,
+    date,
+    platform: str | None = None,
+) -> str:
+    """Story-engine headline for one ``(Game, Date)``, optionally scoped to ``platform``.
+
+    Prefers the slate's ``lead`` story for that key, falling back to every matching row
+    when none is marked lead, and returns that subset's highest-``model_ev`` ``headline``.
+    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row, and ``""``
+    when both are empty.
     """
-    if not stories.empty and {"Game", "headline", "model_ev"} <= set(stories.columns):
-        sub = stories.loc[stories["Game"] == game].dropna(subset=["model_ev"])
+    rows = _story_rows(stories, game, date, platform)
+    if not rows.empty and {"headline", "model_ev"} <= set(rows.columns):
+        sub = rows.dropna(subset=["model_ev"])
+        lead_sub = sub.loc[sub["lead"]]
+        if not lead_sub.empty:
+            sub = lead_sub
         if not sub.empty:
             headline = sub.loc[sub["model_ev"].idxmax(), "headline"]
             if pd.notna(headline) and str(headline):
                 return str(headline)
     return top_thesis(parlays, game=game, date=date)
+
+
+def storyless_prophecy(favored: int) -> str:
+    """Tonight's placeholder line for a game :func:`game_headline` left empty.
+
+    A game carrying favored legs with no story to bind them is a correlation gap, not a
+    quiet slate, so the copy says which of the two it is.
+    """
+    if favored >= _STORY_FAVORED_MIN:
+        return f"No prophecy yet — {favored} favored legs, no story binds them"
+    return "No prophecy tonight — thin edges"
 
 
 def home_away(group: pd.DataFrame) -> tuple[str, str]:
@@ -103,7 +160,7 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
     """
     if ctx_df.empty:
         return None
-    sub = ctx_df.loc[(ctx_df["Game"] == game) & (ctx_df["Date"].astype(str) == str(date))]
+    sub = ctx_df.loc[_game_date_mask(ctx_df, game, date)]
     if sub.empty:
         return None
     row = sub.iloc[0]

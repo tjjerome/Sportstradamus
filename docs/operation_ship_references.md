@@ -2,7 +2,7 @@
 
 > **The evidence appendix for [`model_improvement_track.md`](handoffs/model_improvement_track.md):**
 > research verdicts (P0–A1.6), branch/commit refs, the critical-files map, and citations
-> [1]–[75]. Preserves the load-bearing facts from the deprecated
+> [1]–[85]. Preserves the load-bearing facts from the deprecated
 > [`gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md) /
 > [`gbdt_mean_regression_context.md`](archive/gbdt_mean_regression_context.md); full
 > prose for any item below lives in the archived docs at the line
@@ -26,7 +26,7 @@
 11. [Critical files map](#11-critical-files-map)
 12. [Per-change-type inference-path checklist](#12-per-change-type-inference-path-checklist)
 13. [Cross-league caveats](#13-cross-league-caveats)
-14. [References [1]–[48]](#14-references)
+14. [References [1]–[85]](#14-references)
 15. [Ship-75 sweep-era verdicts](#15-ship-75-sweep-era-verdicts)
 
 ---
@@ -96,7 +96,7 @@ transform.
 
 **State:** ✅ done. **Result: 6/8 NBA ZINB markets SHIP.**
 
-New `meditate --zinb-mode=hurdle` (orthogonal to `--target-strategy`;
+New `meditate --zinb-mode=hurdle` (orthogonal to `--target-normalization`;
 default `joint` byte-identical to pre-P2.B).
 [`HurdleZINB`](../src/sportstradamus/hurdle.py):
 
@@ -145,7 +145,7 @@ bit-identity. Determinism gate has parallel hurdle assertion.
 | # | Deliverable | Where |
 |---|---|---|
 | 0.1 | `compute_book_brier_skill_score` (book as reference, not chance) | [analysis.py](../src/sportstradamus/analysis.py) — 8 unit tests, hand-ref within 1e-6 |
-| 0.2 | `_compute_live_metrics` Step 6 in `nightly.py`; writes `data/live_metrics_per_market.parquet` (locked 10-col / 2-window schema) | [nightly.py](../src/sportstradamus/nightly.py) — 6 round-trip tests |
+| 0.2 | `_compute_live_metrics` Step 6 in `nightly.py`; writes `data/runtime/live_metrics_per_market.parquet` (locked 10-col / 2-window schema) | [nightly.py](../src/sportstradamus/nightly.py) — 6 round-trip tests |
 | 0.3 | `scorecard --live-window N` + `_history_to_eval_frame` + per-league `_load_league_stats_lookup` | [training/scorecard.py](../src/sportstradamus/training/scorecard.py) — 8 new tests |
 | 0.4 | `check_graduation` CLI: joins Gate 1 × Gate 2, `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted} | [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) — 11 tests, 7 parametrized |
 | 0.5 | `backfill_live_metrics` — walks history backwards, day-precision dedup | [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) — 5 tests |
@@ -295,7 +295,7 @@ player feature apply, but count-family reasoning does not.
 wholesale; A2 pivots to T3 tail head (deferred behind breadth).**
 
 **Stage A1 — ICC₁ table (36 cells).** Read-only
-`scripts/icc_diagnostics.py` (console `icc-diagnostics`) writes
+`scripts/icc_diagnostics.py` (`python -m sportstradamus.scripts.icc_diagnostics`) writes
 `data/icc/{NBA,WNBA,NFL}_icc.parquet`.
 
 **Routing verdict:** 25 ambiguous, 10 eb_centering, 1 tail_extension.
@@ -378,7 +378,7 @@ last-verified against `fbec3cc` (HEAD before Ship 75 rework):
 | [`src/sportstradamus/hurdle.py`](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here, unwired) | ~201 (NegBin loss) |
 | [`src/sportstradamus/training/scorecard.py`](../src/sportstradamus/training/scorecard.py) | P0 harness (promoted from `scripts/compression_eval.py` in `98e1b45`) — decile table, compression ratio, run log, diff verdict, gate scorecard, `supersede_verdict` | 84–149 (gate constants), 927 (`_gate4_iqr_spread`), 1110 (`gate_row`), 1295 (`apply_thresholds`), 1389 (`write_gate_scorecard`), 1641 (`supersede_verdict`), 1989 (`main`) |
 | [`src/sportstradamus/prediction/model_prob.py`](../src/sportstradamus/prediction/model_prob.py) | Live-path confound — shipped strategies must survive end-to-end | SkewNormal decode ~276, NegBin/ZINB decode 259–272, hurdle dispatch 205, `fused_loc` w≈0.9 blend, `temperature` ≈ 1.37 |
-| [`src/sportstradamus/training/ship_config.py`](../src/sportstradamus/training/ship_config.py) | per-cell `ship_config.json` loader + `resolve_cell_strategy` + `resolve_cell_zinb_mode` + `WITHHELD` | 37 (`WITHHELD`), 90 (`load_ship_config`), 117 (`resolve_cell_strategy`), 145 (`resolve_cell_zinb_mode`) |
+| [`src/sportstradamus/training/ship_config.py`](../src/sportstradamus/training/ship_config.py) | per-cell `stat_meta.json` loader and validator + `resolve_cell_target_normalization` + `WITHHELD` | 71 (`WITHHELD`), 107 (`load_stat_meta`), 155 (`load_ship_config`), 213 (`resolve_cell_target_normalization`) |
 | [`src/sportstradamus/training/baselines.py`](../src/sportstradamus/training/baselines.py) | strategy registry | 243–268 (`_STRATEGIES`), 272 (`STRATEGY_SLUGS`), 278 (`ZINB_MODES`) |
 
 ## 12. Per-change-type inference-path checklist
@@ -487,8 +487,9 @@ lesson. The live plan-body homes are §3.4 (lever table), §6.5 (blend closed-st
 **Rework briefs.** The profit-first rework is supported by four briefs — count family (Double
 Poisson), continuous family (centered-SN), copula stage-0 (Gaussian + t-branch), and sweep UX +
 version attribution — at
-`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`, mirrored
-under `~/.claude/plans/review-the-current-state-partitioned-taco-agent-*.md`.
+`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`
+(scratch; the copula brief is committed as
+[archive/researcher_copula_stage0.md](archive/researcher_copula_stage0.md)).
 
 | Verdict | Status | Anchor |
 |---|---|---|

@@ -16,18 +16,17 @@ token.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from time import sleep
 from typing import Literal
 
 import requests
 
-from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
+from sportstradamus.helpers.scraping import BROWSER_USER_AGENT, REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
-# Conservative default: a realistic Firefox UA so requests look like a
-# logged-in browser, and a 2 s pause between catalog endpoints so a
-# weekly walk of ~50 tools stays well under any plausible rate ceiling.
-_DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
+# A 2 s pause between catalog endpoints keeps a weekly walk of ~50 tools
+# well under any plausible rate ceiling.
 _INTER_REQUEST_SLEEP_S = 2.0
 
 # Exponential backoff schedule for retryable failures. Each entry is
@@ -49,6 +48,20 @@ _DECODE_PREVIEW_CHARS = 300
 
 class CollectorAuthError(RuntimeError):
     """Source returned 401/403; the stored Authorization token is expired."""
+
+
+class CollectorAuthRecoveryError(RuntimeError):
+    """No working credential could be restored, so the whole run is dead.
+
+    Distinct from :class:`CollectorAuthError`, which is one call's 401. By
+    the time this is raised the renewal has been tried and refused, and the
+    credential is shared by every remaining endpoint — so continuing buys a
+    report full of identical failures and, where the source renews from a
+    stored login, one more rejected sign-in per endpoint. Dozens of refused
+    sign-ins in a burst is the access pattern providers lock accounts over,
+    which makes finishing the walk actively harmful rather than merely
+    pointless.
+    """
 
 
 class CollectorDecodeError(RuntimeError):
@@ -90,13 +103,16 @@ class CookieClient:
         """
         self._authorization = authorization or ""
         self._cookie = cookie or ""
-        self._user_agent = user_agent or _DEFAULT_UA
+        self._user_agent = user_agent or BROWSER_USER_AGENT
         self._referer = referer
         self._origin = origin
         self._sleep_s = (
             inter_request_sleep_s if inter_request_sleep_s is not None else _INTER_REQUEST_SLEEP_S
         )
         self._first_call = True
+        # Headers of the latest 2xx response, for a source whose API reports
+        # on the body there (Fantasy Points flags a row-capped response).
+        self.last_response_headers: Mapping[str, str] = {}
         if not self._authorization and not self._cookie:
             logger.warning(
                 "collector credentials missing — capture the Authorization header "
@@ -250,6 +266,7 @@ class CookieClient:
                     "source's auth credentials in creds/keys.json."
                 )
             if 200 <= response.status_code < 300:
+                self.last_response_headers = response.headers
                 return self._decode(response, accept)
             is_retryable = response.status_code == 429 or 500 <= response.status_code < 600
             if not is_retryable or backoff is None:

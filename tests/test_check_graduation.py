@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 from click.testing import CliRunner
 
+from sportstradamus.scripts import check_graduation
 from sportstradamus.scripts.check_graduation import main
+from sportstradamus.training.graduation import lifecycle_table
 
 
 def _seed_model_stats(path):
@@ -176,3 +178,50 @@ def test_check_graduation_missing_model_stats_errors(tmp_path):
     )
     assert result.exit_code != 0
     assert "model_stats" in result.output.lower()
+
+
+def test_check_graduation_prints_the_tail_read(tmp_path, monkeypatch):
+    model_stats = tmp_path / "model_stats.parquet"
+    live_metrics = tmp_path / "live_metrics.parquet"
+    _seed_model_stats(model_stats)
+    _seed_live_metrics(live_metrics)
+    tail = tmp_path / "tail_scorecard.parquet"
+    live_gap = tmp_path / "live_gap_per_cell.parquet"
+    pd.DataFrame(
+        [
+            {
+                "league": "NBA",
+                "market": "PTS",
+                "n": 150,
+                "gap": 0.080,
+                "gap_hi": 0.110,
+                "live_n": 60,
+                "live_gap": 0.030,
+                "live_gap_hi": 0.090,
+            }
+        ]
+    ).to_parquet(tail, engine="pyarrow", index=False)
+    pd.DataFrame(
+        [{"league": "NBA", "market": "PTS", "live_n": 90, "live_gap": 0.050, "live_gap_hi": 0.095}]
+    ).to_parquet(live_gap, engine="pyarrow", index=False)
+    # The CLI reads the two sidecars at their production paths; aim it at the tmp pair.
+    monkeypatch.setattr(
+        check_graduation,
+        "lifecycle_table",
+        lambda ms, lm, league: lifecycle_table(
+            ms, lm, league, tail_path=tail, live_gap_path=live_gap
+        ),
+    )
+
+    result = CliRunner().invoke(
+        main, ["--model-stats-path", str(model_stats), "--live-metrics-path", str(live_metrics)]
+    )
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    for column in ("tail_gap", "tail_g_hi", "live_gap", "tail_state"):
+        assert column in lines[0]
+    pts = next(line for line in lines if line.startswith("NBA    PTS"))
+    assert "+0.080" in pts and "+0.110" in pts and "+0.050" in pts and "overstated" in pts
+    # A cell with no row in either sidecar prints the read as nan, not an error.
+    tds = next(line for line in lines if "passing_tds" in line)
+    assert "nan" in tds

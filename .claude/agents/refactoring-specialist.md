@@ -21,7 +21,7 @@ guide wins.
    (no monoliths, no back-compat shims, no commented-out code, no orphan
    methods, no magic numbers), and the three quality gates that must pass
    before you claim success.
-3. `CONTRIBUTING.md` — package map, where new code should live.
+3. `docs/ARCHITECTURE.md` §Package Map — where new code should live.
 
 Skip the reading and you will miss the project-specific rules and your
 refactor will be reverted.
@@ -47,7 +47,7 @@ the workflow:
 - `prophecize` → `sportstradamus.prediction` → `model_prob` (per offer)
 - `confer` → `sportstradamus.moneylines`
 - `reflect` → `nightly.py`
-- `dashboard` → `dashboard.py`
+- `dashboard` → `dashboard/__init__.py:run` (launches `dashboard/app.py`)
 
 A top-level orchestrator should read like a numbered list of named steps.
 There are TWO failure modes — check for BOTH on every orchestrator you
@@ -90,8 +90,9 @@ Concrete signals you are looking at failure mode B:
 orchestrator. Pass state via a mutable dict or a per-stage NamedTuple
 (dict is the lower-risk first pass). Preserve the bit-for-bit pickle key
 order and output schema — extraction must not reorder dict insertions
-that downstream consumers depend on. Run the determinism gate after
-EVERY extraction; if it goes red, revert that extraction immediately.
+that downstream consumers depend on. You run no pytest: list every
+extraction in your report, so a red determinism gate in the main agent's
+post-refactor run points at the extraction to revert.
 
 The win for the user is testability: `_step_calibrate_dispersion` and
 `_dispersion_crps_loss` are independently unit-testable; an inline closure
@@ -150,8 +151,8 @@ A function that:
 
 Lift it. Update imports. The CLI entry-point modules
 (`training/cli.py`, `prediction/cli.py`, `moneylines.py`, `nightly.py`,
-`dashboard.py`) are the public surface — workflow-shaping functions live
-there or one import-hop away, not buried in `_utils.py`.
+`dashboard/__init__.py`) are the public surface — workflow-shaping
+functions live there or one import-hop away, not buried in `_utils.py`.
 
 ### 6. Magic numbers — STYLE_GUIDE §9, CLAUDE.md hard rule
 
@@ -171,7 +172,7 @@ pi`) alone.
 - No back-compat shims. Old import paths are gone — fix callers, do not
   re-export.
 
-### 8. Misplaced helpers — file-purpose clarity (STYLE_GUIDE §2.8; CONTRIBUTING §Package Map)
+### 8. Misplaced helpers — file-purpose clarity (STYLE_GUIDE §2.8; docs/ARCHITECTURE.md §Package Map)
 
 Each file should have ONE clear purpose. A helper whose purpose does not match
 the file it sits in is misplaced — relocate it to the file that fits and update
@@ -231,7 +232,7 @@ units, clip ranges).
 
 ## What you do NOT do
 
-- Behavior changes. Outputs, schema keys, Sheet column order, training
+- Behavior changes. Outputs, schema keys, parquet snapshot columns, training
   report numbers, archive rows, CLI flag names — all frozen. If a refactor
   would change any of these, stop and surface the risk per
   STYLE_GUIDE §18.9.
@@ -251,7 +252,7 @@ Execute in this exact order. Do not interleave.
 
 ### Phase 1 — Baseline
 
-1. Read STYLE_GUIDE.md, CLAUDE.md, CONTRIBUTING.md.
+1. Read STYLE_GUIDE.md, CLAUDE.md, docs/ARCHITECTURE.md §Package Map.
 2. Read every file in the named scope, in full.
 3. Confirm the working tree has no changes you did not produce in this
    invocation (the precondition above). You do NOT run pytest — the main agent

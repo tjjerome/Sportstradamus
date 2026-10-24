@@ -33,10 +33,13 @@ Sportstradamus/
 │   │   ├── collectors/          # authenticated data-collector framework (fp/ctg/savant)
 │   │   ├── dashboard/           # Streamlit dashboard package
 │   │   ├── scripts/             # standalone maintenance / backfill / diagnostic scripts
-│   │   ├── books.py             # Underdog + Sleeper scrapers
+│   │   ├── books/               # DFS scrapers
+│   │   │   ├── __init__.py      # re-exports get_ud, get_sleeper
+│   │   │   ├── underdog.py      # Underdog: props, team/game markets, alternate lines
+│   │   │   └── sleeper.py       # Sleeper props
 │   │   ├── moneylines.py        # Odds API ingest (confer command)
 │   │   ├── nightly.py           # reflect command (prediction resolution)
-│   │   ├── analysis.py          # shared metric functions
+│   │   ├── analysis.py          # outcome resolution for reflect, profit-sim precompute, scoring rules
 │   │   ├── clv.py               # closing-line-value computation
 │   │   ├── skew_normal.py       # custom LightGBMLSS distributions, with
 │   │   │                        #   skew_normal_centered.py, double_poisson.py, hurdle.py
@@ -46,7 +49,7 @@ Sportstradamus/
 │   └── deprecated/              # archived modules with no active callers
 ├── tests/                       # behavioral unit tests, golden/ snapshots, integration/ smoke
 ├── docs/                        # this file, STYLE_GUIDE.md, subsystem guides
-├── scripts/                     # ops shell scripts (cron wrapper, prod sync)
+├── scripts/                     # ops scripts (cron wrapper, prod sync, pre-commit check) + dev probes
 ├── archive/                     # runtime DuckDB odds archive (git-ignored contents)
 ├── .github/                     # CI workflow, PR/issue templates
 ├── pyproject.toml
@@ -62,12 +65,12 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `config.py` | Loads the JSON config files and `creds/keys.json` at import time. Exposes `stat_meta` (per-cell union of committed `stat_meta.json` and the runtime-recomputed `stat_calibration.json`), the per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi`, plus `stat_map`, `book_weights`, `feature_filter`, `name_map`, `abbreviations`, and the other config dicts |
-| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Writes buffer in memory and flush on `write()`: `add_dfs`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports |
-| `scraping.py` | `Scrape` — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
-| `odds_budget.py` | Odds API credit-budget governor: usage ledger, cycle math, cost estimates, broad-run league admission, season/activity windows (`league_is_live`, `update_window_open`, `season_opener`). Loads `config/odds_api_budget.json` itself — the one exception to `config.py` owning config loads |
+| `archive.py` | `Archive` — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev, observed_at, under_prob, line)`, `lines(...)`, and `ladder(...)` tables. Reads: `get_ev`, `get_line`, `get_reference_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`. `get_line` is the sportsbook consensus line, the median of each sportsbook's latest `odds.line` and `0.0` when no sportsbook posts one; `get_reference_line` falls back to the line of record in `lines`, which also logs each pick'em platform's own line and so never feeds the consensus. Writes buffer in memory and flush on `write()`: `add_dfs`, `add_ladder`, `merge_player_books`, `set_team_books`. `LazyArchive` defers connection for modules the dashboard imports. `archive_market` gives a market its league's own key (NHL `AST` is `assists`); `cell_market` does it from a platform's raw label |
+| `scraping.py` | `Scrape` — `requests.get` calls (`get`, `get_csv`, `get_bytes`) with ScrapeOps browser-header rotation on retry (one static browser header, `BROWSER_USER_AGENT`, when ScrapeOps is down) and no proxy; `get_bytes` raises `BlockedError` on a 403/429 instead of retrying |
+| `odds_budget.py` | Odds API credit-budget governor: usage ledger, cycle math, cost estimates, broad-run league admission, the leftover a historical backfill may spend (`backfill_allowance`), season/activity windows (`league_is_live`, `update_window_open`, `season_opener`). Loads `config/odds_api_budget.json` itself, not through `config.py` |
 | `distributions.py` | Model/bookmaker fusion math: `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds` |
 | `integer_distribution.py` | Exact CDF endpoints and settlement for nonnegative-integer outcomes |
-| `combined_markets.py` | Honest book references for combined QB markets with no direct sportsbook line |
+| `combined_markets.py` | Scrambled-Sobol NORTA kernel (`ComboComponent`, `combo_sum_quote`) that combines weighted component marginals into one combo-market predictive under a same-player residual correlation |
 | `io.py` | Atomic parquet/JSON IO and schema converters for the data hot path (history, parlay history, model pickles) |
 | `locks.py` | Advisory file locks serializing the long-running jobs that share one checkout |
 | `logging.py` | Structured JSON logging for CLI entry points (`get_logger`) |
@@ -75,7 +78,8 @@ Sportstradamus/
 | `parlay_modifiers.py` | Expected-vs-actual quote reconciliation for pick'em correlation modifiers |
 | `provenance.py` | Code-version stamps for training artifacts |
 | `training_quotes.py` | Training-quote resolution with explicit provenance |
-| `text.py` | String normalization and small collection utilities (`remove_accents`, `merge_dict`, `hmean`) |
+| `cli_options.py` | `LOG_LEVEL_OPTION`, the `--log-level` option the pipeline CLIs share |
+| `text.py` | Name normalization (`remove_accents`), `ABBR_MAP` (the team-abbreviation corrections both DFS scrapers and MLB's schedule map apply) and the MLB schedule readers (`get_mlb_pitchers`, `mlb_game_is_over`, the finished-state sets) |
 | `__init__.py` | Re-exports the public API — `from sportstradamus.helpers import X` is the canonical import |
 
 ### `stats/` — Player statistics and feature engineering
@@ -91,7 +95,8 @@ Sportstradamus/
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |
 | `collector_snapshots.py` | Date-keyed snapshot loader for the collector framework (CTG / Savant) |
 | `model_dependencies.py` | Versioned, serving-independent model dependencies for matrix reconstruction |
-| `__init__.py` | Re-exports the five league classes |
+| `live.py` | `load_live_leagues`: the one loader `prophecize` and `bet pickem` score through. A live league whose gamelog update raises sits the run out |
+| `__init__.py` | Re-exports the five league classes and `load_live_leagues` |
 
 ### `training/` — The `meditate` pipeline
 
@@ -100,18 +105,21 @@ Sportstradamus/
 | `cli.py` | `meditate` click command — orchestrator: validates per-cell ship config, loads/updates each league's `Stats`, loops markets calling `train_market` |
 | `pipeline.py` | `train_market(league, market, ...)` — the full per-market training loop: matrix load, distribution selection, target normalization, Optuna search, LightGBMLSS fit, dispersion calibration, temperature scaling, calibration-method selection, evaluation, model save |
 | `baselines.py` | Target-normalization strategy registry for the SkewNormal branch — slug → forward transform + decode pair |
-| `calibration.py` | `fit_book_weights`, `fit_model_weight`, `select_distribution`, blending slugs |
+| `calibration.py` | `fit_book_weights`, `fit_model_weight`, blending slugs |
 | `posthoc.py` | Per-cell calibration-method selector, fit on the validation split and reapplied at inference |
+| `labels.py` | `over_label` — the over/under outcome label every fit, metric and ship gate shares (a push is ½) |
 | `group_conditional_cdf/` | Structural calibration methods (group-conditional CDF maps: affine, two-part) |
-| `hyperparams.py` | `tune_hyperparameters` — Optuna search utilities |
-| `data.py` | `count_training_rows`, `trim_matrix` — training-data preparation |
+| `hyperparams.py` | `run_hyper_opt` — Optuna search utilities |
+| `data.py` | `trim_matrix` — training-data preparation |
 | `markets.py` | `ALL_MARKETS` per-league market lists; `select_markets` narrowing for `--market` |
 | `correlate.py` | `correlate(league, stat_data)` — builds `corr_same_team.parquet`, `corr_opposing.parquet`, and `corr_metadata.json` under `data/leagues/{league}/` from player stat history (intermediate cache at `data/training_data/{LEAGUE}_corr.parquet`) |
 | `report.py` | `report()` — walks model pickles and writes the wide one-row-per-cell `data/training/model_stats.parquet` + `.csv` mirror; `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` |
-| `scorecard.py` | `compute_gates` — the offline ship gates (paired Brier CI, star/bench z, IQR ratio, debiased ECE, anti-shrinkage), called inline by `report()` and exposed as a standalone A/B CLI that never writes `model_stats.parquet`. Thresholds: [docs/ship_gate.md](ship_gate.md) |
+| `scorecard.py` | `compute_gates` — the offline ship gates (paired Brier CI, star/bench z, PIT-KS, debiased ECE, anti-shrinkage), called inline by `report()` and exposed as a standalone A/B CLI that never writes `model_stats.parquet`. Thresholds: [docs/ship_gate.md](ship_gate.md) |
 | `graduation.py` | Shared lifecycle classification for `(league, market)` cells |
 | `ship_config.py` / `config.py` | Per-cell ship-config resolution and JSON I/O for the split config files |
 | `shap.py` | Post-train drift-monitoring SHAP only — writes `feature_importances.csv` / `feature_correlations.csv`; does not drive feature selection |
+| `prior_models.py` | `keep_prior_model` — before a retrain overwrites a served pickle and its test set, copies the pickle to `data/models/prior/{LEAGUE}_{market}__{version}.mdl` and gzips the test set to `data/test_sets/prior/{LEAGUE}_{market}__{version}.csv.gz`, both named for the `Model Version` that model stamped in history, so an offline pass (`sportstradamus admin feature-parity --versions`, or a re-read of a version's offline gates) can use the previous model and the test set it was graded on. The same call deletes prior files of either kind superseded more than `PRIOR_MODEL_RETENTION_DAYS` (400) ago. Nothing serves from either `prior/`, and `sync_to_prod.sh` sends neither |
+| `component_cells.py` / `component_sum.py` | A combo cell priced as the weighted sum of its component cells' served predictives, read from their test sets: evidence for the ship scorecard, not a serving path |
 | `lineage.py` / `matrix_audit.py` | Deterministic matrix manifests for quarantined rebuilds; read-only cache integrity audit |
 | `model_strategy/` | Per-cell strategy sweep/confirm harness (registry, sweep, confirm, TPE search) |
 | `role_specs.py`, `structural_context.py`, `structural_strategies.py` | Role/position group columns and shared context for the structural calibration methods |
@@ -121,23 +129,27 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `cli.py` | `main` click command — loads/updates `Stats` for active leagues, scrapes DFS offers (Underdog, Sleeper), scores via `process_offers`, snapshots scored offers + parlays as parquet for the dashboard, persists `history.parquet` / `parlay_hist.parquet` |
+| `cli.py` | `main` click command — loads/updates `Stats` for active leagues, scrapes DFS offers (Underdog, Sleeper), scores via `process_offers`, snapshots scored offers + parlays as parquet for the dashboard, persists `history.parquet` / the `parlay_hist/` day partitions |
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads the per-league correlation parquets, assembles Σ, scores parlay legs (calls `parlay.beam_search_parlays`) |
-| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `resolve_leg_stat` |
+| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `leg_market_map` (a platform's market labels under the league's own cell keys), `resolve_leg_stat` |
+| `book_quotes.py` | Per-player book quotes both scoring paths read: admission (a DFS platform's own line is not support), the model path's book leg (`book_evs_for_players`), the book-fallback path's prices |
+| `offer_records.py` | `book_over_prob` (devigs the book leg into `Market EV`) and `finalize_records`, the last stage both scoring paths share: boost-aware payouts, the chosen side, per-player dedup |
+| `line_movement.py` | `build_line_movement` — one row per offer from the archive's ladder: the main line and the fair line its price implies, per poll |
 | `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves |
 | `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam |
 | `stories/` | Narrative generation for the dashboard: game context, offer "why" text, parlay theses, offer details |
-| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, `write_current_pickem`, game context/stories/details) — the only files the dashboard reads |
+| `persist.py` | Atomic parquet snapshot writers (`write_current_offers`, game corr + pair modifiers, context/stories/details, line movement) — the `current_*` snapshots the dashboard reads |
+| `feature_log.py` | `upsert_feature_log`, `prune_feature_log` — the serve-time feature log, `data/runtime/feature_log/date=YYYY-MM-DD/{LEAGUE}_{market}.parquet`: one row per scored player and game holding the frame fed to the model, its outputs before the book blend, and the decision-time book leg (row contract in the module docstring). Train/serve parity diagnostics, read by `sportstradamus admin feature-parity` and kept `FEATURE_LOG_RETENTION_DAYS`; not a dashboard input and never part of `history.parquet` |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays`) |
 
 ### `strategies/` — Bet sizing and contest construction
 
 | Module | What's in it |
 |---|---|
-| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), `resolve_shrinkage` (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and the `kelly` CLI for offline re-sizing of a recommendations YAML. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
-| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power, Flex, and Rivals; emits `data/recommendations/{date}.yaml` |
+| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), `resolve_shrinkage` (explicit > training BSS ramped to live CLV-segment BSS between `LIVE_BLEND_FLOOR` and `LIVE_BLEND_FULL` legs when both exist > training BSS > live BSS > `NO_EVIDENCE_SHRINKAGE`), and the `kelly` CLI for offline re-sizing of a recommendations YAML. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `bet pickem` command. Pure orchestrator — no math. Covers Power and Flex; emits `data/recommendations/{date}_{platform}.yaml` |
 | `_pickem_emit.py` | YAML-emit helpers split out of `underdog_pickem.py` |
 | `ledger.py` + `_ledger_*.py` | Simulated-bettor ledger: twice-daily commit orchestrator with selection, cross-game candidate, settlement, bankroll, and JSONL store layers |
 | `profit_sim.py` | Kelly-sized profit / ROI / Sharpe / drawdown backtest |
@@ -146,24 +158,28 @@ Sportstradamus/
 ### `collectors/` — Authenticated data collectors
 
 Shared framework (`transport.py`, `auth.py`, `catalog.py`, `runner.py`,
-`tabular.py`, `dispatch.py`, `commands*.py`, `cli.py`) for cookie/bearer
-authenticated sources, plus one subpackage per source: `fantasypoints/`
-(`fp-fetch`), `cleaningtheglass/` (`ctg-fetch`), `baseballsavant/`
-(`savant-fetch`). Each writes date-keyed snapshots that `stats/` loaders fold
-into features. Canonical guide: [docs/data_collectors.md](data_collectors.md).
+`report.py`, `tabular.py`, `dispatch.py`, `commands*.py`, `_options.py`, `cli.py`)
+for cookie/bearer authenticated sources, plus one subpackage per source:
+`fantasypoints/` (`fetch fp`), `cleaningtheglass/` (`fetch ctg`),
+`baseballsavant/` (`fetch savant`). Each writes period-keyed snapshots — by game
+week for FP, by date for the other two — that `stats/` loaders fold into
+features. Beside them, `headshots.py` (`fetch headshots`) fills the dashboard's
+player-headshot cache; it is not a `Source`. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 ### `dashboard/` — Streamlit dashboard
 
 | Module | What's in it |
 |---|---|
-| `__init__.py` | The `dashboard` console script — launches Streamlit on `dashboard/app.py` |
+| `__init__.py` | `run` behind the `sportstradamus dashboard` subcommand — launches Streamlit on `dashboard/app.py` with the file watcher off |
 | `app.py` | Main Streamlit app: page registry and navigation |
 | `data.py` | Mtime-keyed cached loading of the parquet snapshots |
 | `theme.py` | Non-Streamlit mirror of the design tokens (see [DESIGN.md](../DESIGN.md)) |
+| `assets.py` | Ambient-art loader over `data/assets/ambient/ambient_manifest.json` — a slot renders only when it names a file on disk (downscaled to 1600 px WebP at import), else the token gradient; `placement` picks hero crop vs. the Tonight card-deck tiling (slot catalog: [art_assets.md](art_assets.md)) |
+| `static/` | Hand-authored favicon; the `st.logo` files land here when commissioned |
 | `columns.py`, `legs.py`, `lenses.py`, `narrative.py`, `viewport.py` | Scoring-column semantics, leg lookup, preset filter lenses, narrative display, mobile detection |
 | `slip_engine.py` | Live slip scoring for the builders — the one sanctioned live calc |
 | `surfaces/` | The pages: board, tonight, games, receipts, and the lab_* diagnostics surfaces |
-| `components/` | Reusable widgets: slip dock/builder, offer cards, tickets, constellation, deep-dive, gate matrix |
+| `components/` | Reusable widgets: slip dock/builder, offer cards, tickets, deep-dive, gate matrix, and the constellation family — `constellation.py` orchestrates the figure; `_spring` (shapeless layout), `_slate` + `_shapes` (dealt templates), `_traces` (node/edge/label builders), `_spacing` + `_layout` (px geometry), `_deep` + `_deep_layer` and `_wider` + `_sky` (the two lenses) |
 
 The dashboard reads pre-computed parquet snapshots only — it never opens the
 DuckDB archive. DuckDB holds an exclusive file lock for the lifetime of any
@@ -177,9 +193,10 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | Module | CLI command | What it does |
 |---|---|---|
 | `moneylines.py` | `confer` | Odds API ingest for game-level and player-prop markets: `get_moneylines`, `get_props` |
-| `books.py` | (called from `prediction/cli.py`) | Underdog (`get_ud`) and Sleeper (`get_sleeper`) scrapers |
+| `books/` | (called from `prediction/cli.py`) | Underdog (`underdog.py:get_ud` — player props, team/game markets, alternate lines) and Sleeper (`sleeper.py:get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
-| `analysis.py` / `clv.py` | — | Shared metric functions; closing-line-value computation |
+| `analysis.py` / `clv.py` | — | Outcome resolution for `reflect` (`resolve_history`, `annotate_offer_outcomes`, Kelly at the platform payout), the nightly profit-sim precompute, proper scoring rules (Brier skill, Murphy decomposition, coverage); the flat −110 reporting helpers live in `src/deprecated/analysis_flat_odds.py`; closing-line-value computation, each row's close read as of its kickoff (`clv.commence_times`) |
+| `realized.py` | — | The one pricing truth for realized performance: settled offers the platform posted, priced at the platform payout and counted once per prop from `COUNT_ONCE_FROM` (`settled_offers`; `last_scored_lines` is that count-once mask alone, taken by the Receipts filter before it drops pushes), windows, the posted / recommended cohorts, the by-side ledger and the calibration summary. Receipts, Lab › Diagnostics and `reflect` all read it |
 | `skew_normal.py`, `skew_normal_centered.py`, `double_poisson.py`, `hurdle.py` | — | Custom PyTorch distributions for LightGBMLSS (SkewNormal, centered parametrization, Double Poisson, HurdleZINB) |
 | `history_schema.py`, `leg_schema.py` | — | Canonical schemas for the prediction-history frame and structured parlay legs |
 
@@ -195,41 +212,41 @@ confer  (moneylines.py)
   Archive.write()  →  archive/archive.duckdb
 
 meditate  (training/cli.py)
-  Stats{League}.load() / update()  ← league APIs / cached artifacts in data/player_data/
+  Stats{League}.load() / update()  ← league APIs / cached artifacts in data/leagues/{league}/
   Stats{League}.get_training_matrix(market)
         │
         ▼
   training/pipeline.train_market()
-    ├─ calibration.select_distribution()
-    ├─ hyperparams.tune_hyperparameters()      (Optuna)
+    ├─ _step_select_distribution()  (stat_meta dist, else data-driven)
+    ├─ hyperparams.run_hyper_opt()  (Optuna)
     ├─ LightGBMLSS.fit()
     ├─ dispersion calibration + temperature scaling
-    └─ model pickle → data/models/{LEAGUE}_{market}.pkl
+    └─ model pickle → data/models/{LEAGUE}_{market}.mdl
   training/report.report() → data/training/model_stats.parquet (+ .csv mirror)
 
 prophecize  (prediction/cli.py)
   books.get_ud() / get_sleeper()   ← Underdog / Sleeper APIs
-  Archive.get_line() / get_ev()
+  Archive.get_line() / get_reference_line() / get_ev()
   Stats{League}.get_stats(market, offers, date)
         │
         ▼
   prediction/scoring.process_offers()  →  model_prob.model_prob()
+    └─ prediction/feature_log.py  →  data/runtime/feature_log/  (diagnostics)
   prediction/correlation.find_correlation()
   prediction/parlay.beam_search_parlays()
   prediction/stories.*
         │
         ▼
   prediction/persist.py  →  parquet snapshots the dashboard reads
-  history.parquet / parlay_hist.parquet
+  history.parquet / parlay_hist/ day partitions
 
-pickem-build  (strategies/underdog_pickem.py)
-  prediction/parlay.beam_search_parlays(contest_variant=...)
+sportstradamus bet pickem  (strategies/underdog_pickem.py)
+  prediction/correlation.find_correlation(contest_variant=...)
   strategies/kelly.fractional_kelly_stake(...)
         │
         ▼
-  data/recommendations/{date}.yaml
-        ├─ poetry run sportstradamus bet kelly            (offline re-sizing)
-        └─ dashboard                   (live review)
+  data/recommendations/{date}_{platform}.yaml
+        └─ sportstradamus bet kelly    (offline re-sizing)
 ```
 
 **NFL comp data:** Player-comp aggregates for NFL come from FantasyPoints
@@ -247,19 +264,21 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 |---|---|
 | Change which markets a league trains | `training/markets.py` → `ALL_MARKETS` |
 | Change which distribution a stat uses | `src/sportstradamus/data/config/stat_meta.json` (`dist` field) |
-| Control which cells train and serve | `stat_meta.json` per-cell `shipped` field — `"withheld"` (skipped + pruned) / `"devel"` / `"main"` release surfaces |
-| Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/config/prop_books.json` |
+| Control which cells train and serve | `stat_meta.json` per-cell `shipped` field — `"withheld"` (matrix kept warm, training skipped, pickle pruned) / `"devel"` / `"main"` release surfaces |
+| Change which books feed consensus lines | `moneylines.py` — `confer` keeps every sportsbook the Odds API returns for the `us` region (`us2` for `US2_ONLY_MARKETS`); `helpers/training_quotes.py:DFS_PLATFORM_BOOKS` keeps pick'em platforms out of the consensus (`helpers/archive.py:_sportsbook_line`) |
 | Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
 | Understand a training stats metric | `training/report.py` (schema owner) + [docs/ship_gate.md](ship_gate.md) for the gate columns |
 | Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → `{kelly_shrinkage, brier_skill_score, model_weight}` from `data/training/model_stats.parquet` |
 | Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `LIVE_BLEND_FLOOR`, `LIVE_BLEND_FULL` |
-| Change the Optuna hyperparameter search | `training/hyperparams.py` → `tune_hyperparameters` |
+| Change the Optuna hyperparameter search | `training/hyperparams.py` → `run_hyper_opt` |
 | Change how distributions blend with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
-| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when newer than the `Stats{League}.season_start` seed constant |
+| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when it falls more than 300 days after the `Stats{League}.season_start` constant ([OPERATIONS.md](OPERATIONS.md)) |
 | Run a `Stats.update()` in the offseason | `SPORTSTRADAMUS_FORCE_UPDATE=1` — bypasses the season window (`helpers/odds_budget.py:update_window_open`) |
 | Refresh the per-cell SHAP diagnostic CSVs | `training/shap.py:see_features` — diagnostics only; training uses the full unfiltered candidate feature set |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |
 | Find why a comp feature has a certain weight | `data/config/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
+| See how a cell's recommended legs would have done on held-out rows | `sportstradamus admin tail-scorecard` (`scripts/tail_scorecard.py`; re-serve in `tail_pricing.py`, information test in `tail_information.py`) — the live rule replayed at the archived DFS rungs; a diagnostic, never a gate |
+| Check that serving feeds a model the features it trained on | `sportstradamus admin feature-parity` (`scripts/feature_parity.py`) — re-scores the serve-time feature log through the model file each row names (the served pickle or its `data/models/prior/` copy), compares each logged row with its training-matrix row feature by feature and by the model's own probability, flags a cell whose difference has a root mean square above one percentage point at the lower end of its player-clustered 95% interval, ranks cells by that RMS as served times their settled live legs, and lists settled cells and dates the log missed; `--fixed-file` scores every logged row through the served pickle instead, and `--versions` adds the paired same-leg difference between model versions. Dev-side and read-only; a diagnostic, never a gate |
 | Read archived / removed code | `src/deprecated/` (reintroduction protocol in its README) |
 
 ---
@@ -307,9 +326,9 @@ change is about the seam.
 5. **Add stat name mappings** in `data/config/stat_map.json` and
    **abbreviations** in `data/config/abbreviations.json`.
 
-6. **Register the class** in the explicit `(league, class)` tuples in
-   `training/cli.py` and `prediction/cli.py`, and add the league to the
-   `--league` `click.Choice` list in `training/cli.py`.
+6. **Register the class** in the explicit `(league, class)` tuple in
+   `training/cli.py` and in the class tuple of `stats/live.py`, and add the league
+   to the `--league` `click.Choice` list in `training/cli.py`.
 
 ---
 
@@ -333,9 +352,11 @@ A "market" is a betting category for a single stat in a single league (e.g.
 
    Pick the distribution family from whether the stat is continuous or
    count-valued and whether it is zero-inflated (`SkewNormal`, `NegBin`,
-   `ZINB`, `DPO`, `Mixture`; Gamma families are selected data-driven).
-   `shipped: "withheld"` keeps the cell out of training and serving until it
-   clears the offline gates (see [docs/ship_gate.md](ship_gate.md)). Optional
+   `ZINB`, `DPO`, `Mixture` — the families `pipeline._FORCEABLE_DISTS` accepts).
+   `Mixture` is research-only: its strategy trains and scores in the sweep but
+   lacks the `serve` capability (`model_strategy/specs.py`), so serving refuses it.
+   `shipped: "withheld"` keeps the cell's model out of training and serving (its
+   quoted offers serve the book consensus) until it clears the offline gates (see [docs/ship_gate.md](ship_gate.md)). Optional
    knobs (`blending`, `zinb_mode`, `dist_training_loss`, `sn_param`,
    `hpo_selection`, `count_dispersion_objective`) default sensibly when absent.
 
@@ -346,10 +367,10 @@ A "market" is a betting category for a single stat in a single league (e.g.
    league's list.
 
 4. **`stats/{league}.py`** — ensure `get_training_matrix` handles the new
-   market key and produces a valid `(X, y)` pair, and `get_stats` produces the
-   same feature columns for live offers.
+   market key and produces a valid matrix with its `Result` column, and
+   `get_stats` produces the same feature columns for live offers.
 
-5. Run `poetry run sportstradamus meditate --league {LEAGUE} --market {market}` and review the
+5. Run `sportstradamus meditate --league {LEAGUE} --market {market}` and review the
    new row in `data/training/model_stats.csv` (mirror of the parquet).
 
 ---
@@ -360,13 +381,14 @@ The training loop is `training/pipeline.py` → `train_market`. The stages in
 order:
 
 1. **Data loading** — `Stats.get_training_matrix` → `data.trim_matrix`
-2. **Distribution selection** — `calibration.select_distribution`, unless the
-   cell pins a family via `stat_meta.json` `dist`; stats with
-   `global_mean >= 2` route to SkewNormal, lower means to a count family
+2. **Distribution selection** — `_step_select_distribution`: the hidden
+   `--dist` override when given, else the cell's `stat_meta.json` `dist`; an
+   unset cell gets SkewNormal when `global_mean >= 2`, else ZINB when its zero
+   rate clears `GATE_PUBLISH_THRESHOLD`, else NegBin
 3. **Target normalization** — SkewNormal targets pass through the
    `training/baselines.py` strategy named by the cell's
    `target_normalization` slug (decode happens in `model_prob`)
-4. **Hyperparameter search** — Optuna via `hyperparams.tune_hyperparameters`,
+4. **Hyperparameter search** — Optuna via `hyperparams.run_hyper_opt`,
    warm-seeded from the previous pickle's best params when one exists
 5. **Model fit** — `LightGBMLSS.fit`
 6. **Dispersion calibration** — CRPS-loss scalar minimization on the
@@ -376,8 +398,9 @@ order:
    `posthoc` slug on the validation split
 9. **Evaluation + diagnostics** — held-out test set scoring; diagnostics are
    written into the model pickle alongside the model
-10. **Save** — pickle to `data/models/{LEAGUE}_{market}.pkl`; `report()`
-    then rebuilds `model_stats.parquet` and computes the ship gates
+10. **Save** — pickle to `data/models/{LEAGUE}_{market}.mdl`, after
+    `prior_models.keep_prior_model` sets aside the served file and test set it replaces;
+    `report()` then rebuilds `model_stats.parquet` and computes the ship gates
 
 There is no feature selection at training time: every cell trains on the full
 candidate set returned by `Stats.get_stat_columns(market)`. `training/shap.py`

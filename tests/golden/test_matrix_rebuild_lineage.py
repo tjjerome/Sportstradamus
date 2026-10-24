@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pickle
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -18,7 +20,7 @@ from sportstradamus.training import pipeline
 from sportstradamus.training.cli import _validate_mode_flags
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.lineage import validate_matrix_manifest, write_matrix_manifest
-from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix_and_comps
+from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix
 
 
 class _Stats:
@@ -32,9 +34,6 @@ class _Stats:
     def get_training_matrix(self, _market, cutoff):
         self.cutoffs.append(cutoff)
         return self.matrix.copy()
-
-    def save_comps(self):
-        raise AssertionError("player comps must not be saved on a frozen/rebuild path")
 
 
 def _mode_flags(**overrides) -> dict:
@@ -111,7 +110,7 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
     output = tmp_path / "quarantine"
     dependency_root = tmp_path / "dependencies"
 
-    rebuilt, path = _step_load_matrix(
+    rebuilt, path, _new_rows = _step_load_matrix(
         "NFL_passing-yards",
         pd.Timestamp("2024-01-01").date(),
         stats,
@@ -133,6 +132,34 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
     assert stats.cutoffs == [pd.Timestamp("2024-01-01").date()]
     assert stats.model_dependency_root == dependency_root
     assert stats.model_dependency_namespace == "stage5-recovery-20260725-v1"
+
+
+def test_incremental_load_marks_only_the_fetched_rows_new(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "training_data"
+    cache_dir.mkdir()
+    _matrix().to_parquet(cache_dir / "NFL_passing-yards.parquet")
+    monkeypatch.setattr(pipeline, "pkg_resources", SimpleNamespace(files=lambda _pkg: tmp_path))
+    fetched = _matrix().assign(
+        Player=["E", "F", "G", "H"],
+        Date=["2025-02-01", "2025-02-02", "2025-02-03", "2025-02-04"],
+    )
+    stats = _Stats(fetched)
+
+    loaded, _path, new_rows = _step_load_matrix(
+        "NFL_passing-yards",
+        date(2024, 1, 1),
+        stats,
+        "NFL",
+        "passing yards",
+        deterministic=False,
+        force=False,
+        need_model=False,
+    )
+
+    assert stats.cutoffs == [date(2025, 1, 4)]
+    assert list(loaded["Player"]) == ["B", "A", "C", "D", "E", "F", "G", "H"]
+    assert new_rows.tolist() == [False] * 4 + [True] * 4
+    assert new_rows.index.equals(loaded.index)
 
 
 def test_full_rebuild_rejects_canonical_matrix_root():
@@ -171,7 +198,7 @@ def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):
     )
     before = path.read_bytes()
 
-    loaded, loaded_path = _step_load_matrix(
+    loaded, loaded_path, _new_rows = _step_load_matrix(
         "NFL_attempts",
         pd.Timestamp("2024-01-01").date(),
         stats,
@@ -191,7 +218,7 @@ def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_train_market_frozen_input_skips_matrix_persist_and_comps(tmp_path, monkeypatch):
+def test_train_market_frozen_input_skips_matrix_persist(tmp_path, monkeypatch):
     path = tmp_path / "NFL_attempts.parquet"
     matrix = _matrix()
     matrix.to_parquet(path)
@@ -210,8 +237,7 @@ def test_train_market_frozen_input_skips_matrix_persist_and_comps(tmp_path, monk
     monkeypatch.setattr(pipeline, "stat_zi", {})
 
     # matrix_only stops train_market right after the persist step — the frozen
-    # pin under test — without running the HPO tail; _Stats.save_comps raises
-    # if the persist step ever reaches the comps write.
+    # pin under test — without running the HPO tail.
     pipeline.train_market(
         "NFL",
         "attempts",
@@ -313,6 +339,31 @@ def test_dependency_resolution_supports_fresh_named_namespace(tmp_path):
     assert dependency.path.parent == namespace
 
 
+def test_dependency_resolution_accepts_a_count_family_volume_model(tmp_path):
+    """NFL carries is DPO; the decode path is family-agnostic, so the registry must be too."""
+    namespace = tmp_path / DEPENDENCY_NAMESPACE
+    namespace.mkdir()
+    payload = {
+        "dependency_identity": {
+            "namespace": DEPENDENCY_NAMESPACE,
+            "schema_version": 1,
+            "league": "NFL",
+            "market": "carries",
+            "training_cutoff": "2026-09-14",
+            "matrix_sha256": "matrix-sha",
+        },
+        "distribution": "DPO",
+        "expected_columns": ["MeanYr"],
+        "model_version": "test-v3",
+        "trained_at": "2026-09-19T00:00:00+00:00",
+    }
+    (namespace / "NFL_carries.mdl").write_bytes(pickle.dumps(payload))
+
+    dependency = load_model_dependency(tmp_path, "NFL", "carries")
+
+    assert dependency.payload["distribution"] == "DPO"
+
+
 @pytest.mark.parametrize("namespace", ["", ".", "..", "parent/child", "../escape"])
 def test_dependency_resolution_rejects_unsafe_namespace(tmp_path, namespace):
     with pytest.raises(ValueError, match="invalid dependency namespace"):
@@ -332,15 +383,13 @@ def test_mlb_hitter_rebuild_does_not_require_pitch_count_model(tmp_path):
         stats.preflight_training_dependencies("pitcher strikeouts")
 
 
-def test_mlb_frozen_constructor_does_not_fetch_live_pitchers(monkeypatch):
-    def fail_live_fetch():
-        raise AssertionError("live probable-pitcher lookup must stay off the frozen path")
+def test_mlb_constructor_does_not_reach_the_schedule_feed(monkeypatch):
+    def fail_live_fetch(**_):
+        raise AssertionError("constructing StatsMLB must stay off the network")
 
-    monkeypatch.setattr("sportstradamus.stats.mlb.get_mlb_pitchers", fail_live_fetch)
+    monkeypatch.setattr("statsapi.schedule", fail_live_fetch)
 
-    stats = StatsMLB(load_live_pitchers=False)
-
-    assert stats.pitchers == {}
+    StatsMLB()
 
 
 def test_trim_and_parquet_sha_are_reproducible(tmp_path):
@@ -370,15 +419,13 @@ def test_trim_and_parquet_sha_are_reproducible(tmp_path):
 
 
 def test_full_rebuild_write_canonicalizes_feature_order(tmp_path):
-    stats = _Stats(_matrix())
     outputs = [tmp_path / "one.parquet", tmp_path / "two.parquet"]
     matrices = [_matrix(), _matrix().reindex(columns=list(reversed(_matrix().columns)))]
 
     for matrix, output in zip(matrices, outputs, strict=True):
-        persisted = _step_persist_matrix_and_comps(
+        persisted = _step_persist_matrix(
             matrix,
             output,
-            stats,
             deterministic=False,
             full_rebuild=True,
         )

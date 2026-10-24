@@ -10,11 +10,15 @@
 #   close-lines        confer --close-lines
 #   meditate           train/retrain models
 #   reflect            nightly resolution
-#   gate-status        scripts/gate_status_update.sh (monthly: refresh main ship_config, open PR)
+#   export-line-movement  refresh the Board's DFS line-movement snapshot from the archive
+#   gate-status        scripts/gate_status_update.sh (monthly: refresh main's stat_meta.json, open PR)
 #   fp-fetch           fetch fp run (weekly: snapshot Fantasy Points Data Suite)
 #   ctg-fetch          fetch ctg run (snapshot Cleaning the Glass NBA tables)
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
+#   headshots          fetch headshots (monthly: refresh the player-headshot cache)
 #   ledger-commit      bet ledger-commit --run-slot {morning,afternoon}
+#   odds-backfill      scripts.backfill_historical_odds on the live polling key, in
+#                      leftover-only mode; the cron line names the pull
 #
 # Environment (optional):
 #   HEALTHCHECK_URL_<JOB>   per-job healthchecks.io URL (e.g. HEALTHCHECK_URL_PROPHECIZE)
@@ -23,14 +27,24 @@
 #   LOG_DIR                 log directory (default: $SPORTSTRADAMUS_DIR/logs)
 #   ARCHIVE_LOCK_TIMEOUT    seconds to wait for the shared archive lock (default: 900)
 #   GIT_PULL                set 0 to skip the pre-job devel pull (default: 1)
+#   DASHBOARD_UNIT          systemd unit to restart when a pull moves dashboard
+#                           code (default: sportstradamus-dashboard.service; set
+#                           empty to skip the restart)
+#
+# Healthchecks pings:
+#   Every ping carries a `?rid=` run ID and a body whose first line is
+#   `job=<job> host=<host> status=…`, so an alert names its own job and its own
+#   elapsed time even when several HEALTHCHECK_URL_<JOB> share one check UUID.
 #
 # Concurrency model:
 #   - Per-job flock (-n): a second invocation of the *same* job is skipped.
 #   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
 #     the pull and run the checkout as-is. A failed pull never blocks the job.
-#   - Shared archive flock (-w): all jobs serialize on the DuckDB archive so
-#     they don't fight over the single-writer lock. A queued job waits up to
+#   - Shared archive flock (-w): every job but close-lines serializes on the DuckDB
+#     archive so they don't fight over the single-writer lock. A queued job waits up to
 #     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
+#     close-lines takes the same lock from Python around its archive write alone, and
+#     leaves what it fetched spooled for its next tick when the lock stays busy.
 #
 # Exit codes: propagates the wrapped command's exit code.
 
@@ -41,9 +55,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="${SPORTSTRADAMUS_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
 LOCK_DIR="${LOCK_DIR:-/tmp}"
+DASHBOARD_UNIT="${DASHBOARD_UNIT:-sportstradamus-dashboard.service}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|gate-status|fp-fetch|ctg-fetch|savant-fetch|ledger-commit> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit|odds-backfill> [args...]" >&2
     exit 64
 fi
 
@@ -59,11 +74,20 @@ case "$JOB" in
     close-lines)  CMD=("${UMBRELLA[@]}" confer --close-lines) ;;
     meditate)     CMD=("${UMBRELLA[@]}" meditate) ;;
     reflect)      CMD=("${UMBRELLA[@]}" reflect) ;;
+    export-line-movement) CMD=("${UMBRELLA[@]}" export-line-movement) ;;
     gate-status)  CMD=(bash "$SCRIPT_DIR/gate_status_update.sh") ;;
     fp-fetch)     CMD=("${UMBRELLA[@]}" fetch fp run) ;;
     ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;
     savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
+    headshots)    CMD=("${UMBRELLA[@]}" fetch headshots) ;;
     ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
+    # The paying key and the leftover-only flags live here, not on the cron line: the
+    # same pull without --surplus-only buys its whole range at once on the key live
+    # polling spends.
+    odds-backfill)
+        CMD=(poetry run python -m sportstradamus.scripts.backfill_historical_odds
+            --key-name odds_api_plus --props-only --newest-first --surplus-only)
+        ;;
     *)
         echo "unknown job: $JOB" >&2
         exit 64
@@ -90,10 +114,37 @@ job_upper="$(echo "$JOB" | tr '[:lower:]-' '[:upper:]_')"
 hc_var="HEALTHCHECK_URL_${job_upper}"
 HC_URL="${!hc_var:-${HEALTHCHECK_URL:-}}"
 
+# Pairs this run's /start with its own terminating ping. Without it healthchecks
+# times the run from whichever job pinged /start last, so a shared check reports
+# some other job's elapsed time on our failure.
+RUN_ID="$(cat /proc/sys/kernel/random/uuid)"
+HC_TAG="job=$JOB host=${HOSTNAME%%.*}"
+
 ping_hc() {
-    local suffix="$1"  # "" for success, "/fail" for failure, "/start" for start
+    local suffix="$1" body="${2-}"  # "" for success, "/fail" for failure, "/start" for start
     [[ -z "$HC_URL" ]] && return 0
-    curl -fsS --max-time 10 --retry 3 -o /dev/null "${HC_URL}${suffix}" || true
+    printf '%s' "$body" | curl -fsS --max-time 10 --retry 3 --data-binary @- \
+        -o /dev/null "${HC_URL}${suffix}?rid=${RUN_ID}" || true
+}
+
+# The logs are mostly tqdm carriage-return frames, so a raw tail is one
+# unreadable progress bar. Split on \r and drop the frames.
+log_excerpt() {
+    tail -c 262144 "$LOG_FILE" | tr '\r' '\n' \
+        | grep -vE 'it/s\]|s/it\]|\?it/s\]' | tail -n 40
+}
+
+# Names the live jobs when we lose the archive lock — the holder is one of
+# them, and "waited 900s" alone doesn't say who starved us.
+running_jobs() {
+    local lock name found=()
+    for lock in "$LOCK_DIR"/sportstradamus-*.lock; do
+        name="${lock##*/sportstradamus-}"
+        name="${name%.lock}"
+        case "$name" in archive | git-pull | "$JOB") continue ;; esac
+        flock -n "$lock" true 2>/dev/null || found+=("$name")
+    done
+    echo "${found[*]:-none}"
 }
 
 log() {
@@ -107,13 +158,19 @@ pull_devel() {
             exit 0
         fi
         git checkout -- "${MODIFIER_CONFIGS[@]}" >>"$LOG_FILE" 2>&1 || true
+        # What this pull moved, not the checkout's last move: HEAD@{1} still names
+        # the previous deploy on every later job, which restarted the dashboard
+        # at each one.
+        local before pulled
+        before=$(git rev-parse HEAD)
         if ! git pull --ff-only origin devel >>"$LOG_FILE" 2>&1; then
             log "PULL_WARN job=$JOB reason=pull_failed action=run_existing_checkout"
             exit 0
         fi
+        pulled=$(git diff --name-only "$before" HEAD)
         # A pull that moves the dependency set must sync the venv before the
         # job runs, or the checkout imports against stale packages.
-        if git diff --name-only 'HEAD@{1}..HEAD' 2>/dev/null | grep -qE '^(pyproject\.toml|poetry\.lock)$'; then
+        if grep -qE '^(pyproject\.toml|poetry\.lock)$' <<<"$pulled"; then
             if poetry install --no-interaction >>"$LOG_FILE" 2>&1; then
                 log "PULL_INSTALL job=$JOB ok"
             else
@@ -128,12 +185,24 @@ pull_devel() {
         else
             log "PULL_WARN job=$JOB reason=fold_failed"
         fi
+        # The dashboard is the only long-lived process, so a pull that moves its
+        # modules or a config it reads leaves it serving the sys.modules it
+        # imported before the pull.
+        if [[ -n "$DASHBOARD_UNIT" ]] \
+            && grep -qE '^src/sportstradamus/(dashboard/|data/config/)' <<<"$pulled"; then
+            if sudo systemctl restart "$DASHBOARD_UNIT" >>"$LOG_FILE" 2>&1; then
+                log "PULL_RESTART job=$JOB unit=$DASHBOARD_UNIT ok"
+            else
+                log "PULL_WARN job=$JOB reason=dashboard_restart_failed"
+            fi
+        fi
     ) 7>"$PULL_LOCK_FILE"
 }
 
 run() {
     log "START job=$JOB cmd=${CMD[*]}"
-    ping_hc "/start"
+    ping_hc "/start" "$HC_TAG status=start
+cmd=${CMD[*]}"
 
     local start_ts end_ts duration status
     start_ts=$(date +%s)
@@ -146,14 +215,13 @@ run() {
 
     if [[ $status -eq 0 ]]; then
         log "OK job=$JOB duration=${duration}s"
-        ping_hc ""
+        ping_hc "" "$HC_TAG status=ok duration=${duration}s"
     else
         log "FAIL job=$JOB duration=${duration}s exit=$status"
-        # Send last 50 lines of the log as the failure body so the alert is useful.
-        if [[ -n "$HC_URL" ]]; then
-            tail -n 50 "$LOG_FILE" | curl -fsS --max-time 10 --retry 3 \
-                --data-binary @- -o /dev/null "${HC_URL}/fail" || true
-        fi
+        ping_hc "/fail" "$HC_TAG status=fail duration=${duration}s exit=$status
+log=$LOG_FILE
+--- last 40 log lines ---
+$(log_excerpt)"
     fi
     return $status
 }
@@ -173,17 +241,23 @@ fi
 
 # Shared archive lock: serialize against any other job touching the DuckDB
 # archive so we don't crash on DuckDB's single-writer constraint. Wait up to
-# ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish.
-exec 8>"$ARCHIVE_LOCK_FILE"
-wait_start=$(date +%s)
-if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
-    waited=$(( $(date +%s) - wait_start ))
-    log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
-    ping_hc "/fail"
-    exit 75  # EX_TEMPFAIL
+# ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish. close-lines takes this lock
+# itself, around its archive write only: a 2-second job queued behind a 20-minute
+# prophecize misses the games it exists to capture.
+if [[ "$JOB" != close-lines ]]; then
+    exec 8>"$ARCHIVE_LOCK_FILE"
+    wait_start=$(date +%s)
+    if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
+        waited=$(( $(date +%s) - wait_start ))
+        log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
+        ping_hc "/fail" "$HC_TAG status=fail_lock waited=${waited}s
+$JOB never started: gave up waiting for the shared DuckDB archive lock.
+jobs running: $(running_jobs)"
+        exit 75  # EX_TEMPFAIL
+    fi
+    wait_end=$(date +%s)
+    wait_duration=$((wait_end - wait_start))
+    [[ $wait_duration -gt 1 ]] && log "WAIT job=$JOB archive_lock_wait=${wait_duration}s"
 fi
-wait_end=$(date +%s)
-wait_duration=$((wait_end - wait_start))
-[[ $wait_duration -gt 1 ]] && log "WAIT job=$JOB archive_lock_wait=${wait_duration}s"
 
 run

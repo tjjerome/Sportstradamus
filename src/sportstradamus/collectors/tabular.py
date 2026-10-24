@@ -30,8 +30,12 @@ _TEAM_PREFIX = "team_"
 _JSON_ROW_KEYS = ("rows", "data", "values", "stats", "leaderboard")
 
 
-def parse_tabular_response(body: object) -> pd.DataFrame:
+def parse_tabular_response(body: object, **_context: object) -> pd.DataFrame:
     """Turn a collector response into a DataFrame, tolerating four body shapes.
+
+    The runner hands every transform the catalog entry and the (season, week)
+    cell that produced the body; these two sources are date-keyed and need no
+    column translation, so that context is unused here.
 
     - a ready DataFrame (``Scrape.get_csv`` already parsed the CSV),
     - CSV / delimited text (a paid export downloaded as text),

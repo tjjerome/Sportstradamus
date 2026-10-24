@@ -34,7 +34,7 @@ WorkingDirectory=<repo-checkout>
 Environment=STREAMLIT_SERVER_PORT=8501
 Environment=STREAMLIT_SERVER_ADDRESS=127.0.0.1
 Environment=STREAMLIT_SERVER_HEADLESS=true
-ExecStart=<path-to-poetry> run dashboard
+ExecStart=<path-to-poetry> run python -m sportstradamus dashboard
 Restart=always
 RestartSec=5
 User=<user>
@@ -43,7 +43,7 @@ User=<user>
 WantedBy=multi-user.target
 ```
 
-`poetry run sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
+`sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
 it launches `streamlit run` on the package's `dashboard/app.py` with the file
 watcher off, so an unattended server never shows the "Source file changed,
 rerun?" popup. Don't point `ExecStart` at a `.py` directly — the launcher
@@ -57,6 +57,11 @@ is only reachable through Tailscale Serve.
 sudo systemctl daemon-reload
 sudo systemctl enable --now <unit>
 ```
+
+The unit name matters beyond this file: `run_job.sh` restarts it after a pull
+that moves dashboard code, through `DASHBOARD_UNIT` and a sudoers rule pinned to
+the literal command. See
+[OPERATIONS.md](OPERATIONS.md#dashboard-as-a-service).
 
 ## 2. Join the tailnet
 

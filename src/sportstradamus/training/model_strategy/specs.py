@@ -51,10 +51,11 @@ def _base(
     fixed_controls: dict[str, str] | None = None,
     fixed_persist: dict[str, str] | None = None,
     applicability: dict | None = None,
+    implementation_version: int = 1,
 ) -> dict:
     return {
         "slug": slug,
-        "implementation_version": 1,
+        "implementation_version": implementation_version,
         "artifact_schema_version": 1,
         "family": slug,
         "applicability": applicability or {"distribution_classes": _BOTH_CLASSES},
@@ -74,7 +75,6 @@ def _base(
         "legacy_schema_field": "schema_version",
         "legacy_status_field": "status",
         "split_fingerprint_path": (),
-        "matrix_hash_path": (),
     }
 
 
@@ -86,7 +86,7 @@ _NORMS = (
     "centered_additive_eb_meanyr_k10",
     "ratio_projvol",
 )
-_BLENDING = ("crps", "nll")
+_BLENDING = ("crps", "crps_1se", "nll")
 _COUNT_DISPERSION = ("crps", "pit_ks")
 # The ``posthoc`` calibration pool as a search axis. POSTHOC_SLUGS also carries two structural
 # slugs, but those are registered specs of their own and never axis values here — selecting one
@@ -95,19 +95,30 @@ _POSTHOC = (
     "none",
     "prob_recal_isotonic",
     "prob_recal_platt",
+    "prob_recal_book_citl",
     "roe_mean",
     "isotonic_mean",
 )
+# prob_recal_platt_cv stays a registered PROB_STAGE slug but is out of the axis pool: its
+# 59-dump static screen (docs/archive/researcher_passing_g1.md) did not transfer to the
+# sweep's nested cross-fit frame — both live corners scored worse than their plain-platt
+# siblings (0.0062/0.0067 vs 0.0056/0.0064 g1 ci_hi on NFL passing yards, 2026-08-27).
+# Re-admission needs a fresh brief validating the OOF-lambda selection under sweep pressure.
+# What fails to transfer is the base rate: an outcome-fit intercept learns the fold's over-rate,
+# which the holdout does not share. prob_recal_book_citl anchors that level to the book's mean
+# over-probability instead of to outcomes, which is why it is in the pool.
+
 # pipeline gates the whole-CDF stage on ``posthoc_slug in CDF_STAGE and dist == "SkewNormal"``; on
 # any other family it falls through to the scalar path, so the corner would train identically to
 # ``none`` while carrying a different fingerprint.
 _POSTHOC_SKEWNORMAL = (*_POSTHOC, "cdf_recal_isotonic")
 # A base spec deliberately leaves ``hpo_selection`` and ``stabilization`` out of its corner. Neither
-# value is decided by the corner: ``cli._retry_calibrated_if_g4_only`` flips a cell to ``calibrated``
-# and persists it after a Gate-4-only failure (8 cells carry it today, 6 of them shipped), and the
-# pipeline silently upgrades ``stabilization`` to L2 for centered SkewNormal and Mixture. Pinning
-# either would sign a value the run did not train with and would make every such cell fail
-# ``validate_strategy_selection``. A structural spec is different — it pins the entire recipe.
+# value is decided by the corner: the confirm walk's calibrated fallback flips a cell to
+# ``calibrated`` and persists it after a Gate-4-only failure (8 cells carry it today, 6 of them
+# shipped), and the pipeline silently upgrades ``stabilization`` to L2 for centered SkewNormal and
+# Mixture. Pinning either would sign a value the run did not train with and would make every such
+# cell fail ``validate_strategy_selection``. A structural spec is different — it pins the entire
+# recipe.
 
 # With the class unlocked a count corner can win on a cell whose stat_meta carries a continuous
 # normalization; persisting ``none`` alongside keeps ship_config._validate_cell satisfied.
@@ -146,6 +157,14 @@ _BASE_SPECS = (
         },
         _SKEWNORMAL_PERSIST,
         fixed_controls={"dist": "SkewNormal"},
+        # v2 (2026-08-26): scorecard's dispersion-calibrator skew bound widened from +/-3
+        # to +/-8 — a v1 board row scored its calibrated retry under the railed fit, so
+        # its score is not comparable to a v2 one. Count families keep v1 (c-only
+        # calibrator, no skew term).
+        # v3 (2026-08-27): fused_loc's SkewNormal precision pool floors the model scale
+        # at _BLEND_MODEL_SCALE_FLOOR x book scale; earlier rows scored the un-floored
+        # blend. Count families unaffected (log-mean pools carry no scale seizure).
+        implementation_version=3,
     ),
     _base(
         "Mixture",
@@ -253,7 +272,11 @@ def _yards(
         "slug": slug,
         # v2: both methods hold their routing/expert set fixed across the holdout-blind
         # calibration folds, so a v1 board row's score is not comparable to a v2 one.
-        "implementation_version": 2,
+        # v3 (2026-08-26): dispersion-calibrator skew bound widened +/-3 -> +/-8 (same
+        # rotation as the SkewNormal base spec — structural methods share its calibrated
+        # retry).
+        # v4 (2026-08-27): SkewNormal precision-pool scale floor (same rotation again).
+        "implementation_version": 4,
         "artifact_schema_version": schema,
         "family": "SkewNormal",
         "applicability": applicability,
@@ -275,7 +298,6 @@ def _yards(
         "legacy_schema_field": "schema_version",
         "legacy_status_field": "status",
         "split_fingerprint_path": ("validation_audit", "split_fingerprint_sha256"),
-        "matrix_hash_path": (),
     }
 
 
@@ -325,30 +347,18 @@ BUILTIN_SPEC_DATA = (
 # Corners the sweep must evaluate on the cell's *current* matrix before it spends a sampler
 # trial. Unlike CONFIRM_EVIDENCE_CORNERS these carry no independent full-HPO verdict, so
 # confirmation never synthesizes one: a mandatory corner reaches a walk only through the board
-# row its own evaluation writes. The three NFL cells below are the reachability-repair
-# acceptance set — each names the recipe whose evidence predates the current grid.
+# row its own evaluation writes. The two NFL cells below are the reachability-repair
+# acceptance set — each names a structural recipe whose evidence predates the current grid.
+# No base-family recipe is seeded: those the sweep has to find unaided.
 MANDATORY_SWEEP_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     ("NFL", "receiving yards", TWO_PART_STRATEGY, _yards_controls(TWO_PART_STRATEGY)),
     ("NFL", "rushing yards", AFFINE_STRATEGY, _yards_controls(AFFINE_STRATEGY)),
-    (
-        "NFL",
-        "passing yards",
-        "SkewNormal",
-        {
-            "dist": "SkewNormal",
-            "normalization": "ratio_meanyr",
-            "dist_training_loss": "crps",
-            "sn_param": "direct",
-            "blending_loss_fn": "nll",
-            "posthoc": "none",
-        },
-    ),
 )
 
 # Corners with an independent full-HPO six-gate pass, kept so the sweep can seed a cell with a
 # known-good recipe instead of rediscovering it and so confirmation can nominate it directly.
 # Registry validates each against its spec's grid at import. NFL passing TDs:
-# docs/handoffs/model_improvement_track.md, the 2026-07-20 NFL popular-market re-baseline.
+# docs/archive/nfl_popular_market_rebaseline_2026-07-20.md.
 CONFIRM_EVIDENCE_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     (
         "NFL",

@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.training.role_specs import (
-    RoleSpec,
     league_position_codes,
     position_label,
     role_spec_for,

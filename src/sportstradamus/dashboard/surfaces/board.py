@@ -12,9 +12,11 @@ from sportstradamus.dashboard.components.slip_builder import render_simple_build
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     format_ts,
-    load_current_game_corr,
+    load_current_line_movement,
     load_current_meta,
     load_current_offers,
+    load_game_ctxs,
+    load_pair_modifiers,
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
@@ -30,7 +32,7 @@ offers = sport_filtered(load_current_offers())
 
 if offers.empty:
     st.info(
-        "No current predictions found. Run `poetry run prophecize` to "
+        "No current predictions found. Run `sportstradamus prophecize` to "
         "generate `current_offers.parquet`."
     )
     st.stop()
@@ -41,6 +43,7 @@ MAIN_COLS = [
     "Player",
     "Market Display",
     "Line",
+    columns.MOVE,
     "Boost",
     "Win Prob",
     "Model Edge",
@@ -55,14 +58,20 @@ if signal_cols:
     signal = offers[signal_cols].fillna(0)
     offers = offers.loc[(signal != 0).any(axis=1)]
 
+# wrap=True on the widgets placed straight in a column below: Streamlit otherwise keeps
+# them on one scrolling row, which hides lenses on a phone and filter chips on a desktop.
 lens_col, side_col = st.columns([3, 1])
 with lens_col:
     lens = (
-        st.segmented_control("Prophecy lens", list(LENSES), default="Tonight", key="board_lens")
+        st.segmented_control(
+            "Prophecy lens", list(LENSES), default="Tonight", key="board_lens", wrap=True
+        )
         or "Tonight"
     )
 with side_col:
-    side = st.segmented_control("Side", ["All", "Over", "Under"], default="All", key="board_side")
+    side = st.segmented_control(
+        "Side", ["All", "Over", "Under"], default="All", key="board_side", wrap=True
+    )
 
 # Phone: the widget-heavy filters collapse into one expander; lens/side stay above.
 filter_host = st.expander("Filters") if mobile else st.container()
@@ -70,10 +79,10 @@ with filter_host:
     col1, col2, col3 = st.columns(3)
     with col1:
         leagues = sorted(offers["League"].dropna().unique())
-        selected_leagues = st.multiselect("League", leagues, default=leagues)
+        selected_leagues = st.multiselect("League", leagues, default=leagues, wrap=True)
     with col2:
         platforms = sorted(offers["Platform"].dropna().unique()) if "Platform" in offers else []
-        selected_platforms = st.multiselect("Platform", platforms, default=platforms)
+        selected_platforms = st.multiselect("Platform", platforms, default=platforms, wrap=True)
     with col3:
         markets = sorted(offers["Market"].dropna().unique())
         # Chips show the prose market name; the stored value stays the slug the filter keys off.
@@ -83,7 +92,11 @@ with filter_host:
             if pd.notna(m)
         }
         selected_markets = st.multiselect(
-            "Market", markets, default=markets, format_func=lambda s: market_labels.get(s, s)
+            "Market",
+            markets,
+            default=markets,
+            format_func=lambda s: market_labels.get(s, s),
+            wrap=True,
         )
 
     player_query = st.text_input("Player search", placeholder="e.g. Jokic")
@@ -132,13 +145,17 @@ init_detail_state()
 
 filtered = columns.add_match_column(filtered)
 filtered = columns.add_market_display(filtered)
+filtered = columns.add_line_movement(filtered, load_current_line_movement())
 
 # Bet rides along hidden (grid.py's arrow_col auto-hides it) for the Line arrow
 # cellRenderer's params.data.Bet; the Market slug rides along, renamed out of the way,
 # for the row-selection/slip-building code below (which matches offers by slug) — it
 # would otherwise collide with Market Display's LABELS rename to the same "Market"
-# header. Neither is one of the displayed MAIN_COLS.
-display_cols = [c for c in [*MAIN_COLS, "Bet", "Market"] if c in filtered.columns]
+# header. Move Spark carries the finished sparkline SVG the Move cellRenderer draws.
+# None of the three is a displayed MAIN_COLS entry.
+display_cols = [
+    c for c in [*MAIN_COLS, "Bet", "Market", columns.MOVE_SPARK] if c in filtered.columns
+]
 grid_df = filtered[display_cols].copy()
 if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
@@ -161,7 +178,9 @@ grid_df = grid_df.rename(columns=columns.LABELS)
 # frame, so every lookup below keys off the post-rename name, same as "Win %" already
 # does for Win Prob.
 numeric_cols = [
-    c for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge") if c in grid_df.columns
+    c
+    for c in ("Line", columns.MOVE, "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge")
+    if c in grid_df.columns
 ]
 if mobile:
     # Cards read the pre-rename filtered frame (raw 0–1 Win Prob; Model Edge ×100
@@ -182,9 +201,10 @@ else:
         percent_cols=["Win %"],
         signed_percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
         arrow_col="Line",
-        hidden_cols=["Bet", "Market Slug"],
+        spark_col=columns.MOVE,
+        spark_svg_col=columns.MOVE_SPARK,
+        hidden_cols=["Bet", "Market Slug", columns.MOVE_SPARK],
     )
-    st.caption("Trend sparklines arrive with the L1 line-movement export.")
 
 if st.session_state.corr_nav:
     # Rerun from "View →" button — keep the stack as-is, just clear the flag.
@@ -238,7 +258,7 @@ if not mobile:
             st.caption("Select an Underdog or Sleeper row to add it to a slip.")
     else:
         st.caption("Select a row above, then add it to your slip.")
-render_simple_builder(filtered, load_current_game_corr())
+render_simple_builder(filtered, load_game_ctxs(), load_pair_modifiers())
 
 with st.expander("Snapshot info"):
     st.json(meta)

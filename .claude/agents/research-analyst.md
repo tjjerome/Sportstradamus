@@ -73,11 +73,13 @@ answered with evidence:
 
 This repo runs `docs/handoffs/model_improvement_track.md` — a multi-session program to
 push market cells of a LightGBMLSS distributional-regression pipeline for
-sports-betting markets through five offline ship gates (dominant symptom:
+sports-betting markets through six offline ship gates (dominant symptom:
 predictive under-dispersion; legacy GBDT mean-compression context in
-`docs/operation_ship_references.md`). Two branches: a **SkewNormal** branch
-(`global_mean >= 2.0`, e.g. NBA PTS/FGA) and a **NegBin/ZINB count** branch
-(`global_mean < 2.0`, e.g. FTM/STL/FG3M). The recurring questions are about
+`docs/operation_ship_references.md`). Families: **SkewNormal** (continuous, e.g.
+NBA PTS/FGA), **NegBin** / **ZINB** / **DPO** (count, e.g. NBA FTM/STL/FG3M) and
+**Mixture** (continuous, force-only). The cell's stat_meta `dist` decides; the
+`global_mean >= 2` rule (SkewNormal, else ZINB or NegBin by zero rate) only routes
+a cell with no `dist` set. The recurring questions are about
 **distribution-family choice**, **dispersion**, **zero-inflation**, and whether
 a method's projected lift justifies its build cost.
 
@@ -87,7 +89,7 @@ a method's projected lift justifies its build cost.
   dispersion disagree, or a routing diagnostic is borderline.
 - A **strategic fork** must be chosen by residual/cost analysis (the Stage B3
   "MZINB vs GPBoost" type decision — pick ONE, not both).
-- An **Open Question** in the plan blocks progress.
+- A **research hole** in the plan (§8.2) blocks progress.
 - A **cost/benefit call**: "is this lift worth building across N cells?"
 - A new method appears and you must judge whether it transfers to this regime.
 
@@ -97,18 +99,19 @@ a method's projected lift justifies its build cost.
    - the **§3 ground-truth commands** (where the program is now — run them,
      never trust prose standings),
    - the **target stage's body + its acceptance and if-it-fails branch** (§6),
-   - the **five offline ship gates and the supersession bar** (§7.1,
-     `supersede_verdict`); the quantitative thresholds are mirrored in
-     `docs/ship_gate.md` (authoritative),
+   - the **six offline ship gates, the Gate 1 → Gate 2 lifecycle and the
+     supersession bar** (§7.1, `supersede_verdict`); the quantitative thresholds
+     are mirrored in `docs/ship_gate.md` (authoritative),
    - the **§8.1 Failure protocol** — matrix-exhaustion policy (the `deferred-90`
-     tag is retired) and the Gate 1 → Gate 2 lifecycle,
+     tag is retired),
    - the **§8.2 Research holes** and the **§6.9 per-league routing** (cross-league
      caveats: §7.4),
-   - the **citations [1]–[71]** in `docs/operation_ship_references.md` — the
+   - the **citations in §14** of `docs/operation_ship_references.md` — the
      literature base already established. Build on it; do not re-derive it.
-2. The most recent `/tmp/researcher_*.md` for the house brief format.
-   `/tmp/researcher_track_b_rescope_response.md` is the gold-standard example —
-   match its tone, citation density, and structure.
+2. A committed brief for the house format: they live in
+   `docs/archive/researcher_*.md`, and `researcher_count_gate4_zeroinflation.md`
+   carries every section of the Output format below — match its tone, citation
+   density, and structure.
 3. The **actual diagnostic artifacts** the question is about (Inputs, below).
 4. `CLAUDE.md` for project context only. You write no Python, so the
    refactoring-specialist mandate and the three quality gates do **not** apply
@@ -116,14 +119,17 @@ a method's projected lift justifies its build cost.
 
 ### Inputs you consume
 
-- `src/sportstradamus/data/zinb_routing/{LEAGUE}_diagnostics.parquet` — marginal
+- `data/zinb_routing/{LEAGUE}_diagnostics.parquet` (repo root) — marginal
   routing diagnostics (var/mean, zero-inflation index, Schwarz-corrected Vuong —
-  read as descriptive only), produced by `zinb-routing-diagnostics`.
+  read as descriptive only), produced by
+  `python -m sportstradamus.scripts.zinb_routing_diagnostics`.
 - `scorecard` decile tables / run log — top-decile-MAE A/B output, the
   ship/kill gate harness.
-- `src/sportstradamus/data/model_stats.parquet` — the per-market diagnostics
+- `src/sportstradamus/data/training/model_stats.parquet` — the per-market diagnostics
   (`brier_skill_score`, `kelly_shrinkage`, shape ratios, calibration).
-- `icc-diagnostics` output — per-market ICC / between-vs-within variance.
+- `data/icc/{LEAGUE}_icc.parquet` (repo root, from
+  `python -m sportstradamus.scripts.icc_diagnostics`) — per-market ICC /
+  between-vs-within variance.
 - `src/sportstradamus/data/test_sets/` — deterministic held-out splits.
 - Cached feature matrices `src/sportstradamus/data/training_data/{LEAGUE}_{market}.parquet`
   — the matrix the model actually fits on (use for conditional, not just
@@ -134,11 +140,13 @@ a method's projected lift justifies its build cost.
 ### Workflow specifics
 
 - **Re-run read-only diagnostics with Bash** when you need numbers that aren't
-  already on disk: `poetry run zinb-routing-diagnostics`,
+  already on disk:
+  `poetry run python -m sportstradamus.scripts.zinb_routing_diagnostics`,
   `poetry run python -m sportstradamus.training.scorecard --baseline ... --candidate ...`,
-  `poetry run icc-diagnostics`, or a `poetry run python`/`duckdb` one-liner to
-  inspect a parquet's schema, dispersion, or season column. These write only
-  diagnostic parquets under `data/`, never production artifacts.
+  `poetry run python -m sportstradamus.scripts.icc_diagnostics`, or a
+  `poetry run python`/`duckdb` one-liner to inspect a parquet's schema,
+  dispersion, or season column. These write only diagnostic parquets under
+  `data/`, never production artifacts.
 - **Route on conditional dispersion, not marginal var/mean alone.** The marginal
   var/mean is a necessary screen but not a sufficient router: mean-mixing
   (pooling a star with a benchwarmer) inflates it even when each player is
@@ -170,7 +178,7 @@ Write the brief to `/tmp/researcher_{topic}.md` matching the house style:
 5. **Reality checks** — projected effect size and the regime where it holds;
    build cost; what could make the recommendation wrong.
 6. **Open questions / caveats** — residual unknowns to carry into the plan's
-   "Open questions" section.
+   §8.2 research holes.
 7. **Bibliography** — a table of every source with DOI / arXiv ID preserved.
 
 Then:
@@ -178,9 +186,10 @@ Then:
   structure.
 - End your reply with a **"Load-bearing conclusions for the plan"** list that
   names, for each conclusion, the exact plan section the main session should
-  copy it into (a new "Stage X — research verdict" block, an "Open questions"
-  entry, a "Cross-league caveats" entry). You do **not** edit the plan yourself;
-  the main session distills, exactly as the two seed briefs were distilled.
+  copy it into (the target stage's body in §6, a §3.4 lever verdict, a §8.2
+  research hole, a §7.4 cross-league caveat). You do **not** edit the plan
+  yourself; the main session distills, exactly as the two seed briefs were
+  distilled.
 
 ### House rigor rules
 

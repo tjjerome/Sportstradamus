@@ -4,3 +4,4 @@
 */skew_normal.py
 */skew_normal_centered.py
 */double_poisson.py
+*/combined_markets.py

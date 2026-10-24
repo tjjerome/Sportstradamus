@@ -25,7 +25,12 @@ from sportstradamus.dashboard.components.deep_dive_tabs import (
     _p_over,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
-from sportstradamus.leg_schema import build_leg
+from sportstradamus.dashboard.slip_engine import modifier_map
+from sportstradamus.helpers import stat_map
+from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
+from sportstradamus.leg_schema import build_leg, leg_label
+from sportstradamus.prediction.correlation import _corr_partners
+from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 
 def test_decode_json_and_degenerate():
@@ -118,9 +123,10 @@ def test_gauge_svg_fill_is_sequential_not_gold():
     assert 'fill="#7FAAE8"' in g  # SEQUENTIAL_COLORS[3]
 
 
-def _corr_fixture() -> tuple[pd.DataFrame, dict, pd.DataFrame]:
-    """A focus offer (idx 10) + two candidates (11, 12) on a non-0-based index, plus a
-    positive-rho correlation slice — the shape ``_lift_survivors`` resolves against."""
+def _corr_fixture() -> tuple[pd.DataFrame, dict, dict]:
+    """A focus offer (idx 10) + two candidates (11, 12) on a non-0-based index, plus the
+    per-game contexts carrying their positive rho — the shape ``_lift_survivors`` resolves
+    against."""
     filtered = pd.DataFrame(
         {
             "Player": ["A. Wilson", "J. Young", "A. Boston"],
@@ -149,13 +155,16 @@ def _corr_fixture() -> tuple[pd.DataFrame, dict, pd.DataFrame]:
             "rho": [0.4, 0.3],
         }
     )
-    return filtered, focus_leg, corr
+    return filtered, focus_leg, ctxs_from_frame(None, corr)
+
+
+_NO_MODS: dict = {}
 
 
 def test_lift_survivors_resolves_idx_and_returns_multiplier():
-    filtered, focus_leg, corr = _corr_fixture()
+    filtered, focus_leg, ctxs = _corr_fixture()
     items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    survivors = _lift_survivors(items, filtered, focus_leg, corr, "Underdog")
+    survivors = _lift_survivors(items, filtered, focus_leg, ctxs, _NO_MODS, "Underdog")
     assert len(survivors) == 1
     item, idx, lift = survivors[0]
     assert item["player"] == "J. Young"
@@ -166,17 +175,26 @@ def test_lift_survivors_resolves_idx_and_returns_multiplier():
 
 
 def test_lift_survivors_drops_missing_and_nonpositive():
-    filtered, focus_leg, corr = _corr_fixture()
+    filtered, focus_leg, ctxs = _corr_fixture()
     # A partner not in the current grid (idx None) has no computable lift — dropped.
     missing = [{"player": "Nobody", "market": "AST", "bet": "Over", "line": 5.5, "mult": 1.2}]
-    assert _lift_survivors(missing, filtered, focus_leg, corr, "Underdog") == []
+    assert _lift_survivors(missing, filtered, focus_leg, ctxs, _NO_MODS, "Underdog") == []
 
     # A low-probability pair prices below the solo baseline (lift <= 1.0) — dropped, so
     # the "positive-lift rows only" filter isn't silently defeated.
     cold = filtered.assign(**{"Win Prob": [0.25, 0.25, 0.25], "Kelly": [-0.5, -0.5, -0.5]})
     cold_focus = build_leg(cold.loc[10])
     items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    assert _lift_survivors(items, cold, cold_focus, corr, "Underdog") == []
+    assert _lift_survivors(items, cold, cold_focus, ctxs, _NO_MODS, "Underdog") == []
+
+    # The survivor of the test above, once Underdog refuses it beside the focus: $0 — dropped.
+    refused = modifier_map(
+        pd.DataFrame(
+            [["Underdog", "WNBA", "LVA/IND", "A. Wilson|PTS|Over", "J. Young|3PM|Over", 0.0]],
+            columns=PAIR_MODIFIER_COLS,
+        )
+    )
+    assert _lift_survivors(items, filtered, focus_leg, ctxs, refused, "Underdog") == []
 
 
 def _extract_corr_items(raw):
@@ -246,3 +264,31 @@ def test_corr_partner_lookup_pins_platform_across_markets_and_lines():
     reb_partner = {"player": "Mitchell Robinson", "market": "REB", "bet": "Over", "line": 5.5}
     assert find_offer_idx(reb_partner, filtered, platform="Underdog") == 1
     assert find_offer_idx(partner, filtered, platform="Underdog") != 1
+
+
+def test_stored_partner_resolves_on_a_board_renamed_through_the_platform_map():
+    """Scoring runs under the platform's labels and the board run then renames ``Market``
+    through the platform's map, so a partner is stored under the mapped name. Stored
+    under the label ("Receiving Yards") no Underdog partner met its board row, and every
+    pairing card came up empty. The mapped name is the board's and not the league's own
+    key: an NHL assists row is ``AST`` there."""
+    scored = pd.DataFrame(
+        {
+            "League": ["NFL", "NHL"],
+            "Player": ["Travis Kelce", "Connor McDavid"],
+            "Market": ["Receiving Yards", "Assists"],
+            "Bet": ["Over", "Under"],
+            "Line": [60.5, 1.5],
+            "Corr Mult": [1.08, 1.04],
+        }
+    )
+    board = scored.assign(Market=scored["Market"].map(stat_map["Underdog"]), Platform="Underdog")
+
+    partners = _corr_partners(scored, stat_map["Underdog"])
+
+    assert [find_offer_idx(partner, board, platform="Underdog") for partner in partners] == [0, 1]
+    assert [leg_label(partner) for partner in partners] == [
+        "Travis Kelce Over 60.5 Receiving Yards",
+        # The display map names NHL assists by the league's key, and the label is read under it.
+        "Connor McDavid Under 1.5 Assists",
+    ]

@@ -7,14 +7,23 @@ consistent across the scrape/predict pipeline.
 
 Schema (created on first connect):
 
-* ``odds(league, market, game_date, entity, book, ev, observed_at)`` — one
-  row per (slate-entry, book, observation). ``entity`` is a player name for
-  player props or a team name for moneyline / totals / spreads / team
-  markets. ``observed_at`` is set at write time so successive polls accrue
-  a time-series rather than overwriting per-book EVs.
-* ``lines(league, market, game_date, entity, line, observed_at)`` — every
-  observed line value with its observation timestamp. Skipped for
-  moneyline / totals / spreads / team-only markets, which are pure EV.
+* ``odds(league, market, game_date, entity, book, ev, observed_at, under_prob,
+  line)`` — one row per (slate-entry, book, observation). ``entity`` is a
+  player name for player props or a team name for moneyline / totals /
+  spreads / team markets. ``observed_at`` is set at write time so successive
+  polls accrue a time-series rather than overwriting per-book EVs.
+  ``under_prob``/``line`` are the shape-free quote (see the DDL below).
+* ``lines(league, market, game_date, entity, line, observed_at)`` — the
+  line-of-record log: every observed line value with its observation
+  timestamp. Skipped for moneyline / totals / spreads / team-only markets,
+  which are pure EV. No ``book`` column, so a reader cannot tell a DFS line
+  from a sharp one: the consensus line is read from ``odds.line``
+  (:meth:`Archive.get_line`) and this log is only what an entry with no
+  sportsbook line is graded at (:meth:`Archive.get_reference_line`).
+* ``ladder(league, market, game_date, entity, book, line, p_over,
+  observed_at)`` — every rung a book posted on every poll. ``odds`` keeps
+  only one tier per player-market, so this is the sole record of how a
+  book's own number moved (``prediction.line_movement``).
 
 :func:`clean_archive` drops dates older than ``cutoff_date`` and prunes
 combo / matchup pseudo-entities (``" + "``, ``" vs. "``).
@@ -22,12 +31,12 @@ combo / matchup pseudo-entities (``" + "``, ``" vs. "``).
 
 from __future__ import annotations
 
-import dataclasses
 import datetime
+import operator
 import os
 import time
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import timedelta
 from pathlib import Path
 
@@ -35,33 +44,20 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
+from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist, stat_map
 from sportstradamus.helpers.distributions import (
     SN_MAX_MEAN_FACTOR,
+    UNDERDOG_BOOST_BASELINE,
+    dfs_boost_probs,
     get_ev,
-    get_odds,
-    no_vig_odds,
 )
 from sportstradamus.helpers.text import remove_accents
-from sportstradamus.helpers.training_quotes import ArchivedBookQuote, pickem_quote
-
-
-@dataclasses.dataclass
-class ClosingLine:
-    """Consensus line and implied probability from the latest pre-kickoff odds snapshot.
-
-    Attributes:
-        line: Consensus line (median of all book lines).
-        devig_over: Implied probability of outcome exceeding the line (no-vig).
-        sample_ts: Timestamp of the latest odds snapshot (None if unavailable).
-        book_set: Set of books that quoted this entry.
-    """
-
-    line: float
-    devig_over: float
-    sample_ts: datetime.datetime | None
-    book_set: frozenset[str]
-
+from sportstradamus.helpers.training_quotes import (
+    DFS_PLATFORM_BOOKS,
+    ArchivedBookQuote,
+    pickem_quote,
+    sportsbook_cohort,
+)
 
 # Markets whose value schema is per-book EV only (no Lines table rows).
 _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
@@ -69,12 +65,41 @@ _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
 # Columns _book_rows may interpolate into SQL; anything else is an injection vector.
 _BOOK_VALUE_COLS = frozenset({"ev", "under_prob"})
 
+# Guards on the weighted book consensus: a DFS platform reposting a moved or
+# discounted line (the 2026-08 Sleeper WNBA incident) must not read as market truth.
+# A median line is only meaningful with at least this many lined book rows.
+_DIVERGENCE_MIN_BOOKS = 3
+# Normal cross-book jitter is half a point; only lines at least this far off the median drop.
+_DIVERGENCE_ABS_FLOOR = 2.0
+# High lines jitter proportionally, so the tolerance also scales with the median.
+_DIVERGENCE_REL_FACTOR = 0.25
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
+
+# clean_archive's default cutoff: the retention window carried over from the
+# original klepto-backed archive.
+_ARCHIVE_RETENTION_DAYS = 365 * 4
+
+# get_book_line_histories joins the caller's key frame through this DuckDB view.
+_KEY_JOIN_VIEW = "book_line_history_keys"
+_BOOK_LINE_HISTORY_COLS = [
+    "league",
+    "market",
+    "game_date",
+    "entity",
+    "book",
+    "observed_at",
+    "line",
+    "p_over",
+]
 
 # Hours before commence_time treated as "the books' line" during training.
 # Aligned with the typical Vegas closing-window inflection (~8h pre-game).
 TRAINING_LOOKBACK_HOURS: int = 8
 TRAINING_LOOKBACK = timedelta(hours=TRAINING_LOOKBACK_HOURS)
+
+# Game lines for a finished game are read as of 15:00 UTC on its game date: after the
+# morning confer poll (13:30 UTC, 14:30 in winter) and before any regular US start.
+GAME_LINE_TRAINING_CUTOFF = timedelta(hours=15)
 
 # Sharp books that anchor the movement-direction diagnostic in CLV.
 SHARP_BOOKS: tuple[str, ...] = ("pinnacle", "circa", "bookmaker")
@@ -146,35 +171,65 @@ def _safe_date(d: str | datetime.date | None) -> datetime.date | None:
         return None
 
 
-def _dfs_under_boost(over, boost_under):
-    return boost_under if boost_under and boost_under > 0 else over
+def _consensus_line(values: list[float]) -> float:
+    """Median of observed lines floored to the half-point; ``0.0`` when nothing usable."""
+    if not values:
+        return 0.0
+    line = np.floor(2 * np.median(values)) / 2
+    return 0.0 if np.isnan(line) else float(line)
 
 
-def _dedup_offers_by_boost(offers) -> list[dict]:
-    """Normalize ``offers`` to records, one per ``(Player, Market)``.
+def _sportsbook_line(quotes: Iterable[tuple[str, float | None]]) -> float:
+    """Consensus over the lines the sportsbooks post; ``0.0`` when none posts one.
 
-    Accepts a single dict or a list. Duplicates are resolved in favor of the
-    offer whose ``Boost_Over`` is closest to a neutral 1.0 (filling ``Boost_Over``
-    from ``Boost`` when absent). Empty list when no offers survive.
+    A pick'em platform's line never counts: it is the entry being graded, not
+    evidence of where the market sits.
     """
-    if not isinstance(offers, list):
-        offers = [offers]
-    df = pd.DataFrame(offers)
-    if df.empty:
-        return []
-    if "Boost_Over" not in df.columns:
-        df["Boost_Over"] = np.nan
-    if "Boost" in df.columns:
-        df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
-    df["Boost Factor"] = np.abs(df["Boost_Over"] - 1)
-    df = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])]
-    return df.to_dict(orient="records")
+    return _consensus_line(
+        [line for book, line in quotes if line is not None and book not in DFS_PLATFORM_BOOKS]
+    )
 
 
-def _resolve_market(league: str, raw_market: str, key: dict) -> str:
-    """Rename a sportsbook-native market string to its canonical per-league name."""
-    market = raw_market.replace("H2H ", "")
-    market = key.get(market, market)
+def _dfs_offer_probs(offer: dict, platform: str) -> list[float]:
+    """Payout-implied ``[p_over, p_under]`` for one DFS offer.
+
+    ``Boost_Over``/``Boost_Under`` are full decimal payouts on Sleeper but
+    modifiers on the standard slot payout on Underdog, so Underdog converts
+    through ``UNDERDOG_BOOST_BASELINE`` before the devig. A genuinely one-sided
+    offer keeps its missing side missing — fabricating the symmetric twin let
+    moved lines archive as fair 50/50 quotes.
+    """
+    over = offer.get("Boost_Over", 0)
+    under = offer.get("Boost_Under", 0)
+    if platform == "Underdog":
+        over, under = over * UNDERDOG_BOOST_BASELINE, under * UNDERDOG_BOOST_BASELINE
+    return dfs_boost_probs(over, under)
+
+
+def _drop_divergent_lines(
+    rows: list[tuple[str, float | None, float | None]],
+) -> list[tuple[str, float | None, float | None]]:
+    """Drop rows whose line sits far off the cohort median line.
+
+    A row that far from the pack is quoting a different offer (a DFS platform's
+    moved/discounted tier). The median only means anything with at least
+    ``_DIVERGENCE_MIN_BOOKS`` lined rows — below that the filter is inert — and
+    NULL-line rows (team markets, pre-migration history) are never dropped.
+    """
+    lined = [float(row[2]) for row in rows if row[2] is not None and np.isfinite(row[2])]
+    if len(lined) < _DIVERGENCE_MIN_BOOKS:
+        return rows
+    median_line = float(np.median(lined))
+    allowed = max(_DIVERGENCE_ABS_FLOOR, _DIVERGENCE_REL_FACTOR * median_line)
+    return [
+        row
+        for row in rows
+        if row[2] is None or not np.isfinite(row[2]) or abs(float(row[2]) - median_line) <= allowed
+    ]
+
+
+def archive_market(league: str, market: str) -> str:
+    """Archive key for a market label already renamed through its platform's ``stat_map``."""
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
     if league in ("NBA", "WNBA"):
@@ -182,23 +237,22 @@ def _resolve_market(league: str, raw_market: str, key: dict) -> str:
     return market
 
 
-def _devig_over(line, evs, dist, cv) -> float:
-    """Mean no-vig implied over-probability across the books' EVs.
+def cell_market(league: str, platform: str, label: str) -> str | None:
+    """The league's own cell key for a platform's market label; ``None`` when it has no cell.
 
-    Each book EV inverts through ``get_odds`` to an under-probability; the
-    over side is ``1 - under``. None / NaN EVs and prices that fail to invert
-    are skipped; ``NaN`` when no book yields a usable probability.
+    A label the platform's ``stat_map`` lacks has no cell. The map names a market
+    the same for every league, while the model cell, the gamelog column and the
+    archive go by the league's own name: NHL ``AST`` is the ``assists`` cell.
+    ``label`` is the platform's raw label, not a name the map has already renamed.
     """
-    over_probs = []
-    for ev in evs:
-        if ev is None or np.isnan(ev):
-            continue
-        try:
-            under_prob = get_odds(line, ev, dist, cv=cv)
-            over_probs.append(1.0 - under_prob)
-        except (ValueError, RuntimeError):
-            continue
-    return np.nan if not over_probs else float(np.mean(over_probs))
+    mapped = stat_map[platform].get(label)
+    return None if mapped is None else archive_market(league, mapped)
+
+
+def _resolve_market(league: str, raw_market: str, key: dict) -> str:
+    """Rename a sportsbook-native market string to its canonical per-league name."""
+    market = raw_market.replace("H2H ", "")
+    return archive_market(league, key.get(market, market))
 
 
 def clean_archive(cutoff_date: datetime.date | None = None) -> None:
@@ -208,7 +262,9 @@ def clean_archive(cutoff_date: datetime.date | None = None) -> None:
     defaults to four years before today (the original klepto window).
     """
     if cutoff_date is None:
-        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365 * 4)).date()
+        cutoff_date = (
+            datetime.datetime.today() - datetime.timedelta(days=_ARCHIVE_RETENTION_DAYS)
+        ).date()
     a = Archive()
     con = a._connection
     con.execute("DELETE FROM odds WHERE game_date < ?", [cutoff_date])
@@ -375,18 +431,28 @@ class Archive:
                 self._connection.execute(f"ALTER TABLE odds ADD COLUMN {col} DOUBLE")
         self._connection.commit()
 
-    def _weighted_book_ev(self, league: str, market: str, rows: list[tuple[str, float]]) -> float:
-        weights = book_weights.get(league, {}).get(market, {})
-        evs = []
-        ws = []
-        for book, ev in rows:
-            if ev is None:
-                continue
-            evs.append(ev)
-            ws.append(weights.get(book, 1))
-        if not evs:
+    def _weighted_book_ev(
+        self, league: str, market: str, rows: list[tuple[str, float | None, float | None]]
+    ) -> float:
+        """Weighted consensus over latest per-book rows, guarded against DFS poisoning.
+
+        The rows narrow to their sportsbooks first, under the same
+        :func:`sportsbook_cohort` policy the shape-free quote resolver applies, so
+        both consensus reads price off one rule rather than two and a pick'em
+        platform's line never sets the median a sportsbook is judged against. Of
+        those, rows quoting a line far from the cohort median are a different offer
+        and drop out; NULL-line rows (team markets, pre-migration history) never do.
+        """
+        usable = _drop_divergent_lines(
+            sportsbook_cohort([row for row in rows if row[1] is not None], operator.itemgetter(0))
+        )
+        if not usable:
             return float("nan")
-        return float(np.average(evs, weights=ws))
+
+        weights = book_weights.get(league, {}).get(market, {})
+        values = np.array([row[1] for row in usable], dtype=float)
+        ws = np.array([weights.get(row[0], 1) for row in usable], dtype=float)
+        return float(np.average(values, weights=ws))
 
     def _book_rows(
         self,
@@ -398,11 +464,13 @@ class Archive:
         at: datetime.datetime | None = None,
         case_insensitive_entity: bool = False,
         value_col: str = "ev",
-    ) -> list[tuple[str, float]]:
-        """Return ``[(book, value), ...]`` — latest ``value_col`` observation per book at-or-before ``at``.
+    ) -> list[tuple[str, float, float | None]]:
+        """Return ``[(book, value, line), ...]`` — latest ``value_col`` observation per book at-or-before ``at``.
 
         ``value_col`` selects the per-book column to read: ``"ev"`` (the consensus mean) or the
-        shape-free ``"under_prob"`` (backs :meth:`get_composite_under_prob`).
+        shape-free ``"under_prob"`` (backs :meth:`get_composite_under_prob`). ``line`` is the
+        same physical row's quoted line (NULL for team markets and pre-migration history),
+        carried so the consensus reducer can drop divergent-line quotes.
 
         ``at=None`` means "latest available", i.e. as-of-now.
 
@@ -426,8 +494,8 @@ class Archive:
                 f"value_col must be one of {sorted(_BOOK_VALUE_COLS)}, got {value_col!r}"
             )
         sql = (
-            f"SELECT book, {value_col} FROM ("
-            f"  SELECT book, {value_col}, observed_at, "
+            f"SELECT book, {value_col}, line FROM ("
+            f"  SELECT book, {value_col}, line, observed_at, "
             "         ROW_NUMBER() OVER (PARTITION BY book ORDER BY observed_at DESC) AS rn "
             "  FROM odds "
             f"  WHERE league=? AND market=? AND game_date=? AND {entity_clause}"
@@ -439,7 +507,10 @@ class Archive:
         # otherwise undefined, and changing the book iteration order can move a
         # floating-point weighted mean by a few ULPs across independent rebuilds.
         sql += ") WHERE rn = 1 ORDER BY book"
-        return [(book, val) for book, val in self._connection.execute(sql, params).fetchall()]
+        return [
+            (book, val, line)
+            for book, val, line in self._connection.execute(sql, params).fetchall()
+        ]
 
     def get_training_book_quotes(
         self,
@@ -491,7 +562,7 @@ class Archive:
         *,
         at: datetime.datetime | None = None,
     ) -> dict[str, tuple[list[ArchivedBookQuote], float]]:
-        """Batch coherent book rows and legacy lines for an entire training slate."""
+        """Batch coherent book rows and reference lines for an entire training slate."""
         d = _safe_date(date)
         ordered_entities = sorted(set(entities))
         if d is None or not ordered_entities:
@@ -524,11 +595,10 @@ class Archive:
         inputs = {}
         for entity in ordered_entities:
             values, seen_at = observed_lines.get(entity, ([], None))
-            legacy_line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
-            if np.isnan(legacy_line):
-                legacy_line = 0.0
-            rows = grouped[entity] or pickem_quote(market, legacy_line, seen_at)
-            inputs[entity] = (rows, legacy_line)
+            line_of_record = _consensus_line(values)
+            rows = grouped[entity] or pickem_quote(market, line_of_record, seen_at)
+            line = _sportsbook_line((row.book, row.line) for row in grouped[entity])
+            inputs[entity] = (rows, line or line_of_record)
         return inputs
 
     def _observed_lines(
@@ -539,7 +609,12 @@ class Archive:
         entities: list[str],
         at: datetime.datetime | None,
     ) -> dict[str, tuple[list[float], datetime.datetime | None]]:
-        """Distinct archived lines per entity, with the freshest observation time."""
+        """Distinct logged lines per entity, with the freshest observation time.
+
+        ``lines`` holds each pick'em platform's main rung beside the sportsbook medians
+        with no book to tell them apart, so the median of what this returns is a line of
+        record, never a consensus.
+        """
         placeholders = ",".join("?" for _ in entities)
         params: list = [league, market, d, *entities]
         sql = (
@@ -565,7 +640,7 @@ class Archive:
         *,
         at: datetime.datetime | None = None,
     ) -> dict[str, tuple[float, float]]:
-        """Batch the legacy weighted EV and consensus line for one slate."""
+        """Batch the legacy weighted EV and reference line for one slate."""
         d = _safe_date(date)
         ordered_entities = sorted(set(entities))
         if d is None or not ordered_entities:
@@ -574,8 +649,8 @@ class Archive:
 
         odds_params: list = [league, market, d, *ordered_entities]
         odds_sql = (
-            "SELECT entity, book, ev FROM ("
-            "  SELECT entity, book, ev, observed_at, "
+            "SELECT entity, book, ev, line FROM ("
+            "  SELECT entity, book, ev, line, observed_at, "
             "         ROW_NUMBER() OVER ("
             "             PARTITION BY entity, book ORDER BY observed_at DESC"
             "         ) AS rn "
@@ -586,32 +661,20 @@ class Archive:
             odds_sql += " AND observed_at <= ?"
             odds_params.append(at)
         odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
-        ev_rows: dict[str, list[tuple[str, float]]] = {entity: [] for entity in ordered_entities}
-        for entity, book, ev in self._connection.execute(odds_sql, odds_params).fetchall():
-            ev_rows[entity].append((book, ev))
+        ev_rows: dict[str, list[tuple[str, float, float | None]]] = {
+            entity: [] for entity in ordered_entities
+        }
+        for entity, book, ev, line in self._connection.execute(odds_sql, odds_params).fetchall():
+            ev_rows[entity].append((book, ev, line))
 
-        line_params: list = [league, market, d, *ordered_entities]
-        line_sql = (
-            "SELECT DISTINCT entity, line FROM lines "
-            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
-        )
-        if at is not None:
-            line_sql += " AND observed_at <= ?"
-            line_params.append(at)
-        line_values: dict[str, list[float]] = {entity: [] for entity in ordered_entities}
-        for entity, line in self._connection.execute(line_sql, line_params).fetchall():
-            if line is not None:
-                line_values[entity].append(float(line))
-
+        observed_lines = self._observed_lines(league, market, d, ordered_entities, at)
         inputs = {}
         for entity in ordered_entities:
             rows = ev_rows[entity]
             ev = self._weighted_book_ev(league, market, rows) if rows else float("nan")
-            values = line_values[entity]
-            line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
-            if np.isnan(line):
-                line = 0.0
-            inputs[entity] = (ev, line)
+            line = _sportsbook_line((book, book_line) for book, _, book_line in rows)
+            values, _ = observed_lines.get(entity, ([], None))
+            inputs[entity] = (ev, line or _consensus_line(values))
         return inputs
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
@@ -680,18 +743,18 @@ class Archive:
         league: str,
         market: str,
         *,
+        cutoff: timedelta,
         dates: Iterable[str | datetime.date] | None = None,
-        at: datetime.datetime | None = None,
     ) -> dict[tuple[str, str], float]:
         """Bulk weighted-average EV map for one ``(league, market)`` across many entities.
 
         Returns ``{("YYYY-MM-DD", entity): ev}`` for every ``(date, entity)``
-        the archive holds for the league/market. ``dates`` restricts the
+        a book quoted by the cutoff for the league/market. ``dates`` restricts the
         scan to the slice the caller cares about (typical: the unique
         ``game_date`` values present in a freshly fetched gamelog). When
         ``dates`` is omitted, every date is scanned.
 
-        Missing keys mean "no book quoted that slot"; callers should pass
+        Missing keys mean "no book quoted that slot by the cutoff"; callers should pass
         a fallback to :py:meth:`dict.get` (e.g. ``0.5`` for moneyline,
         :attr:`default_totals` for totals) to preserve the per-row
         semantics of :meth:`get_moneyline` / :meth:`get_total` when
@@ -707,23 +770,26 @@ class Archive:
         Args:
             league: League code (e.g., 'NBA', 'NFL').
             market: Market name (e.g., 'Moneyline', 'Totals').
+            cutoff: Each book counts at its newest quote stamped at or before
+                ``game_date + cutoff``; a slot quoted only after that has no key.
+                An offset rather than an instant, since one instant cannot
+                stand for each row's own game date.
             dates: Restrict scan to these game dates. ``None`` scans all dates.
-            at: Observation cutoff; ``None`` means "latest available" per book.
 
         Returns:
             Dict mapping ``("YYYY-MM-DD", UPPER(entity))`` to weighted-average EV.
-            Keys absent from the dict mean no book quoted that slot.
+            Keys absent from the dict mean no book quoted that slot by the cutoff.
         """
-        params: list = [league, market]
+        params: list = [league, market, cutoff]
         sql = (
-            "SELECT game_date, entity, book, ev FROM ("
-            "  SELECT game_date, entity, book, ev, observed_at, "
+            "SELECT game_date, entity, book, ev, line FROM ("
+            "  SELECT game_date, entity, book, ev, line, observed_at, "
             "         ROW_NUMBER() OVER ("
             "             PARTITION BY game_date, entity, book "
             "             ORDER BY observed_at DESC"
             "         ) AS rn "
             "  FROM odds "
-            "  WHERE league=? AND market=?"
+            "  WHERE league=? AND market=? AND observed_at <= game_date + ?"
         )
         if dates is not None:
             normalized = sorted({_safe_date(d) for d in dates} - {None})
@@ -732,47 +798,48 @@ class Archive:
             placeholders = ",".join(["?"] * len(normalized))
             sql += f" AND game_date IN ({placeholders})"
             params.extend(normalized)
-        if at is not None:
-            sql += " AND observed_at <= ?"
-            params.append(at)
         sql += ") WHERE rn = 1"
 
-        grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
-        for game_date, entity, book, ev in self._connection.execute(sql, params).fetchall():
+        grouped: dict[tuple[str, str], list[tuple[str, float, float | None]]] = {}
+        for game_date, entity, book, ev, line in self._connection.execute(sql, params).fetchall():
             key = (game_date.isoformat(), entity.upper())
-            grouped.setdefault(key, []).append((book, ev))
+            grouped.setdefault(key, []).append((book, ev, line))
         return {key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()}
 
     def get_line(self, league, market, date, player, *, at: datetime.datetime | None = None):
-        """Consensus line for ``player`` on ``date``: median, floored to ½.
+        """Sportsbook consensus line for ``player`` on ``date``: median, floored to ½.
 
-        ``at=None`` aggregates every distinct line ever observed for the
-        entity (the legacy semantics). Pass a ``datetime`` to median over
-        only the distinct lines observed at-or-before ``at``.
+        The median runs over each sportsbook's latest posted line at-or-before ``at``
+        (``at=None``: latest available). ``0.0`` when no sportsbook has posted one. A
+        pick'em platform's line is never a consensus; :meth:`get_reference_line` falls
+        back to it.
         """
+        quotes = self.get_training_book_quotes(league, market, date, player, at=at)
+        return _sportsbook_line((quote.book, quote.line) for quote in quotes)
+
+    def get_reference_line(
+        self, league, market, date, player, *, at: datetime.datetime | None = None
+    ):
+        """The line an entry is graded at: the sportsbook consensus, else its line of record.
+
+        The line of record is the median of every distinct line the archive logged for the
+        entry: a pick'em platform's own main rung, or a pre-2025 sportsbook row archived
+        without its line. It anchors a price that has no sportsbook line beside it. It is
+        never a consensus and never feeds one.
+        """
+        line = self.get_line(league, market, date, player, at=at)
         d = _safe_date(date)
-        if d is None:
-            return 0
-        params: list = [league, market, d, player]
-        sql = (
-            "SELECT DISTINCT line FROM lines "
-            "WHERE league=? AND market=? AND game_date=? AND entity=?"
-        )
-        if at is not None:
-            sql += " AND observed_at <= ?"
-            params.append(at)
-        arr = [row[0] for row in self._connection.execute(sql, params).fetchall()]
-        if not arr:
-            return 0
-        line = np.floor(2 * np.median(arr)) / 2
-        return 0 if np.isnan(line) else float(line)
+        if line or d is None:
+            return line
+        values, _ = self._observed_lines(league, market, d, [player], at).get(player, ([], None))
+        return _consensus_line(values)
 
     def to_pandas(self, league, market):
         """Flatten one league/market into a wide DataFrame.
 
-        Indexed by ``(date, player)``, one column per book + a ``Line``
-        column carrying the consensus line. Drops pre-2023-05-03 rows for
-        non-totals markets (stale format) to match the legacy behaviour.
+        Indexed by ``(date, player)``, one column per book. Drops
+        pre-2023-05-03 rows (the player props' stale format) for every market
+        but the two game lines, ``Moneyline`` and ``Totals``.
 
         Selects the latest observation per ``(date, player, book)`` so
         time-series storage does not change the per-book column semantics
@@ -794,7 +861,7 @@ class Archive:
             return pd.DataFrame()
 
         odds_df["game_date"] = pd.to_datetime(odds_df["game_date"])
-        if market not in ("Moneyline", "Total"):
+        if market not in ("Moneyline", "Totals"):
             odds_df = odds_df[odds_df["game_date"] >= cutoff]
             if odds_df.empty:
                 return pd.DataFrame()
@@ -805,108 +872,7 @@ class Archive:
         )
         wide.columns.name = None
         wide.index.names = ["date", "player"]
-
-        if market in _TEAM_ONLY_MARKETS:
-            return wide
-
-        lines_df = self._connection.execute(
-            "SELECT game_date, entity, line FROM lines WHERE league=? AND market=?",
-            [league, market],
-        ).fetchdf()
-        if lines_df.empty:
-            wide["Line"] = 0.0
-            return wide
-
-        lines_df["game_date"] = pd.to_datetime(lines_df["game_date"]).dt.strftime("%Y-%m-%d")
-        consensus = (
-            lines_df.groupby(["game_date", "entity"])["line"]
-            .apply(lambda s: float(np.floor(2 * np.median(s)) / 2))
-            .rename("Line")
-        )
-        consensus.index.names = ["date", "player"]
-        wide = wide.join(consensus, how="left")
-        wide["Line"] = wide["Line"].fillna(0.0)
         return wide
-
-    def archived_players_by_date(self, league: str, market: str) -> dict[str, set[str]]:
-        """Return ``{"YYYY-MM-DD": {player, ...}}`` for one (league, market).
-
-        Used by training/data.count_training_rows to size the training matrix.
-        """
-        rows = self._connection.execute(
-            "SELECT DISTINCT game_date, entity FROM odds WHERE league=? AND market=?",
-            [league, market],
-        ).fetchall()
-        out: dict[str, set[str]] = {}
-        for d, entity in rows:
-            out.setdefault(d.isoformat(), set()).add(entity)
-        return out
-
-    def get_closing_line(
-        self,
-        league: str,
-        market: str,
-        date: str | datetime.date,
-        entity: str,
-        *,
-        at: datetime.datetime | None = None,
-    ) -> ClosingLine | None:
-        """Return consensus line and implied probability from the latest pre-kickoff snapshot.
-
-        Wraps ``get_line`` and ``get_ev`` to return a dataclass with the
-        consensus line, the no-vig implied over probability, the timestamp
-        of the latest snapshot, and the set of books that provided data.
-        ``at=None`` uses the most recent observation; pass a ``datetime``
-        to pin to a specific snapshot (e.g. ``commence_time``).
-
-        Args:
-            league: League code (e.g., 'NBA', 'MLB').
-            market: Market name (e.g., 'player_pass_yds').
-            date: Game date.
-            entity: Player or team name.
-            at: Snapshot cutoff; defaults to "latest available".
-
-        Returns:
-            ClosingLine with (line, devig_over, sample_ts, book_set) or
-            ``None`` if no data exists for this entry.
-        """
-        d = _safe_date(date)
-        if d is None:
-            return None
-
-        line = self.get_line(league, market, d, entity, at=at)
-        rows = self._book_rows(league, market, d, entity, at=at)
-        if not rows:
-            return None
-
-        books = [row[0] for row in rows]
-        evs = [row[1] for row in rows]
-        book_set = frozenset(books)
-
-        dist = stat_dist.get(league, {}).get(market, "Gamma")
-        cv = stat_cv.get(league, {}).get(market, 1)
-
-        devig_over = _devig_over(line, evs, dist, cv)
-        sample_ts = self._latest_sample_ts(league, market, d, entity, at)
-
-        return ClosingLine(
-            line=line,
-            devig_over=devig_over,
-            sample_ts=sample_ts,
-            book_set=book_set,
-        )
-
-    def _latest_sample_ts(self, league, market, d, entity, at):
-        sample_sql = (
-            "SELECT observed_at FROM odds WHERE league=? AND market=? AND game_date=? AND entity=?"
-        )
-        sample_params: list = [league, market, d, entity]
-        if at is not None:
-            sample_sql += " AND observed_at <= ?"
-            sample_params.append(at)
-        sample_sql += " ORDER BY observed_at DESC LIMIT 1"
-        sample_rows = self._connection.execute(sample_sql, sample_params).fetchall()
-        return sample_rows[0][0] if sample_rows and sample_rows[0][0] is not None else None
 
     def get_line_history(
         self,
@@ -942,6 +908,53 @@ class Archive:
             params.append(until)
         sql += " ORDER BY observed_at"
         return self._connection.execute(sql, params).fetchdf()
+
+    def get_book_line_histories(
+        self, keys: pd.DataFrame, *, books: Sequence[str], since: datetime.date
+    ) -> pd.DataFrame:
+        """Bulk per-book ladder time-series for many ``(league, entity, market)`` keys.
+
+        Reads ``ladder``, the one table that keeps every rung a DFS book posted on
+        every poll together with its de-vigged ``p_over``. ``odds`` cannot say how a
+        book's own number moved: ``add_dfs`` keeps only the nearest-even-money rung
+        there per player-market — the same rung ``build_line_movement`` calls the
+        main line — and drops every other tier. ``lines`` has no book column at
+        all. Choosing each poll's main rung is the caller's job
+        (``prediction.line_movement``).
+
+        One scan joins every key at once; a per-entity loop over a full slate is
+        thousands of round trips against the same table pages. Rungs staged this run
+        stay invisible until :meth:`write` flushes them.
+
+        Args:
+            keys: Frame carrying ``league``, ``entity`` and ``market`` columns.
+                Extra columns are ignored, duplicates collapsed.
+            books: Books to keep, e.g. ``("Underdog", "Sleeper")``.
+            since: Earliest ``game_date`` to scan, inclusive.
+
+        Returns:
+            ``[league, market, game_date, entity, book, observed_at, line, p_over]``
+            sorted by key then ``observed_at``; a ladder poll contributes one row per
+            rung. Column-stable and empty when ``keys`` or ``books`` is empty.
+        """
+        wanted = keys[["league", "entity", "market"]].drop_duplicates()
+        if wanted.empty or not books:
+            return pd.DataFrame(columns=_BOOK_LINE_HISTORY_COLS)
+
+        placeholders = ", ".join("?" * len(books))
+        self._connection.register(_KEY_JOIN_VIEW, wanted)
+        try:
+            return self._connection.execute(
+                "SELECT l.league, l.market, l.game_date, l.entity, l.book, "
+                "       l.observed_at, l.line, l.p_over "
+                f"FROM ladder l JOIN {_KEY_JOIN_VIEW} k "
+                "  ON l.league = k.league AND l.entity = k.entity AND l.market = k.market "
+                f"WHERE l.book IN ({placeholders}) AND l.game_date >= ? "
+                "ORDER BY l.league, l.market, l.game_date, l.entity, l.book, l.observed_at",
+                [*books, since],
+            ).fetchdf()
+        finally:
+            self._connection.unregister(_KEY_JOIN_VIEW)
 
     def get_ev_history(
         self,
@@ -1130,48 +1143,60 @@ class Archive:
             self._stage_ladder(league, market, d, entity, book, line, p_over, observed_at)
 
     def add_dfs(self, offers, platform, key):
-        """Add a batch of scraped offers to the archive for one ``platform``.
+        """Add a batch of scraped DFS offers to the archive for one ``platform``.
 
-        ``offers`` is accepted as a list or single dict; duplicates per
-        ``(Player, Market)`` are resolved in favor of the offer closest to
-        a neutral 1.0 boost. The ``key`` mapping renames sportsbook-native
-        market strings into the canonical per-league market names used
-        elsewhere in the pipeline.
+        ``offers`` is accepted as a list or single dict. Every tier's
+        ``(line, p_over)`` is appended to the ladder table; per
+        ``(Player, Market)`` the tier priced nearest even money (higher line
+        on a tie) additionally becomes the platform's odds and lines rows,
+        storing its payout-implied under-probability beside the encoded
+        ``ev``. That is the rule ``prediction.line_movement`` picks a poll's
+        main rung by, so the archived tier and the tracked line agree. The
+        lines row is the entry's line of record (:meth:`get_reference_line`),
+        never part of the consensus line (:meth:`get_line`). The
+        ``key`` mapping renames sportsbook-native market strings into the
+        canonical per-league market names used elsewhere in the pipeline.
         """
-        offers = _dedup_offers_by_boost(offers)
+        if not isinstance(offers, list):
+            offers = [offers]
 
-        for o in offers:
-            if not o["Line"]:
-                continue
+        # Rank tiers by distance from even money, higher line breaking a tie: the main-rung
+        # rule prediction.line_movement applies, so the archived tier is the one that book's
+        # tracked line follows. The raw boost can't rank them — a 1.0 payout is certainty.
+        priced = sorted(
+            ((o, *_dfs_offer_probs(o, platform)) for o in offers if o["Line"]),
+            key=lambda tier: (abs(tier[1] - 0.5), -float(tier[0]["Line"])),
+        )
+
+        quoted: set[tuple[str, str]] = set()
+        for o, p_over, p_under in priced:
             d = _safe_date(o["Date"])
             if d is None:
                 continue
 
             league = o["League"]
             market = _resolve_market(league, o["Market"], key)
+            line = float(o["Line"])
+            self.add_ladder(league, market, d, o["Player"], platform, [(line, p_over)])
+
+            if (o["Player"], market) in quoted:
+                continue
+            quoted.add((o["Player"], market))
 
             cv = stat_cv.get(league, {}).get(market, 1)
             dist = stat_dist.get(league, {}).get(market, "Gamma")
             gate = book_gate(league, market, dist)
-
             player = remove_accents(o["Player"])
-            line = float(o["Line"])
-
-            over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
-            # A missing/zero under side fabricated a ~6.5%-vig under in no_vig_odds
-            # that inverts to a blown count-cell ev; DFS picks are symmetric instead.
-            odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
-            ev = get_ev(line, odds[1], cv, dist=dist, gate=gate)
+            ev = get_ev(line, p_under, cv, dist=dist, gate=gate)
 
             # Same rule the sportsbook writer follows: get_ev returns its ceiling when no
             # mean reproduces the price, and a bound is not a mean. It binds constantly here
             # — an unboosted pick prices at 0.5, which sits below book_gate's population zero
             # rate on every high-zi count cell, so one prophecize wrote 6,055 of these. They
             # reach further than the sportsbook kind did: _sanitize_book_ev's runaway test is
-            # 10x line and deliberately spares 5x, and fit_book_weights drops only pinnacle,
-            # so the placeholder rode into both the served blend and the fitted weights.
-            # Storing NULL drops the platform from _weighted_book_ev instead; the quote and
-            # the line beside it are untouched and still carry the entry.
+            # 10x line and deliberately spares 5x, so the placeholder rode into the served
+            # blend. Storing NULL drops the platform from _weighted_book_ev instead; the quote
+            # and the line beside it are untouched and still carry the entry.
             clamped = ev >= max(SN_MAX_MEAN_FACTOR * line, 1.0)
             self._stage_book_ev(
                 league,
@@ -1180,7 +1205,7 @@ class Archive:
                 player,
                 platform,
                 None if clamped else ev,
-                under_prob=odds[1],
+                under_prob=p_under,
                 line=line,
             )
             self._stage_line(league, market, d, player, line)
@@ -1237,12 +1262,15 @@ class Archive:
         date: str | datetime.date,
         team: str,
         book_evs: dict[str, float],
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Append per-book EVs for a team-market entry (Moneyline / Totals / Spreads).
 
         With time-series storage every observation is preserved; the
         ``set_*`` name is retained for caller compatibility but semantics
         are append-only — the latest-per-book reader returns the freshest.
+        ``observed_at`` defaults to now; a historical fetch passes its
+        snapshot time.
         """
         d = _safe_date(date)
         if d is None:
@@ -1250,7 +1278,7 @@ class Archive:
         for book, ev in book_evs.items():
             if ev is None:
                 continue
-            self._stage_book_ev(league, market, d, team, book, ev)
+            self._stage_book_ev(league, market, d, team, book, ev, observed_at)
 
     def write(self, all=False):
         """Flush pending writes to disk.

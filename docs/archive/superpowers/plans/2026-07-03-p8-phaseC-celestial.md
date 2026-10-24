@@ -1,5 +1,9 @@
 # P8 Phase C — Celestial Surfaces Implementation Plan
 
+> **Status: SHIPPED 2026-07-05** (`c92c2b7..4711296`, merged to devel in `84c3342`;
+> owner-live-checked after Phase R, 2026-07-16). Checkboxes were not maintained during
+> execution — the record is the archived lane brief `docs/archive/dashboard-ux.md`.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.

@@ -26,7 +26,7 @@ ground truth:
 the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-06-19._
+_Last updated: 2026-10-23._
 
 ---
 
@@ -37,11 +37,15 @@ with an **offline** check at research→devel and a **live** check at devel→ma
 
 |  | research → devel (offline) | devel → main (live) |
 |---|---|---|
-| **Set first baseline** | The **6 gates** below | **Profitability:** positive Kelly-sized ROI on settled data |
-| **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | **≥ +0.5% ROI vs the incumbent on live data for ≥ 2 weeks** |
+| **Set first baseline** | The **6 gates** below | **Live Gate 2:** ≥ 200 settled offers in 30 days, live book BSS ≥ 0, neither side's live precision below 0.50 |
+| **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | No separate live rule |
 
-A served model that drifts back outside any of its track's bounds is **withheld and
-re-enters the set-baseline track** for a fresh baseline (drift monitor).
+Realized money is never a live threshold: no model is promoted, demoted or withheld on
+realized ROI (owner rule, 2026-10-04). A served cell that fails a gate on a later retrain
+is flagged, not withheld: `meditate`'s post-run table and `sportstradamus ship config --branch
+devel` list it (`training.graduation.served_cells_failing_ship`), and the cull is the
+owner's. For `main`, the monthly `gate-status` job regenerates `stat_meta.json` from live
+graduation (`training.graduation`) and opens a PR for a human to merge.
 
 ---
 
@@ -55,9 +59,12 @@ anti-shrinkage legs** (recent-form, CITL-under, count over — below): the cell 
 if any leg fires. Only the recent-form leg is anchor-scoped (`corr(Mean10, Result)` with a
 hysteresis deadband); the CITL-under leg runs on every cell.
 
+The outcome label `y` in Gates 1 and 5 is `training/labels.over_label`: 1 when `Result` is over
+`Line`, 0 when under, ½ at a push, which is how the model's own probability counts a tie.
+
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
-| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
+| 1 | **Brier vs book, date-clustered paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` resampling whole game dates (2000 resamples, seeded): one slate's rows share game-level shocks (totals, pace, weather), so a row bootstrap reads too narrow where dates are few. Over very few dates the date bootstrap collapses instead, so the row bootstrap's interval decides whenever its upper bound is higher; scored on sportsbook-priced rows (`QuoteAuthenticity == authentic`) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
 | 2 | **Star σ-match** | `z = |mean(EV) − mean(Result)| / std(Result)` on the top-mean decile | `z < 0.5` — bias under half the segment's spread | `_GATE2_STAR_Z_MAX = 0.5` |
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
@@ -107,8 +114,9 @@ Gate-2 `z = 0.22`). Three one-sided legs, OR-ed, cover the failure from differen
 The recent-form and CITL legs are star-side (mean-regression deflates the stars, where recent
 form is also the cleanest yardstick); the over leg is the only bench-side check and is scoped to
 count families. Live symptom that motivated the original leg: served WNBA FGA projecting a stable
-13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research:
-`/tmp/researcher_overshrinkage_gate.md`, `/tmp/researcher_gate6_scope_and_drift.md`]
+13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research: summarized in the
+[Gate 6 design record](archive/superpowers/specs/2026-06-21-gate6-outcome-directional-legs-design.md);
+the two `/tmp` briefs it cites were never committed]
 
 **Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
 is *at least as good as* the book," so a statistical **tie passes** — we do not demand
@@ -123,9 +131,10 @@ not to manufacture ships; more breadth comes from model work, not a looser δ).
 Whether it is then **+EV to bet** the cell — and how much — is *not* the gate's job:
 that is owned downstream by the EV calc, the Kelly sizer (`kelly_shrinkage =
 clip(brier_skill_score, 0, 1)`, so a tie cell is sized to ~0 until it earns edge), and
-the 14-day live Gate-2 soak. The gate certifies **deployable** (calibrated +
-uncompressed + tie-or-better); the sizer + soak certify **profitable**. That split is
-what makes shipping a tie safe.
+the 30-day live Gate-2 window (settled count, live book BSS, side precision). The gate
+certifies **deployable** (calibrated + uncompressed + tie-or-better); the sizer sets the
+stake from measured skill, and live Gate 2 checks that skill against the book on settled
+offers. That split is what makes shipping a tie safe.
 
 **Gate 4 is whole-CDF calibration (PIT-KS), not IQR spread.** `pit_ks =
 sup|F_model − F_true|` over the predictive CDF *is* the worst-case alt-line probability
@@ -164,7 +173,7 @@ as the reported `g4_iqr_ratio`.
   Over 0.5, +2% at Over 1.5, `pit_ks ≈ 0.04` but `g4_tail_pit_ks ≈ 0.037`, i.e. ~90% of
   its deviation is in the over-tail). It is **not** a gate — the deep tail is too
   sample-starved per cell to threshold without gaming the cutoff — but it flags the
-  alt-over wobblers for the fix-queue and the live soak.
+  alt-over wobblers for the fix-queue.
 - `central50_coverage`, `central80_coverage` — central predictive-interval coverage of
   the per-row distribution; names the *direction* a KS scalar cannot. Coverage
   materially below nominal (0.50 / 0.80) ⇒ the predictive is too narrow / mislocated
@@ -178,7 +187,13 @@ as the reported `g4_iqr_ratio`.
 **Auto-pass / fail conventions for blank metrics:**
 
 - **Gate 1 blank** (no book `Odds` in the dump): **auto-pass** — no book to beat,
-  model wins by default.
+  model wins by default. Also blank when the sportsbook-priced rows (`QuoteAuthenticity ==
+  "authentic"`) span fewer than `calibration._ONE_SE_MIN_CLUSTERS` distinct players (dates for
+  team markets) — a one-row book is no book, the same floor the blend-weight fit applies to
+  its rows. A pick'em-only cohort (`"pickem"`: Underdog/PrizePicks/Sleeper/… with no
+  sportsbook on the line) is a real line priced at the platform's even payout, not book
+  evidence: such rows never enter Gate 1 or the blend fit, so a DFS-only cell is book-less
+  and ships on gates 2–6 at weight 1.0 (owner decision 2026-09-29).
 - **Gate 5 blank** (no `P` or no `Line`): **fail** — the cell couldn't compute
   calibration; that's a model artifact, not a free pass. Gate 5 only needs `P` +
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.
@@ -194,7 +209,7 @@ as the reported `g4_iqr_ratio`.
   can't test; Gate 6 fails only when a leg fires on a positive signal.
 
 **Oracle columns.** Gates 1–5 each emit a sibling "oracle" value computed under the
-deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0`):
+oracle (`pred = Result`; over-prob `= y`, the outcome label, so ½ on a push row):
 - Gate 1 oracle `mean = −book Brier` (and CI sits below 0), exposing the book's own
   Brier so the achievable headroom is visible.
 - Gate 2/3 oracle `z = 0`.
@@ -205,6 +220,22 @@ deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0
 
 The σ / IQR_true denominators equal the model row, so the oracle row sizes each
 gate's natural threshold.
+
+**The gates score the bulk, not the recommended tail.** Gate 1 runs where the model and the book
+mostly agree (mean |model − market| .050 on its rows, against .120 on the legs the live rule
+recommends), so a cell can pass all six and still overstate its recommended legs.
+`sportstradamus admin tail-scorecard` replays the live recommendation rule on the held-out test rows
+at the DFS rungs the archive held and reports that selected-tail gap. It is a training-time
+diagnostic and an acceptance input for model-information work
+([handoffs/honest-receipts.md](handoffs/honest-receipts.md) §6). It is never a gate, and nothing in
+it demotes or withholds a cell.
+
+**The gates score training-matrix features, not served ones.** Every gate reads the held-out test
+set, whose rows carry the features the training matrix built. `sportstradamus admin feature-parity`
+compares what serving fed each model (the serve-time feature log) with the matrix row for the same
+player and game, feature by feature and by the model's own probability, and flags a cell whose
+difference has a root mean square above one percentage point. It is a dev-side diagnostic like the
+tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
 
 ---
 
@@ -220,35 +251,52 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 | S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). |
 | S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
 
+Under `ship sweep --confirm --min-model-weight T` the blend weight is a ship criterion as well:
+a board corner whose fitted `model_weight` is below `T` ranks but never nominates (exactly `1.0`
+= no sportsbook-priced quotes, exempt), a confirmed retrain landing below `T` is reverted, and a
+challenger at or above `T` may replace an incumbent below `T` on **S1 alone** — two legs that
+both sit on the book at the line give S2/S3 a paired difference of zero, so they cannot separate
+them. Any other supersession keeps S1 + S2 + S3. See
+[handoffs/low_weight_models.md](handoffs/low_weight_models.md).
+
 ---
 
 ## Serving control — default-deny via stat_meta `shipped` field
 
 `data/config/stat_meta.json` is the **canonical, hand-curated** per-cell
-record. Every cell carries `{"dist": ..., "shipped": ..., "strategy": ...}`
-where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
+record. Every cell carries `{"dist", "shipped", "target_normalization",
+"posthoc"}` plus optional knobs, where `shipped` is one of `"withheld"` /
+`"devel"` / `"main"`:
 
-- `"withheld"` — `meditate` prunes the cell's pickle so `prophecize`
-  dark-outs the market.
+- `"withheld"` — `prophecize` prices the cell's offers at the book consensus
+  instead of its model; an offer no sportsbook quotes (fantasy points, for one) leaves
+  the board. `meditate` prunes its pickle (a volume denominator in `VOLUME_STATS` keeps
+  its pickle for the league's projections).
 - `"devel"` — the production-tracking branch (`devel`) trains + ships
-  the cell. In 14-day Gate-2 soak.
+  the cell, and live Gate 2 scores it over a rolling 30-day window.
 - `"main"` — the cell also passed Gate-2 graduation; it's locked in on
   `main`.
 
 This is **default-deny**: only cells the human explicitly promotes
 (`shipped` ≠ `"withheld"`) serve. Promoting a Gate-1 passer is a
-one-line edit (`"withheld"` → `"devel"`). `generate-ship-config --branch
-main` mutates `stat_meta.json` monthly (cron via `run_job.sh
-gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
-the rest back to `"devel"`; the cron opens a PR a human merges.
-`generate-ship-config --branch devel` only validates the current state
+one-line edit (`"withheld"` → `"devel"`). A live Gate-2 verdict (`demoted`
+in `ship graduation`) never removes a cell from `devel`: it only holds the
+cell's promotion to `main` until the cell passes (owner, 2026-10-21).
+Demotion from `devel` is equally manual: a
+served cell whose weekly retrain fails the fresh gates is **warned about**
+(meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
+it) but keeps serving until the human flips it back to `"withheld"` (next
+meditate prunes the pickle) or runs `ship config --branch devel --prune`.
+`sportstradamus ship config --branch main` mutates `stat_meta.json` monthly
+(cron via `run_job.sh gate-status`) to promote graduated cells `"devel"` →
+`"main"` and demote the rest back to `"devel"`; the cron opens a PR a human
+merges.
+`ship config --branch devel` only validates the current state
 and prints a summary — devel promotions are direct edits.
 
-**Known gap:** the graduated classifier (`training/graduation.py`) uses a
-proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window
-+ non-negative live book-BSS — not the full live metric set above. `main` is
-dormant until the live aggregator produces data, so the proxy is acceptable
-for now.
+**Classifier:** `training.graduation.classify_lifecycle` applies the live
+rule in the table below after one offline precondition: a missing or
+negative Gate-1 BSS leaves the cell `not-shipped`.
 
 ---
 
@@ -256,13 +304,15 @@ for now.
 
 | Case | Threshold | Where |
 |---|---|---|
-| **No incumbent in main** | Positive Kelly-sized ROI on the cell's settled offers within the 30-day graduation window (`profit_sim_kelly_yield ≥ 0` AND live `book_bss ≥ 0`) | `nightly._profit_sim_kelly_yield` writes `data/live_metrics_per_market.parquet`; `check_graduation._classify_lifecycle` reads it |
-| **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `stat_meta.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
+| **No incumbent in main** | ≥ 200 settled offers in the 30-day graduation window, live `book_bss ≥ 0`, and neither side's live precision below `MIN_PRECISION_SIDE` (0.50). No realized-money threshold: models are never promoted, demoted or withheld on realized ROI (owner rule, 2026-10-04); `profit_sim_yield` / `profit_sim_kelly_yield` in `data/runtime/live_metrics_per_market.parquet` are display-only | `nightly.py` writes the parquet; `training.graduation.classify_lifecycle` reads `n_settled`, `gate2_book_bss` and the side precisions |
+| **Incumbent in main** | No separate rule: nothing compares a challenger with the incumbent on live data, and live ROI is never a threshold | — |
 
-A cell that drifts outside its set-baseline bounds is **withheld and re-enters the
-set-baseline track** (drift monitor; the prior pickle stays archived under
-`data/old_models/` for one-pull revert). Live data is dormant in dev, so the live
-gate fires only after `nightly.py`'s aggregator has produced rows for the cell.
+Live precision and both profit sims count only sides the platform posted
+(`Boost > 0`); an unposted side was never a bet, and `Market Prob` is the bet side's
+book probability on either side, so no Under inversion is applied.
+
+A cell with no row in `live_metrics_per_market.parquet`, or fewer than 200 settled
+offers in the window, stays `in-test`.
 
 Plus, when changing the deterministic-mode pipeline: the determinism gate must be
 green for every league with cached parquets

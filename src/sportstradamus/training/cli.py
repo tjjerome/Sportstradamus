@@ -10,15 +10,11 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+import tabulate
+from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    LazyArchive,
-    book_weights,
-    feature_filter,
-    get_logger,
-    odds_budget,
-)
+from sportstradamus.helpers import LazyArchive, book_weights, get_logger, odds_budget
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.helpers.locks import (
@@ -38,7 +34,8 @@ from sportstradamus.training.pipeline import (
     train_market,
 )
 from sportstradamus.training.posthoc import POSTHOC_SLUGS, STRUCTURAL_STAGE
-from sportstradamus.training.scorecard import _GATE1_NONINF_MARGIN
+from sportstradamus.training.report import report
+from sportstradamus.training.scorecard import _SHIP_GATES
 from sportstradamus.training.ship_config import (
     CONTINUOUS_DISTS,
     STAT_META_PATH,
@@ -64,32 +61,44 @@ faulthandler.enable()
 _RNG_SEED: int = 69
 
 
-def _enforce_ship_gate(
+def _na_fmt(value, spec: str) -> str:
+    """Format a nullable model_stats number for the warning table (pd.NA breaks ``format``)."""
+    return format(value, spec) if pd.notna(value) else "-"
+
+
+def _warn_ship_gate(
     active_markets: dict[str, list[str]],
     ship_config: ShipConfig,
     loaded_leagues: set[str],
     log,
-) -> int:
-    """Dark-out every served cell whose latest offline gates fail.
+) -> None:
+    """Warn about every served cell whose latest offline gates fail; the human decides the cull.
 
-    A cell may serve only when its ``model_stats`` row has ``ship == True``
-    (all five gates; ``training.scorecard``). ``report()`` writes each cell's
-    fresh gates during training, so this post-loop pass prunes the production
-    pickle of any served cell that came back ``ship == False`` — the same
-    dark-out a ``withheld`` cell gets, so inference skips the market. Scoped to
-    leagues actually loaded this run and to cells served on the branch
-    (``ship_config`` value other than ``WITHHELD``); an empty ``ship_config``
-    (``--deterministic`` or the integration smoke test) serves nothing, so this
-    no-ops.
+    ``report()`` writes each cell's fresh gates during training, so this post-loop pass surfaces
+    every served cell (``ship_config`` value other than ``WITHHELD``, leagues actually loaded this
+    run) whose ``model_stats`` row came back ``ship == False``. It never prunes — the cell keeps
+    serving its fresh pickle until the operator demotes it (flip ``shipped: "withheld"`` and the
+    next meditate prunes, or ``sportstradamus ship config --branch devel --prune`` for an immediate
+    dark-out). An empty ``ship_config`` (``--deterministic`` or the integration smoke test) serves
+    nothing, so this no-ops.
     """
     if not MODEL_STATS_PATH.is_file():
-        return 0
+        return
     stats = pd.read_parquet(
-        MODEL_STATS_PATH, columns=["league", "market", "ship", "g4_pass", "g4_pit_ks"]
+        MODEL_STATS_PATH,
+        columns=[
+            "league",
+            "market",
+            "ship",
+            "g4_pit_ks",
+            "g4_pit_ks_max",
+            "brier_skill_score",
+            *(f"{g}_pass" for g in _SHIP_GATES),
+        ],
     )
     failed = stats["ship"].eq(False).fillna(False).astype(bool)
     failing = {(r.league, r.market): r for r in stats[failed].itertuples(index=False)}
-    pruned = 0
+    rows = []
     for lg, markets in active_markets.items():
         if lg not in loaded_leagues:
             continue
@@ -97,15 +106,34 @@ def _enforce_ship_gate(
             if ship_config.get(lg, {}).get(market, WITHHELD) == WITHHELD:
                 continue
             row = failing.get((lg, market))
-            if row is None or not prune_model_pickle(lg, market):
+            if row is None:
                 continue
-            pruned += 1
-            click.echo(
-                f"DEMOTE [{lg}] {market}: ship=False "
-                f"(g4_pass={row.g4_pass}, pit_ks={row.g4_pit_ks:.3f}) — pruned pickle"
+            gates = " ".join(
+                g for g in _SHIP_GATES if not (pd.notna(v := getattr(row, f"{g}_pass")) and bool(v))
             )
-            log.warning("ship-gate demote", extra={"league": lg, "market": market})
-    return pruned
+            rows.append(
+                [
+                    f"{lg} {market}",
+                    gates,
+                    f"{_na_fmt(row.g4_pit_ks, '.3f')} ({_na_fmt(row.g4_pit_ks_max, '.3f')})",
+                    _na_fmt(row.brier_skill_score, "+.4f"),
+                ]
+            )
+            log.warning("ship-gate warn", extra={"league": lg, "market": market})
+    if not rows:
+        return
+    click.secho(
+        "\nSHIP-GATE WARNINGS (served cells failing fresh gates — still serving)", bold=True
+    )
+    click.echo(
+        tabulate.tabulate(
+            rows, headers=["cell", "failed gates", "g4_pit_ks (max)", "bss"], tablefmt="github"
+        )
+    )
+    click.echo(
+        'To cull: set "shipped": "withheld" in stat_meta.json (the next meditate prunes the '
+        "pickle), or sportstradamus ship config --branch devel --prune for an immediate dark-out."
+    )
 
 
 def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
@@ -117,139 +145,6 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     """
     cell_value = stat_meta_full.get(lg, {}).get(market, {}).get(key, default)
     return cell_value if flag_value == LOSS_AUTO else flag_value
-
-
-# The six ship-gate booleans in model_stats.parquet (nullable BooleanDtype;
-# pd.NA means the scorecard never ran, which counts as not passing here).
-_GATE_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "g6_pass")
-
-# brief R3: separates the 9 addressable near-miss ledger rows from the 4 structural
-# failures at excess >= 0.049.
-_G4_RETRY_MAX_EXCESS: float = 0.010
-# brief R3: noise band on the g1 non-inferiority CI bound.
-_G1_RETRY_NOISE_BAND: float = 0.002
-
-
-def _gate_passed(value) -> bool:
-    """NA-safe read of a nullable-boolean gate cell (``bool(pd.NA)`` raises)."""
-    return pd.notna(value) and bool(value)
-
-
-def _model_stats_row(lg: str, market: str) -> pd.Series | None:
-    """The cell's model_stats row (fresh after train_market — report() rewrote it), or None."""
-    if not MODEL_STATS_PATH.is_file():
-        return None
-    stats = pd.read_parquet(
-        MODEL_STATS_PATH,
-        columns=[
-            "league",
-            "market",
-            "distribution",
-            "ship",
-            "g4_pit_ks",
-            "g4_pit_ks_max",
-            "g1_brier_diff_ci_hi",
-            *_GATE_COLS,
-        ],
-    )
-    rows = stats[(stats["league"] == lg) & (stats["market"] == market)]
-    return None if rows.empty else rows.iloc[0]
-
-
-def _g4_only_retry_wanted(
-    row: pd.Series | None, cell_hpo_selection: str, cell_zinb_mode: str
-) -> bool:
-    """Whether a cell earns the one-shot calibrated-HPO retry.
-
-    Fires only for cells trained under ``loss`` selection whose fresh
-    model_stats row failed ship on a near-miss Gate 4, alone or with a
-    within-band Gate 1 — the dispersion-calibration failures calibrated trial
-    selection targets. Any other failing gate blocks the retry, g6 explicitly
-    included (deferred pending the Experiment C measurement, brief R3).
-    Hurdle-ZINB and Mixture are excluded: those paths have no calibrated
-    trial-selection closure.
-    """
-    if row is None or cell_hpo_selection != "loss":
-        return False
-    if row["distribution"] == "Mixture":
-        return False
-    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
-        return False
-    if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
-        return False
-    if not row["g4_pit_ks"] - row["g4_pit_ks_max"] <= _G4_RETRY_MAX_EXCESS:
-        return False
-    return _cofailures_within_band(row)
-
-
-def _cofailures_within_band(row: pd.Series) -> bool:
-    """Non-g4 gate failures are admissible only as exactly {g1} inside its noise band."""
-    others_failing = [c for c in _GATE_COLS if c != "g4_pass" and not _gate_passed(row[c])]
-    if others_failing == ["g1_pass"]:
-        return bool(row["g1_brier_diff_ci_hi"] - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
-    return not others_failing
-
-
-def _persist_calibrated_hpo(stat_meta_full: dict, lg: str, market: str) -> None:
-    """Pin ``hpo_selection="calibrated"`` into the cell's stat_meta entry, on disk and in memory.
-
-    The weekly warm cron retrains from stat_meta; without the pin the next
-    retrain would select by loss again and serve-iff-ship would prune the cell.
-    """
-    stat_meta_full.setdefault(lg, {}).setdefault(market, {})["hpo_selection"] = "calibrated"
-    meta_path = Path(str(STAT_META_PATH))
-    tmp = meta_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(stat_meta_full, indent=4) + "\n")
-    tmp.replace(meta_path)
-
-
-def _retry_calibrated_if_g4_only(
-    lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
-) -> None:
-    """One-shot calibrated-HPO retry for a cell that failed ship on a near-miss
-    Gate 4, alone or with a within-band Gate 1.
-
-    Reruns ``train_market`` with the same kwargs but ``hpo_selection="calibrated"``
-    and ``force=True`` (the first run consumed the new gamedays; without force the
-    input-freeze short-circuit would skip the retrain). The retry's ``report()``
-    overwrites the cell's model_stats row — the retry row wins. A shipped retry
-    persists the knob via :func:`_persist_calibrated_hpo`; a failed one just
-    echoes its failing gates. Never retries more than once.
-    """
-    if (
-        train_kwargs["deterministic"]
-        or train_kwargs["matrix_only"]
-        or train_kwargs.get("artifact_output") is not None
-        or train_kwargs["posthoc_slug"] in STRUCTURAL_STAGE
-    ):
-        return
-    row = _model_stats_row(lg, market)
-    if not _g4_only_retry_wanted(row, train_kwargs["hpo_selection"], train_kwargs["zinb_mode"]):
-        return
-    click.echo(f"[{lg}] {market}: g4-only ship fail — retrying with hpo_selection=calibrated")
-    log.info("g4-only calibrated retry", extra={"league": lg, "market": market})
-    train_market(
-        lg,
-        market,
-        stat_data,
-        archive,
-        league_start_date,
-        **(train_kwargs | {"force": True, "hpo_selection": "calibrated"}),
-    )
-    row = _model_stats_row(lg, market)
-    if row is not None and _gate_passed(row["ship"]):
-        _persist_calibrated_hpo(stat_meta_full, lg, market)
-        click.echo(
-            f"[{lg}] {market}: SHIPPED via calibrated HPO — persisted hpo_selection to stat_meta"
-        )
-        log.info("calibrated retry shipped", extra={"league": lg, "market": market})
-    else:
-        failed = (
-            "no model_stats row"
-            if row is None
-            else ", ".join(c for c in _GATE_COLS if not _gate_passed(row[c]))
-        )
-        click.echo(f"[{lg}] {market}: calibrated retry still ship=False (failed gates: {failed})")
 
 
 def _validate_mode_flags(
@@ -412,7 +307,7 @@ def _lock_production_artifacts(
         "every cell. 'joint' is the legacy jointly-fit LightGBMLSS ZINB. "
         "'hurdle' uses the two-stage HurdleZINB (calibrated zero classifier + "
         "NegBin on positives + derived-pi gate; see "
-        "docs/OVERCONFIDENCE_INVESTIGATION.md §2)."
+        "docs/archive/nba_overconfidence_investigation.md §2)."
     ),
 )
 @click.option(
@@ -437,7 +332,7 @@ def _lock_production_artifacts(
     help=(
         "Training distribution family. 'auto' (default) honors each cell's stat_meta dist "
         "(else the data-driven mean>=2 / zero-rate pick); an explicit family (DPO / NegBin / "
-        "ZINB / SkewNormal) overrides every cell — a WS-3 family sweep axis."
+        "ZINB / SkewNormal / Mixture) overrides every cell — a WS-3 family sweep axis."
     ),
 )
 @click.option(
@@ -509,8 +404,8 @@ def _lock_production_artifacts(
         "Optuna search). 'auto' (default) honors each cell's stat_meta hpo_selection (else 'loss'); "
         "an explicit slug overrides every cell. 'loss' picks the lowest CV loss; 'calibrated' "
         "re-ranks the top trials by validation PIT-KS and picks the sharpest that clears the Gate-4 "
-        "threshold. A cell failing ship on Gate 4 alone under 'loss' is retrained once with "
-        "'calibrated', and the knob persists to stat_meta when the retry ships; a Ship 75 axis."
+        "threshold. The confirm walk retries a nominee failing ship on Gate 4 alone once under "
+        "'calibrated' and persists the knob to stat_meta when the retry ships; a Ship 75 axis."
     ),
 )
 @click.option(
@@ -545,7 +440,7 @@ def _lock_production_artifacts(
     help=(
         "Assemble and persist each cell's training matrix (and comps), then stop before "
         "distribution selection and model training. Warms data/training_data/ without training; "
-        "pair with --bypass-withholding to reach withheld cells."
+        "withheld cells are included (their matrices refresh on every run)."
     ),
 )
 @click.option(
@@ -645,8 +540,7 @@ def meditate(
     )
     # --deterministic implies --force: the input-freeze (new_M = empty) otherwise
     # short-circuits train_market when a prior model pickle exists, which is precisely
-    # when the eval harness needs a fresh deterministic rebuild. See
-    # docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    # when the eval harness needs a fresh deterministic rebuild.
     force = force or deterministic
     if full_rebuild:
         os.environ["SPORTSTRADAMUS_ARCHIVE_READ_ONLY"] = "1"
@@ -676,11 +570,12 @@ def meditate(
         np.random.seed(_RNG_SEED)
 
     # Per-cell ship config (data/config/stat_meta.json) governs which markets
-    # train with which strategy and which are withheld (skipped + pruned).
+    # train with which strategy and which are withheld (matrix kept warm,
+    # training skipped, pickle pruned).
     # Validated here so a bad entry fails before the expensive gamelog loads
     # below. Deterministic A/B runs ignore it: they target an explicit
     # --market with an explicit --target-normalization and must never mutate
-    # production pickles. See docs/gbdt_mean_regression_plan.md "Ship
+    # production pickles. See docs/archive/gbdt_mean_regression_plan.md "Ship
     # mechanism — per-cell strategy".
     ship_config = {} if deterministic else load_ship_config(branch=branch)
     # Raw stat_meta carries the per-cell ``posthoc`` slug (the calibration-method
@@ -718,13 +613,7 @@ def meditate(
     ):
         if league not in ("All", lg_name):
             continue
-        if cls is StatsMLB and (deterministic or full_rebuild or frozen_matrix_dir is not None):
-            # Frozen/cold builds consume cached historical inputs only. Probable
-            # pitchers describe the live upcoming slate and must not introduce
-            # a network dependency before the cached MLB gamelog is loaded.
-            struct = cls(load_live_pitchers=False)
-        else:
-            struct = cls()
+        struct = cls()
         if league == "All" and not odds_budget.league_is_live(lg_name, struct.season_start):
             continue
         click.echo(f"[{lg_name}] loading cached gamelogs...")
@@ -760,24 +649,15 @@ def meditate(
         # (including correlate's per-run rebuild). Only trim_gamelog, which
         # yields league_start_date, is still needed.
         if not deterministic and not full_rebuild and frozen_matrix_dir is None:
-            # Fit book weights for moneylines and totals before per-market loop
-            book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
-            book_weights[lg]["Moneyline"] = fit_book_weights(
-                lg, "Moneyline", stat_data, archive, book_weights
-            )
-            book_weights.setdefault(lg, {}).setdefault("Totals", {})
-            book_weights[lg]["Totals"] = fit_book_weights(
-                lg, "Totals", stat_data, archive, book_weights
-            )
-
+            # Markets no training cell covers; train_market fits each cell's own book weights.
+            weighted_markets = ["Moneyline", "Totals"]
             if lg == "MLB":
-                for extra_market in ("1st 1 innings", "pitcher win", "triples"):
-                    book_weights.setdefault(lg, {}).setdefault(extra_market, {})
-                    book_weights[lg][extra_market] = fit_book_weights(
-                        lg, extra_market, stat_data, archive, book_weights
-                    )
-            elif lg == "NHL":
-                stat_data.dump_goalie_list()
+                weighted_markets += ["1st 1 innings", "pitcher win", "triples"]
+            for weighted_market in weighted_markets:
+                book_weights.setdefault(lg, {}).setdefault(weighted_market, {})
+                book_weights[lg][weighted_market] = fit_book_weights(
+                    lg, weighted_market, stat_data, archive, book_weights
+                )
 
             with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
                 json.dump(book_weights, outfile, indent=4)
@@ -788,7 +668,9 @@ def meditate(
 
         league_start_date = stat_data.trim_gamelog()
 
-        for market in markets:
+        market_bar = tqdm(markets, unit="market")
+        for market in market_bar:
+            market_bar.set_description(f"[{lg}] {market}")
             cell_meta = stat_meta_full.get(lg, {}).get(market, {})
             cell_dist = cell_meta.get("dist") if dist == LOSS_AUTO else dist
             cell_target_norm = resolve_cell_target_normalization(
@@ -808,8 +690,27 @@ def meditate(
                         f"(dist={cell_dist!r}, strategy={cell_target_norm!r})"
                     )
                 else:
-                    prune_model_pickle(lg, market)
-                    click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
+                    # Withheld cells keep their training matrix warm — a later promotion
+                    # (board sweep / confirm walk) trains from this cache without a
+                    # cold multi-season rebuild. Only the fit is skipped.
+                    train_market(
+                        lg,
+                        market,
+                        stat_data,
+                        archive,
+                        league_start_date,
+                        force=force,
+                        matrix_only=True,
+                        full_rebuild=full_rebuild,
+                        matrix_output=matrix_output,
+                        dependency_root=dependency_root,
+                        dependency_namespace=dependency_namespace,
+                    )
+                    pruned = prune_model_pickle(lg, market)
+                    click.echo(
+                        f"[{lg}] {market}: withheld — matrix refreshed, "
+                        f"{'pruned pickle' if pruned else 'no pickle pruned'}, skipped training"
+                    )
                     continue
             if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:
                 cell_target_norm = TARGET_NORM_NONE
@@ -846,8 +747,6 @@ def meditate(
             cell_dist_training_loss = _resolve_cell_knob(
                 stat_meta_full, lg, market, "dist_training_loss", LOSS_AUTO, dist_training_loss
             )
-            # Kwargs as a dict so the g4-only calibrated retry below reruns the
-            # exact same call with only force/hpo_selection overridden.
             train_kwargs = {
                 "force": force,
                 "deterministic": deterministic,
@@ -875,11 +774,9 @@ def meditate(
                 "holdout_blind": holdout_blind,
             }
             train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
-            _retry_calibrated_if_g4_only(
-                lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
-            )
+
+        if not deterministic and not matrix_only and artifact_output is None:
+            report()
 
     if not deterministic and not matrix_only and artifact_output is None:
-        demoted = _enforce_ship_gate(active_markets, ship_config, set(stat_structs), log)
-        if demoted:
-            click.echo(f"ship-gate: pruned {demoted} served cell(s) with ship=False")
+        _warn_ship_gate(active_markets, ship_config, set(stat_structs), log)

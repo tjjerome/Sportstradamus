@@ -27,6 +27,7 @@ serve time; the fitters themselves live in ``training.posthoc``.
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 from scipy.optimize import brentq, minimize
 from scipy.special import beta as beta_fn
 from scipy.special import expit, gammaln, logit, logsumexp, xlogy
@@ -81,6 +82,15 @@ _DP_NEWTON_MAX_ITER = 8
 # estimate outside this band is small-sample noise, not a real dispersion read.
 _DP_PHI_SEED_FLOOR = 0.25
 _DP_PHI_SEED_CEILING = 4.0
+# Divide-by-zero guard on a family's shape parameter in the predictive-SD closed
+# forms; a shape this small is a degenerate fit, not a real dispersion read.
+_SHAPE_FLOOR = 1e-6
+# SkewNormal precision-pool floor on the model scale, as a fraction of the book scale.
+# The pool weights legs by 1/sigma^2, so a GBDT sigma far below the book's seizes the
+# blend regardless of w and saturates served P to 0/1 — three such rows carried 98% of
+# NFL passing yards' Gate-1 point estimate (docs/archive/researcher_passing_g1.md §6;
+# 0.8 was the best measured kappa, with g4/cov50 unchanged and g5 improved).
+_BLEND_MODEL_SCALE_FLOOR = 0.8
 
 
 def odds_to_prob(odds):
@@ -141,6 +151,65 @@ def no_vig_odds(over, under=None, method="proportional"):
     return [o / juice, u / juice]
 
 
+# What one unboosted (1.00x) Underdog pick is worth. An entry pays its table multiplier
+# times the legs' own multipliers, so a single pick has no payout of its own: this is the
+# geometric mean of the per-pick roots of the Power entries the owner plays, 3, 5 and 6
+# picks (6.5 ** (1/3) = 1.866, 20 ** (1/5) = 1.821, 35 ** (1/6) = 1.809;
+# ``underdog_payouts.json``). ``finalize_records`` and ``platform_payout`` multiply it into
+# the raw API multiplier so ``Model EV = P * Boost`` is a per-$1 expected return; it is
+# divided back out before a ``Boost`` is persisted or an entry is priced. ``Archive.add_dfs``
+# prices a one-sided offer through it as well, so an unquoted leg's ``Market Prob`` and the
+# close the archive later hands ``clv`` are on one scale. Moving it does not re-price rows
+# already archived (``tail_scorecard.side_boosts`` decodes them by era).
+UNDERDOG_BOOST_BASELINE: float = 1.83
+
+# Underdog's raw multiplier on a pick it neither discounts nor boosts: an even pick
+# (docs/underdog_api.md §6.8). The app shows the same pick at its decimal price, 1.87 (§7.4).
+UNDERDOG_EVEN_PICK_MULTIPLIER: float = 1.0
+
+# Full decimal payout above which Kelly is zeroed instead of computed. The realized
+# ledger (2026-07 through 10) shows recommended legs paying above this hit only 15-35%
+# against a ~60% model read, so the edge claim isn't trusted past here. The cap moves
+# only on the realized_by_side payout-band split, never ad hoc.
+MAX_FAVORED_PAYOUT: float = 2.5
+
+
+def platform_payout(boost, platform):
+    """Full decimal payout of a persisted DFS leg (``history.parquet`` conventions).
+
+    Underdog persists its raw multiplier over the per-pick baseline; Sleeper's ``Boost``
+    is already the posted decimal payout. Scalars or aligned array-likes.
+    """
+    return boost * np.where(np.asarray(platform) == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
+
+
+# An unboosted symmetric DFS pick pays the same either way, so it prices even.
+DFS_FAIR_PICK_PROB = 0.5
+
+
+def dfs_boost_probs(odds_over, odds_under):
+    """Payout-implied ``[p_over, p_under]`` from full decimal DFS payout odds.
+
+    A two-sided offer devigs proportionally, so a symmetric pair prices at
+    exactly ``DFS_FAIR_PICK_PROB`` per side and standard picks are unchanged.
+    A one-sided offer — the missing side passed as 0 or NaN — is the
+    platform's own claim on a moved or discounted line: the offered side
+    stores its raw breakeven ``1/odds`` with no hold shave and the other side
+    its complement, never a fabricated fair 50/50. Neither side offered
+    prices even.
+    """
+    imp_over = 1.0 / odds_over if odds_over > 0 else None
+    imp_under = 1.0 / odds_under if odds_under > 0 else None
+    if imp_over is not None and imp_under is not None:
+        juice = imp_over + imp_under
+        return [imp_over / juice, imp_under / juice]
+    if imp_over is not None:
+        return [imp_over, 1.0 - imp_over]
+    if imp_under is not None:
+        return [1.0 - imp_under, imp_under]
+    return [DFS_FAIR_PICK_PROB, DFS_FAIR_PICK_PROB]
+
+
 # Cap the SkewNormal implied mean at this multiple of the line — the archive's
 # own blown-row threshold (``BLOWN_LINE_FACTOR``). Below the corresponding
 # under-prob the inversion would exceed it, so the line is used instead.
@@ -149,7 +218,7 @@ SN_MAX_MEAN_FACTOR = 5.0
 # A SkewNormal's standardized skewness is bounded to |gamma| < 0.99527 (Azzalini 1985 [82]).
 # Clamp a target skew just inside it so the moment-match's alpha stays finite; a count cell's
 # low-mean right-skew that exceeds the bound is met in variance and finished by the integer PMF
-# correction (WS2 research brief, /tmp/researcher_ws2_book_shape.md Findings 2-3).
+# correction (WS2 research brief, Findings 2-3).
 _SN_SKEW_MAX = (
     0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
 )
@@ -259,7 +328,10 @@ def _dp_log_pmf_grid(mu, phi):
     mu = np.clip(np.atleast_1d(np.asarray(mu, dtype=float)), 1e-6, None)
     phi = np.clip(np.atleast_1d(np.asarray(phi, dtype=float)), _DP_PHI_FLOOR, _DP_PHI_CEILING)
     mu, phi = np.broadcast_arrays(mu, phi)
-    span = np.max(mu + _DP_GRID_SIGMAS * np.sqrt(mu / phi))
+    # An empty batch is legal (a slate with no player in a volume model's
+    # positions); ``initial`` keeps the reduction defined and never beats a
+    # real span, which is positive.
+    span = np.max(mu + _DP_GRID_SIGMAS * np.sqrt(mu / phi), initial=0.0)
     kmax = int(np.clip(span + 1, _DP_KMAX_MIN, _DP_KMAX_CAP))
     grid = np.arange(kmax + 1, dtype=float)
     k = grid[:, None]
@@ -431,7 +503,9 @@ def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
     return np.sum((cdf - indicator) ** 2, axis=0) * dx
 
 
-def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None):
+def get_ev(
+    line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None, phi=None, r=None
+):
     """Invert the book's ``(line, under-prob)`` to the implied mean.
 
     The exact numerical inverse of :func:`get_odds`: returns the mean ``ev`` for
@@ -458,6 +532,12 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
         sigma: SkewNormal scale held fixed across the inversion; ``None`` → ``ev*cv``.
             WS2 passes the per-cell fitted scale evaluated once at the quoted line, so
             the bracket stays monotone (the shape does not move with the solved mean).
+        phi: Double Poisson precision held fixed across the inversion; ``None`` →
+            ``1/(1+cv·ev)``. The count analogue of ``sigma`` and fixed for the same
+            reason — :func:`~sportstradamus.helpers.config.book_count_dispersion`
+            evaluates it once at the quoted line so the bracket stays monotone.
+        r: NegBin/ZINB dispersion held fixed across the inversion; ``None`` → ``1/cv``.
+            The same fitted shape as ``phi``, in the other count family's parameter.
 
     Returns:
         The mean that reproduces the book's ``under`` under :func:`get_odds`.
@@ -467,7 +547,16 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
 
     def p_under(ev):
         return get_odds(
-            line, ev, dist, cv=cv, step=step, gate=gate, skew_alpha=skew_alpha, sigma=sigma
+            line,
+            ev,
+            dist,
+            cv=cv,
+            step=step,
+            gate=gate,
+            skew_alpha=skew_alpha,
+            sigma=sigma,
+            phi=phi,
+            r=r,
         )
 
     lo = 1e-6
@@ -775,6 +864,56 @@ def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, his
     return DecodedParams(ev=ev, sigma=sn_scale, skew=skew, gate=gate)
 
 
+def predictive_std(dist: str, decoded: DecodedParams) -> np.ndarray:
+    """Closed-form predictive SD for a decoded distribution.
+
+    The moment companion to :func:`decode_predictive_mean`: together they reduce
+    any family to the ``(mean, std)`` pair that the volume-projection path and the
+    dashboard detail popup both consume, so neither has to carry family algebra.
+    Returns NaN where the family's shape parameter is absent (a book-fallback
+    record, or a legacy pickle predating the shape persist).
+    """
+    # style: allow-complexity  flat per-family dispatch of closed forms; splitting
+    # it would duplicate the shape-present guard in every branch.
+    mean = np.asarray(decoded.ev, dtype=float)
+    if dist in ("NegBin", "ZINB") and decoded.r is not None:
+        r = np.clip(np.asarray(decoded.r, dtype=float), _SHAPE_FLOOR, None)
+        return np.sqrt(np.clip(mean + mean**2 / r, 0, None))
+    if dist == "DPO" and decoded.phi is not None:
+        phi = np.clip(np.asarray(decoded.phi, dtype=float), _SHAPE_FLOOR, None)
+        return np.sqrt(np.clip(mean / phi, 0, None))
+    if dist in ("Gamma", "ZAGamma") and decoded.alpha is not None:
+        alpha = np.clip(np.asarray(decoded.alpha, dtype=float), _SHAPE_FLOOR, None)
+        return mean / np.sqrt(alpha)
+    if dist == "SkewNormal" and decoded.sigma is not None:
+        sigma = np.asarray(decoded.sigma, dtype=float)
+        skew = np.asarray(decoded.skew if decoded.skew is not None else 0.0, dtype=float)
+        delta = skew / np.sqrt(1 + skew**2)
+        return sigma * np.sqrt(np.clip(1 - 2 * delta**2 / np.pi, 0, None))
+    return np.full_like(mean, np.nan)
+
+
+# Last-resort coefficient of variation for an offer carrying neither a model spread nor a
+# calibrated CV: a middling counting-stat dispersion, there only to keep the spread finite.
+_FALLBACK_CV = 0.3
+
+
+def resolve_std(projection_std: float | None, ev: float, cv: float) -> float:
+    """A positive, finite spread for one offer's outcome distribution.
+
+    Prefers the model's ``Projection STD``; book-fallback offers carry none, so it falls
+    back to the CV-implied ``ev * cv`` (``cv`` is always present), then
+    ``ev * _FALLBACK_CV``. The NaN guard matters: ``NaN or default`` keeps the NaN (NaN is
+    truthy), which would blank the deep-dive curve's x-range and every fair line the
+    line-movement snapshot scales by this spread.
+    """
+    if pd.notna(projection_std) and projection_std > 0:
+        return float(projection_std)
+    if pd.notna(cv) and cv > 0:
+        return float(ev) * float(cv)
+    return float(ev) * _FALLBACK_CV
+
+
 def apply_temperature(p_over, temperature):
     """Temperature-scale an over-probability in logit space.
 
@@ -888,7 +1027,8 @@ def fused_loc(
             evaluated at the quoted line). ``None`` → legacy ``ev_b*cv``.
         book_skew_alpha: Per-observation book SkewNormal skewness. ``None`` → 0
             (symmetric), paired with the legacy ``book_sigma`` default.
-        phi: DPO per-observation precision from the model.
+        phi: DPO per-observation precision from the model. ``None`` → the book's
+            own precision, collapsing the pool to the book side.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
@@ -909,9 +1049,9 @@ def fused_loc(
         ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
         mean_blend = np.exp(w * np.log(ev_a) + (1 - w) * np.log(ev_b))
         phi_book = 1.0 / (1.0 + cv * ev_b)
-        phi_blend = np.exp(
-            w * np.log(np.clip(phi, _DP_PHI_FLOOR, _DP_PHI_CEILING)) + (1 - w) * np.log(phi_book)
-        )
+        # No model phi (volume-stats decode) — no model precision to pool.
+        phi_model = phi_book if phi is None else np.clip(phi, _DP_PHI_FLOOR, _DP_PHI_CEILING)
+        phi_blend = np.exp(w * np.log(phi_model) + (1 - w) * np.log(phi_book))
         return mean_blend, phi_blend, gate_blend
 
     if dist == "NegBin":
@@ -941,7 +1081,16 @@ def fused_loc(
         book_delta = book_skew / np.sqrt(1 + book_skew**2)
         book_loc = ev_b - book_scale * book_delta * np.sqrt(2 / np.pi)
 
-        prec_m = 1.0 / model_sigma**2
+        # The floor applies to the pool only: model_loc above decodes the model's own
+        # mean identity from its true sigma, which the floor must not shift. At w = 1
+        # (no authentic book quote) there is no book leg to seize, and the pure-model
+        # identity fused == model must hold exactly.
+        pooled_model_sigma = np.where(
+            np.asarray(w) >= 1.0,
+            model_sigma,
+            np.maximum(model_sigma, _BLEND_MODEL_SCALE_FLOOR * book_scale),
+        )
+        prec_m = 1.0 / pooled_model_sigma**2
         prec_b = 1.0 / book_scale**2
         total_prec = w * prec_m + (1 - w) * prec_b
         blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec
@@ -1070,6 +1219,33 @@ def _mixture_start_values(mu, std, n, offset_mode, normalized):
     return np.column_stack([loc, boom_loc, log_scale, boom_log_scale, logit_base, logit_boom])
 
 
+def shape_from_moments(
+    dist: str, mean: np.ndarray | float, std: np.ndarray | float
+) -> tuple[str, np.ndarray] | None:
+    """Recover a family's shape parameter from a predictive mean/SD pair.
+
+    Inverse of :func:`predictive_std`. The volume path publishes only
+    ``proj {market} mean`` / ``proj {market} std`` -- a team-budget-rescaled
+    projection, not fitted distribution parameters -- but ``fused_loc`` blends the
+    family's own shape. Returns the ``(column, values)`` pair the offer frame should
+    carry, or ``None`` for a family whose shape a mean/SD pair cannot pin down.
+
+    SkewNormal resolves to the symmetric case: with no skew to carry through the
+    budget rescale, sigma is the SD itself.
+    """
+    mean = np.clip(np.asarray(mean, dtype=float), _SHAPE_FLOOR, None)
+    var = np.clip(np.asarray(std, dtype=float), _SHAPE_FLOOR, None) ** 2
+    if dist in ("NegBin", "ZINB"):
+        return "Model R", mean**2 / np.clip(var - mean, _SHAPE_FLOOR, None)
+    if dist == "DPO":
+        return "Model Phi", np.clip(mean / var, _DP_PHI_FLOOR, _DP_PHI_CEILING)
+    if dist in ("Gamma", "ZAGamma"):
+        return "Model Alpha", mean**2 / var
+    if dist == "SkewNormal":
+        return "Model Sigma", np.sqrt(var)
+    return None
+
+
 def set_model_start_values(
     model,
     dist,
@@ -1123,7 +1299,14 @@ def set_model_start_values(
     n = len(sv)
 
     mu = np.clip(sv[:, 0], 1e-6, None)
-    std = np.clip(sv[:, 1], 1e-6, None)
+    std = sv[:, 1]
+    # A player with one game in the window has STDYr 0. Seeding its scale head at the clip
+    # floor hands the loss a near-zero sigma whose gradient blows the head up for every row in
+    # its leaves, so rows without dispersion history borrow the batch's typical dispersion.
+    with_history = std > 0
+    if with_history.any():
+        std = np.where(with_history, std, np.median(std[with_history]))
+    std = np.clip(std, 1e-6, None)
     hist_gate = np.clip(sv[:, 2], 0, 0.99)
 
     _r_upper = shape_ceiling if shape_ceiling is not None else 50

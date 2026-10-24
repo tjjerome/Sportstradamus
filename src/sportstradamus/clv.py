@@ -1,98 +1,68 @@
 """Closing-line value (CLV) computation for resolved predictions.
 
 Reads the closing snapshot from the time-series archive — the latest
-observation per book at-or-before the row's nominal kickoff — and folds
+observation per book at-or-before the row's kickoff — and folds
 it into each offer row in ``history`` as ``Close Market Prob``, ``Market CLV``,
-and ``Model CLV``. The ``commence_time`` used as the ``at=`` cutoff is
-derived from the row date; until per-row kickoff timestamps are wired in
-the default sits at game-day evening UTC, which guarantees the cutoff is
-after every league's kickoff window.
+and ``Model CLV`` once that instant has passed. The kickoff is the row's
+``Commence``, borrowed from its team's other rows of the day where the row has
+none, and 20:00 UTC on the game date where there is none to borrow
+(:func:`commence_times`).
 
-Definitions, in no-vig probability units:
+``Market Prob``, ``Win Prob``, and ``Close Market Prob`` are all already
+expressed on the bet side (``prediction/offer_records.py`` flips an Under
+row's book price before either column is derived), so CLV is a plain
+difference for either side, in no-vig probability units:
 
-    sign       = +1 if Bet in {"Over",  "Higher"} else -1
-    Market CLV = sign * (Close Market Prob - Market Prob)
-    Model CLV  = sign * (Close Market Prob - Win Prob)
+    Market CLV = Close Market Prob - Market Prob
+    Model CLV  = Close Market Prob - Win Prob
 """
 
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.archive import archive_market
 from sportstradamus.helpers.config import book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_odds
-from sportstradamus.helpers.logging import get_logger
 from sportstradamus.history_schema import PREDICTION_KEY
 
 # Per-(League, Market, Platform) CLV summary segments require this many legs
 # to be reported. Smaller segments are statistical noise.
 CLV_SEGMENT_MIN_N = 20
 
-# An archive snapshot taken more than this many minutes before kickoff is too
-# stale to credibly stand in for the closing line; warn once per segment.
-CLOSE_LOOKBACK_WARN_MINUTES = 90
-
-# Stand-in for true commence_time when the offer row carries only a date.
-# Evening UTC is comfortably past every league's typical kickoff window so
-# `at=commence_time` cuts off after every pre-game observation has landed.
+# Stand-in kickoff for a row with no `Commence` of its own and none to borrow: rows
+# scored before the column existed (2026-10-05), and a Sleeper offer with no Underdog
+# row of its team that day. 20:00 UTC is mid-afternoon US Eastern: after the early
+# starts, before the evening ones.
 _COMMENCE_DEFAULT_OFFSET = timedelta(hours=20)
 
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
-
-_logger = get_logger("reflect")
 
 
 def _segments_parquet_path() -> Path:
     return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
 
 
-def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
-    """Return signed CLV in probability points, or NaN when undefined.
-
-    Args:
-        open_p: Probability the bettor implicitly bought at placement time.
-        close_p: Closing book probability at game-lock.
-        bet: Direction of the bet — Over/Higher get +1, Under/Lower get -1.
-
-    Returns:
-        Signed CLV (close − open, flipped for Under). NaN if either
-        probability is NaN.
-    """
-    if pd.isna(open_p) or pd.isna(close_p):
-        return np.nan
-    sign = 1 if bet in _OVER_BETS else -1
-    return sign * (float(close_p) - float(open_p))
-
-
 def _fill_offer_rows(history: pd.DataFrame, idx, close_under: float) -> None:
-    """Assign the closing trio onto ``history.loc[idx]`` in place.
+    """Assign ``Close Market Prob`` onto ``history.loc[idx]`` in place.
 
     ``close_under`` is ``P(under offer_line)``, shared by every offer row in the
-    ``PREDICTION_KEY`` group; each row flips it to its own side via ``Bet`` before
-    computing CLV, since a single prediction can carry both Over and Under offers
-    across platforms.
+    ``PREDICTION_KEY`` group; each row flips it to its own side via ``Bet``, since
+    a single prediction can carry both Over and Under offers across platforms.
+    ``Market CLV``/``Model CLV`` are derived afterward, vectorized across the
+    whole frame, by :func:`fill_from_archive`.
     """
     rows = history.loc[idx]
     close_p = rows["Bet"].apply(
         lambda bet: close_under if bet not in _OVER_BETS else 1.0 - close_under
     )
-    market_clv = [
-        _signed_clv(mp, cp, bet)
-        for mp, cp, bet in zip(rows["Market Prob"], close_p, rows["Bet"], strict=True)
-    ]
-    model_clv = [
-        _signed_clv(wp, cp, bet)
-        for wp, cp, bet in zip(rows["Win Prob"], close_p, rows["Bet"], strict=True)
-    ]
     history.loc[idx, "Close Market Prob"] = close_p
-    history.loc[idx, "Market CLV"] = market_clv
-    history.loc[idx, "Model CLV"] = model_clv
 
 
 def _fetch_close_ev_or_composite(
@@ -174,26 +144,30 @@ def _close_prob_at_line(
     return get_odds(offer_line, close_ev, dist, cv=float(cv), gate=gate_val, step=step_val)
 
 
-def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
+def _fill_one_group(history: pd.DataFrame, archive, key, idx, commence_time) -> None:
     """Resolve one ``PREDICTION_KEY`` group's closing probability and write it in place.
 
     ``Dist``/``CV``/``Gate``/``Step`` are prediction-level columns (constant across the
     whole group), but ``Line`` is offer-level — different offer rows in the same group
     (different books, or an explicit Alt Line) can legitimately quote different lines.
     The archive fetch (:func:`_fetch_close_ev_or_composite`) is genuinely group-invariant
-    and runs once; the mean-to-probability conversion
-    (:func:`_close_prob_at_line`) depends on the line, so it re-runs once per distinct
-    ``Line`` in the group, each writing only its own matching subset of rows.
+    and runs once, as of ``commence_time``: the one instant :func:`commence_times` gives
+    every row of the group, the latest kickoff among them (NaT, a group with neither a
+    kickoff nor a parseable date, reads the latest quotes). The mean-to-probability
+    conversion (:func:`_close_prob_at_line`) depends on the line, so it re-runs once per
+    distinct ``Line`` in the group, each writing only its own matching subset of rows.
 
     No-op (leaves a row NaN) when the key isn't a real (league, market) pair, the
     archive lookup misses, or the resolved probability falls outside ``[0, 1]`` — the
-    last case is a clamp-to-NaN quarantine, matching ``migrate_leg_schema.py``'s
-    existing handling of out-of-range ``Close Market Prob`` values. A bad conversion at
-    one line does not blank out other lines in the same group that resolved fine.
+    last case is a clamp-to-NaN quarantine. A bad conversion at one line does not
+    blank out other lines in the same group that resolved fine.
     """
     player, league, date, market = key
     if not (isinstance(league, str) and isinstance(market, str)):
         return
+    # The archive and the cell's fitted book shape go by the league's own market name,
+    # not the one the platform's stat_map gave history's rows.
+    market = archive_market(league, market)
     date_str = _normalize_date(date)
     group = history.loc[idx]
     dist = group["Dist"].iloc[0]
@@ -201,7 +175,14 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
     gate = group["Gate"].iloc[0]
     step = group["Step"].iloc[0]
     fetched, is_composite = _fetch_close_ev_or_composite(
-        archive, league, market, date_str, player, at=_commence_time(date_str), dist=dist, cv=cv
+        archive,
+        league,
+        market,
+        date_str,
+        player,
+        at=None if pd.isna(commence_time) else commence_time,
+        dist=dist,
+        cv=cv,
     )
     if pd.isna(fetched):
         return
@@ -216,23 +197,67 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
         _fill_offer_rows(history, line_idx, close_under)
 
 
-def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
-    """Populate the closing trio on every offer row from ``archive``.
+def commence_times(history: pd.DataFrame) -> pd.Series:
+    """Each row's kickoff: the instant its close is gated on and read as of.
+
+    Naive UTC, the convention of the archive's ``observed_at``. A row's own ``Commence``
+    where it parses, else the latest kickoff among the rows of its (League, Date, Team),
+    since Sleeper posts none. The rows of one ``PREDICTION_KEY`` group then share the
+    latest kickoff any of them holds, so a group is read from the archive once, at one
+    instant, however its rows differ (a doubleheader, a row filed under another team).
+    A group with no kickoff at all, and every row of a frame without a ``Commence``
+    column, gets :data:`_COMMENCE_DEFAULT_OFFSET` past its game date: NaT where that
+    date does not parse.
+    """
+    stand_in = (
+        pd.to_datetime(history["Date"], format="%Y-%m-%d", errors="coerce")
+        + _COMMENCE_DEFAULT_OFFSET
+    )
+    if "Commence" not in history.columns:
+        return stand_in
+    kickoff = pd.to_datetime(
+        history["Commence"], format="ISO8601", utc=True, errors="coerce"
+    ).dt.tz_localize(None)
+    team_day = kickoff.groupby([history[col] for col in ("League", "Date", "Team")])
+    kickoff = kickoff.fillna(team_day.transform("max"))
+    prediction = kickoff.groupby([history[col] for col in PREDICTION_KEY], dropna=False)
+    return prediction.transform("max").fillna(stand_in)
+
+
+def fill_from_archive(
+    history: pd.DataFrame, archive, *, now: datetime | None = None
+) -> pd.DataFrame:
+    """Populate the closing trio on every offer row whose kickoff has passed.
 
     Groups rows whose ``Close Market Prob`` is still NaN by
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` and resolves each group's
     closing probability via :func:`_fill_one_group` (see :func:`_fetch_close_ev_or_composite`
-    and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Pinning
-    ``at=commence_time`` makes the closing read reproducible regardless of when ``reflect``
-    runs. Groups whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left
-    with NaN closing fields and excluded from CLV aggregates downstream.
+    and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Groups
+    whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left with NaN
+    closing fields and excluded from CLV aggregates downstream.
 
-    Skips rows that already carry a non-NaN ``Close Market Prob`` so a
-    re-run doesn't redundantly hit archive.
+    A row's kickoff (:func:`commence_times`) is both the ``at=`` cutoff of its closing
+    read and the instant it must be past to carry a close: the read is reproducible only
+    from then on, and before it returns the newest quote so far. So a row whose kickoff
+    is still ahead of ``now`` is left unfilled, and one that already carries a close
+    loses its closing trio: ``prediction.cli._upsert_history`` lets a closed row beat
+    every later scoring of the same offer, so a row closed early stops updating before
+    its game. A row with neither a kickoff nor a parseable date has nothing to wait for
+    and is filled whenever it is pending.
+
+    Skips rows that already carry a non-NaN ``Close Market Prob`` so a re-run
+    doesn't redundantly hit archive. ``Market CLV``/``Model CLV`` are then
+    (re)computed — ``Close Market Prob - Market Prob`` / ``- Win Prob`` — for
+    every row with a non-NaN ``Close Market Prob``, not only the ones just
+    filled. That makes the recompute idempotent and lets it repair a row
+    stamped under a stale or differently-signed convention on its next run,
+    with no migration script needed.
 
     Args:
         history: Flat one-row-per-offer DataFrame.
         archive: A loaded ``Archive`` instance.
+        now: The instant each row's kickoff is compared against; defaults to the
+            current UTC time. tz-stripped, so pass UTC.
 
     Returns:
         The same DataFrame, mutated in place. Returned for chaining.
@@ -240,17 +265,26 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     if history.empty or "Close Market Prob" not in history.columns:
         return history
 
-    pending = history.loc[history["Close Market Prob"].isna()]
-    if pending.empty:
-        return history
+    commence = commence_times(history)
+    ahead = commence > pd.Timestamp(now or datetime.now(UTC)).tz_localize(None)
+    history.loc[ahead, ["Close Market Prob", "Market CLV", "Model CLV"]] = np.nan
 
-    for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
-        _fill_one_group(history, archive, key, idx)
+    pending = history.loc[history["Close Market Prob"].isna() & ~ahead]
+    if not pending.empty:
+        for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
+            _fill_one_group(history, archive, key, idx, commence.at[idx[0]])
 
+    has_close = history["Close Market Prob"].notna()
+    history.loc[has_close, "Market CLV"] = (
+        history.loc[has_close, "Close Market Prob"] - history.loc[has_close, "Market Prob"]
+    )
+    history.loc[has_close, "Model CLV"] = (
+        history.loc[has_close, "Close Market Prob"] - history.loc[has_close, "Win Prob"]
+    )
     return history
 
 
-def _row_movement(archive, league_val, market_val, date_val, player_val, movement_cache):
+def _row_movement(archive, league_val, market_val, date_val, player_val, until, movement_cache):
     if archive is None or not date_val or not isinstance(player_val, str):
         return None
     cache_key = (league_val, market_val, date_val, player_val)
@@ -258,10 +292,10 @@ def _row_movement(archive, league_val, market_val, date_val, player_val, movemen
         try:
             movement_cache[cache_key] = archive.get_movement(
                 league_val,
-                market_val,
+                archive_market(league_val, market_val),
                 date_val,
                 player_val,
-                until=_commence_time(date_val),
+                until=None if pd.isna(until) else until,
             )
         except (KeyError, ValueError, TypeError):
             movement_cache[cache_key] = None
@@ -288,13 +322,15 @@ def _offer_to_leg(row, movement) -> dict | None:
 def _collect_clv_legs(history: pd.DataFrame, archive) -> list[dict]:
     legs: list[dict] = []
     movement_cache: dict = {}
-    for _, row in history.iterrows():
+    # A line's movement runs up to its close, so it ends at the instant the close is read at.
+    untils = commence_times(history) if archive is not None else [None] * len(history)
+    for (_, row), until in zip(history.iterrows(), untils, strict=True):
         league_val = row.get("League")
         market_val = row.get("Market")
         date_val = _normalize_date(row.get("Date"))
         player_val = row.get("Player")
         movement = _row_movement(
-            archive, league_val, market_val, date_val, player_val, movement_cache
+            archive, league_val, market_val, date_val, player_val, until, movement_cache
         )
         leg = _offer_to_leg(row, movement)
         if leg is not None:
@@ -361,7 +397,7 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
 
 
 def persist_segments(grouped: pd.DataFrame) -> None:
-    """Write the full per-segment frame to ``data/clv_segments.parquet``.
+    """Write the full per-segment frame to ``data/runtime/clv_segments.parquet``.
 
     All segments are persisted (not just the reportable ones) so the Kelly
     shrinkage getter can reason about sample size for low-n segments too.
@@ -377,94 +413,31 @@ def persist_segments(grouped: pd.DataFrame) -> None:
 def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
     """Return ``(shrinkage, n)`` for one ``(league, market)`` segment.
 
-    Reads ``data/clv_segments.parquet`` (written by :func:`summarize`).
+    Reads ``data/runtime/clv_segments.parquet`` (written by :func:`persist_segments`).
     The shrinkage weight is ``frac_beat_close`` linearly remapped from
     ``[0.5, 1.0]`` onto ``[0.0, 1.0]`` and clamped — a segment that beats
     the close 50% of the time gets no credit; one that beats it every
     time gets full credit. ``n`` is the number of resolved legs in the
     segment, surfaced for the Kelly blending ramp.
 
-    Returns ``(1.0, 0)`` when the segment has fewer than
-    :data:`CLV_SEGMENT_MIN_N` legs or no parquet exists. The
-    ``shrinkage=1.0`` fallback means "no information, don't shrink".
+    The shrinkage is NaN — what ``kelly.resolve_shrinkage`` reads as "no live
+    evidence" — when no parquet exists, the segment is absent (``n`` is 0) or it
+    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). Never
+    ``1.0`` there: that reads as full trust in exactly the cells nothing has measured.
     """
-    path = _segments_parquet_path()
-    if not path.exists():
-        return 1.0, 0
     try:
-        seg_df = pd.read_parquet(path)
+        seg_df = pd.read_parquet(_segments_parquet_path())
     except (OSError, ValueError):
-        return 1.0, 0
+        return np.nan, 0
     rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
     if rows.empty:
-        return 1.0, 0
+        return np.nan, 0
     n = int(rows["n"].sum())
     if n < CLV_SEGMENT_MIN_N:
-        return 1.0, n
+        return np.nan, n
     weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
     shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
     return shrinkage, n
-
-
-def check_close_sample_freshness(
-    samples: pd.DataFrame,
-    *,
-    logger=None,
-) -> pd.DataFrame:
-    """Warn when archive close-snapshots lag too far behind ``commence_time``.
-
-    Iterates the supplied ``samples`` frame — one row per offer — and emits
-    one WARNING per ``(league, market, date)`` segment when any snapshot's
-    ``sample_ts`` precedes ``commence_time`` by more than
-    :data:`CLOSE_LOOKBACK_WARN_MINUTES`. Rows missing either timestamp are
-    skipped silently.
-
-    Args:
-        samples: DataFrame with columns ``league``, ``market``, ``date``,
-            ``sample_ts``, ``commence_time``. The latter two must be
-            timezone-aware datetimes (or NaT).
-        logger: Optional override for the structured ``reflect`` logger;
-            tests pass a captured logger to assert on warnings.
-
-    Returns:
-        A frame of the segments that produced warnings, with columns
-        ``league``, ``market``, ``date``, ``max_lag_minutes``, ``n``.
-        Empty when nothing was stale.
-    """
-    log = logger if logger is not None else _logger
-    required = {"league", "market", "date", "sample_ts", "commence_time"}
-    if samples.empty or not required.issubset(samples.columns):
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    df = samples.copy()
-    df["sample_ts"] = pd.to_datetime(df["sample_ts"], utc=True, errors="coerce")
-    df["commence_time"] = pd.to_datetime(df["commence_time"], utc=True, errors="coerce")
-    df = df.dropna(subset=["sample_ts", "commence_time"])
-    if df.empty:
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    df["lag_minutes"] = (df["commence_time"] - df["sample_ts"]).dt.total_seconds() / 60.0
-    stale = df.loc[df["lag_minutes"] > CLOSE_LOOKBACK_WARN_MINUTES]
-    if stale.empty:
-        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
-
-    grouped = (
-        stale.groupby(["league", "market", "date"], dropna=False)["lag_minutes"]
-        .agg(["max", "count"])
-        .reset_index()
-        .rename(columns={"max": "max_lag_minutes", "count": "n"})
-    )
-    for _, seg in grouped.iterrows():
-        log.warning(
-            "stale close snapshot (lag=%.0fmin > %dmin) for %s/%s on %s across %d legs",
-            seg["max_lag_minutes"],
-            CLOSE_LOOKBACK_WARN_MINUTES,
-            seg["league"],
-            seg["market"],
-            seg["date"],
-            int(seg["n"]),
-        )
-    return grouped
 
 
 def _normalize_date(date) -> str:
@@ -476,22 +449,6 @@ def _normalize_date(date) -> str:
         return pd.to_datetime(date).strftime("%Y-%m-%d")
     except (ValueError, TypeError, AttributeError):
         return ""
-
-
-def _commence_time(date_str: str) -> datetime | None:
-    """Best-effort kickoff timestamp for ``date_str``.
-
-    Until offer rows carry an explicit kickoff timestamp this is the
-    midnight-of-game-date plus :data:`_COMMENCE_DEFAULT_OFFSET`, which
-    guarantees the resulting ``at=`` snapshot includes every pre-game
-    observation regardless of league.
-    """
-    if not date_str:
-        return None
-    try:
-        return datetime.strptime(date_str[:10], "%Y-%m-%d") + _COMMENCE_DEFAULT_OFFSET
-    except (ValueError, TypeError):
-        return None
 
 
 def _safe_get_ev(

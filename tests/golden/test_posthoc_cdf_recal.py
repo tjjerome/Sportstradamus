@@ -16,9 +16,11 @@ import pandas as pd
 from scipy import stats
 
 from sportstradamus.prediction.model_prob import _apply_cdf_recal_over
-from sportstradamus.training import posthoc
+from sportstradamus.training import pipeline, posthoc
 from sportstradamus.training.pipeline import (
+    _build_y_proba_raw,
     _step_calibrate_dispersion,
+    _step_calibrate_temperature,
     _step_compute_test_probabilities,
 )
 
@@ -237,3 +239,41 @@ def test_step_compute_test_probabilities_warps_over_through_g():
     raw_under = raw[:, 0]  # F(line)
     np.testing.assert_allclose(warped[:, 1], 1.0 - posthoc.apply_cdf_recal(blob, raw_under))
     assert not np.allclose(warped[:, 1], raw[:, 1])  # the map is non-trivial on this PIT
+
+
+def test_skewnormal_probabilities_price_pushes_at_the_cell_step(monkeypatch):
+    # Serving prices a SkewNormal integer line through get_odds(..., step=step), so the
+    # test-set P and the temperature fit must hand get_odds the same step or the half-point
+    # band around a push differs from the one the pickle serves (honest-receipts §6, I6a).
+    fused, splits, base, _ = _skewnormal_inputs()
+    n = len(splits["B_test"])
+    fused["gate_blend_val"] = None
+    splits["B_validation"] = splits["B_test"].round()
+    splits["y_validation"] = pd.DataFrame(
+        {"Result": np.random.default_rng(10).normal(18.0, 5.0, n)}
+    )
+    calibrated = {
+        **base,
+        "pit_recal_blob": None,
+        "val_weighted_mean_val": fused["weighted_mean"],
+        "sn_sigma_blend_val": base["sn_sigma_blend_test"],
+        "sn_alpha_blend_val": base["sn_alpha_blend_test"],
+    }
+    steps_seen = []
+    real_get_odds = pipeline.get_odds
+
+    def recording_get_odds(*args, **kwargs):
+        steps_seen.append(kwargs.get("step"))
+        return real_get_odds(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "get_odds", recording_get_odds)
+    _step_compute_test_probabilities(fused, calibrated, splits, {}, "SkewNormal", 0.5)
+    _step_calibrate_temperature(fused, calibrated, splits, {}, "SkewNormal", 0.5)
+    decoded = {
+        "ev": fused["weighted_mean"],
+        "gate_test": fused["gate_blend_test"],
+        "sn_sigma_test": base["sn_sigma_blend_test"],
+        "sn_alpha_test": base["sn_alpha_blend_test"],
+    }
+    _build_y_proba_raw(splits["B_test"], decoded, "SkewNormal", 0.5)
+    assert steps_seen == [0.5, 0.5, 0.5]

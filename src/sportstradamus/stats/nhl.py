@@ -2,48 +2,60 @@
 
 import importlib.resources as pkg_resources
 import json
-import os.path
-import pickle
-import warnings
 from datetime import date, datetime, timedelta
-from time import sleep
 
-import line_profiler
 import numpy as np
 import pandas as pd
-from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Scrape,
     abbreviations,
     combo_props,
-    feature_filter,
     get_ev,
-    get_mlb_pitchers,
     get_odds,
     remove_accents,
-    set_model_start_values,
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import write_gamelog
-from sportstradamus.spiderLogger import logger
+from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.stats.base import (
+    GAMELOG_RETENTION_DAYS,
+    ComboSpec,
     Stats,
     archive,
-    clean_data,
     scale_team_volume_to_budget,
     scraper,
 )
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
 
-# Days of gamelog history to retain (~4 NHL seasons); older rows pruned on each update.
-_GAMELOG_RETENTION_DAYS = 1431
-# Days since season start before triggering a full gamelog re-enrichment pass.
-_STALE_SEASON_DAYS = 300
+# DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
+# are carried as separate shots/blocked components because those are distinct book
+# markets with their own correlation cross terms).
+NHL_SKATER_UNDERDOG_WEIGHTS = (
+    ("goals", 6),
+    ("assists", 4),
+    ("shots", 1),
+    ("blocked", 1),
+    ("hits", 0.5),
+    ("powerPlayPoints", 0.5),
+)
+NHL_SKATER_PRIZEPICKS_WEIGHTS = (("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5))
+# `hits` is a pick'em-only market: 3200 archived player-gamedays, none of them
+# from a sportsbook. It is the sole component of the underdog skater spec that
+# no book prices, so without a fallback that spec never quotes at all.
+NHL_ASSUMABLE_SKATER_COMPONENTS = frozenset({"hits"})
+# The research brief's 0.6*shotsAgainst - 3.6*goalsAgainst re-parameterization is
+# unusable here: shotsAgainst has zero book quotes in the archive (model-side volume
+# stat), so the goalie spec stays on the quoted pair; the same-player corr matrix
+# carries the residual saves x goalsAgainst co-movement (weakly negative for
+# starters — save% luck at fixed shot volume — despite saves + GA == SA on raw counts).
+NHL_GOALIE_UNDERDOG_WEIGHTS = (("saves", 0.6), ("goalsAgainst", -3))
+NHL_GOALIE_UNDERDOG_BERNOULLI = (("win", 6),)
+# Keeps the goalie win probability off the exact 0/1 poles so it always clears
+# combo_quote's strict open-interval admission check.
+_GOALIE_WIN_P_CLIP: float = 0.01
 
 
 class StatsNHL(Stats):
@@ -107,7 +119,7 @@ class StatsNHL(Stats):
             "Rebound",
             "RG",
         ]
-        self.volume_stats = ["timeOnIce", "shotsAgainst"]
+        self.volume_stats = VOLUME_STATS["NHL"]
         self.default_total = 2.674
         self.positions = ["C", "W", "D", "G"]
         self.league = "NHL"
@@ -163,40 +175,6 @@ class StatsNHL(Stats):
 
         return playerProfile, playerDict, id_to_name
 
-    def update_player_comps(self, year=None):
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        players = self.players.get(self.season_start.year - 1, {})
-        players.update(self.players.get(self.season_start.year, {}))
-        playerProfile, all_players, id_to_name = self.build_comp_profile(players)
-
-        comps = {}
-        for position in ["C", "W", "D", "G"]:
-            pos_players = [
-                p
-                for p, v in all_players.items()
-                if v.get("position") == position and p in playerProfile.index
-            ]
-            positionProfile = playerProfile.loc[
-                pos_players, list(stats["NHL"][position].keys())
-            ].replace([np.nan, np.inf, -np.inf], 0)
-            positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
-            positionProfile = positionProfile[~positionProfile.index.duplicated(keep="first")]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
-            knn = BallTree(positionProfile)
-            min_k = 4 if position == "G" else 5
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
-
-        filepath = pkg_resources.files(data) / "leagues" / "nhl" / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
-
     def _current_season_key(self, target_game_date: date) -> int:
         """Return the ``self.players`` key for the season containing ``target_game_date``.
 
@@ -213,8 +191,7 @@ class StatsNHL(Stats):
 
         Returns a flat ``{player_id: stats_dict}`` mapping ready for
         :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts (matches the
-        :meth:`update_player_comps` ``prior.update(current)`` order).
+        season's roster wins on dict-update conflicts.
         """
         cutoff = self._current_season_key(target_game_date)
         merged: dict = {}
@@ -508,7 +485,6 @@ class StatsNHL(Stats):
         return n | stats
 
     def _update(self):
-        """Updates the NHL skater and goalie data."""
         latest_date = self.season_start
         if not self.gamelog.empty:
             latest_date = pd.to_datetime(self.gamelog["gameDate"]).max().date() + timedelta(days=1)
@@ -522,11 +498,12 @@ class StatsNHL(Stats):
         player_df = self._fetch_player_bios_nhl()
         skater_df = self._fetch_skater_summary(player_df)
         goalie_df = self._fetch_goalie_summary(player_df)
-        self.players[self.season_start.year] = skater_df.to_dict("index") | goalie_df.to_dict(
-            "index"
-        )
+        roster_pull = skater_df.to_dict("index") | goalie_df.to_dict("index")
+        # A pull moneypuck blocks comes back empty. Merged, it leaves the season's rows as
+        # they were; assigned, it would hand every player to last season's row.
+        self._merge_season_roster(self.season_start.year, roster_pull)
 
-        four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
         ]
@@ -536,14 +513,23 @@ class StatsNHL(Stats):
         ]
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
+        # Underdog's parser files an NHL fantasy line as a goalie's or a skater's by this list;
+        # the hourly board run's update keeps it current.
+        self.dump_goalie_list()
+
+        # Raised after the writes, so the parsed games and the stored roster are kept. Before
+        # opening night the season has no summary yet and an empty pull is normal.
+        game_days = pd.to_datetime(self.gamelog["gameDate"]).dt.date
+        if not roster_pull and (game_days >= self.season_start).any():
+            raise RuntimeError(
+                "NHL roster pull came back empty: moneypuck returned no skater or goalie "
+                f"season summary for {self.season_start.year}"
+            )
 
     def _collect_game_ids(self, latest_date, today):
         """Walk the NHL schedule day-by-day collecting (gameId, date) since latest_date."""
@@ -833,13 +819,44 @@ class StatsNHL(Stats):
                 per_player_cap=per_player_cap,
             )
 
-        # Drop SkewNormal parameters (keep only mean/std for downstream use)
-        self.playerProfile.drop(
-            columns=[f"proj {market} loc", f"proj {market} scale", f"proj {market} alpha"],
-            inplace=True,
-            errors="ignore",
-        )
         self.playerProfile.fillna(0, inplace=True)
+
+    def _fantasy_combo_spec(self, market, player):
+        if market == "skater fantasy points underdog":
+            return ComboSpec(
+                marginals=NHL_SKATER_UNDERDOG_WEIGHTS,
+                assumable=NHL_ASSUMABLE_SKATER_COMPONENTS,
+            )
+        if market == "fantasy points prizepicks":
+            return ComboSpec(marginals=NHL_SKATER_PRIZEPICKS_WEIGHTS)
+        if market == "goalie fantasy points underdog":
+            return ComboSpec(
+                marginals=NHL_GOALIE_UNDERDOG_WEIGHTS,
+                bernoulli=NHL_GOALIE_UNDERDOG_BERNOULLI,
+                analytics=("win_ml",),
+            )
+        return None
+
+    def _combo_bernoulli_p(self, name, player, date):
+        if name != "win":
+            return super()._combo_bernoulli_p(name, player, date)
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        if date < datetime.today().date():
+            todays_games = self._gamelog_on(date)
+            player_game = todays_games.loc[todays_games[self.log_strings["player"]] == player]
+            if player_game.empty:
+                return np.nan
+            team = player_game[self.log_strings["team"]].iloc[0]
+        else:
+            team = self.short_gamelog.loc[
+                self.short_gamelog[self.log_strings["player"]] == player,
+                self.log_strings["team"],
+            ].iloc[-1]
+        # A goalie starter takes essentially every team decision, so the raw team
+        # moneyline is P(win) — no SP-style calibration map (unlike MLB pitchers).
+        p = archive.get_moneyline("NHL", date.strftime("%Y-%m-%d"), team)
+        return float(np.clip(p, _GOALIE_WIN_P_CLIP, 1 - _GOALIE_WIN_P_CLIP))
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         if self.snapshot_only_rebuild:

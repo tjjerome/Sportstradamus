@@ -17,6 +17,11 @@ deterministic trials — it never ships. This module turns a ranked board into s
    pickle prune is mandatory: inference loads pickles by path and never consults ``shipped``, so
    reverting stat_meta alone would leave a failed cell serving.
 
+The walk also owns the g4-only calibrated fallback: a nominee failing ship on a near-miss Gate 4
+alone is retrained once under ``hpo_selection: "calibrated"``, and a shipping retry persists that
+pin with the cell's other edits. The weekly ``meditate`` never explores — it trains each cell once
+with whatever this walk persisted.
+
 Everything is local and uncommitted — the human reviews the ``shipped: devel`` diff and commits it.
 A whole-file ``stat_meta.json`` backup is taken before any write as the crash/abort safety net.
 """
@@ -86,7 +91,12 @@ from sportstradamus.training.model_strategy.sweep import (
     _training_matrix_path,
 )
 from sportstradamus.training.posthoc import PROB_STAGE
-from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
+from sportstradamus.training.scorecard import (
+    _GATE1_NONINF_MARGIN,
+    _supersede_headline,
+    load_test_set,
+    supersede_verdict,
+)
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -111,7 +121,7 @@ _BOARD_ECHO_FIELDS: tuple[str, ...] = (
 # Leagues whose withheld cells confirm may never auto-flip: a board-passing cell is announced and
 # skipped until the owner's activation gates (D1/D2) go GO, then the league is removed here in the
 # same PR that ships its first cells. Empty since the MLB+NHL GO (2026-07-09,
-# docs/handoffs/mlb-nhl-activation.md); machinery stays for the next league onboarding.
+# docs/archive/mlb-nhl-activation.md); machinery stays for the next league onboarding.
 _ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
 # A full-HPO meditate confirm is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung
 # run from blocking the loop forever. A timeout is treated as a failure (the cell auto-reverts).
@@ -137,6 +147,8 @@ _GATE4_MECHANISM_CONTROLS: tuple[str, ...] = (
 # Correctors that move a single over-probability rather than the predictive PIT, so Gate 4
 # cannot tell them from ``none``.
 _PIT_NEUTRAL_POSTHOC: frozenset[str] = frozenset({"none", *PROB_STAGE})
+# brief L2: exact-rank ties only. Wider bands demote corners the board genuinely ranks higher.
+_SHAPING_SLOT_TIE_TOL: float = 1e-9
 # The exact model_stats identity columns the official ship verdict is bound to.
 _SHIP_IDENTITY_COLUMNS = [
     "league",
@@ -152,6 +164,25 @@ _SHIP_IDENTITY_COLUMNS = [
     "strategy_matrix_hash",
     "strategy_split_fingerprint",
     "ship",
+]
+# The six ship-gate booleans in model_stats.parquet (nullable BooleanDtype; pd.NA means the
+# scorecard never ran, which counts as not passing here).
+_GATE_COLS: tuple[str, ...] = tuple(f"{g}_pass" for g in _GATES)
+# brief R3: separates the 9 addressable near-miss ledger rows from the 4 structural
+# failures at excess >= 0.049.
+_G4_RETRY_MAX_EXCESS: float = 0.010
+# brief R3: noise band on the g1 non-inferiority CI bound.
+_G1_RETRY_NOISE_BAND: float = 0.002
+# The model_stats columns the calibrated-retry predicate reads.
+_RETRY_COLUMNS = [
+    "league",
+    "market",
+    "distribution",
+    "ship",
+    "g4_pit_ks",
+    "g4_pit_ks_max",
+    "g1_brier_diff_ci_hi",
+    *_GATE_COLS,
 ]
 
 
@@ -170,11 +201,14 @@ def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
     return "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
 
 
-def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
+def _nominees(
+    sub: pd.DataFrame, *, live: bool = False, min_model_weight: float | None = None
+) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
-    Only board-confident corners nominate: a corner needs a positive rank value — see
-    :func:`_rank_column` for which value that is — and a cell whose best admissible corner is
+    Only board-confident corners nominate: a corner needs a positive admissibility value — the
+    milder ``veto_slack`` pricing on a withheld cell that carries it, else the same value
+    :func:`_rank_column` picks for ordering — and a cell whose best admissible corner is
     non-positive returns no nominees at all. On a live cell that also means a cell whose baseline
     never scored (``margin_vs_incumbent`` all ``NaN``) nominates nobody: an unmeasured incumbent
     makes every margin unknown, and an unknown margin is not evidence a corner is better. This
@@ -197,17 +231,23 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     rank_column = _rank_column(admissible, live=live)
     # A board read back off disk carries pd.NA in any column its sweep predates, and `pd.NA > 0` is
     # neither True nor False — every rank comparison below would raise on it.
+    # brief L5: the stable fingerprint tie-break makes an exact-tie lane a fact about the board,
+    # not about row order.
     ranked = admissible.assign(
         **{rank_column: pd.to_numeric(admissible[rank_column], errors="coerce")}
-    ).sort_values(rank_column, ascending=False)
+    ).sort_values([rank_column, "corner_fingerprint"], ascending=[False, True], kind="stable")
     if len(admissible):
         board_rank = float(ranked[rank_column].max())
-        if not board_rank > 0:
+        lane_rows = _veto_admissible(
+            ranked, rank_column, live=live, min_model_weight=min_model_weight
+        )
+        if lane_rows is None:
             return []
+        ranked = lane_rows
     else:
         board_rank = float("-inf")
     nominated = _board_lane(ranked, rank_column, context, lg, mkt)
-    backup = _count_class_backup(ranked, rank_column, nominated, context, lg, mkt)
+    backup = _count_class_backup(ranked, nominated, context, lg, mkt)
     if backup is not None:
         nominated.insert(1, backup)
     for spec, controls in _seed_corners(context):
@@ -220,6 +260,58 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
         for cand in nominated
         if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
     ]
+
+
+def _veto_admissible(
+    ranked: pd.DataFrame, rank_column: str, *, live: bool, min_model_weight: float | None = None
+) -> pd.DataFrame | None:
+    """The rows eligible for lane slots, or ``None`` when the whole cell fails the nomination bar.
+
+    brief R3: admissibility is priced at the milder median ``veto_slack`` while the ordering (and
+    ``board_rank``, the walk order) stays on the conservative rank column, so a cell whose corners
+    fail only under the conservative price still walks — last. Boards that predate the veto
+    pricing, and the live lane's margin, keep the rank column as the bar. brief L4: a corner the
+    ledger has already decided on this matrix cannot usefully walk again — the walk would skip
+    it — so it never spends a lane slot either.
+
+    ``min_model_weight`` drops book-riding corners from the lane (why: :func:`run_confirm`). It is
+    a lane filter, not a cell veto: a cell whose top corner rides the book still nominates its
+    remaining positive corners, and when none remain, its seeds and incumbent.
+    """
+    veto = ranked[rank_column]
+    if not live and "veto_slack" in ranked.columns:
+        veto = pd.to_numeric(ranked["veto_slack"], errors="coerce").fillna(veto)
+    if not veto.max() > 0:
+        return None
+    ranked = ranked[veto > 0]
+    decided = _decided_pairs()
+    if decided:
+        pairs = zip(
+            ranked["corner_fingerprint"].astype(str),
+            ranked["matrix_hash"].astype(str),
+            strict=True,
+        )
+        ranked = ranked[[pair not in decided for pair in pairs]]
+    if min_model_weight is not None:
+        # NaN (a board swept before the weight column existed) and exactly 1.0 (a cell with no
+        # authentic validation quotes to blend against) are not evidence of a book-rider.
+        weight = pd.to_numeric(ranked["model_weight"], errors="coerce")
+        ranked = ranked[~(weight < min_model_weight)]
+    return ranked
+
+
+def _decided_pairs() -> set[tuple[str, str]]:
+    """Every ``(corner_fingerprint, matrix_hash)`` the ledger holds a full-HPO verdict for."""
+    if not NOMINEE_LEDGER_PATH.exists():
+        return set()
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    return set(
+        zip(
+            ledger["strategy_corner_fingerprint"].astype(str),
+            ledger["strategy_matrix_hash"].astype(str),
+            strict=True,
+        )
+    )
 
 
 def _gate4_mechanism(candidate: dict) -> tuple[str, ...]:
@@ -242,28 +334,33 @@ def _gate4_mechanism(candidate: dict) -> tuple[str, ...]:
 def _board_lane(
     ranked: pd.DataFrame, rank_column: str, context, league: str, market: str
 ) -> list[dict]:
-    """The cell's positive-rank board corners, ordered for mechanism diversity, capped at K.
+    """The cell's veto-admissible board corners, ordered for mechanism diversity, capped at K.
 
-    The leader always goes first — the board's own opinion is the best single guess. After that
-    a corner earns its slot by being *different*: first the highest-ranked unseen family, then
-    the highest-ranked unseen Gate-4 mechanism, and only then the next corner by rank. Without
-    it a cell whose top three rows are near-identical ZINB corners spends its whole walk
-    relearning one verdict while a positive DPO or structural row never runs.
+    ``ranked`` arrives already filtered to the corners that clear the nomination bar (see
+    :func:`_nominees`), best rank first. The leader always goes first — the board's own opinion is
+    the best single guess. After that a corner earns its slot by being *different*: first the
+    highest-ranked unseen family, then the highest-ranked unseen Gate-4 mechanism — with a
+    PIT-reshaping corner taking an exactly tied slot (:func:`_next_slot`) — and only then the
+    next corner by rank. Without it a cell whose top three rows are near-identical ZINB corners
+    spends its whole walk relearning one verdict while a positive DPO or structural row never
+    runs.
     """
     pool: list[dict] = []
+    rank_values: list[float] = []
     for _, row in ranked.iterrows():
-        if not row[rank_column] > 0:
-            break
         cand = _board_candidate_row(row, context, league, market)
         if cand is not None:
             pool.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+            rank_values.append(float(row[rank_column]))
 
     lane: list[dict] = []
     families: set[str] = set()
     mechanisms: set[tuple[str, ...]] = set()
     remaining = list(range(len(pool)))
     while remaining and len(lane) < CONFIRM_TOP_K:
-        pick = _next_slot(pool, remaining, families, mechanisms) if lane else remaining[0]
+        pick = (
+            _next_slot(pool, rank_values, remaining, families, mechanisms) if lane else remaining[0]
+        )
         remaining.remove(pick)
         lane.append(pool[pick])
         families.add(pool[pick]["strategy_slug"])
@@ -272,18 +369,43 @@ def _board_lane(
 
 
 def _next_slot(
-    pool: list[dict], remaining: list[int], families: set[str], mechanisms: set[tuple[str, ...]]
+    pool: list[dict],
+    rank_values: list[float],
+    remaining: list[int],
+    families: set[str],
+    mechanisms: set[tuple[str, ...]],
 ) -> int:
-    """The highest-ranked remaining corner that argues something new, else the next by rank."""
+    """The highest-ranked remaining corner that argues something new, else the next by rank.
+
+    brief L2: when the lane holds no PIT-reshaping corner and the pick is a non-reshaping corner
+    exactly tied (:data:`_SHAPING_SLOT_TIE_TOL`) with an unseen-mechanism corner that does
+    reshape, the reshaper takes the slot — the ranking statistic cannot separate the two (slack
+    binds on a mean/skill gate on ~97% of top rows), and confirm Gate 4 demonstrably can.
+    """
     unseen_family = (index for index in remaining if pool[index]["strategy_slug"] not in families)
-    unseen_mechanism = (
-        index for index in remaining if _gate4_mechanism(pool[index]) not in mechanisms
-    )
-    return next(unseen_family, next(unseen_mechanism, remaining[0]))
+    pick = next(unseen_family, None)
+    if pick is not None:
+        return pick
+    unseen = [index for index in remaining if _gate4_mechanism(pool[index]) not in mechanisms]
+    pick = unseen[0] if unseen else remaining[0]
+    lane_reshapes = any(mechanism[-1] for mechanism in mechanisms)
+    if not lane_reshapes and not _gate4_mechanism(pool[pick])[-1]:
+        tied_reshaper = next(
+            (
+                index
+                for index in unseen
+                if _gate4_mechanism(pool[index])[-1]
+                and abs(rank_values[index] - rank_values[pick]) <= _SHAPING_SLOT_TIE_TOL
+            ),
+            None,
+        )
+        if tied_reshaper is not None:
+            return tied_reshaper
+    return pick
 
 
 def _count_class_backup(
-    ranked: pd.DataFrame, rank_column: str, nominated: list[dict], context, league: str, market: str
+    ranked: pd.DataFrame, nominated: list[dict], context, league: str, market: str
 ) -> dict | None:
     """The best count-class board corner to slot second on an integer-target cell, or ``None``.
 
@@ -292,15 +414,14 @@ def _count_class_backup(
     pattern. Interleaving the best count corner at slot 2 costs nothing when the leader confirms
     and saves the walk when it diverges. No-op when the cell's target is not on the integer
     lattice, nothing was nominated, a count corner already sits in the top slots, or no
-    positive-rank count-class row remains. Insert-only: no continuous nominee is dropped.
+    veto-admissible count-class row remains (``ranked`` is pre-filtered to the nomination bar).
+    Insert-only: no continuous nominee is dropped.
     """
     if not context.target_is_integer or not nominated:
         return None
     if any(distribution_class(cand["family"]) == "count" for cand in nominated):
         return None
     for _, row in ranked.iterrows():
-        if not row[rank_column] > 0:
-            break
         if distribution_class(str(row["family"])) != "count":
             continue
         cand = _board_candidate_row(row, context, league, market)
@@ -441,7 +562,11 @@ def _validate_board_identity(
 
 
 def _candidates(
-    board: pd.DataFrame, meta: dict, max_nominees: int | None = None
+    board: pd.DataFrame,
+    meta: dict,
+    max_nominees: int | None = None,
+    *,
+    min_model_weight: float | None = None,
 ) -> list[list[dict]]:
     """Each cell's ordered nominee list, strongest cells first; nothing confirmable drops out.
 
@@ -466,7 +591,9 @@ def _candidates(
         for (league, market), sub in board.groupby(["league", "market"], sort=False)
         if (
             nominated := _nominees(
-                sub, live=priced and meta[league][market].get("shipped") != WITHHELD
+                sub,
+                live=priced and meta[league][market].get("shipped") != WITHHELD,
+                min_model_weight=min_model_weight,
             )
         )
     ]
@@ -481,18 +608,6 @@ def _atomic_write_meta(meta: dict) -> None:
         json.dump(meta, fh, indent=4)
         fh.write("\n")
     tmp.replace(_STAT_META)
-
-
-def _sync_cell_from_disk(meta: dict, league: str, market: str) -> None:
-    """Re-read one cell's stat_meta entry after a meditate subprocess shipped it.
-
-    The g4-only calibrated retry inside meditate persists ``hpo_selection`` to disk
-    from the subprocess; without this re-sync the walk's next whole-file
-    ``_atomic_write_meta`` (another cell's persist or revert) would silently erase
-    that pin from confirm's stale in-memory copy.
-    """
-    with _STAT_META.open() as fh:
-        meta[league][market] = json.load(fh)[league][market]
 
 
 def _backup_stat_meta() -> pathlib.Path:
@@ -513,7 +628,7 @@ def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
     that cell's ``meditate`` runs between them, so the revert touches only that cell's row/key).
 
     Deliberately excluded: the per-cell training-matrix cache (``training_data/{slug}.parquet``) and
-    the per-league caches (gamelog, ``comps.json``, correlation matrices). Those are training inputs,
+    the per-league caches (gamelog, correlation matrices). Those are training inputs,
     never read at serve time — and a confirm retrain trains from the walk's frozen snapshot
     (``--frozen-matrix-dir``) without touching any of them.
     """
@@ -644,7 +759,7 @@ def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
     """The gates a just-confirmed cell fails, read from model_stats — diagnostics for the report."""
-    row = _cell_row(league, market, ["league", "market", *(f"{g}_pass" for g in _GATES)])
+    row = _cell_row(league, market, ["league", "market", *_GATE_COLS])
     if row is None:
         return ["(no model_stats row)"]
     return [g for g in _GATES if not bool(row[f"{g}_pass"])]
@@ -744,10 +859,10 @@ def _confirm_median_seconds(league: str | None = None, market: str | None = None
 
     Naming no cell asks for the all-cells median, which is what sizes the up-front confirm prompt.
 
-    Median rather than mean: ``cli._retry_calibrated_if_g4_only`` can silently run a second 300-trial
-    HPO inside one subprocess, so the durations are bimodal and a mean sits between the two modes
-    describing neither. A retrain that errored never reaches the ledger, so the estimate is blind to
-    the slowest failures — hence it is always shown as approximate.
+    Each ledger row now times exactly one meditate subprocess (a calibrated retry records its own
+    row), but a retrain that errored never reaches the ledger, so the estimate is blind to the
+    slowest failures — hence it is always shown as approximate. Median guards the estimate against
+    that skew.
     """
     if not NOMINEE_LEDGER_PATH.exists():
         return None
@@ -808,6 +923,11 @@ def _retrained_matrix_hash(league: str, market: str) -> str | None:
     return row["strategy_matrix_hash"]
 
 
+def _served_weight(path: pathlib.Path) -> float:
+    """The blend weight in a model pickle: how much of the served predictive is model, not book."""
+    return float(pd.read_pickle(path)["weight"])
+
+
 def _produced_artifacts_match(
     league: str, market: str, candidate: dict, expected: ArtifactIdentity
 ) -> bool:
@@ -835,18 +955,110 @@ def _produced_artifacts_match(
     return actual == expected
 
 
-def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
+def _gate_passed(value) -> bool:
+    """NA-safe read of a nullable-boolean gate cell (``bool(pd.NA)`` raises)."""
+    return pd.notna(value) and bool(value)
+
+
+def _g4_only_retry_wanted(
+    row: pd.Series | None, cell_hpo_selection: str, cell_zinb_mode: str
+) -> bool:
+    """Whether a cell earns the one-shot calibrated-HPO retry.
+
+    Fires only for cells trained under ``loss`` selection whose fresh
+    model_stats row failed ship on a near-miss Gate 4, alone or with a
+    within-band Gate 1 — the dispersion-calibration failures calibrated trial
+    selection targets. Any other failing gate blocks the retry, g6 explicitly
+    included (deferred pending the Experiment C measurement, brief R3).
+    Hurdle-ZINB and Mixture are excluded: those paths have no calibrated
+    trial-selection closure.
+    """
+    if row is None or cell_hpo_selection != "loss":
+        return False
+    if row["distribution"] == "Mixture":
+        return False
+    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
+        return False
+    if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
+        return False
+    if not row["g4_pit_ks"] - row["g4_pit_ks_max"] <= _G4_RETRY_MAX_EXCESS:
+        return False
+    return _cofailures_within_band(row)
+
+
+def _cofailures_within_band(row: pd.Series) -> bool:
+    """Non-g4 gate failures are admissible only as exactly {g1} inside its noise band."""
+    others_failing = [c for c in _GATE_COLS if c != "g4_pass" and not _gate_passed(row[c])]
+    if others_failing == ["g1_pass"]:
+        return bool(row["g1_brier_diff_ci_hi"] - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
+    return not others_failing
+
+
+def _retry_calibrated_wanted(candidate: dict, cell: dict) -> bool:
+    """Whether the just-retrained nominee earns the walk's calibrated-HPO fallback.
+
+    ``cell`` is the nominee's stat_meta entry *after* its edits — exactly what the meditate
+    subprocess resolved its knobs from. Structural corners never retry (their spec pins
+    ``hpo_selection``, and the structural stage has no calibrated trial-selection closure).
+    """
+    if get_strategy(candidate["strategy_slug"]).is_structural:
+        return False
+    try:
+        row = _cell_row(candidate["league"], candidate["market"], _RETRY_COLUMNS)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return _g4_only_retry_wanted(
+        row, cell.get("hpo_selection", "loss"), cell.get("zinb_mode", "joint")
+    )
+
+
+def _pin_calibrated(meta: dict, candidate: dict) -> None:
+    """Pin ``hpo_selection: "calibrated"`` for the retry — in stat_meta (the rerun subprocess
+    reads it back per-cell, the same path the weekly cron uses) and in the nominee's edits (so
+    the persisted diff, the supersede promote prompt, and the report tell the truth).
+    """
+    lg, mkt = candidate["league"], candidate["market"]
+    click.echo(f"  {lg} {mkt}: g4-only ship fail — retrying with hpo_selection=calibrated")
+    meta[lg][mkt]["hpo_selection"] = "calibrated"
+    candidate["edits"]["hpo_selection"] = "calibrated"
+    _atomic_write_meta(meta)
+
+
+def _retrain_with_calibrated_retry(
+    league: str, market: str, candidate: dict, meta: dict
+) -> tuple[str, bool]:
+    """Retrain a nominee, with the walk's one-shot calibrated fallback on a g4-only near-miss.
+
+    Runs the nominee's meditate and records its ledger row; when the fresh model_stats row earns
+    the retry (:func:`_retry_calibrated_wanted`), pins the knob and reruns the identical command,
+    recording the retry as its own ledger row. Returns ``(error, diverged)`` for the run whose
+    model_stats row stands; a failed retry leaves the pin for the caller's revert to strip.
+    """
+    error = _run_meditate(league, market, candidate)
+    if error:
+        return error, False
+    diverged = _record_nominee_gates(league, market, candidate)
+    if not _retry_calibrated_wanted(candidate, meta[league][market]):
+        return "", diverged
+    _pin_calibrated(meta, candidate)
+    retry = {**candidate, "source": f"{candidate['source']} +calibrated-retry"}
+    error = _run_meditate(league, market, retry)
+    if error:
+        return error, diverged
+    return "", _record_nominee_gates(league, market, retry)
+
+
+def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> list[str]:
     """Withheld-path confirm: retrain, then the reasons the cell did not ship (empty means it did).
 
     Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
     bare False reads on the report as a gate failure with no gate named.
     """
-    error = _run_meditate(league, market, candidate)
+    error, diverged = _retrain_with_calibrated_retry(league, market, candidate, meta)
     if error:
         return [f"retrain {error}"]
     # A diverged fit is named ahead of whatever it fails: the gates already reject it, but
     # "diverged g1 g4" sends triage to the fit rather than the anonymous gate list.
-    diverged = _record_nominee_gates(league, market, candidate)
     prefix = ["diverged"] if diverged else []
     matrix_hash = _retrained_matrix_hash(league, market)
     if matrix_hash is None:
@@ -865,11 +1077,20 @@ def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
     return []
 
 
-def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
-    """Persist one candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
+def _confirm_one(
+    meta: dict, cand: dict, *, min_model_weight: float | None = None
+) -> tuple[str, str, str, list[str]]:
+    """Persist a candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
 
-    The pickle prune on failure is what actually dark-outs the cell — inference loads pickles by
-    path and ignores ``shipped``, so a reverted stat_meta entry alone would still serve.
+    The pickle prune on failure keeps the artifact set honest: serving already prices a
+    withheld cell at the book consensus, and a volume denominator (``VOLUME_STATS``) keeps
+    its pickle.
+
+    ``min_model_weight`` is the campaign's blend-weight floor, checked here rather than on the
+    board: the board's ``model_weight`` is a fixed-HP proxy that this retrain refits, so only the
+    served pickle says what the cell would actually blend. A cell under the floor reverts like any
+    other loser; the ledger row written before this check keeps its 6/6 verdict, so the corner is
+    decided on this matrix and walks again only once the matrix hash moves.
     """
     lg, mkt = cand["league"], cand["market"]
     original = deepcopy(meta[lg][mkt])
@@ -879,12 +1100,14 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         meta[lg][mkt].update(cand["edits"])
         meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
         _atomic_write_meta(meta)
-        failed = _confirm_meditate(lg, mkt, cand)
+        failed = _confirm_meditate(lg, mkt, cand, meta)
         if not failed:
-            _sync_cell_from_disk(meta, lg, mkt)
-            keep = True
-            click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
-            return (lg, mkt, "SHIPPED", [])
+            weight = _served_weight(model_pickle_path(lg, mkt))
+            if min_model_weight is None or weight >= min_model_weight:
+                keep = True
+                click.secho(f"  SHIPPED (devel) {lg} {mkt} w={weight:.3f}", fg="green")
+                return (lg, mkt, "SHIPPED", [])
+            failed = [f"w={weight:.3f}<{min_model_weight}"]
         click.secho(f"  REVERTED {lg} {mkt} — failed {' '.join(failed)}", fg="red")
         return (lg, mkt, "REVERTED", failed)
     finally:
@@ -899,7 +1122,7 @@ def _failed_legs(verdict: dict) -> list[str]:
 
 
 def _supersede_one(
-    meta: dict, cand: dict, *, auto_promote: bool = False
+    meta: dict, cand: dict, *, auto_promote: bool = False, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
     """Supersession-test one live cell: snapshot, retrain the candidate in place, require its exact
     artifact identity and official six-gate ``model_stats`` ship, then run S1/S2/S3 and promote it
@@ -911,6 +1134,14 @@ def _supersede_one(
     confirmation yes so an unattended run can swap live cells: the S1/S2/S3 verdict and the six
     gates still decide, only the human veto is gone. Every swap is still local and uncommitted, so
     the review of the ``stat_meta.json`` diff is where a promotion is actually accepted.
+
+    ``min_model_weight`` cuts both ways on this lane. A candidate under the floor is held whatever
+    the verdict says. Above it, a book-riding incumbent waives S2/S3 for that pair: both models sit
+    on the book at the line, so their paired Brier difference is ~0 by construction and neither
+    test can ever fire — S1 plus the weight separation is the whole evidence available for the swap.
+    An incumbent already above the floor keeps the full S1+S2+S3 bar. Both weights print on the
+    headline whether or not the floor is set, so the live lane reads the incumbent's pickle from
+    its snapshot on every walk.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -920,10 +1151,9 @@ def _supersede_one(
     try:
         meta[lg][mkt].update(cand["edits"])  # shipped left as-is; the cell stays live
         _atomic_write_meta(meta)
-        error = _run_meditate(lg, mkt, cand)
+        error, diverged = _retrain_with_calibrated_retry(lg, mkt, cand, meta)
         if error:
             return (lg, mkt, "HELD", [f"retrain {error}"])
-        diverged = _record_nominee_gates(lg, mkt, cand)
         prefix = ["diverged"] if diverged else []
         matrix_hash = _retrained_matrix_hash(lg, mkt)
         if matrix_hash is None:
@@ -936,8 +1166,17 @@ def _supersede_one(
         baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
         candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
         verdict = supersede_verdict(baseline, candidate, _SHIP_PRED_COL, league=lg, market=mkt)
-        click.echo("  " + _supersede_headline(verdict))
-        if not verdict["ship"]:
+        w_in = _served_weight(backup / model_pickle_path(lg, mkt).name)
+        w_out = _served_weight(model_pickle_path(lg, mkt))
+        waived = (
+            min_model_weight is not None and verdict["s1_pass"] and w_out >= min_model_weight > w_in
+        )
+        click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
+        if waived:
+            click.echo("  [S2/S3 waived: incumbent rides the book]")
+        if min_model_weight is not None and w_out < min_model_weight:
+            return (lg, mkt, "HELD", [*prefix, f"w={w_out:.3f}<{min_model_weight}"])
+        if not (verdict["ship"] or waived):
             return (lg, mkt, "HELD", prefix + _failed_legs(verdict))
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
         if auto_promote:
@@ -945,7 +1184,6 @@ def _supersede_one(
         elif not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
             return (lg, mkt, "HELD", ["declined"])
         keep = True
-        _sync_cell_from_disk(meta, lg, mkt)
         return (lg, mkt, "SUPERSEDED", [])
     finally:
         if not keep:
@@ -1010,23 +1248,6 @@ def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
                     click.echo(wrapped(f"{n}. [{cand['source']}] {edits}", "    ", "       "))
 
 
-def _ledger_decided(cand: dict) -> bool:
-    """Whether this corner already has a full-HPO verdict on the same training matrix.
-
-    A resumed batch re-nominates every still-withheld cell an interrupted run already walked;
-    retraining a corner the ledger has scored on an identical frame re-buys a known verdict at
-    full-HPO price (~40 min). Ledger rows from an older matrix never match, so a cache regen
-    voids the skip and the corner retrains.
-    """
-    if not NOMINEE_LEDGER_PATH.exists():
-        return False
-    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
-    hit = (ledger["strategy_corner_fingerprint"] == cand["corner_fingerprint"]) & (
-        ledger["strategy_matrix_hash"] == cand["matrix_hash"]
-    )
-    return bool(hit.any())
-
-
 def _walk_nominees(
     meta: dict, nominated: list[dict], attempt
 ) -> tuple[str, str, str, list[str], str]:
@@ -1035,31 +1256,37 @@ def _walk_nominees(
     The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`), so every nominee
     retrains and scores on the same frame. No new revert machinery is needed: ``_confirm_one``'s
     ``finally`` already restores stat_meta and prunes the pickle on every non-win, and
-    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win. A nominee
-    the ledger has already decided on this matrix (:func:`_ledger_decided`) is skipped, not
-    re-retrained.
+    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win.
+
+    Nomination already drops ledger-decided corners (brief L4), but a concurrent walk can append a
+    verdict between selection and this loop, so a decided nominee is still skipped here — without
+    letting a trailing skip overwrite the verdict of a corner that actually ran.
     """
     outcome = ("", "", "REVERTED", ["no nominee"], "-")
     _pin_cell_matrix(nominated[0]["league"], nominated[0]["market"])
+    decided = _decided_pairs()
+    walked = False
     for n, cand in enumerate(nominated, start=1):
         click.secho(
             f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",
             bold=True,
         )
         attempt_label = f"{n}/{len(nominated)} {cand['source']}"
-        if _ledger_decided(cand):
+        if decided and (str(cand["corner_fingerprint"]), str(cand["matrix_hash"])) in decided:
             click.secho(
                 "    ledger already holds this corner's verdict on this matrix — skipping",
                 fg="yellow",
             )
-            outcome = (
-                cand["league"],
-                cand["market"],
-                "SKIPPED",
-                ["prior verdict on this matrix"],
-                attempt_label,
-            )
+            if not walked:
+                outcome = (
+                    cand["league"],
+                    cand["market"],
+                    "SKIPPED",
+                    ["prior verdict on this matrix"],
+                    attempt_label,
+                )
             continue
+        walked = True
         lg, mkt, verdict, failed = attempt(meta, cand)
         outcome = (lg, mkt, verdict, failed, attempt_label)
         if verdict in _WIN_OUTCOMES:
@@ -1073,6 +1300,7 @@ def _walk_lanes(
     shipped: list[list[dict]],
     deadline_hours: float | None,
     auto_promote: bool = False,
+    min_model_weight: float | None = None,
 ) -> list[tuple[str, str, str, list[str], str]]:
     """Walk both lanes cell by cell; past the deadline, remaining cells record SKIPPED instead.
 
@@ -1081,10 +1309,13 @@ def _walk_lanes(
     at most one cell. :func:`_candidates` ordered the cells best-first, which is what makes the cut
     land on the weakest tail.
     """
-    supersede = functools.partial(_supersede_one, auto_promote=auto_promote)
+    confirm = functools.partial(_confirm_one, min_model_weight=min_model_weight)
+    supersede = functools.partial(
+        _supersede_one, auto_promote=auto_promote, min_model_weight=min_model_weight
+    )
     deadline = None if deadline_hours is None else time.monotonic() + deadline_hours * 3600
     results = []
-    for lane, attempt in ((fresh, _confirm_one), (shipped, supersede)):
+    for lane, attempt in ((fresh, confirm), (shipped, supersede)):
         for nominated in lane:
             if deadline is not None and time.monotonic() > deadline:
                 lead = nominated[0]
@@ -1102,6 +1333,7 @@ def run_confirm(
     deadline_hours: float | None = None,
     fresh_only: bool = False,
     auto_promote: bool = False,
+    min_model_weight: float | None = None,
 ) -> None:
     """Confirm the sweep's winners: auto-ship withheld cells on a clean 6/6, supersession-test live cells.
 
@@ -1113,10 +1345,12 @@ def run_confirm(
     skips only the upfront gate — live-cell promotions prompt individually unless ``auto_promote``
     answers them. ``max_nominees`` caps each cell's walk at its first N nominees;
     ``deadline_hours`` skips cells not yet started when the budget runs out; ``fresh_only`` drops
-    the live lane for unattended runs.
+    the live lane for unattended runs. ``min_model_weight`` sets the campaign's blend-weight floor:
+    book-riding corners drop out of every lane, a confirmed cell under the floor reverts, and a
+    book-riding incumbent waives S2/S3 against a candidate above it.
     """
     meta = load_stat_meta(_STAT_META)
-    ready = _candidates(board, meta, max_nominees)
+    ready = _candidates(board, meta, max_nominees, min_model_weight=min_model_weight)
     if not ready:
         click.echo("no confirmable nominees on the board.")
         return
@@ -1141,7 +1375,9 @@ def run_confirm(
 
     backup = _backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    _print_confirm_report(_walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote), backup)
+    _print_confirm_report(
+        _walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote, min_model_weight), backup
+    )
 
 
 def _print_confirm_report(

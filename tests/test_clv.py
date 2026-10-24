@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -17,40 +18,33 @@ class _StubArchive:
 
     ``get_ev`` returns a book stat-mean keyed by ``ev_table``; ``get_composite_under_prob``
     returns a devigged under-probability keyed by ``under_table``, used only by the
-    NaN-Dist/CV fallback path.
+    NaN-Dist/CV fallback path. ``asked`` records every lookup key, so a test can assert
+    a group was never read, and ``movement_asked`` the key of every movement read;
+    ``asked_at`` and ``movement_until`` record the player and time-series cutoff of each
+    closing and movement read. The cutoff does not change what the stub answers.
     """
 
     def __init__(self, ev_table, under_table=None):
         self._ev_table = ev_table
         self._under_table = under_table or {}
+        self.asked = []
+        self.asked_at = []
+        self.movement_asked = []
+        self.movement_until = []
 
     def get_ev(self, league, market, date, player, *, at=None):
-        del at  # the stub ignores the time-series cutoff
+        self.asked.append((league, market, date, player))
+        self.asked_at.append((player, at))
         return self._ev_table.get((league, market, date, player), float("nan"))
 
     def get_composite_under_prob(self, league, market, date, player, *, at=None):
-        del at
+        self.asked.append((league, market, date, player))
+        self.asked_at.append((player, at))
         return self._under_table.get((league, market, date, player), float("nan"))
 
-
-def test_signed_clv_over_uses_positive_sign():
-    assert clv._signed_clv(0.50, 0.55, "Over") == pytest.approx(0.05)
-
-
-def test_signed_clv_under_flips_sign():
-    assert clv._signed_clv(0.50, 0.55, "Under") == pytest.approx(-0.05)
-
-
-def test_signed_clv_higher_is_over_synonym():
-    assert clv._signed_clv(0.40, 0.45, "Higher") == pytest.approx(0.05)
-
-
-def test_signed_clv_returns_nan_when_open_is_nan():
-    assert math.isnan(clv._signed_clv(float("nan"), 0.55, "Over"))
-
-
-def test_signed_clv_returns_nan_when_close_is_nan():
-    assert math.isnan(clv._signed_clv(0.55, float("nan"), "Under"))
+    def get_movement(self, league, market, date, player, *, until=None):
+        self.movement_asked.append((league, market, date, player))
+        self.movement_until.append((player, until))
 
 
 # Player A: NBA points, a Gamma cell. Archive close-EV is a realistic points stat mean
@@ -143,8 +137,45 @@ def test_fill_from_archive_skips_rows_already_closed():
     assert df.loc[0, "Close Market Prob"] == pytest.approx(0.99)
 
 
+def test_fill_from_archive_repairs_inverted_clv_on_existing_close():
+    """A row already carrying Close Market Prob, stamped under the pre-fix,
+    sign-flipped convention, gets its Market/Model CLV corrected on the next
+    run — it isn't "pending" so the archive is never consulted for it."""
+    history = pd.DataFrame(
+        [
+            {
+                "Player": "Player C",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "blocks",
+                "Line": 3.5,
+                "Boost": 1.0,
+                "Platform": "Underdog",
+                "Bet": "Under",
+                "Win Prob": 0.55,
+                "Market Prob": 0.50,
+                "Dist": "ZINB",
+                "CV": 0.9,
+                "Gate": 0.12,
+                "Step": 1.0,
+                "Close Market Prob": 0.65,
+                "Market CLV": -(0.65 - 0.50),
+                "Model CLV": -(0.65 - 0.55),
+            }
+        ]
+    )
+    df = clv.fill_from_archive(history, _StubArchive({}))
+
+    row = df.loc[0]
+    assert row["Close Market Prob"] == pytest.approx(0.65)
+    assert row["Market CLV"] == pytest.approx(0.65 - 0.50)
+    assert row["Model CLV"] == pytest.approx(0.65 - 0.55)
+
+
 def test_fill_from_archive_under_bet_hand_computed():
-    """An Under bet's close_p is the raw P(under line), not 1 minus it."""
+    """An Under bet's close_p is the raw P(under line), not 1 minus it, and its
+    CLV is close_p minus the bet-side probability with no extra sign flip —
+    Market Prob/Win Prob are already expressed on the bet side."""
     history = pd.DataFrame(
         [
             {
@@ -176,8 +207,8 @@ def test_fill_from_archive_under_bet_hand_computed():
     row = df.loc[0]
     assert 0.0 <= expected_close_p <= 1.0
     assert row["Close Market Prob"] == pytest.approx(expected_close_p)
-    assert row["Market CLV"] == pytest.approx(-(expected_close_p - 0.50))
-    assert row["Model CLV"] == pytest.approx(-(expected_close_p - 0.55))
+    assert row["Market CLV"] == pytest.approx(expected_close_p - 0.50)
+    assert row["Model CLV"] == pytest.approx(expected_close_p - 0.55)
 
 
 def test_fill_from_archive_zinb_gate_changes_close_p():
@@ -384,6 +415,277 @@ def test_fill_from_archive_quarantines_out_of_range_close_p(monkeypatch):
     assert math.isnan(row["Close Market Prob"])
     assert math.isnan(row["Market CLV"])
     assert math.isnan(row["Model CLV"])
+
+
+# The fixture date's stand-in kickoff: `_build_history` rows carry no `Commence`, so
+# this is the instant they close at and are read as of.
+_CUT = datetime(2026, 5, 4, 20)
+_EARLY_KICKOFF = datetime(2026, 5, 4, 17)
+_EVENING_KICKOFF = datetime(2026, 5, 4, 23, 30)
+_PLAYER_A_KEY = ("NBA", "points", "2026-05-04", "Player A")
+_CLOSING_TRIO = ["Close Market Prob", "Market CLV", "Model CLV"]
+
+
+def test_fill_from_archive_leaves_group_unfilled_while_cut_is_ahead():
+    """Before the cut an ``at=cut`` read returns the newest quote so far, not the close,
+    so the group is skipped without the archive being asked; a group past its own cut
+    fills in the same pass."""
+    history = _build_history()
+    history.loc[1, "Date"] = "2026-05-03"
+    player_b_key = ("NBA", "points", "2026-05-03", "Player B")
+    archive = _StubArchive({_PLAYER_A_KEY: _PLAYER_A_CLOSE_EV, player_b_key: 12.0})
+    df = clv.fill_from_archive(history, archive, now=_CUT - timedelta(seconds=1))
+
+    assert archive.asked == [player_b_key]
+    assert df.loc[0, _CLOSING_TRIO].isna().all()
+    assert df.loc[1, "Close Market Prob"] == pytest.approx(
+        get_odds(12.5, 12.0, "Gamma", cv=0.35, gate=None, step=0.5)
+    )
+
+
+def test_fill_from_archive_clears_close_stamped_before_cut():
+    """A row closed ahead of its cut loses the closing trio (a closed row beats every
+    later scoring in ``prediction.cli._upsert_history``, so it would stop updating);
+    a row whose cut has passed keeps its close."""
+    history = _build_history()
+    history.loc[0, _CLOSING_TRIO] = [0.62, 0.07, 0.02]
+    history.loc[1, "Date"] = "2026-05-03"
+    history.loc[1, _CLOSING_TRIO] = [0.57, 0.07, 0.09]
+    df = clv.fill_from_archive(history, _StubArchive({}), now=_CUT - timedelta(seconds=1))
+
+    assert df.loc[0, _CLOSING_TRIO].isna().all()
+    assert df.loc[1, "Close Market Prob"] == pytest.approx(0.57)
+    assert df.loc[1, "Market CLV"] == pytest.approx(0.57 - 0.50)
+    assert df.loc[1, "Model CLV"] == pytest.approx(0.57 - 0.48)
+
+
+def test_fill_from_archive_fills_once_cut_has_passed_and_rerun_changes_nothing():
+    archive = _StubArchive({_PLAYER_A_KEY: _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(_build_history(), archive, now=_CUT)
+
+    expected_close_p = _player_a_expected_close_p()
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(expected_close_p)
+    assert df.loc[0, "Market CLV"] == pytest.approx(expected_close_p - 0.55)
+    assert df.loc[0, "Model CLV"] == pytest.approx(expected_close_p - 0.60)
+
+    first = df.copy()
+    rerun = clv.fill_from_archive(df, archive, now=_CUT)
+    pd.testing.assert_frame_equal(rerun, first)
+    assert archive.asked.count(_PLAYER_A_KEY) == 1
+
+
+def test_fill_from_archive_row_without_parseable_date_has_no_cut():
+    """A date that does not parse gives no cut to wait for: the row fills when pending
+    and keeps a close it already carries, whatever ``now`` is."""
+    history = _build_history()
+    history["Date"] = "TBD"
+    history.loc[1, "Close Market Prob"] = 0.57
+    archive = _StubArchive({("NBA", "points", "TBD", "Player A"): _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(history, archive, now=datetime(2000, 1, 1))
+
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(_player_a_expected_close_p())
+    assert df.loc[1, "Close Market Prob"] == pytest.approx(0.57)
+
+
+def _kickoff_history(*rows):
+    """Player A's resolvable offer, once per ``(player, platform, team, commence)``."""
+    offer = _build_history().iloc[0].to_dict()
+    return pd.DataFrame(
+        [
+            {**offer, "Player": player, "Platform": platform, "Team": team, "Commence": commence}
+            for player, platform, team, commence in rows
+        ]
+    )
+
+
+def _closing_archive(*players):
+    return _StubArchive(
+        {("NBA", "points", "2026-05-04", player): _PLAYER_A_CLOSE_EV for player in players}
+    )
+
+
+def test_fill_from_archive_evening_game_closes_at_its_kickoff_not_the_stand_in():
+    """A 23:30 UTC kickoff is still ahead at 21:00 although the 20:00 stand-in has
+    passed; once it has passed, the close is read as of the kickoff itself."""
+    history = _kickoff_history(("Player A", "Underdog", "BOS", "2026-05-04T23:30:00Z"))
+    archive = _closing_archive("Player A")
+
+    df = clv.fill_from_archive(history, archive, now=datetime(2026, 5, 4, 21))
+    assert archive.asked_at == []
+    assert df.loc[0, _CLOSING_TRIO].isna().all()
+
+    df = clv.fill_from_archive(df, archive, now=_EVENING_KICKOFF)
+    assert archive.asked_at == [("Player A", _EVENING_KICKOFF)]
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(_player_a_expected_close_p())
+
+
+def test_fill_from_archive_early_game_closes_at_its_kickoff_before_the_stand_in():
+    history = _kickoff_history(("Player A", "Underdog", "BOS", "2026-05-04T17:00:00Z"))
+    archive = _closing_archive("Player A")
+    df = clv.fill_from_archive(history, archive, now=datetime(2026, 5, 4, 18))
+
+    assert archive.asked_at == [("Player A", _EARLY_KICKOFF)]
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(_player_a_expected_close_p())
+
+
+def test_fill_from_archive_sleeper_row_borrows_its_teams_kickoff():
+    """Sleeper posts no kickoff: its row takes the one an Underdog row of the same team
+    and day carries, in its own prediction or in another, and falls back to the
+    stand-in when its team has none."""
+    history = _kickoff_history(
+        ("Player A", "Underdog", "BOS", "2026-05-04T23:30:00Z"),
+        ("Player A", "Sleeper", "BOS", ""),
+        ("Player B", "Sleeper", "BOS", ""),
+        ("Player C", "Sleeper", "LAL", ""),
+    )
+    archive = _closing_archive("Player A", "Player B", "Player C")
+
+    df = clv.fill_from_archive(history, archive, now=datetime(2026, 5, 4, 21))
+    assert archive.asked_at == [("Player C", _CUT)]
+    assert df.loc[:2, "Close Market Prob"].isna().all()
+
+    df = clv.fill_from_archive(df, archive, now=_EVENING_KICKOFF)
+    assert archive.asked_at[1:] == [
+        ("Player A", _EVENING_KICKOFF),
+        ("Player B", _EVENING_KICKOFF),
+    ]
+    assert df["Close Market Prob"].notna().all()
+
+
+def test_fill_from_archive_prediction_is_read_once_at_its_latest_kickoff():
+    """Rows of one prediction can carry different kickoffs (a doubleheader shares a
+    PREDICTION_KEY): none closes before the latest, and one read serves them all."""
+    history = _kickoff_history(
+        ("Player A", "Underdog", "BOS", "2026-05-04T17:00:00Z"),
+        ("Player A", "Underdog", "BOS", "2026-05-04T23:30:00Z"),
+    )
+    archive = _closing_archive("Player A")
+
+    df = clv.fill_from_archive(history, archive, now=datetime(2026, 5, 4, 18))
+    assert archive.asked_at == []
+
+    df = clv.fill_from_archive(df, archive, now=_EVENING_KICKOFF)
+    assert archive.asked_at == [("Player A", _EVENING_KICKOFF)]
+    assert df["Close Market Prob"].notna().all()
+
+
+def test_fill_from_archive_row_filed_under_another_team_shares_its_predictions_kickoff():
+    """A row with no kickoff to borrow by team still closes with the rest of its
+    prediction, at the real kickoff rather than at the later stand-in."""
+    history = _kickoff_history(
+        ("Player A", "Underdog", "BOS", "2026-05-04T17:00:00Z"),
+        ("Player A", "Sleeper", "NYK", ""),
+    )
+    archive = _closing_archive("Player A")
+    df = clv.fill_from_archive(history, archive, now=datetime(2026, 5, 4, 18))
+
+    assert archive.asked_at == [("Player A", _EARLY_KICKOFF)]
+    assert df["Close Market Prob"].notna().all()
+
+
+@pytest.mark.parametrize("commence", [None, ""], ids=["scored_before_the_column", "sleeper"])
+def test_fill_from_archive_row_with_no_kickoff_anywhere_uses_the_stand_in(commence):
+    history = _kickoff_history(("Player A", "Sleeper", "BOS", commence))
+    archive = _closing_archive("Player A")
+
+    clv.fill_from_archive(history, archive, now=_CUT - timedelta(seconds=1))
+    assert archive.asked_at == []
+
+    clv.fill_from_archive(history, archive, now=_CUT)
+    assert archive.asked_at == [("Player A", _CUT)]
+
+
+def test_fill_from_archive_frame_without_commence_column_reads_at_the_stand_in():
+    archive = _StubArchive({_PLAYER_A_KEY: _PLAYER_A_CLOSE_EV})
+    clv.fill_from_archive(_build_history(), archive, now=_CUT)
+
+    assert archive.asked_at == [("Player A", _CUT), ("Player B", _CUT)]
+
+
+def test_row_without_parseable_date_is_read_with_no_cutoff_rather_than_nat():
+    """NaT must not reach the archive: DuckDB binds it as NULL, which matches no quote."""
+    history = _build_history()
+    history["Date"] = "TBD"
+    archive = _StubArchive({})
+    clv.fill_from_archive(history, archive, now=datetime(2000, 1, 1))
+    clv.summarize(history, archive=archive)
+
+    no_cutoff = [("Player A", None), ("Player B", None)]
+    assert archive.asked_at == no_cutoff
+    assert archive.movement_until == no_cutoff
+
+
+def test_summarize_reads_line_movement_up_to_the_instant_the_close_was_read_at():
+    history = _kickoff_history(("Player A", "Underdog", "BOS", "2026-05-04T23:30:00Z"))
+    archive = _closing_archive("Player A")
+    df = clv.fill_from_archive(history, archive, now=_EVENING_KICKOFF)
+    clv.summarize(df, archive=archive)
+
+    assert archive.movement_until == [("Player A", _EVENING_KICKOFF)]
+
+
+def _history_filed_as(league, market):
+    """Player A's resolvable offer under the market name its platform's map gives it."""
+    return _build_history().iloc[[0]].assign(League=league, Market=market)
+
+
+@pytest.mark.parametrize(
+    ("league", "history_name", "archive_name"),
+    [
+        ("WNBA", "fantasy points underdog", "fantasy points prizepicks"),
+        ("NHL", "AST", "assists"),
+    ],
+    ids=["wnba_fantasy_points", "nhl_assists"],
+)
+def test_fill_from_archive_asks_for_the_close_under_the_leagues_market_name(
+    league, history_name, archive_name
+):
+    """The archive files a market under the league's own name (``archive_market``);
+    history keeps the name it was scored under."""
+    archive_key = (league, archive_name, "2026-05-04", "Player A")
+    archive = _StubArchive({archive_key: _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(_history_filed_as(league, history_name), archive)
+
+    assert archive.asked == [archive_key]
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(_player_a_expected_close_p())
+    assert df["Market"].tolist() == [history_name]
+
+
+def test_fill_from_archive_inverts_the_close_through_the_leagues_cell_shape(monkeypatch):
+    """The fitted book shape is filed under the league's market name too: looked up under
+    history's, the close would fall back to the symmetric constant-CV shape."""
+    from sportstradamus.helpers import config
+
+    league, cell = "WNBA", "fantasy points prizepicks"
+    coeffs = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.01, "n_bins": 9}
+    monkeypatch.setitem(config.stat_meta, league, {cell: {"book_shape": coeffs}})
+    history = _history_filed_as(league, "fantasy points underdog").assign(Dist="SkewNormal")
+    archive = _StubArchive({(league, cell, "2026-05-04", "Player A"): _PLAYER_A_CLOSE_EV})
+    df = clv.fill_from_archive(history, archive)
+
+    sigma, skew = config.book_skewnormal_shape(league, cell, _PLAYER_A_CLOSE_EV, _PLAYER_A_CV)
+    fitted_under = get_odds(
+        10.5,
+        _PLAYER_A_CLOSE_EV,
+        "SkewNormal",
+        cv=_PLAYER_A_CV,
+        step=0.5,
+        sigma=float(sigma),
+        skew_alpha=float(skew),
+    )
+    symmetric_under = get_odds(10.5, _PLAYER_A_CLOSE_EV, "SkewNormal", cv=_PLAYER_A_CV, step=0.5)
+    assert fitted_under != pytest.approx(symmetric_under)
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(1.0 - fitted_under)
+
+
+def test_summarize_asks_for_line_movement_under_the_leagues_market_name():
+    history = _history_filed_as("WNBA", "fantasy points underdog")
+    archive = _StubArchive({})
+    clv.summarize(history, archive=archive)
+
+    assert archive.movement_asked == [
+        ("WNBA", "fantasy points prizepicks", "2026-05-04", "Player A")
+    ]
 
 
 def test_summarize_drops_unresolved_legs():

@@ -99,39 +99,48 @@
         color: var(--gray);
       }
 
-      /* Transition timings ported verbatim from p8-constellation-lab.html rev 5.
-         main.js sets these elements' transform/opacity/stroke inline every render;
-         a CSS transition on an element fires on any style change regardless of how
-         it's set, so this alone is what makes the dials sweep. main.js suppresses
-         the sweep only on the very first mount via the .no-anim override below —
-         after that, every value change (a real nonce change) eases; an incidental
-         rerun with the same nonce just re-applies identical values (no-op, no
-         visible motion either way). */
-      .grp {
-        transform-box: view-box;
-        transform-origin: 150px 150px;
-        transition: transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1);
-      }
+      /* main.js tweens the dials itself, one animation frame at a time, and writes
+         only numbers: --angle on the dots and the lift arc, --scale on the Kelly gem,
+         and data-sign wherever a sign picks the colour. These rules draw them. */
+      .grp,
       .band,
-      .bandglow {
-        transform-box: view-box;
-        transform-origin: 150px 150px;
-        transition:
-          transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1),
-          stroke-dasharray 0.9s ease,
-          stroke 0.9s ease;
-      }
+      .bandglow,
       .gem {
         transform-box: view-box;
         transform-origin: 150px 150px;
-        transform: scale(0.66);
-        opacity: 0.55;
-        transition:
-          transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1),
-          opacity 0.9s ease;
       }
-      .thread,
-      .halo,
+      .grp,
+      .band,
+      .bandglow {
+        transform: rotate(var(--angle));
+      }
+      .gem {
+        --scale: 0.66;
+        transform: scale(var(--scale));
+        opacity: 0.55;
+      }
+      .band[data-sign="up"],
+      .bandglow[data-sign="up"] {
+        stroke: url(#bandGreen);
+      }
+      .band[data-sign="down"],
+      .bandglow[data-sign="down"] {
+        stroke: url(#bandRed);
+      }
+      .evbead[data-sign="up"] {
+        fill: var(--green);
+      }
+      .evbead[data-sign="down"] {
+        fill: var(--red);
+      }
+      .rv[data-sign="up"] {
+        color: var(--green);
+      }
+      .rv[data-sign="down"] {
+        color: var(--red);
+      }
+      /* Discrete flips still ease in CSS: a crown glow switching on or off, and the
+         EV bead changing colour when EV changes sign. */
       .ovf-win,
       .ovf-ev,
       .evbead {
@@ -139,18 +148,17 @@
           opacity 0.9s ease,
           fill 0.9s ease;
       }
-      /* The astrolabe only ever mounts over a real (already-in-progress) slip, so
-         it always reads as the mockup's "selected/strong" pose for the parts that
-         pose toggled in the demo but this task doesn't name as a JS-driven readout
-         (thread/halo brightness) -- fixed here rather than invented a formula for. */
+      /* Thread and halo brightness hold the mockup's "selected/strong" pose at every
+         leg count, the rest pose included: no payload number drives them, so they
+         stay fixed here rather than get an invented formula. */
       .thread {
         opacity: 0.65;
       }
       .halo {
         opacity: 0.5;
       }
-      /* First-mount override: main.js adds this for one frame so the initial pose
-         paints without a sweep-in, then removes it before any later render. */
+      /* First-mount override: main.js adds this for one frame so the first bead
+         colour and crown glow paint without easing in. */
       #astro.no-anim,
       #astro.no-anim * {
         transition: none !important;

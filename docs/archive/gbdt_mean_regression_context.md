@@ -4,7 +4,7 @@
 > retired alongside its parent
 > [`gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md). The
 > new home-of-record is
-> [`docs/operation_ship_75.md`](../operation_ship_75.md), and the
+> [`operation_ship_75.md`](operation_ship_75.md), and the
 > load-bearing facts (research verdicts, citations [1]–[48], critical
 > files map, inference-path checklist, cross-league caveats) are
 > preserved in

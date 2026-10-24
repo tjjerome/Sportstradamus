@@ -2,9 +2,9 @@
 
 import importlib.resources as pkg_resources
 import json
-import os.path
-import pickle
 from datetime import date, datetime, timedelta
+from http import HTTPStatus
+from urllib.error import HTTPError
 
 import nfl_data_py as nfl
 import nflreadpy as nflr
@@ -14,11 +14,8 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    remove_accents,
-    set_model_start_values,
-)
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers import remove_accents
+from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import (
     nfl_fp_loader,
@@ -26,12 +23,7 @@ from sportstradamus.stats import (
     nfl_fp_team_weekly_aggregate,
     nfl_fp_weekly_aggregate,
 )
-from sportstradamus.stats.base import (
-    _VOLUME_SCALE_RATIO_CAP,
-    _VOLUME_SCALE_RATIO_FLOOR,
-    Stats,
-    clean_data,
-)
+from sportstradamus.stats.base import ComboSpec, Stats, apply_volume_budget
 
 # Phase-1.5 lookback rule:
 #   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
@@ -91,6 +83,46 @@ NFL_MARKET_POSITIONS = {
     "tds": {"WR", "RB", "TE"},  # rush+rec TDs
 }
 
+# Fantasy scoring is one all-position formula (see update()), but the components a
+# book actually quotes are not, so the component sum is specified per position.
+# Measured over the 2025 NFL season, per (player, gameday), quote coverage and mean
+# points contributed:
+#
+#   QB  passing yards 82%/7.42  passing tds 81%/4.90  interceptions 81%/-0.58
+#       rushing yards 79%/1.49  tds 82%/0.98          receptions 0%/0.01
+#   RB  rushing yards 71%/3.62  receiving yards 62%/1.20  receptions 63%/0.79  tds 98%/1.99
+#   WR  receiving yards 74%/3.22  receptions 72%/1.28  tds 98%/1.24  rushing yards 5%/0.08
+#   TE  receiving yards 64%/2.27  receptions 63%/1.11  tds 98%/1.11  rushing yards 1%/0.03
+#
+# Admission is all-or-nothing, so a term that is structurally ~0 for a position and
+# essentially unquoted there would reject the whole position: WR/TE rushing yards and
+# QB receiving yards/receptions are dropped for that reason, at a cost under 0.1 points
+# against a ~7-point sd. `fumbles lost` is quoted on one gameday all season and is
+# dropped everywhere (a QB gives up 0.34 points to it); so are the three 2-pt
+# conversion terms, which no book prices. `yards` and `qb yards` are quoted as
+# composites but stopped archiving after 2023, so the sum runs off the split markets.
+NFL_FANTASY_COMPONENTS = {
+    "QB": ("passing yards", "passing tds", "interceptions", "rushing yards", "tds"),
+    "RB": ("rushing yards", "receiving yards", "receptions", "tds"),
+    "WR": ("receiving yards", "receptions", "tds"),
+    "TE": ("receiving yards", "receptions", "tds"),
+}
+
+# Points per unit, straight off the update() scoring formulas. `receptions` is the
+# only weight the two platforms disagree on.
+NFL_FANTASY_WEIGHTS = {
+    "passing yards": 0.04,
+    "passing tds": 4.0,
+    "interceptions": -1.0,
+    "rushing yards": 0.1,
+    "receiving yards": 0.1,
+    "tds": 6.0,
+}
+NFL_FANTASY_RECEPTION_POINTS = {
+    "fantasy points prizepicks": 1.0,
+    "fantasy points underdog": 0.5,
+}
+
 # nfl-data-py delivers the advanced-stat columns (yards per carry, passer
 # rating, the target-share metrics, ...) as object-dtype numeric strings. Every
 # gamelog column EXCEPT these identifier / categorical / boolean ones is coerced
@@ -123,6 +155,51 @@ _TARGET_CAP: int = 20  # absolute single-player target ceiling per game
 # (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
 # includes pre-analytics-era play-by-play that is noisier than modern data.
 _GAMELOG_RETENTION_DAYS: int = 2191  # 6 * 365 + 1 leap day
+
+# nflverse creates a season's FTN charting and weekly PFR files only once its first
+# games are charted, so for a while after the opener a 404 on them means "not yet".
+# Two weeks clears FTN's 48 h charting lag with room for PFR; a 404 past that means
+# the release moved, and the backfill fails loud.
+_NFLVERSE_PUBLISH_GRACE_DAYS: int = 14
+
+# Weekly PFR columns the pbp stats read; the empty stand-in carries them until the
+# season's PFR files exist.
+_PFR_WEEKLY_COLUMNS: list[str] = [
+    "pfr_player_name",
+    "team",
+    "opponent",
+    "week",
+    "times_pressured",
+    "rushing_broken_tackles",
+    "receiving_broken_tackles",
+    "rushing_yards_after_contact_avg",
+    "receiving_drop_pct",
+    "passing_drop_pct",
+]
+
+# Team-week columns fed only by FTN charting (read_thrown, n_blitzers) and only by weekly
+# PFR (times_pressured). A charted game always has first-read passes and blitzes, and a
+# PFR-covered one pressures, so all zero means the team-week was parsed before its game
+# reached that source.
+_FTN_TEAM_COLUMNS: list[str] = [
+    "first_read_success_rate",
+    "first_read_success_rate_allowed",
+    "first_read_epa",
+    "first_read_epa_allowed",
+    "blitz_rate",
+    "epa_per_blitz",
+    "epa_allowed_per_blitz",
+]
+_PFR_TEAM_COLUMNS: list[str] = ["pressure_per_pass", "pressure_allowed_per_pass"]
+# The player columns the same two sources feed.
+_LATE_SOURCE_PLAYER_COLUMNS: list[str] = [
+    "first read targets per route run",
+    "first read target share",
+    "receiver drops",
+    "breakaway yards",
+    "broken tackles",
+    "drop rate",
+]
 
 # KNN comp-pool filtering thresholds. The percentile gate removes very
 # low-usage players who would pollute the nearest-neighbor set with
@@ -397,7 +474,8 @@ class StatsNFL(Stats):
                 "time_per_play",
             ],
         }
-        self.volume_stats = ["attempts", "carries", "targets"]
+        self.volume_stats = VOLUME_STATS["NFL"]
+        self.depth_quoted_markets = frozenset(NFL_FANTASY_RECEPTION_POINTS)
         self.need_pbp = True
         self.default_total = 22.668
         self.positions = ["QB", "WR", "RB", "TE"]
@@ -424,7 +502,7 @@ class StatsNFL(Stats):
 
         Overrides the base no-op hook. Markets absent from ``NFL_MARKET_POSITIONS``
         (the fantasy-points composites) keep all four positions. See Stage A1.6 in
-        docs/gbdt_mean_regression_plan.md.
+        docs/archive/gbdt_mean_regression_plan.md.
         """
         eligible = NFL_MARKET_POSITIONS.get(market)
         if eligible is None:
@@ -468,7 +546,6 @@ class StatsNFL(Stats):
         self._coerce_numeric_gamelog()
 
     def _update(self):
-        """Update data from the web API."""
         self.need_pbp = True
         # QW-4 gametime / own rest / opp rest were reverted 2026-06-20 (the
         # PrimeTime/RestDiff features they fed carried zero importance). Shed them
@@ -493,9 +570,10 @@ class StatsNFL(Stats):
             remove_accents
         )
         self._load_player_ids()
+        self._reopen_late_source_weeks()
         teamDataList = self._backfill_missing_rows(sched)
         self._finalize_logs(teamDataList)
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+        if self._full_clean_due():
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(
                 remove_accents
             )
@@ -664,15 +742,20 @@ class StatsNFL(Stats):
         stats["CanClinch"] = stats["Playoff"]
 
     def _assemble_gamelog_frame(self, nfl_data, sched, snaps):
+        # Spelled as _fetch_schedule spells them, ahead of the join on team below.
+        nfl_data.loc[nfl_data["team"] == "LA", "team"] = "LAR"
+        nfl_data.loc[nfl_data["team"] == "WSH", "team"] = "WAS"
+        nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
         # Attach each row's gameday from the schedule -- home and away side both map
-        # their team to recent_team so the merge reaches every player row.
+        # their team to `team` so the merge reaches every player row. Keys are named: a bare
+        # merge once fell back to week alone, so game lines were read under the week's first day.
         sched_long = pd.concat(
             [
-                sched.rename(columns={"home_team": "recent_team"}),
-                sched.rename(columns={"away_team": "recent_team"}),
+                sched.rename(columns={"home_team": "team"}),
+                sched.rename(columns={"away_team": "team"}),
             ]
-        )[["recent_team", "week", "gameday"]]
-        nfl_data = nfl_data.merge(sched_long, how="left")
+        )[["team", "week", "gameday"]]
+        nfl_data = nfl_data.merge(sched_long, on=["team", "week"], how="left")
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(["QB", "WR", "RB", "TE"])]
         snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
         snaps["player_display_name"] = snaps["player"].map(remove_accents)
@@ -735,16 +818,11 @@ class StatsNFL(Stats):
 
         nfl_data.rename(columns=lambda x: x.replace("_", " "), inplace=True)
         nfl_data.rename(columns={"position group": "position"}, inplace=True)
-        nfl_data.drop(columns=["recent team"], inplace=True)
         nfl_data[["target share", "air yards share", "wopr", "yards per target"]] = (
             nfl_data[["target share", "air yards share", "wopr", "yards per target"]]
             .fillna(0)
             .infer_objects(copy=False)
         )
-
-        nfl_data.loc[nfl_data["team"] == "LA", "team"] = "LAR"
-        nfl_data.loc[nfl_data["team"] == "WSH", "team"] = "WAS"
-        nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
         return nfl_data
 
     def _enrich_new_rows(self, nfl_data):
@@ -781,14 +859,13 @@ class StatsNFL(Stats):
         self._enrich_team_markets(nfl_data, mask=new_mask)
 
     def _load_player_ids(self):
-        self.players = nfl.import_ids()
-        self.players = self.players.loc[
-            self.players["position"].isin(["QB", "RB", "WR", "TE"])
-            & (self.players["team"] != "FA")
-            & (self.players["team"] != "FA*")
-        ]
-        self.players.name = self.players.name.apply(remove_accents)
-        self.players.team = self.players.team.map(
+        skill = nfl.import_ids()
+        skill = skill.loc[skill["position"].isin(["QB", "RB", "WR", "TE"])]
+        skill.name = skill.name.apply(remove_accents)
+        self.players = skill.loc[(skill["team"] != "FA") & (skill["team"] != "FA*")]
+        # import_ids() codes that differ from the gamelog's. Every current team must map:
+        # an unmapped code reaches _rescale_team_volume as a team the profiles never saw.
+        self.players.team = self.players.team.replace(
             {
                 "NOS": "NO",
                 "GBP": "GB",
@@ -797,14 +874,71 @@ class StatsNFL(Stats):
                 "KCC": "KC",
                 "LVR": "LV",
                 "JAC": "JAX",
+                "NEP": "NE",
             }
         )
-        ids = self.players[["name", "gsis_id"]].dropna()
+        # parse_pbp resolves gamelog names through this map, so it covers everyone who ever
+        # played, not just the roster: a player who left the league used to get
+        # _empty_player_pbp_stats on every past game. A rostered id wins a same-name collision.
+        ids = skill[["name", "gsis_id"]].dropna()
         ids.index = ids.name
         self.ids = ids.gsis_id.to_dict()
+        rostered = self.players[["name", "gsis_id"]].dropna()
+        rostered.index = rostered.name
+        self.ids.update(rostered.gsis_id.to_dict())
         self.players = self.players.drop_duplicates("name")
         self.players.index = self.players["name"]
         self.players = self.players[["age", "height", "weight", "team", "position"]]
+
+    def _reopen_late_source_weeks(self):
+        """Send this season's team-weeks parsed before FTN or PFR held their game back to parse.
+
+        Both sources trail the pbp by days and the backfill parses a team-week once, so a
+        team-week parsed early keeps zeros in every column that source feeds (prod ingests
+        within hours of a game, so every week it holds was parsed early). A team-week whose
+        columns from one source are all zero while that source now holds the game loses
+        its team row and gets NaN in its players' source-fed columns, which puts both
+        back through :meth:`_backfill_missing_rows`. Nothing is fetched while no team-week
+        reads zero.
+        """
+        season = self.season_start.year
+        team_week = ["season", "week", "team"]
+        team = self.teamlog.loc[self.teamlog.season == season].assign(
+            ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
+            pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
+        )
+        if not (team.ftn_zero | team.pfr_zero).any():
+            return
+        games = self.gamelog[[*team_week, "game id"]].drop_duplicates(team_week)
+        team = team.merge(games, on=team_week)
+        ftn_games, pfr_games = self._late_source_games(season)
+        stale = team.loc[
+            (team.ftn_zero & team["game id"].isin(ftn_games))
+            | (team.pfr_zero & team["game id"].isin(pfr_games)),
+            team_week,
+        ]
+        if stale.empty:
+            return
+        logger.info("Re-parsing %d NFL team-weeks that FTN or PFR published late", len(stale))
+        flagged = self.gamelog.merge(stale, how="left", indicator=True)["_merge"].eq("both")
+        self.gamelog.loc[flagged.to_numpy(), _LATE_SOURCE_PLAYER_COLUMNS] = np.nan
+        kept = self.teamlog.merge(stale, how="left", indicator=True)
+        self.teamlog = kept.loc[kept["_merge"].eq("left_only")].drop(columns="_merge")
+
+    def _late_source_games(self, season: int) -> tuple[set[str], set[str]]:
+        """Game ids the season's FTN charting and weekly PFR files hold; empty while unpublished."""
+        try:
+            ftn = set(nfl.import_ftn_data([season])["nflverse_game_id"])
+        except HTTPError as exc:
+            self._raise_unless_unpublished(exc)
+            ftn = set()
+        try:
+            # The rush and rec files publish with this one, and every game has a passer.
+            pfr = set(nfl.import_weekly_pfr("pass", [season])["game_id"])
+        except HTTPError as exc:
+            self._raise_unless_unpublished(exc)
+            pfr = set()
+        return ftn, pfr
 
     def _backfill_missing_rows(self, sched):
         teamDataList = []
@@ -933,8 +1067,13 @@ class StatsNFL(Stats):
             self.pbp = self.pbp.loc[
                 self.pbp["play_type"].isin(["run", "pass"]) | (self.pbp["desc"] == "END GAME")
             ]
+            ftn = None
             if self.season_start.year > 2021:
-                ftn = nfl.import_ftn_data([self.season_start.year])
+                try:
+                    ftn = nfl.import_ftn_data([self.season_start.year])
+                except HTTPError as exc:
+                    self._raise_unless_unpublished(exc)
+            if ftn is not None:
                 ftn["game_id"] = ftn["nflverse_game_id"]
                 ftn["play_id"] = ftn["nflverse_play_id"]
                 ftn.drop(columns=["week", "season", "nflverse_game_id"], inplace=True)
@@ -969,15 +1108,37 @@ class StatsNFL(Stats):
                 nfl.import_ngs_data("rushing", [self.season_start.year]), how="outer"
             )
             self.ngs["player_display_name"] = self.ngs["player_display_name"].apply(remove_accents)
-            self.pfr = nfl.import_weekly_pfr("pass", [self.season_start.year])
-            self.pfr = self.pfr.merge(
-                nfl.import_weekly_pfr("rush", [self.season_start.year]), how="outer"
-            )
-            self.pfr = self.pfr.merge(
-                nfl.import_weekly_pfr("rec", [self.season_start.year]), how="outer"
-            )
+            try:
+                self.pfr = nfl.import_weekly_pfr("pass", [self.season_start.year])
+                self.pfr = self.pfr.merge(
+                    nfl.import_weekly_pfr("rush", [self.season_start.year]), how="outer"
+                )
+                self.pfr = self.pfr.merge(
+                    nfl.import_weekly_pfr("rec", [self.season_start.year]), how="outer"
+                )
+            except HTTPError as exc:
+                self._raise_unless_unpublished(exc)
+                # float dtype: an empty object column sums to int 0, which raises on 0/0
+                # where the real frame's numpy scalars give NaN.
+                self.pfr = pd.DataFrame(columns=_PFR_WEEKLY_COLUMNS, dtype=float)
             self.pfr["pfr_player_name"] = self.pfr["pfr_player_name"].apply(remove_accents)
+            # PFR spells the Rams "LA", as the raw pbp does before the renames above.
+            self.pfr[["team", "opponent"]] = self.pfr[["team", "opponent"]].replace("LA", "LAR")
             self.need_pbp = False
+
+    def _raise_unless_unpublished(self, exc: HTTPError) -> None:
+        """Re-raise ``exc`` unless it is a season file nflverse has not published yet.
+
+        nflverse creates a season's FTN charting and weekly PFR files only after its
+        first games are charted, while pbp, player stats and snaps already carry them.
+        Past the grace window a 404 means the release moved, so it fails loud.
+        """
+        season_age = datetime.today().date() - self.season_start
+        if exc.code != HTTPStatus.NOT_FOUND or season_age > timedelta(
+            days=_NFLVERSE_PUBLISH_GRACE_DAYS
+        ):
+            raise exc
+        logger.warning("nflverse file not published yet, backfilling without it: %s", exc.url)
 
     def _ratio(self, num, den):
         return num / den if den > 0 else np.nan
@@ -1418,7 +1579,7 @@ class StatsNFL(Stats):
         target_season, target_week = self._lookup_season_week(target_game_date)
         return target_season, target_week
 
-    def _comp_target_key(self, date: "date | None") -> "tuple[int, int | None]":
+    def _comp_target_key(self, date: "date") -> "tuple[int, int | None]":
         """NFL override: cache the per-week comp pool on ``(season, week)``.
 
         The base implementation buckets on the most-recent Wednesday's week
@@ -1498,15 +1659,13 @@ class StatsNFL(Stats):
         ``_lookup_season_week``, applies the Phase-1.5 lookback rule via
         ``_lookback_windows`` (post-week-4 = current-season only;
         pre-week-5 = prior season weeks 11..18 BLENDED with current
-        partial), and hands the windows + the target snapshot to the
-        bridge. The bridge handles Pattern A (rate stats pooled across
-        windows) and Pattern B (``line_matchups`` single-snapshot at
-        target week).
+        partial), and hands the windows to the bridge, which pools the
+        Pattern A rate stats across them.
 
         Returns ``(None, None)`` when the team-data fetcher hasn't
-        backfilled any snapshots for the target season AND the prior
-        season -- the existing nfl_data_py-derived teamlog aggregates
-        carry the run alone, so production stays live on mixed-fill data.
+        backfilled any snapshots for the lookback windows -- the existing
+        nfl_data_py-derived teamlog aggregates carry the run alone, so
+        production stays live on mixed-fill data.
         """
         season, target_week = self._lookup_season_week(date)
         if getattr(self, "_fp_team_feature_cache", None) is None:
@@ -1517,18 +1676,14 @@ class StatsNFL(Stats):
         if cache_key in self._fp_team_feature_cache:
             return self._fp_team_feature_cache[cache_key]
         pattern_a_windows = self._lookback_windows(season, target_week)
-        has_data = any(
+        if not any(
             nfl_fp_team_weekly.available_snapshots(window_season)
             for window_season, _, _ in pattern_a_windows
-        ) or bool(nfl_fp_team_weekly.available_snapshots(season))
-        if not has_data:
+        ):
             self._fp_team_feature_cache[cache_key] = (None, None)
             return None, None
         team_features, defense_features = (
-            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(
-                pattern_a_windows=pattern_a_windows,
-                pattern_b_snapshot=(season, target_week),
-            )
+            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(pattern_a_windows)
         )
         self._fp_team_feature_cache[cache_key] = (team_features, defense_features)
         return self._fp_team_feature_cache[cache_key]
@@ -1734,10 +1889,6 @@ class StatsNFL(Stats):
           (no postseason props are priced), but the test pins it so a
           future tightening does not kill it before the operator decides
           to price one.
-
-        Pattern B (``line_matchups``) is NOT routed through this method;
-        the single-snapshot lookup at ``(target_season, target_week)``
-        applies whether the target is reg-season or postseason.
         """
         if target_week is None:
             # Legacy fallback -- full-season aggregates for prior 3 + current.
@@ -1768,64 +1919,6 @@ class StatsNFL(Stats):
         if target_week > 1:
             windows.append((target_season, 1, target_week - 1))
         return windows
-
-    def update_player_comps(self, year: int | None = None) -> None:
-        """Rebuild comp clusters for each NFL position and write to ``comps.json``.
-
-        Applies the Phase-1.5 lookback rule via ``build_comp_profile``: after
-        week 4 of the current season, the comp pool is restricted to
-        current-season weeks 1..W-1; pre-week-5, the prior season's back half
-        (weeks 11..18) is blended with any current-season games. Writes the
-        result to ``data/leagues/nfl/comps.json`` for reuse by the prediction
-        pipeline.
-
-        Args:
-            year: Override the season year. Defaults to ``self.season_start.year``.
-        """
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
-
-        # Pass today's date so the Phase-1.5 lookback rule applies: after
-        # week 4 of the current season the comp pool is restricted to
-        # current-season weeks 1..W-1 (`_lookback_windows`), which is the
-        # operator-confirmed cron behaviour. Pre-week-5 (or off-season),
-        # the prior season's back half (weeks 11..18) is blended with
-        # any current-season games already played.
-        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
-        if playerProfile.empty:
-            return
-
-        comps = {}
-        for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
-            positionProfile[filterStat[position]] = (
-                positionProfile[filterStat[position]] / positionProfile["player_game_count"]
-            )
-            positionProfile = positionProfile.loc[
-                positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
-            ]
-            positionProfile = positionProfile.reindex(
-                columns=list(stats["NFL"][position].keys())
-            ).replace([np.nan, np.inf, -np.inf], 0)
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(
-                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
-            )
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(
-                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
-            )
-
-        filepath = pkg_resources.files(data) / "leagues" / "nfl" / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
 
     def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps from loaded data at runtime (no JSON I/O).
@@ -1879,6 +1972,25 @@ class StatsNFL(Stats):
 
         self.comps = comps
 
+    def _fantasy_combo_spec(self, market: str, player: str) -> ComboSpec | None:
+        """Per-position component sum for NFL's all-position fantasy markets.
+
+        The scoring formula is position-independent; the quoted components are not,
+        so the spec is selected off the position ``get_depth`` wrote to
+        ``playerProfile`` -- the gamelog's on a past date, the roster's on an upcoming
+        one (see ``NFL_FANTASY_COMPONENTS`` for the coverage measurements behind each
+        list). A player whose position is unknown gets no quote.
+        """
+        reception_points = NFL_FANTASY_RECEPTION_POINTS.get(market)
+        if reception_points is None:
+            return None
+        code = int(self.playerProfile["position"].get(player, 0))
+        components = NFL_FANTASY_COMPONENTS.get(self.positions[code - 1]) if code else None
+        if components is None:
+            return None
+        weights = NFL_FANTASY_WEIGHTS | {"receptions": reception_points}
+        return ComboSpec(marginals=tuple((sub, weights[sub]) for sub in components))
+
     def check_combo_markets(
         self, market: str, player: str, date: date = datetime.today().date()
     ) -> int:
@@ -1894,103 +2006,43 @@ class StatsNFL(Stats):
             ):
                 return
 
-            if market == "attempts":
-                self._finalize_attempts_volume(market)
-                continue
-
-            teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-            for team, team_df in teams:
-                self._rescale_team_volume(market, team, team_df)
+            # attempts is the pass-volume budget carries and targets divide, not
+            # itself a share of one, so it takes no team rescale.
+            if market != "attempts":
+                teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
+                for team, team_df in teams:
+                    self._rescale_team_volume(market, team, team_df)
             self.playerProfile.fillna(0, inplace=True)
 
         # Defragment after 3-market loop's sequential .join / .loc column inserts.
         self.playerProfile = self.playerProfile.copy()
 
-    def _finalize_attempts_volume(self, market):
-        # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
-        loc = self.playerProfile[f"proj {market} loc"].fillna(0)
-        scale = self.playerProfile[f"proj {market} scale"].fillna(0)
-        sn_alpha = (
-            self.playerProfile[f"proj {market} alpha"].fillna(0)
-            if f"proj {market} alpha" in self.playerProfile.columns
-            else 0
-        )
-
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_stds = scale
-
-        self.playerProfile.loc[loc.index, f"proj {market} mean"] = true_means
-        self.playerProfile.loc[scale.index, f"proj {market} std"] = true_stds
-        self.playerProfile.drop(
-            columns=[f"proj {market} loc", f"proj {market} scale"],
-            inplace=True,
-            errors="ignore",
-        )
-        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors="ignore")
-
-        self.playerProfile.fillna(0, inplace=True)
-
     def _rescale_team_volume(self, market, team, team_df):
-        # Precision-weighted, always-adjust normalization.
-        # Budget constraints:
-        #   carries:  total ≈ plays_per_game − proj_attempts − _UNMODELED_CARRY_RESERVE
-        #   targets:  total ≈ proj_attempts − _UNMODELED_TARGET_RESERVE
-        # proj_attempts from SkewNormal: E[X] = loc + scale*delta*sqrt(2/π),
-        # delta = alpha/sqrt(1+alpha²)
-        loc = team_df[f"proj {market} loc"].copy()
-        scale = team_df[f"proj {market} scale"].copy()
-        sn_alpha = (
-            team_df[f"proj {market} alpha"].copy()
-            if f"proj {market} alpha" in team_df.columns
-            else 0
-        )
+        """Redistribute one team's carries or targets onto its share of team plays.
 
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_vars = scale**2
-        total = true_means.sum()
-
-        if total <= 0:
-            return
-
+        Budget constraints:
+            carries:  total ≈ plays_per_game − proj_attempts − _UNMODELED_CARRY_RESERVE
+            targets:  total ≈ proj_attempts − _UNMODELED_TARGET_RESERVE
+        """
         plays = self.teamProfile.loc[team, "plays_per_game"]
-
-        # proj_attempts for this team: from attempts market
         if "proj attempts mean" in self.playerProfile.columns:
             proj_attempts = self.playerProfile.loc[
                 self.playerProfile["team"] == team, "proj attempts mean"
             ].sum()
         else:
-            pass_rate = self.teamProfile.loc[team, "pass_rate"]
-            proj_attempts = plays * pass_rate
+            proj_attempts = plays * self.teamProfile.loc[team, "pass_rate"]
 
         if market == "carries":
             cap = _CARRY_CAP
-            rush_budget = plays - proj_attempts
-            target = max(rush_budget - _UNMODELED_CARRY_RESERVE, len(team_df))
+            budget = plays - proj_attempts - _UNMODELED_CARRY_RESERVE
         else:  # targets
             cap = _TARGET_CAP
-            target = max(proj_attempts - _UNMODELED_TARGET_RESERVE, len(team_df))
+            budget = proj_attempts - _UNMODELED_TARGET_RESERVE
 
-        deficit = target - total
-        total_var = true_vars.sum()
-        if total_var > 0:
-            adjustments = true_vars / total_var * deficit
-        else:
-            adjustments = true_means / total * deficit
-
-        new_means = (true_means + adjustments).clip(lower=0, upper=cap)
-
-        # SkewNormal: scale both loc and scale to preserve CV
-        ratio = new_means / true_means.replace(0, np.nan)
-        ratio = ratio.fillna(1.0).clip(
-            lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
+        apply_volume_budget(
+            self.playerProfile,
+            market,
+            team_df.index,
+            target=max(budget, len(team_df)),
+            per_player_cap=cap,
         )
-        new_scale = scale * ratio
-        new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-        self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-        self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-        self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-        self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale

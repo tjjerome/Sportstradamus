@@ -2,38 +2,25 @@
 
 import importlib.resources as pkg_resources
 import json
-import warnings
 from datetime import date, datetime, timedelta
-from io import StringIO
+from pathlib import Path
 
-import line_profiler
 import nba_api.stats.endpoints as nba
 import numpy as np
 import pandas as pd
-import requests
-from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_mlb_pitchers,
-    get_odds,
-    remove_accents,
-    stat_cv,
-    stat_dist,
-)
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers import combo_props, remove_accents, stat_cv, stat_dist
+from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
+    GAMELOG_RETENTION_DAYS,
+    ComboSpec,
     Stats,
     archive,
-    clean_data,
     fetch_upcoming_games,
     scale_team_volume_to_budget,
 )
@@ -41,8 +28,10 @@ from sportstradamus.stats.nba_client import NBAStatsError
 
 # Days since last fetch beyond which play-in and playoff logs are re-pulled (off-season catch-up)
 _CATCHUP_THRESHOLD_DAYS: int = 150
-# Retention window: keep 4 seasons of logs to bound file growth
-_GAMELOG_RETENTION_DAYS: int = 1461
+
+# Cleaning the Glass publishes a season's player export only after games are played,
+# so a new season starts on the newest earlier file until the real one is dropped in.
+_ROSTER_SEED_DIR = Path(str(pkg_resources.files(data) / "player_data" / "NBA"))
 
 # Cleaning the Glass (NBA) dated-snapshot roots + join schema. The key/meta lists
 # are pinned from a real authenticated CTG capture (see docs/cleaningtheglass.md);
@@ -54,6 +43,35 @@ _CTG_PLAYER_KEY_COL = ""
 _CTG_PLAYER_META_COLS: frozenset[str] = frozenset()
 _CTG_TEAM_KEY_COL = ""
 _CTG_TEAM_META_COLS: frozenset[str] = frozenset()
+
+# DFS scoring weights shared by PrizePicks and Underdog NBA fantasy (settled gamelog formula in
+# _compute_derived_player_stats; its BLST*3 term is carried as separate BLK/STL components
+# because they are distinct book markets with their own correlation cross terms).
+NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1))
+
+# The three components sportsbooks price thinly or not at all, measured over the
+# 2025-26 archive: NBA `TOV` reaches a real book on 15.7% of its rows (325 against
+# PTS's 20712), `STL` on 18.2% and `BLK` on 40.9%. Under all-or-nothing admission
+# that denies the whole fantasy board, so they fall back to the player's trailing
+# rate (`Stats._assumed_component`) where no sportsbook priced them.
+#
+# `_MAX_ASSUMED_COMPONENT_SHARE` still binds at one of these six per player, so a
+# row needs `TOV` quoted before a second may fall back. WNBA inherits this set and
+# quotes none of the three — no archived `BLK` row at any book, `STL` and `TOV`
+# pick'em only — so WNBA fantasy always exceeds the cap and stays unquotable here.
+# It graded PIT KS 0.0405 against legacy's 0.1489 when the cap was off, which makes
+# it a component-model-blend candidate rather than a book quote.
+NBA_ASSUMABLE_FANTASY_COMPONENTS = frozenset({"TOV", "BLK", "STL"})
+
+
+def _roster_seed_path(season: str) -> Path:
+    """The season's roster seed file, else the newest earlier season's."""
+    wanted = _ROSTER_SEED_DIR / f"nba_players_{season}.csv"
+    if wanted.is_file():
+        return wanted
+    newest = max(path for path in _ROSTER_SEED_DIR.glob("nba_players_*.csv") if path < wanted)
+    logger.warning(f"NBA roster seed {wanted.name} is missing; reading {newest.name}")
+    return newest
 
 
 class StatsNBA(Stats):
@@ -364,7 +382,7 @@ class StatsNBA(Stats):
             "OPP_PIE",
         ]
 
-        self.volume_stats = ["MIN"]
+        self.volume_stats = VOLUME_STATS["NBA"]
         self.default_total = 111.667
         self.log_strings = {
             "game": "GAME_ID",
@@ -441,47 +459,6 @@ class StatsNBA(Stats):
 
         return playerProfile, playerDict
 
-    def update_player_comps(self, year=None):
-        """Recompute player comp BallTrees and write them to comps.json."""
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        prior_season, current_season = self._comp_season_pair()
-        playerList = self.players.get(prior_season, {})
-        playerList.update(self.players.get(current_season, {}))
-        playerProfile, playerDict = self.build_comp_profile(playerList)
-        all_features = set()
-        for pos_weights in stats[self.league].values():
-            all_features.update(pos_weights.keys())
-        all_features = list(all_features)
-        playerProfile = playerProfile[
-            [f for f in all_features if f in playerProfile.columns]
-        ].replace([np.nan, np.inf, -np.inf], 0)
-
-        comps = {}
-        for position in self.positions:
-            pos_weights = stats[self.league][position]
-            pos_features = list(pos_weights.keys())
-            pos_players = [
-                p
-                for p, v in playerDict.items()
-                if v["POS"] == position and p in playerProfile.index
-            ]
-            positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
-
-        self.comps = comps
-        filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
-
     def _comp_season_pair(self) -> tuple[str, str]:
         """Return the ``(prior, current)`` ``self.players`` keys for comp assembly.
 
@@ -530,8 +507,7 @@ class StatsNBA(Stats):
 
         Returns a ``{team: {player_name: stats_dict}}`` mapping ready for
         :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts (matches the
-        :meth:`update_player_comps` ``prior.update(current)`` order).
+        season's roster wins on dict-update conflicts.
         """
         cutoff = self._current_season_key(target_game_date)
         merged: dict = {}
@@ -597,15 +573,12 @@ class StatsNBA(Stats):
         self.season = f"{day.year}-{(day.year + 1) % 100:02d}"
 
     def _update(self) -> None:
-        """Update data from the web API."""
         self._clean_player_positions()
 
         latest_date = self._latest_gamelog_date()
         today = datetime.today().date()
 
-        player_df = pd.read_csv(
-            pkg_resources.files(data) / f"player_data/NBA/nba_players_{self.season}.csv"
-        )
+        player_df = pd.read_csv(_roster_seed_path(self.season))
         player_df.Player = player_df.Player.apply(remove_accents)
         player_df.rename(
             columns={
@@ -631,7 +604,9 @@ class StatsNBA(Stats):
             "Center-Guard": "B",
             "Guard-Center": "W",
         }
-        self.upcoming_games = fetch_upcoming_games("00", self.season[:4], today)
+        self.upcoming_games, self.upcoming_games_by_date = fetch_upcoming_games(
+            "00", self.season[:4], today
+        )
 
         params = {
             "season_nullable": self.season,
@@ -679,7 +654,7 @@ class StatsNBA(Stats):
             )
 
         # Remove old games to prevent file bloat
-        four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date >= four_years_ago
         ]
@@ -692,7 +667,7 @@ class StatsNBA(Stats):
         self._canonicalize_team_abbrevs(self.gamelog)
         self._canonicalize_team_abbrevs(self.teamlog)
 
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+        if self._full_clean_due():
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
             self._enrich_team_markets(
                 self.gamelog, date_col=self.log_strings["date"], team_col="TEAM_ABBREVIATION"
@@ -844,9 +819,11 @@ class StatsNBA(Stats):
     def _build_player_profiles(self, player_df, playerBios, shotData, synergy):
         """Merge bios + shot/synergy data into per-team player profiles on self.players."""
         if playerBios.empty:
-            self.players[self.season] = self.players.get(
-                "-".join([str(int(x) - 1) for x in self.season.split("-")]), {}
-            )
+            # No bios before opening night or after a failed pull. The season keeps what it
+            # holds (nothing, at first, so the roster lookup stands on last season's):
+            # copying last season's pairs in would leave every player who has since moved
+            # on his old team for the whole season.
+            self.players.setdefault(self.season, {})
             return
 
         shotData = self._enrich_shot_data(shotData, synergy)
@@ -912,13 +889,7 @@ class StatsNBA(Stats):
         )
         player_df[numeric_cols] = player_df[numeric_cols].fillna(0)
         player_df = {level: player_df.xs(level).T.to_dict() for level in player_df.index.levels[0]}
-        if self.season in self.players:
-            self.players[self.season] = {
-                team: players | player_df.get(team, {})
-                for team, players in self.players[self.season].items()
-            }
-        else:
-            self.players[self.season] = player_df
+        self._merge_season_roster(self.season, player_df)
 
     def _fetch_game_logs(self, params, include_playin, include_playoffs):
         """Pull player/team game logs (base/advanced/usage/scoring) for the window.
@@ -1183,6 +1154,14 @@ class StatsNBA(Stats):
         # pylint: enable=duplicate-code
 
         self.playerProfile.fillna(0, inplace=True)
+        return None
+
+    def _fantasy_combo_spec(self, market, player):
+        if market in ("fantasy points prizepicks", "fantasy points underdog"):
+            return ComboSpec(
+                marginals=NBA_FANTASY_WEIGHTS,
+                assumable=NBA_ASSUMABLE_FANTASY_COMPONENTS,
+            )
         return None
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):

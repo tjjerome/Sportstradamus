@@ -2,13 +2,15 @@
 
 Writes each day's settled entries to ``data/ledger/settled_entries.parquet``
 (one accumulating table, matching ``history.parquet``/``parlay_hist.parquet``'s
-read-modify-write idiom) and derives a compounding per-``(persona,
-replicate_id)`` paper bankroll trajectory in ``data/ledger/bankroll.parquet``.
+read-modify-write idiom) and derives a compounding per-``(policy_version,
+persona, replicate_id)`` paper bankroll trajectory in
+``data/ledger/bankroll.parquet``: a new policy version starts its own
+trajectory from the seed bankroll, so two versions are never pooled.
 Pure sink -- nothing upstream (``_ledger_selection``, ``ledger``) imports this
 module or reads its output back; sizing must never be a function of settled
 P&L. Idempotent against re-running the same date twice: a re-run's
-``settled_rows`` is empty once ``_ledger_settlement.settle_day`` has excluded
-already-settled ids via :func:`already_settled_ids`, and both writers below
+``settled_rows`` is empty once ``_ledger_settlement.settle_day`` has left out
+what :func:`read_settled_entries` shows as settled, and both writers below
 no-op on empty input.
 """
 
@@ -54,6 +56,7 @@ _SETTLED_ENTRIES_COLUMNS = (
 
 _BANKROLL_COLUMNS = (
     "date",
+    "policy_version",
     "persona",
     "replicate_id",
     "starting_bankroll",
@@ -63,21 +66,22 @@ _BANKROLL_COLUMNS = (
     "n_entries_pending",
 )
 
+# Bankroll rows written before the table carried ``policy_version`` all came from this one.
+_FIRST_POLICY_VERSION = "policy_v1"
 
-def already_settled_ids(date: datetime.date | None = None) -> set[str]:
-    """IDs already present in the settled-entries table, optionally filtered to ``date``.
 
-    Empty-safe: returns an empty set before the first settlement ever runs.
-    ``_ledger_settlement.settle_day`` calls this directly to exclude
-    already-settled entries from its resolve pass -- the idempotency check
-    for the whole settlement pipeline, not just this module's half.
+def read_settled_entries(date: datetime.date) -> list[dict]:
+    """Rows of the settled-entries table for slate ``date``.
+
+    Empty-safe: returns ``[]`` before the first settlement ever runs.
+    ``_ledger_settlement.settleable_entries`` reads these to leave what has
+    settled out of its resolve pass -- the idempotency check for the whole
+    settlement pipeline, not just this module's half.
     """
     df = read_parquet_safe(SETTLED_ENTRIES_PATH)
     if df.empty:
-        return set()
-    if date is not None:
-        df = df.loc[df["date"] == date.isoformat()]
-    return set(df["id"])
+        return []
+    return df.loc[df["date"] == date.isoformat()].to_dict("records")
 
 
 def write_settled_entries(rows: list[dict]) -> None:
@@ -107,28 +111,31 @@ def write_settled_entries(rows: list[dict]) -> None:
 
 
 def update_bankroll(date: datetime.date, settled_rows: list[dict]) -> None:
-    """Derive and append one bankroll row per ``(persona, replicate_id)`` settled today.
+    """Append one bankroll row per ``(policy_version, persona, replicate_id)`` settled today.
 
     No-op on empty input -- a gap day writes nothing, and the next active day's
-    ``starting_bankroll`` naturally carries forward from the most recent prior
-    row for that pair (not necessarily yesterday's), since it looks up the max
-    existing row rather than assuming a contiguous daily series.
+    ``starting_bankroll`` carries forward from the last row written for that
+    trajectory (not necessarily yesterday's; see :func:`_latest_ending_bankroll`).
     """
     if not settled_rows:
         return
     existing = read_parquet_safe(BANKROLL_PATH)
-    grouped: dict[tuple[str, int], list[dict]] = {}
+    if not existing.empty and "policy_version" not in existing:
+        existing["policy_version"] = _FIRST_POLICY_VERSION
+    grouped: dict[tuple[str, str, int], list[dict]] = {}
     for row in settled_rows:
-        grouped.setdefault((row["persona"], row["replicate_id"]), []).append(row)
+        key = (row["policy_version"], row["persona"], row["replicate_id"])
+        grouped.setdefault(key, []).append(row)
 
     new_rows = []
-    for (persona, replicate_id), rows in grouped.items():
+    for (policy_version, persona, replicate_id), rows in grouped.items():
         daily_pnl = sum((Decimal(str(row["pnl"])) for row in rows), Decimal("0"))
-        starting_bankroll = _latest_ending_bankroll(existing, persona, replicate_id)
+        starting_bankroll = _latest_ending_bankroll(existing, policy_version, persona, replicate_id)
         ending_bankroll = starting_bankroll + daily_pnl
         new_rows.append(
             {
                 "date": date.isoformat(),
+                "policy_version": policy_version,
                 "persona": persona,
                 "replicate_id": replicate_id,
                 "starting_bankroll": float(starting_bankroll),
@@ -138,19 +145,28 @@ def update_bankroll(date: datetime.date, settled_rows: list[dict]) -> None:
                 "n_entries_pending": 0,  # placeholder: needs a committed-vs-settled cross-reference a future stage can add
             }
         )
-    new_df = pd.DataFrame(new_rows)[list(_BANKROLL_COLUMNS)]
+    new_df = pd.DataFrame(new_rows)
     combined = pd.concat([existing, new_df], ignore_index=True) if not existing.empty else new_df
-    _atomic_write_parquet(combined, BANKROLL_PATH)
+    _atomic_write_parquet(combined[list(_BANKROLL_COLUMNS)], BANKROLL_PATH)
 
 
-def _latest_ending_bankroll(existing: pd.DataFrame, persona: str, replicate_id: int) -> Decimal:
-    """Most recent prior ``ending_bankroll`` for this pair, or the seed value if none."""
+def _latest_ending_bankroll(
+    existing: pd.DataFrame, policy_version: str, persona: str, replicate_id: int
+) -> Decimal:
+    """``ending_bankroll`` of the last row written for this trajectory, or the seed value if none.
+
+    Write order, not slate date, is the chain. Rows are appended as passes
+    settle, so the last one written holds every earlier pass's P&L. The row of
+    the latest ``date`` need not: a date can settle in two passes, and a late
+    pass of an older date is written after a newer date's row.
+    """
     if existing.empty:
         return STARTING_BANKROLL
-    pair_rows = existing.loc[
-        (existing["persona"] == persona) & (existing["replicate_id"] == replicate_id)
+    prior_rows = existing.loc[
+        (existing["policy_version"] == policy_version)
+        & (existing["persona"] == persona)
+        & (existing["replicate_id"] == replicate_id)
     ]
-    if pair_rows.empty:
+    if prior_rows.empty:
         return STARTING_BANKROLL
-    latest = pair_rows.loc[pair_rows["date"].idxmax()]
-    return Decimal(str(latest["ending_bankroll"]))
+    return Decimal(str(prior_rows["ending_bankroll"].iloc[-1]))

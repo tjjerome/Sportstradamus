@@ -8,7 +8,9 @@ build, and the ``write_upcoming_events`` call). This pins that path on a
 synthetic Odds API payload so the CC-20 decomposition can be proven behavior
 preserving. The per-event parse itself is pinned separately by
 ``test_moneylines_archive_event_props``; here the focus is the orchestration and
-the upcoming-events ledger.
+the upcoming-events ledger. The last tests pin ``_get_with_retry``, the HTTP
+chokepoint under every fetch: a 429 or a network blip gets one retry, and a
+second network error raises.
 """
 
 from __future__ import annotations
@@ -16,9 +18,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from http import HTTPStatus
 
+import pytest
 import pytz
+import requests
 
 from sportstradamus import moneylines
+from sportstradamus.helpers import odds_budget
 
 _CHICAGO = pytz.timezone("America/Chicago")
 _TODAY = datetime.today()
@@ -64,8 +69,8 @@ _GAME = {
 
 
 class _FakeResponse:
-    def __init__(self, payload):
-        self.status_code = HTTPStatus.OK
+    def __init__(self, payload, status_code=HTTPStatus.OK):
+        self.status_code = status_code
         self._payload = payload
 
     def json(self):
@@ -94,7 +99,7 @@ class _FakeArchive:
     def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):
         self.ladder_calls.append((league, market, gameDate, player, book, rungs, observed_at))
 
-    def set_team_books(self, league, market, gameDate, team, books):  # pragma: no cover
+    def set_team_books(self, *args, **kwargs):  # pragma: no cover
         raise AssertionError("synthetic payload has no totals market")
 
 
@@ -108,7 +113,6 @@ _EXPECTED_LEDGER = [
         "event_id": "ev1",
         "league": "NBA",
         "commence_time": _COMMENCE,
-        "markets": ["player_points"],
     },
 ]
 
@@ -178,3 +182,50 @@ def test_mlb_inning_markets_ride_the_us_request() -> None:
 
     assert us == ("us", ["batter_hits", "totals_1st_1_innings", "spreads_1st_1_innings"])
     assert us2 == ("us2", [])
+
+
+def _wire_http(monkeypatch, outcomes):
+    """Play ``outcomes`` through ``requests.get`` in order, raising the exceptions among them."""
+    gets, sleeps, recorded = [], [], []
+
+    def fake_get(url, params=None, timeout=None):
+        gets.append(url)
+        outcome = outcomes[len(gets) - 1]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(moneylines.requests, "get", fake_get)
+    monkeypatch.setattr(moneylines, "sleep", sleeps.append)
+    monkeypatch.setattr(
+        odds_budget, "record_response", lambda url, params, res: recorded.append(res)
+    )
+    return gets, sleeps, recorded
+
+
+@pytest.mark.parametrize("blip", [requests.ReadTimeout, requests.ConnectionError])
+def test_get_with_retry_retries_a_network_blip_once(monkeypatch, blip) -> None:
+    ok = _FakeResponse({})
+    gets, sleeps, recorded = _wire_http(monkeypatch, [blip("blip"), ok])
+
+    assert moneylines._get_with_retry(moneylines.ODDS_API_SPORTS_URL) is ok
+    assert (len(gets), sleeps, recorded) == (2, [1], [ok])
+
+
+def test_get_with_retry_raises_a_second_network_error(monkeypatch) -> None:
+    gets, _, recorded = _wire_http(
+        monkeypatch, [requests.ReadTimeout("first"), requests.ReadTimeout("second")]
+    )
+
+    with pytest.raises(requests.ReadTimeout, match="second"):
+        moneylines._get_with_retry(moneylines.ODDS_API_SPORTS_URL)
+    assert (len(gets), recorded) == (2, [])
+
+
+def test_get_with_retry_retries_a_429_once(monkeypatch) -> None:
+    ok = _FakeResponse({})
+    throttled = _FakeResponse({}, status_code=HTTPStatus.TOO_MANY_REQUESTS)
+    gets, sleeps, recorded = _wire_http(monkeypatch, [throttled, ok])
+
+    assert moneylines._get_with_retry(moneylines.ODDS_API_SPORTS_URL) is ok
+    assert (len(gets), sleeps, recorded) == (2, [1], [ok])

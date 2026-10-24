@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import pytest
 from click.testing import CliRunner
 
 from sportstradamus.nightly import LIVE_METRICS_COLUMNS

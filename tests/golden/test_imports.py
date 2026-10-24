@@ -17,6 +17,8 @@ CORE_MODULES = [
     "sportstradamus.skew_normal",
     "sportstradamus.stats",
     "sportstradamus.books",
+    "sportstradamus.books.sleeper",
+    "sportstradamus.books.underdog",
     "sportstradamus.moneylines",
     "sportstradamus.training",
     "sportstradamus.prediction",

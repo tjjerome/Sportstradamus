@@ -26,8 +26,9 @@ not the package data dir), one row per (league, market).
 
 Usage
 -----
-    poetry run icc-diagnostics
-    poetry run icc-diagnostics --league NFL --min-nonzero-fraction 0.4
+    poetry run python -m sportstradamus.scripts.icc_diagnostics
+    poetry run python -m sportstradamus.scripts.icc_diagnostics \
+        --league NFL --min-nonzero-fraction 0.4
 """
 
 from __future__ import annotations

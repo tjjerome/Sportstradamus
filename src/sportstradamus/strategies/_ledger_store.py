@@ -2,7 +2,8 @@
 
 One file per slate date at ``data/ledger/entries/{date}.jsonl``. Records are
 opaque dicts to this module — schema ownership lives with the orchestrator
-that builds them; this module only stores/reads/appends by ``id``.
+that builds them; this module only stores/reads/appends by ``id`` and the
+bettor copy (``persona``, ``replicate_id``) that holds it.
 """
 
 from __future__ import annotations
@@ -27,30 +28,31 @@ def read_records(date: datetime.date) -> list[dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def already_committed_ids(
-    date: datetime.date, run_slot: str, persona: str, replicate_id: int
-) -> set[str]:
-    """IDs already committed for this EXACT (run_slot, persona, replicate_id) today.
+def entry_key(record: dict) -> tuple[str, str, int]:
+    """What tells one entry from another within a slate date: its ``id`` and the copy holding it.
 
-    Scoped to one run_slot -- this run's own idempotency/retry-safety check.
+    A persona's replicates are independent bettors drawing from one candidate
+    pool, and a candidate's ``id`` is the same whoever draws it, so two copies
+    that draw the same candidate each hold an entry of their own.
     """
-    return {
-        rec["id"]
-        for rec in read_records(date)
-        if rec["run_slot"] == run_slot
-        and rec["persona"] == persona
-        and rec["replicate_id"] == replicate_id
-    }
+    return (record["id"], record["persona"], record["replicate_id"])
+
+
+def committed_replicates(date: datetime.date, run_slot: str) -> set[int]:
+    """Replicates that already hold a record from ``run_slot`` on ``date``.
+
+    The commit run's retry check. Such a replicate has drawn in this slot;
+    drawn again it would count its own entries against the day's budget and
+    draw others, so a retry leaves it alone.
+    """
+    return {rec["replicate_id"] for rec in read_records(date) if rec["run_slot"] == run_slot}
 
 
 def already_committed_entries(date: datetime.date, persona: str, replicate_id: int) -> list[dict]:
     """Full records for (persona, replicate_id) across BOTH run_slots committed so far today.
 
     NOT scoped to run_slot -- this is the function a later afternoon-run
-    budget check reads to see what a morning run already committed. Kept
-    separate from :func:`already_committed_ids` (rather than one function with
-    an optional run_slot filter) because the two answer genuinely different
-    questions and every call site knows up front which one it needs.
+    budget check reads to see what a morning run already committed.
     """
     return [
         rec
@@ -62,12 +64,16 @@ def already_committed_entries(date: datetime.date, persona: str, replicate_id: i
 def append_entries(date: datetime.date, records: list[dict]) -> int:
     """Append-only write; never rewrites existing lines.
 
-    Re-checks each record's "id" against what's already on disk before
-    writing -- belt-and-suspenders idempotency that closes the gap even if a
-    caller forgets to pre-filter via :func:`already_committed_ids`.
+    Refuses a record whose :func:`entry_key` is already held that day, on disk
+    or earlier in ``records``: a copy holds a candidate once, and what another
+    copy holds does not count against it.
     """
-    existing_ids = {rec["id"] for rec in read_records(date)}
-    to_write = [rec for rec in records if rec["id"] not in existing_ids]
+    held = {entry_key(rec) for rec in read_records(date)}
+    to_write = []
+    for rec in records:
+        if entry_key(rec) not in held:
+            held.add(entry_key(rec))
+            to_write.append(rec)
     if not to_write:
         return 0
 

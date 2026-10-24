@@ -14,6 +14,7 @@ incumbent corners are evaluated first, that an admissible prior row is reused in
 and that a legacy row scored on the ship holdout is inert.
 """
 
+import dataclasses
 import io
 import json
 import math
@@ -65,7 +66,7 @@ from sportstradamus.training.model_strategy.specs import (
     INCUMBENT_CONTROL_DEFAULTS,
     MANDATORY_SWEEP_CORNERS,
 )
-from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, STRUCTURAL_STAGE
+from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, PROB_STAGE, STRUCTURAL_STAGE
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY as RUSHING,
@@ -281,6 +282,7 @@ def _artifact(spec, league, market, controls, *, status="active"):
             normalization
             and get_target_normalization(normalization).start_mode_flag == "normalized"
         ),
+        "diagnostics": {"n_authentic_validation": 0},
         **{
             control: controls[control]
             for control in ("sn_param", "zinb_mode", "posthoc")
@@ -313,16 +315,16 @@ def test_family_registry_grids_and_persist_maps():
     dpo = get_strategy("DPO")
     receiving = get_strategy(RECEIVING)
     rushing = get_strategy(RUSHING)
-    # SN: 4 norms × 2 dist-loss × 2 sn-param × 2 blend × 6 posthoc.
-    assert math.prod(len(v) for v in sn.axes.values()) == 192
-    # Mixture: 1 dist × 4 norms × 2 blend × 5 posthoc — no loss axis (lightgbmlss rejects crps
+    # SN: 4 norms × 2 dist-loss × 2 sn-param × 3 blend × 7 posthoc.
+    assert math.prod(len(v) for v in sn.axes.values()) == 336
+    # Mixture: 1 dist × 4 norms × 3 blend × 6 posthoc — no loss axis (lightgbmlss rejects crps
     # components, so the pinned nll is the only trainable value).
-    assert math.prod(len(v) for v in mix.axes.values()) == 40
+    assert math.prod(len(v) for v in mix.axes.values()) == 72
     assert mix.fixed_controls["dist_training_loss"] == "nll"
-    # 1 dist × 2 mode × 2 disp × 2 blend × 5 posthoc.
-    assert math.prod(len(v) for v in zinb.axes.values()) == 40
-    assert math.prod(len(v) for v in negbin.axes.values()) == 20  # 1 dist × 2 disp × 2 blend × 5
-    assert math.prod(len(v) for v in dpo.axes.values()) == 20
+    # 1 dist × 2 mode × 2 disp × 3 blend × 6 posthoc.
+    assert math.prod(len(v) for v in zinb.axes.values()) == 72
+    assert math.prod(len(v) for v in negbin.axes.values()) == 36  # 1 dist × 2 disp × 3 blend × 6
+    assert math.prod(len(v) for v in dpo.axes.values()) == 36
     assert sn.persist == {
         "dist": "dist",
         "normalization": "target_normalization",
@@ -426,7 +428,7 @@ def test_cell_knobs_the_corner_does_not_decide_stay_out_of_every_base_corner():
     ``pipeline.train_market`` projects the cell's runtime knobs onto ``(fixed_controls, axes)`` and
     hands the result to :func:`validate_strategy_selection`, so pinning a knob the corner does not
     decide turns every cell holding a different value into a hard training failure. Two knobs are
-    decided elsewhere: ``cli._retry_calibrated_if_g4_only`` persists ``hpo_selection=calibrated``
+    decided elsewhere: the confirm walk's calibrated fallback persists ``hpo_selection=calibrated``
     after a Gate-4-only miss (shipped cells carry it today), and the pipeline silently upgrades
     ``stabilization`` to L2 for centered SkewNormal and Mixture.
     """
@@ -872,13 +874,13 @@ def test_cell_trial_count_is_the_reachable_grid_capped_by_the_budget():
     """A cell contributes its reachable corners, or the per-cell budget when the grid is bigger."""
     assert (
         tpe_search.reachable_corners(sweep._cell_context("MLB", "pitcher strikeouts"), ("NegBin",))
-        == 20
+        == 36
     )
-    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", ("NegBin",), 48) == 20
-    # ZINB + NegBin + DPO = 80 reachable, so the 48-trial budget binds.
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", ("NegBin",), 48) == 36
+    # ZINB + NegBin + DPO = 144 reachable, so the 48-trial budget binds.
     families = ("ZINB", "NegBin", "DPO")
     assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 48) == 48
-    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 200) == 80
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 200) == 144
 
 
 def test_ratio_projvol_is_pruned_per_cell_by_its_denominator_mapping(monkeypatch):
@@ -899,14 +901,14 @@ def test_ratio_projvol_is_pruned_per_cell_by_its_denominator_mapping(monkeypatch
 def test_reachable_corners_on_the_live_nfl_matrices(monkeypatch):
     """The budget is spent against the corners a cell can actually reach, not the declared grid."""
     monkeypatch.undo()  # real matrices: target lattice + mean decide count-family admission
-    # 192 SkewNormal + 40 ZINB + 20 NegBin + 20 DPO — a low-mean integer target. Mixture
-    # declares 40 more but has no serve path, so SWEEP_CAPABILITIES keeps it out of the pool.
+    # 336 SkewNormal + 72 ZINB + 36 NegBin + 36 DPO — a low-mean integer target. Mixture
+    # declares more but has no serve path, so SWEEP_CAPABILITIES keeps it out of the pool.
     tds = sweep._cell_context("NFL", "passing tds")
-    assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 272
-    # 192 SkewNormal plus one fixed corner per enrolled structural spec: the mean-226.7 target is
+    assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 480
+    # 336 SkewNormal plus one fixed corner per enrolled structural spec: the mean-226.7 target is
     # over the count-admission ceiling, so no count family reaches this cell.
     yards = sweep._cell_context("NFL", "passing yards")
-    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 194
+    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 338
 
 
 def test_decode_strategy_is_registered_norm_for_sn_and_none_for_count():
@@ -951,6 +953,30 @@ def test_score_corner_runs_production_gate_for_sn(monkeypatch):
     assert row["g1_pass"] is True and row["g6_pass"] is True
     assert row["dispersion_cal"] == 1.27 and row["skew_cal"] == 2.3
     assert row["n"] == 1500
+
+
+def test_score_corner_reads_n_authentic_validation_from_diagnostics(monkeypatch):
+    """The board's evidence-behind-the-weight column comes from the diagnostics block of the pickle
+    the sweep's own deterministic retrain just wrote."""
+    spec = get_strategy("SkewNormal")
+    corner = {
+        "dist": "SkewNormal",
+        "normalization": "centered_additive_mean10",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending_loss_fn": "nll",
+        "posthoc": "none",
+    }
+    monkeypatch.setattr(
+        sweep, "gate_row", lambda df, pred_col, **kw: _canned_row(ship=True, g4_pit_ks=0.03)
+    )
+    monkeypatch.setattr(sweep, "apply_thresholds", lambda row: row)
+
+    frame, model = _artifact(spec, "WNBA", "AST", corner)
+    model["diagnostics"] = {"n_authentic_validation": 42}
+    monkeypatch.setattr(sweep, "load_test_set", lambda path, col: frame)
+    monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: model)
+    assert sweep._score_corner("WNBA", "AST", corner, spec)["n_authentic_validation"] == 42
 
 
 def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
@@ -1138,6 +1164,216 @@ def test_search_cell_evaluates_the_seed_corner_first(monkeypatch):
     monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
     sweep.search_cell("NFL", "passing tds", max_trials=6)
     assert trained[0] == ("DPO", seed)
+
+
+def test_frontier_corners_cover_normalization_by_shaping_posthoc_grid():
+    """The frontier spans (normalization x shaping-posthoc) with the family defaults elsewhere.
+
+    Gate evidence is axis-structured — normalization moves the mean gates (g2/g3/g6), the
+    PIT-shaping posthoc moves Gate 4 — while TPE, optimizing one scalar, can leave whole frontier
+    points unsampled (WNBA MIN's board-shipping ratio_meanyr+cdf_recal corner was never proposed:
+    its only (ratio, cdf) observation was confounded with ``centered``). Enqueuing the frontier
+    makes coverage of the two gate-relevant axes deterministic instead of sampler luck. The
+    PIT-neutral class is represented by ``none`` alone: Gate 4 cannot tell a prob-stage
+    recalibrator from ``none``, so extra members of that class buy no frontier information.
+    """
+    cell = CellContext("WNBA", "MIN", "SkewNormal", "continuous", frozenset(), _MATRIX_SHA)
+    corners = sweep._frontier_corners(cell)
+    spec = get_strategy("SkewNormal")
+    # The frontier respects per-cell axis pruning: a normalization the cell cannot train
+    # (ratio_projvol without a volume denominator) must not burn an enqueued trial on a
+    # guaranteed crash.
+    choices = tpe_search.cell_axis_choices(cell, spec)
+    assert "ratio_projvol" not in choices["normalization"]
+    shaping = tuple(p for p in choices["posthoc"] if p != "none" and p not in PROB_STAGE)
+    sn_points = {(c["normalization"], c["posthoc"]) for s, c in corners if s.slug == "SkewNormal"}
+    assert sn_points == {
+        (norm, posthoc) for norm in choices["normalization"] for posthoc in ("none", *shaping)
+    }
+    defaults = INCUMBENT_CONTROL_DEFAULTS["SkewNormal"]
+    for frontier_spec, controls in corners:
+        assert not frontier_spec.structural
+        assert controls in strategy_controls(frontier_spec)
+        if frontier_spec.slug == "SkewNormal":
+            for name in ("dist_training_loss", "sn_param", "blending_loss_fn"):
+                assert controls[name] == defaults[name]
+    dpo_points = {(c.get("normalization"), c["posthoc"]) for s, c in corners if s.slug == "DPO"}
+    assert dpo_points == {(None, "none"), (None, "roe_mean"), (None, "isotonic_mean")}
+
+
+def test_enqueued_corners_include_the_frontier_deduplicated():
+    """Frontier corners enqueue after the seeds and never duplicate a fingerprint."""
+    context = sweep._cell_context("WNBA", "MIN")
+    enqueued = sweep._enqueued_corners(context)
+    prints = [corner_fingerprint(s, c, str(context.matrix_sha256)) for s, c in enqueued]
+    assert len(prints) == len(set(prints))
+    frontier = {
+        corner_fingerprint(s, c, str(context.matrix_sha256))
+        for s, c in sweep._frontier_corners(context)
+    }
+    assert frontier <= set(prints)
+
+
+def _quiet_progress():
+    return progress.SearchProgress("WNBA", "MIN", 4, verbosity=progress.QUIET)
+
+
+def _probe_scored_row(context, corner, slack):
+    """A scored-dict entry for one SkewNormal corner, keyed like the search cache."""
+    spec = get_strategy("SkewNormal")
+    row = {
+        **_fake_row("SkewNormal", corner, slack),
+        "controls_json": controls_json(corner),
+        "corner_fingerprint": corner_fingerprint(spec, corner, str(context.matrix_sha256)),
+    }
+    return row["corner_fingerprint"], row
+
+
+def _probe_corner(norm, dl, bl, posthoc):
+    return {
+        "dist": "SkewNormal",
+        "normalization": norm,
+        "dist_training_loss": dl,
+        "sn_param": "direct",
+        "blending_loss_fn": bl,
+        "posthoc": posthoc,
+    }
+
+
+def test_shaping_probes_cover_the_top_two_bases_with_the_cdf_corrector(monkeypatch):
+    """brief L1': the ranking statistic is blind to the CDF-stage corrector (slack binds on a
+    mean/skill gate on 97% of top rows, so cdf ties ``none``), so after the study the top
+    :data:`sweep._SHAPING_PROBE_ANCHORS` distinct base recipes each get their cdf twin scored —
+    deterministic coverage of the one mechanism the board cannot rank, budget-exempt.
+    """
+    context = sweep._cell_context("WNBA", "MIN")
+    scored = dict(
+        [
+            _probe_scored_row(
+                context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "prob_recal_platt"), 0.06
+            ),
+            # Same base as the leader (posthoc differs) — one anchor, not two.
+            _probe_scored_row(
+                context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "none"), 0.06
+            ),
+            _probe_scored_row(context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.044),
+            # Third distinct base — beyond the anchor budget, never probed.
+            _probe_scored_row(
+                context, _probe_corner("centered_additive_mean10", "crps", "nll", "none"), 0.03
+            ),
+        ]
+    )
+    failed_fp, failed = _probe_scored_row(
+        context, _probe_corner("centered_additive_eb_meanyr_k10", "nll", "nll", "none"), 0.9
+    )
+    failed["slack"] = sweep._FAILED_CORNER_SLACK
+    scored[failed_fp] = failed
+
+    trained = []
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+    probes = sweep._shaping_probes(
+        context, ("SkewNormal",), dict(scored), scored, {}, timeout_s=60, progress=_quiet_progress()
+    )
+
+    assert [c["posthoc"] for _, c in trained] == ["cdf_recal_isotonic"] * 2
+    assert [(c["normalization"], c["dist_training_loss"]) for _, c in trained] == [
+        ("ratio_meanyr", "nll"),
+        ("ratio_meanyr", "crps"),
+    ]
+    spec = get_strategy("SkewNormal")
+    for _, corner in trained:
+        assert corner in strategy_controls(spec)
+        assert corner_fingerprint(spec, corner, str(context.matrix_sha256)) in probes
+
+
+def test_shaping_probes_skip_covered_known_and_foreign_anchors(monkeypatch):
+    """An anchor already carrying the corrector is covered; a probe fingerprint already evaluated
+    is not re-bought; a family without the corrector in its posthoc axis is never probed.
+    """
+    context = sweep._cell_context("WNBA", "MIN")
+    leader_fp, leader = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "cdf_recal_isotonic"), 0.06
+    )
+    runner_fp, runner = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.044
+    )
+    probe_fp, probe_row = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "crps", "nll", "cdf_recal_isotonic"), 0.044
+    )
+    scored = {leader_fp: leader, runner_fp: runner}
+    trained = []
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+    probes = sweep._shaping_probes(
+        context,
+        ("SkewNormal",),
+        {**scored, probe_fp: probe_row},
+        scored,
+        {},
+        timeout_s=60,
+        progress=_quiet_progress(),
+    )
+    assert trained == [] and probes == {}
+
+    count_fp, count_row = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.1
+    )
+    count_row["family"] = count_row["strategy_slug"] = "ZINB"
+    probes = sweep._shaping_probes(
+        context,
+        ("ZINB",),
+        {count_fp: count_row},
+        {count_fp: count_row},
+        {},
+        timeout_s=60,
+        progress=_quiet_progress(),
+    )
+    assert trained == [] and probes == {}
+
+
+def test_search_cell_scores_the_leader_base_cdf_probe(monkeypatch):
+    """End-to-end: after the budget is spent the top-2 bases carry cdf twins the study never ran."""
+    spec = get_strategy("SkewNormal")
+    enqueued = [
+        (spec, _probe_corner("centered_additive_mean10", "nll", "crps", "none")),
+        (spec, _probe_corner("centered_additive_mean10", "crps", "crps", "none")),
+    ]
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: list(enqueued))
+    monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
+    board = sweep.search_cell("WNBA", "AST", max_trials=2)
+    base_cols = ["normalization", "dist_training_loss", "blending_loss_fn"]
+    cdf = board[board["posthoc"] == "cdf_recal_isotonic"]
+    # Both enqueued bases outrank the incumbent's, so both get their cdf twin — and only they do.
+    assert sorted(map(tuple, cdf[base_cols].to_numpy())) == [
+        ("centered_additive_mean10", "crps", "crps"),
+        ("centered_additive_mean10", "nll", "crps"),
+    ]
+    leader_base = board.iloc[0][base_cols].tolist()
+    assert any((cdf[base_cols] == leader_base).all(axis="columns"))
+
+
+def test_rank_cell_board_breaks_ties_deterministically_by_fingerprint():
+    """brief L5: an exact slack tie is ordered by fingerprint, not by dict insertion — the repro
+    test's slot-3 'coin flip' was an unstable sort over an insertion-ordered tie.
+    """
+    tied = {
+        "b-corner": {
+            **_scored_row("b", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)),
+            "corner_fingerprint": "bbb",
+        },
+        "a-corner": {
+            **_scored_row("a", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)),
+            "corner_fingerprint": "aaa",
+        },
+        "c-corner": {
+            **_scored_row("c", "SkewNormal", 0.10, _gate_scalars(0.01, 0.05)),
+            "corner_fingerprint": "ccc",
+        },
+    }
+    forward = sweep._rank_cell_board("WNBA", "AST", tied)
+    reversed_in = sweep._rank_cell_board("WNBA", "AST", dict(reversed(list(tied.items()))))
+    assert forward["corner_fingerprint"].tolist() == ["ccc", "aaa", "bbb"]
+    assert reversed_in["corner_fingerprint"].tolist() == forward["corner_fingerprint"].tolist()
 
 
 def test_search_cell_count_cell_sweeps_both_families_and_unions(monkeypatch):
@@ -1688,6 +1924,25 @@ def test_a_changed_family_pool_gets_its_own_journal_instead_of_crashing(monkeypa
     assert again.study_name == full.study_name
 
 
+def test_a_widened_axis_gets_its_own_journal_instead_of_crashing(monkeypatch, tmp_path):
+    """A new axis value changes a categorical's choices exactly the way a pool change does."""
+    monkeypatch.setattr(tpe_search, "_STUDY_ROOT", tmp_path)
+    before = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB"))
+    sn = get_strategy("SkewNormal")
+    widened = dataclasses.replace(
+        sn, axes={**sn.axes, "posthoc": (*sn.axes["posthoc"], "prob_recal_widened")}
+    )
+    monkeypatch.setattr(
+        tpe_search,
+        "get_strategy",
+        lambda slug: widened if slug == "SkewNormal" else get_strategy(slug),
+    )
+    after = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB"))
+
+    assert before.study_name != after.study_name
+    assert len(list(tmp_path.glob("NBA_DREB.*.log"))) == 2
+
+
 def test_a_cell_killed_mid_search_keeps_the_corners_it_already_trained(monkeypatch, tmp_path):
     """Every scored corner reaches the board CSV immediately, not once the cell finishes.
 
@@ -1906,7 +2161,9 @@ def test_cli_runs_a_single_cell_under_the_max_trials_budget(monkeypatch, tmp_pat
     assert result.exit_code == 0, result.output
     assert "WNBA AST" in result.output
     board = pd.read_csv(out)
-    assert 0 < len(board) <= 6
+    # The budget bounds study trials; the incumbent backstop and the shaping probes are the two
+    # documented retrains beyond it.
+    assert 0 < len(board) <= 6 + 1 + sweep._SHAPING_PROBE_ANCHORS
     assert (board["league"] == "WNBA").all()
 
 
@@ -1924,12 +2181,15 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: seen.update(
-            n=len(board),
-            yes=yes,
-            max_nominees=max_nominees,
-            deadline_hours=deadline_hours,
-            fresh_only=fresh_only,
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
+            seen.update(
+                n=len(board),
+                yes=yes,
+                max_nominees=max_nominees,
+                deadline_hours=deadline_hours,
+                fresh_only=fresh_only,
+                min_model_weight=min_model_weight,
+            )
         ),
     )
     out = str(tmp_path / "board.csv")
@@ -1951,12 +2211,15 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
             "--confirm-hours",
             "12",
             "--confirm-fresh-only",
+            "--min-model-weight",
+            "0.3",
         ],
     )
     assert result.exit_code == 0, result.output
-    assert seen["yes"] is True and 0 < seen["n"] <= 5
+    assert seen["yes"] is True and 0 < seen["n"] <= 5 + 1 + sweep._SHAPING_PROBE_ANCHORS
     assert seen["max_nominees"] == 2
     assert seen["deadline_hours"] == 12.0 and seen["fresh_only"] is True
+    assert seen["min_model_weight"] == 0.3
 
 
 def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_path):
@@ -1990,7 +2253,7 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: (
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
             confirmed.update(
                 cells=set(zip(board["league"], board["market"], strict=True)),
                 yes=yes,
@@ -2058,10 +2321,14 @@ def _ledger_row(**overrides):
     row = {
         "recorded_at": "2026-07-28T00:00:00",
         "strategy_slug": "SkewNormal",
+        # Discount pairs are signature-scoped: a row recorded under rotated-away code is
+        # dropped, so the synthetic rows must carry the live signature to count as pairs.
+        "strategy_signature": get_strategy("SkewNormal").canonical_signature,
         "source": "board slack +0.100",
         "league": "WNBA",
         "market": "AST",
         "distribution": "SkewNormal",
+        "n_validation": 1500,
         "strategy_controls_json": '{"corner":0}',
         "dispersion_cal": 1.0,
         "ship": False,
@@ -2092,11 +2359,26 @@ def _board_csv_row(controls_json):
 
 def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_thin(tmp_path):
     out = tmp_path / "board.csv"
+    cells = [("WNBA", "AST"), ("WNBA", "BLK"), ("WNBA", "STL")]
     ledger_rows, board_rows = [], []
-    for i in range(9):
+    # Shifts vary per pair, with an outlier last, so the pins below hold for the two fixed
+    # quantiles only — a mean (or an OLS fit) would land elsewhere.
+    for i, bump in enumerate([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 20.0]):
+        league, market = cells[i % 3]
         controls = f'{{"corner":{i}}}'
-        ledger_rows.append(_ledger_row(strategy_controls_json=controls))
-        board_rows.append(_board_csv_row(controls))
+        ledger_rows.append(
+            _ledger_row(
+                league=league,
+                market=market,
+                strategy_controls_json=controls,
+                g4_pit_ks=0.05 + 0.005 * bump,
+                g2_star_z=1.0 + 0.1 * bump,
+                g3_bench_z=1.0 - 0.05 * bump,
+                g5_ece_debiased=0.03 + 0.002 * bump,
+                g1_brier_diff_ci_hi=0.001 * bump,
+            )
+        )
+        board_rows.append({**_board_csv_row(controls), "league": league, "market": market})
     # A diverged confirm (dispersion_cal on its 0.1 floor) and a seed row absent from the board.
     ledger_rows.append(
         _ledger_row(strategy_controls_json='{"corner":90}', dispersion_cal=0.1000001, g4_pit_ks=9.0)
@@ -2104,37 +2386,80 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
     board_rows.append(_board_csv_row('{"corner":90}'))
     ledger_rows.append(_ledger_row(strategy_controls_json='{"corner":91}', source="seed/incumbent"))
 
-    assert sweep._ledger_gate_discounts(str(out)) == {}  # no ledger file yet
+    assert sweep._ledger_gate_discounts(str(out)) == ({}, {})  # no ledger file yet
 
     pd.DataFrame(ledger_rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
-    assert sweep._ledger_gate_discounts(None) == {}  # no board CSV to pair against
+    assert sweep._ledger_gate_discounts(None) == ({}, {})  # no board CSV to pair against
     pd.DataFrame(board_rows).to_csv(out, index=False)
 
-    discounts = sweep._ledger_gate_discounts(str(out))
-    assert set(discounts) == set(sweep._DISCOUNTED_GATES)
-    assert discounts["g4_pit_ks"] == pytest.approx(0.01)
-    assert discounts["g2_star_z"] == pytest.approx(0.5)
-    assert discounts["g3_bench_z"] == pytest.approx(-0.2)  # a gate confirm lands better on
-    assert discounts["g5_ece_debiased"] == pytest.approx(0.01)
-    assert discounts["g1_brier_diff_ci_hi"] == pytest.approx(0.01)
+    rank, veto = sweep._ledger_gate_discounts(str(out))
+    assert set(rank) == set(veto) == set(sweep._DISCOUNTED_GATES)
+    # Rank discounts price the corner at the pessimistic q75 of the measured shifts; the veto
+    # keeps the central q50, so a cell loses its nominations only when even the median
+    # confirm-vs-board gap sinks every corner.
+    assert rank["g4_pit_ks"] == pytest.approx(0.03)
+    assert veto["g4_pit_ks"] == pytest.approx(0.02)
+    assert rank["g2_star_z"] == pytest.approx(0.6)
+    assert veto["g2_star_z"] == pytest.approx(0.4)
+    assert rank["g3_bench_z"] == pytest.approx(-0.1)  # a gate confirm lands better on
+    assert veto["g3_bench_z"] == pytest.approx(-0.2)
+    assert veto["g5_ece_debiased"] == pytest.approx(0.008)
+    assert veto["g1_brier_diff_ci_hi"] == pytest.approx(0.004)
 
     # 7 clean pairs + the diverged one: dropping the diverged row is what makes the ledger thin.
     thin = [*ledger_rows[:7], ledger_rows[9]]
     pd.DataFrame(thin).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
-    assert sweep._ledger_gate_discounts(str(out)) == {}
+    assert sweep._ledger_gate_discounts(str(out)) == ({}, {})
+
+    # Nine pairs but only two distinct cells: row volume alone is not evidence — a per-cell
+    # quirk (one campaign's confirms) must not become every cell's discount.
+    two_cell_rows = [
+        {**row, "league": cells[i % 2][0], "market": cells[i % 2][1]}
+        for i, row in enumerate(ledger_rows[:9])
+    ]
+    pd.DataFrame(two_cell_rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    two_cell_board = [
+        {**row, "league": cells[i % 2][0], "market": cells[i % 2][1]}
+        for i, row in enumerate(board_rows[:9])
+    ]
+    pd.DataFrame(two_cell_board).to_csv(out, index=False)
+    assert sweep._ledger_gate_discounts(str(out)) == ({}, {})
 
 
-def test_ledger_gate_discounts_prefers_board_echo_columns():
-    """Once confirm echoes ``board_*`` gate values into the ledger, no board CSV join is needed."""
+def test_ledger_gate_discounts_are_flat_quantile_scalars_via_echo_columns():
+    """Every gate — g4 included — takes the same pooled empirical-quantile treatment; the
+    ``board_*`` echo columns pair the rows, so no board CSV join is needed (``out=None``).
+
+    The old conditional-OLS g4 model was deleted on the researcher's verdict
+    (/tmp/researcher_ledger_discount_sharpening.md R1): on the 15 live pairs it measured 2.6x
+    worse out-of-cell than a flat median, its 1/sqrt(n) regressor was dead (n is constant
+    within every cell), and its single-row family effects carried hat values of 1.0.
+    """
     echo = {f"board_{gate}": 0.0 for gate in sweep._DISCOUNTED_GATES}
-    rows = [_ledger_row(strategy_controls_json=f'{{"corner":{i}}}', **echo) for i in range(8)]
+    cells = [("MLB", "hits"), ("MLB", "runs"), ("NBA", "PTS"), ("NBA", "AST")]
+    # Eight pairs across four cells; g4 shifts 0.01..0.08 pin q50 = 0.045 and q75 = 0.0625.
+    rows = [
+        _ledger_row(
+            league=league,
+            market=market,
+            n_validation=n,
+            g4_pit_ks=0.01 * (i + 1),
+            g2_star_z=1.0 + (0.5 if i % 2 == 0 else -0.5),
+            **echo,
+        )
+        for i, (n, (league, market)) in enumerate((300 + 100 * k, cells[k % 4]) for k in range(8))
+    ]
     pd.DataFrame(rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
 
-    discounts = sweep._ledger_gate_discounts(None)
+    rank, veto = sweep._ledger_gate_discounts(None)
 
-    assert discounts["g4_pit_ks"] == pytest.approx(0.06)
-    assert discounts["g2_star_z"] == pytest.approx(1.5)
-    assert set(discounts) == set(sweep._DISCOUNTED_GATES)
+    assert set(rank) == set(veto) == set(sweep._DISCOUNTED_GATES)
+    assert all(isinstance(value, float) for value in {**rank, **veto}.values())
+    assert rank["g4_pit_ks"] == pytest.approx(0.0625)
+    assert veto["g4_pit_ks"] == pytest.approx(0.045)
+    assert rank["g4_pit_ks"] >= veto["g4_pit_ks"]
+    assert rank["g2_star_z"] == pytest.approx(1.5)
+    assert veto["g2_star_z"] == pytest.approx(1.0)
 
 
 def _gate_scalars(g4, g4_max):
@@ -2149,14 +2474,16 @@ def _gate_scalars(g4, g4_max):
     }
 
 
-def _scored_row(marker, family, slack, gates):
+def _scored_row(marker, family, slack, gates, n=None):
     return {
         "family": family,
         "strategy_slug": family,
         "structural_strategy": BASE_STRUCTURAL_STRATEGY,
         "controls_json": marker,
+        "corner_fingerprint": marker,
         "slack": slack,
         "ships": slack > 0,
+        "n": n,
         **gates,
     }
 
@@ -2168,13 +2495,14 @@ def test_rank_cell_board_discounted_slack_reranks_and_matches_slack_when_inert()
     the board columns don't carry survives via the cap).
     """
     scored = {
-        "thin": _scored_row("thin-headroom", "SkewNormal", 0.10, _gate_scalars(0.045, 0.05)),
-        "wide": _scored_row("wide-scale", "NegBin", 0.09, _gate_scalars(0.455, 0.5)),
+        "thin": _scored_row("thin-headroom", "SkewNormal", 0.10, _gate_scalars(0.045, 0.05), n=500),
+        "wide": _scored_row("wide-scale", "NegBin", 0.09, _gate_scalars(0.455, 0.5), n=5000),
         "g6": _scored_row("g6-bound", "NegBin", 0.02, _gate_scalars(0.01, 0.05)),
         "dead": {
             "family": "SkewNormal",
             "strategy_slug": "SkewNormal",
             "controls_json": "dead",
+            "corner_fingerprint": "dead",
             "slack": sweep._FAILED_CORNER_SLACK,
             "ships": False,
         },
@@ -2195,6 +2523,18 @@ def test_rank_cell_board_discounted_slack_reranks_and_matches_slack_when_inert()
     # Raw slack and raw gate values stay untouched — only the ranking column shifts.
     assert by_marker.loc["thin-headroom", "slack"] == pytest.approx(0.10)
     assert by_marker.loc["thin-headroom", "g4_pit_ks"] == pytest.approx(0.045)
+    # With no veto discounts given, the veto column mirrors the raw slack (inert veto).
+    assert by_marker.loc["thin-headroom", "veto_slack"] == pytest.approx(0.10)
+
+    # The veto column prices the same rows under the milder q50 discounts: the thin-headroom
+    # corner survives the veto (+0.045 + 0.004 < 0.05) while ranking already wrote it off.
+    two_tier = sweep._rank_cell_board(
+        "WNBA", "AST", scored, {"g4_pit_ks": 0.02}, veto_discounts={"g4_pit_ks": 0.004}
+    )
+    tiers = two_tier.set_index("controls_json")
+    assert tiers.loc["thin-headroom", "discounted_slack"] == pytest.approx(-0.3)
+    assert tiers.loc["thin-headroom", "veto_slack"] == pytest.approx(0.02)
+    assert tiers.loc["wide-scale", "veto_slack"] == pytest.approx(0.082)
 
 
 def test_confirm_risk_flags_continuous_on_integer_target_and_g4_inside_inflation(monkeypatch):
@@ -2276,6 +2616,8 @@ def test_search_cell_scores_the_incumbent_even_when_the_study_never_proposes_it(
     row had gone inadmissible silently lost it — 25 of 73 live cells on the board carry no incumbent
     row for that reason. The backstop costs one retrain beyond ``max_trials``.
     """
+    sn = get_strategy("SkewNormal")
+    monkeypatch.setattr(sweep, "_incumbent_corner", lambda ctx: (sn, strategy_controls(sn)[0]))
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: [])
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
@@ -2305,7 +2647,7 @@ def test_search_cell_threads_ledger_discounts_into_the_board(monkeypatch, tmp_pa
 
     def fake_discounts(out):
         seen["out"] = out
-        return {"g4_pit_ks": 0.02}
+        return {"g4_pit_ks": 0.02}, {"g4_pit_ks": 0.005}
 
     monkeypatch.setattr(sweep, "_ledger_gate_discounts", fake_discounts)
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
@@ -2318,12 +2660,16 @@ def test_search_cell_threads_ledger_discounts_into_the_board(monkeypatch, tmp_pa
     assert seen["out"] == out
     # Every fake row carries g4 0.04/0.05, so the +0.02 shift prices each at (0.05-0.06)/0.05.
     assert board["discounted_slack"].tolist() == pytest.approx([-0.2] * len(board))
+    # The milder veto shift prices each row at (0.05-0.045)/0.05, capped at its raw slack.
+    expected_veto = [min(0.1, raw) for raw in board["slack"]]
+    assert board["veto_slack"].tolist() == pytest.approx(expected_veto)
     assert (board["g4_pit_ks"] == 0.04).all()
     assert board["slack"].max() > 0  # raw slack survives beside the discounted ranking
     persisted = sweep._read_board(pathlib.Path(out))
     assert persisted["discounted_slack"].astype(float).tolist() == pytest.approx(
         [-0.2] * len(board)
     )
+    assert persisted["veto_slack"].astype(float).tolist() == pytest.approx(expected_veto)
 
 
 def test_read_board_backfills_the_ranking_columns_on_legacy_csvs(tmp_path):
@@ -2334,8 +2680,9 @@ def test_read_board_backfills_the_ranking_columns_on_legacy_csvs(tmp_path):
     board = sweep._read_board(out)
     assert list(board.columns) == sweep._BOARD_COLUMNS
     assert board["discounted_slack"].isna().all() and board["confirm_risk"].isna().all()
+    assert board["veto_slack"].isna().all()
     order = sweep._BOARD_COLUMNS.index
-    assert order("ships") < order("discounted_slack") < order("confirm_risk")
+    assert order("ships") < order("discounted_slack") < order("veto_slack") < order("confirm_risk")
 
 
 def test_cell_summary_shows_discounted_slack_and_risk(capsys, monkeypatch):
@@ -2452,6 +2799,7 @@ def test_compress_corner_orders_family_first_and_clamps_to_budget():
         (["--confirm-hours", "4"], "require --confirm"),
         (["--confirm-fresh-only"], "require --confirm"),
         (["--confirm-auto-promote"], "require --confirm"),
+        (["--min-model-weight", "0.3"], "require --confirm"),
         (
             ["--confirm", "--confirm-fresh-only", "--confirm-auto-promote"],
             "only affects the live lane",
@@ -2795,6 +3143,22 @@ def test_a_family_that_recovers_inside_the_window_keeps_going(monkeypatch):
     assert trained.count("ZINB") > tpe_search.ABANDON_MIN_TRIALS
 
 
+def test_enqueued_corners_do_not_consume_early_stop_patience():
+    """A deterministic enqueue prefix is coverage, not sampler staleness.
+
+    The frontier enqueue can put a dozen same-default corners ahead of the sampler; if each
+    non-improving (or failed) one ticked the patience window, the study could stop before TPE's
+    first own proposal. Only sampled trials measure "the search stopped finding improvements".
+    """
+    cell = CellContext("WNBA", "MIN", "SkewNormal", "continuous", frozenset(), _MATRIX_SHA)
+    state = tpe_search.CellSearchState(cell, ("SkewNormal",))
+    for _ in range(tpe_search._EARLY_STOP_PATIENCE + 4):
+        state.observe("SkewNormal", float("-inf"), sampled=False)
+    assert state._stale == 0
+    state.observe("SkewNormal", float("-inf"))
+    assert state._stale == 1
+
+
 def test_abandonment_survives_a_resume(monkeypatch):
     """A resumed cell must not re-litigate families its reused rows already ruled out."""
     cell = ("MLB", "pitcher strikeouts")
@@ -2923,40 +3287,50 @@ def test_cell_verdict_names_the_outcome_for_a_parallel_run():
 def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incumbent(monkeypatch):
     """A mandatory corner is evaluated first, then the proven evidence corner, then the incumbent.
 
-    The three acceptance cells declare recipes whose evidence predates the current matrix, so the
-    sweep has to re-measure them on it before a budgeted sampler is trusted to have considered
-    them. Assert each source's position, not the exact list — the incumbent is whatever the cell
-    last shipped.
+    The two acceptance cells declare structural recipes whose evidence predates the current
+    matrix, so the sweep has to re-measure them on it before a budgeted sampler is trusted to have
+    considered them. Assert each source's position, not the exact list — the incumbent is whatever
+    the cell last shipped.
     """
     monkeypatch.setattr(
         sweep,
         "load_stat_meta",
         lambda path: {
             "NFL": {
-                "passing yards": {"dist": "DPO", "dist_training_loss": "nll", "posthoc": "roe_mean"}
+                "receiving yards": {
+                    "dist": "DPO",
+                    "dist_training_loss": "nll",
+                    "posthoc": "roe_mean",
+                }
             }
         },
     )
     mandatory = next(
         (slug, controls)
         for league, market, slug, controls in MANDATORY_SWEEP_CORNERS
-        if (league, market) == ("NFL", "passing yards")
+        if (league, market) == ("NFL", "receiving yards")
     )
     monkeypatch.setattr(
         sweep,
         "CONFIRM_EVIDENCE_CORNERS",
-        (("NFL", "passing yards", "DPO", _dpo_controls("crps", "nll", "none")),),
+        (("NFL", "receiving yards", "DPO", _dpo_controls("crps", "nll", "none")),),
     )
 
     enqueued = [
         (spec.slug, corner)
-        for spec, corner in sweep._enqueued_corners(sweep._cell_context("NFL", "passing yards"))
+        for spec, corner in sweep._enqueued_corners(sweep._cell_context("NFL", "receiving yards"))
     ]
 
     assert enqueued[0] == mandatory
     assert enqueued[1] == ("DPO", _dpo_controls("crps", "nll", "none"))
-    # The stat_meta cell above reconstructs to the DPO/roe_mean incumbent, and it comes last.
-    assert enqueued[-1] == ("DPO", _dpo_controls("crps", "nll", "roe_mean"))
+    # The stat_meta cell above reconstructs to the DPO/roe_mean incumbent; it follows the
+    # evidence corner directly, ahead of every frontier corner.
+    assert enqueued[2] == ("DPO", _dpo_controls("crps", "nll", "roe_mean"))
+    frontier = {
+        str((spec.slug, corner))
+        for spec, corner in sweep._frontier_corners(sweep._cell_context("NFL", "receiving yards"))
+    }
+    assert {str(pair) for pair in enqueued[3:]} <= frontier
     assert len(enqueued) == len(set(map(str, enqueued)))
 
 

@@ -1,7 +1,7 @@
 # Baseball Savant snapshotter
 
-`savant-fetch` snapshots Baseball Savant (Statcast) MLB leaderboards to
-date-stamped parquets that `StatsMLB` folds into player/team features. It runs on
+`sportstradamus fetch savant` snapshots Baseball Savant (Statcast) MLB leaderboards
+to date-stamped parquets that `StatsMLB` folds into player/team features. It runs on
 the shared collector framework — see [data_collectors.md](data_collectors.md) for
 the CLI surface (`run`/`verify`/`list`), the idempotent skip-if-on-disk behavior,
 and the strict-`<` leakage rule. This page covers only what is savant-specific.
@@ -32,10 +32,10 @@ typically `"Last, First"`; account for that when pinning the join key below.
 ### Verify locally
 
 ```bash
-poetry run sportstradamus fetch savant list
-poetry run sportstradamus fetch savant run --season 2026 --dry-run
-poetry run sportstradamus fetch savant run --season 2026 --only player_expected_stats
-poetry run sportstradamus fetch savant verify --season 2026
+sportstradamus fetch savant list
+sportstradamus fetch savant run --season 2026 --dry-run
+sportstradamus fetch savant run --season 2026 --only player_expected_stats
+sportstradamus fetch savant verify --season 2026
 ```
 
 `--season` is the calendar year; `--date` defaults to today, so omit it for a
@@ -61,5 +61,7 @@ rebuilds the matrix cache.
 
 ## Sync to production
 
-Savant collection is dev-side: run `savant-fetch` on the dev box, then
-`scripts/sync_to_prod.sh` pushes the snapshots up (additive, never `--delete`).
+Savant collection is dev-side: run `sportstradamus fetch savant run` on the dev box,
+then a full `scripts/sync_to_prod.sh` pushes the snapshots up (additive, never
+`--delete`). `--league` sends no snapshots, and a full sync carries every league's
+models and serving files — see [OPERATIONS.md](OPERATIONS.md).

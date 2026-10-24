@@ -3,37 +3,36 @@
 import importlib.resources as pkg_resources
 import json
 import os.path
-import pickle
 import warnings
+from bisect import bisect_left
 from datetime import datetime, timedelta
-from io import StringIO
-from time import sleep
+from functools import partial
 
 import line_profiler
 import numpy as np
 import pandas as pd
 import statsapi as mlb
-from scipy.stats import iqr, norm, poisson
-from sklearn.neighbors import BallTree
+from scipy.special import expit, logit
+from scipy.stats import norm, poisson
+from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import (
-    Scrape,
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_mlb_pitchers,
-    get_odds,
-    remove_accents,
-    set_model_start_values,
-    stat_cv,
-    stat_dist,
+from sportstradamus.helpers import combo_props, get_ev, get_odds, remove_accents, stat_cv, stat_dist
+from sportstradamus.helpers.combined_markets import POST_RNG_SEED
+from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
+from sportstradamus.helpers.text import ABBR_MAP, MLB_FINAL_BOX_SCORE_STATES, mlb_game_is_over
+from sportstradamus.stats.base import (
+    _SCHEDULE_LOOKAHEAD_DAYS,
+    GAMELOG_RETENTION_DAYS,
+    ComboSpec,
+    Stats,
+    archive,
+    earliest_game_dates,
+    earliest_last,
+    is_mlb_pitcher_market,
+    scraper,
 )
-from sportstradamus.helpers.io import write_gamelog
-from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, is_mlb_pitcher_market, scraper
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -56,6 +55,9 @@ _MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"}
 # postseason code (P) and anything unmapped fall back to best-of-5.
 _MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
 _MLB_DEFAULT_SERIES_WINS: int = 3
+# statsapi's sport id for Major League Baseball; every other id is a minor or
+# foreign league whose players never reach our gamelog.
+_MLB_SPORT_ID: int = 1
 
 # Batting-order plate-appearance structure, measured from the backfilled ~2-season
 # MLB gamelog (scripts/measure_mlb_volume_constants.py). The batting slot fixes a
@@ -91,29 +93,194 @@ _TEAM_OBP_WINDOW = (
 )
 
 
+# The four fantasy markets priced as honest component sums through the NORTA
+# kernel (combo-sum pricing brief §8); everything else — parlay variants
+# included — keeps the legacy `_check_mlb_fantasy` path.
+FANTASY_COMBO_MARKETS = frozenset(
+    {
+        "hitter fantasy score",
+        "hitter fantasy points underdog",
+        "pitcher fantasy score",
+        "pitcher fantasy points underdog",
+    }
+)
+
+_HIT_TYPES = ("singles", "doubles", "triples", "home runs")
+
+# Sportsbooks price stolen bases on a minority of the hitter board, and under
+# all-or-nothing admission that one gap rejects the whole player: on 45 gamedays
+# only 32.4% of hitter-fantasy rows had every component quoted. It is also the
+# only component whose omission is cheap to model — league rate 0.064 per game,
+# so a player's trailing frequency carries it (see `Stats._assumed_component`,
+# which measures the substitution against the real quote where one exists).
+_ASSUMABLE_HITTER_COMPONENTS = frozenset({"stolen bases"})
+
+# Hit-type fantasy weights per variant — the same numbers as the
+# `_mlb_fantasy_props` tables (pinned by tests/test_combo_spec_mlb.py). The
+# hit types are not priced as marginals: each sampled `hits` draw is split
+# across them by the compound-multinomial post hook below.
+FANTASY_HIT_TYPE_WEIGHTS = {
+    "hitter fantasy points underdog": (
+        ("singles", 3.0),
+        ("doubles", 6.0),
+        ("triples", 8.0),
+        ("home runs", 10.0),
+    ),
+    "hitter fantasy score": (
+        ("singles", 3.0),
+        ("doubles", 5.0),
+        ("triples", 8.0),
+        ("home runs", 10.0),
+    ),
+}
+
+# Settled hit-by-pitch weight per variant (the gamelog fantasy formulas). No
+# book quotes HBP, so it enters as a deterministic mean offset of
+# weight * LEAGUE_HBP_PER_GAME — +0.135 points on underdog, 2% of the mean and
+# <1% of the variance, admitted clean per brief §8e.
+FANTASY_HBP_WEIGHTS = {"hitter fantasy points underdog": 3.0, "hitter fantasy score": 2.0}
+# ~0.011 HBP per plate appearance x ~4.2 PA per game (brief §8e).
+LEAGUE_HBP_PER_GAME = 0.045
+
+# League hit-type shares (singles, doubles, triples, home runs) measured on
+# 140k hitter-games (brief §8d): the split fallback for thin player windows.
+LEAGUE_HIT_SHARES = (0.6517, 0.1925, 0.0165, 0.1393)
+# Below this many trailing-window hits a player's own shares are noisier than
+# the league prior (the singles-share SE alone is ~0.11 at 20 hits).
+_HIT_SHARES_MIN_HITS = 20
+
+# Quality start settles as six full innings (outs >= 18) with earned runs <= 3.
+_QS_MIN_OUTS = 18
+_QS_MAX_RUNS = 3
+
+# P(SP win) / P(team win) by team-moneyline bucket ((lo, hi] upper edges),
+# measured on 13,914 starts (brief §8b). A step table rather than one flat
+# ratio because favorites convert team wins into starter decisions at ~0.68
+# against ~0.43 for heavy dogs. Fallback map for gamelogs too thin to fit the
+# logistic in `_fit_sp_win_curve`.
+SP_WIN_RATIO_BUCKETS = (
+    (0.40, 0.430),
+    (0.45, 0.527),
+    (0.50, 0.589),
+    (0.55, 0.557),
+    (0.60, 0.592),
+    (0.65, 0.680),
+    (1.00, 0.684),
+)
+# Quoted starter rows required before the fitted logistic map is trusted over
+# the measured bucket table.
+_SP_WIN_FIT_MIN_STARTS = 500
+# Keeps logit() finite on consensus moneylines near the probability poles.
+_SP_WIN_P_CLIP = 0.01
+
+
+def _multinomial_split(rng, hits, shares):
+    """Split integer hit-count draws across the four hit types.
+
+    Binomial ladder — X1 ~ Bin(H, s1), X2 ~ Bin(H - X1, s2 / (1 - s1)), ... —
+    equal in law to a per-draw ``rng.multinomial(H_i, shares)`` (multinomial
+    chain rule) but vectorized over the draw vector, which ``rng.multinomial``
+    cannot do for a vector of trial counts.
+    """
+    counts = []
+    remaining = hits
+    tail = 1.0
+    for share in shares[:-1]:
+        # tail hits 0 when the leading shares already sum to 1 (a window that is
+        # all singles); the clip absorbs float error in the renormalization.
+        p = float(np.clip(share / tail, 0.0, 1.0)) if tail > 0 else 0.0
+        drawn = rng.binomial(remaining, p)
+        counts.append(drawn)
+        remaining = remaining - drawn
+        tail -= share
+    counts.append(remaining)
+    return counts
+
+
+def _build_hit_split_post(stats_obj, player, date, *, market):
+    """Build the hitter-fantasy post hook: compound-multinomial hit-type split.
+
+    Proration made the four hit types deterministic multiples of one latent and
+    discarded 25% of the sum's variance; splitting each sampled ``hits`` draw
+    as Mult(H, shares) recovers 98.6% of it (brief §8d). Shares come from the
+    player's trailing window, or from the league table when the window holds
+    too few hits. The unquoted HBP term rides along as a deterministic mean
+    offset (brief §8e).
+    """
+    games = stats_obj.short_gamelog
+    games = games[games[stats_obj.log_strings["player"]] == player]
+    window_hits = games["hits"].sum()
+    if window_hits >= _HIT_SHARES_MIN_HITS:
+        shares = tuple(float(games[sub].sum()) / float(window_hits) for sub in _HIT_TYPES)
+    else:
+        shares = LEAGUE_HIT_SHARES
+    weights = [weight for _, weight in FANTASY_HIT_TYPE_WEIGHTS[market]]
+    offset = FANTASY_HBP_WEIGHTS[market] * LEAGUE_HBP_PER_GAME
+
+    def post(draws):
+        rng = np.random.default_rng(POST_RNG_SEED)
+        split = _multinomial_split(rng, np.rint(draws["hits"]).astype(np.int64), shares)
+        term = np.full(draws["hits"].shape, offset)
+        for weight, type_counts in zip(weights, split, strict=True):
+            term = term + weight * type_counts
+        return term
+
+    return post
+
+
+def _build_quality_start_post(stats_obj, player, date, *, weight):
+    """Build the pitcher-fantasy post hook: quality start priced in-sample.
+
+    QS is a deterministic functional of two components already in the sum
+    (outs, runs allowed), so it is evaluated on the sampled pair instead of
+    being added as a marginal (brief §8a). Documented approximation: settlement
+    reads *earned* runs for both the QS trigger and the -3 penalty while the
+    priced component is total runs allowed, and the settled outs term is
+    3*floor(outs/3) against the priced 1-per-out — measured -0.550 and +0.531
+    points of mean respectively, a coincidental near-cancellation, not design.
+    """
+
+    def post(draws):
+        quality = (draws["pitching outs"] >= _QS_MIN_OUTS) & (draws["runs allowed"] <= _QS_MAX_RUNS)
+        return weight * quality.astype(float)
+
+    return post
+
+
 def _mlb_team_abbr(mlb_teams, team_id):
-    return next(
-        team["abbreviation"].replace("AZ", "ARI")
-        for team in mlb_teams["teams"]
-        if team["id"] == team_id
+    abbreviation = next(
+        team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == team_id
     )
+    return ABBR_MAP.get(abbreviation, abbreviation)
 
 
-def _build_mlb_upcoming_games(mlb_games, mlb_teams):
+def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
     mlb_upcoming_games = {}
+    mlb_upcoming_games_by_date = {}
     for game in mlb_games:
-        if game["status"] in ["Pre-Game", "Scheduled"] and game["game_type"] not in ["A"]:
+        # Until it is over: the feed moves a game to "Warmup" minutes before first pitch,
+        # and the board run that falls there is the last one before the game.
+        if not mlb_game_is_over(game["status"]) and game["game_type"] not in ["A"]:
             awayTeam = _mlb_team_abbr(mlb_teams, game["away_id"])
             homeTeam = _mlb_team_abbr(mlb_teams, game["home_id"])
-            game_bs = mlb.boxscore_data(game["game_id"])
-            players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
+            # A later day's game is listed by date only, so the next-game map holds what
+            # it did while the schedule request ended today. No lineup is posted a day
+            # ahead, which saves that game's box score request.
+            later = game["game_date"] > today.isoformat()
+            if later:
+                away_order, home_order = [], []
+            else:
+                game_bs = mlb.boxscore_data(game["game_id"])
+                players = {p["id"]: p["fullName"] for p in game_bs["playerInfo"].values()}
+                away_order = [players[i] for i in game_bs["away"]["battingOrder"]]
+                home_order = [players[i] for i in game_bs["home"]["battingOrder"]]
             playoff = game["game_type"] in _MLB_POSTSEASON_GAME_TYPES
             away_entry = {
                 "Pitcher": remove_accents(game["away_probable_pitcher"]),
                 "Home": False,
                 "Opponent": homeTeam,
                 "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
+                "Batting Order": away_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
             }
@@ -122,21 +289,23 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams):
                 "Home": True,
                 "Opponent": awayTeam,
                 "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
+                "Batting Order": home_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
             }
             suffix = "" if game["game_num"] == 1 else str(game["game_num"])
-            mlb_upcoming_games[awayTeam + suffix] = away_entry
-            mlb_upcoming_games[homeTeam + suffix] = home_entry
-    return mlb_upcoming_games
+            for team, entry in ((awayTeam + suffix, away_entry), (homeTeam + suffix, home_entry)):
+                mlb_upcoming_games_by_date[team, game["game_date"]] = entry
+                if not later:
+                    mlb_upcoming_games[team] = entry
+    return mlb_upcoming_games, mlb_upcoming_games_by_date
 
 
 def _mlb_final_game_ids(mlb_games, prev_game_ids):
     return [
         game["game_id"]
         for game in mlb_games
-        if game["status"] == "Final"
+        if game["status"].split(":")[0] in MLB_FINAL_BOX_SCORE_STATES
         and game["game_type"] not in ("E", "S", "A")
         and game["game_id"] not in prev_game_ids
     ]
@@ -159,18 +328,16 @@ class StatsMLB(Stats):
     Inherits from the Stats parent class.
 
     Additional Attributes:
-        pitchers (mlb_pitchers): Object containing MLB pitcher data.
         gameIds (list): List of game ids in gamelog.
 
     Additional Methods:
         None
     """
 
-    def __init__(self, *, load_live_pitchers: bool = True):
+    def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
         self.season_start = datetime(2026, 3, 25).date()
-        self.pitchers = get_mlb_pitchers() if load_live_pitchers else {}
         self.gameIds = []
         self.gamelog = pd.DataFrame()
         self.teamlog = pd.DataFrame()
@@ -183,7 +350,7 @@ class StatsMLB(Stats):
             "fielding": ["DER"],
             "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"],
         }
-        self.volume_stats = ["pitches thrown"]
+        self.volume_stats = VOLUME_STATS["MLB"]
         self.default_total = 4.671
         self.log_strings = {
             "game": "gameId",
@@ -198,6 +365,10 @@ class StatsMLB(Stats):
             "score": "runs",
         }
         self._volume_model_cache = None
+        # update() replaces this with the probable-pitcher table; empty keeps
+        # quote-time team lookups safe on load()-only instances.
+        self.upcoming_games = {}
+        self._sp_win_curve = None  # lazy (a, b) SP-win logit map; () = use the bucket table
 
     def _join_fp_player_features(self, date):
         """MLB hook: Baseball Savant per-player season-to-date features as of ``date``."""
@@ -220,8 +391,10 @@ class StatsMLB(Stats):
 
         linescore = game["scoreboard"]["linescore"]
         boxscore = game["boxscore"]
-        awayTeam = game["away_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
-        homeTeam = game["home_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
+        away_code = game["away_team_data"]["abbreviation"]
+        home_code = game["home_team_data"]["abbreviation"]
+        awayTeam = ABBR_MAP.get(away_code, away_code)
+        homeTeam = ABBR_MAP.get(home_code, home_code)
         bpf = self.park_factors[homeTeam]
         game_date = game["game_date"]
 
@@ -691,8 +864,8 @@ class StatsMLB(Stats):
         comps ordered closest-first (``distance = 1 - match_score``), keeping only
         same-handedness pairs at or above the match-score threshold. This is the
         same ``{"comps", "distances"}`` shape the other leagues' KNN comps carry,
-        so MLB writes a uniform ``comps.json`` even though its affinities come from
-        a static Statcast table rather than a fitted BallTree.
+        even though MLB's affinities come from a static Statcast table rather than
+        a fitted BallTree.
         """
         filepath = pkg_resources.files(data) / "player_data" / "MLB" / filename
         if not os.path.isfile(filepath):
@@ -711,7 +884,7 @@ class StatsMLB(Stats):
             for pid, grp in df.groupby("pid", sort=False)
         }
 
-    def update_player_comps(self, year=None):
+    def update_player_comps(self) -> None:
         """Refresh the Savant affinity CSVs, keeping the cached copy on a bot-block."""
         for filename in (
             "affinity_hittersByHittingProfile_matchScores.csv",
@@ -725,7 +898,8 @@ class StatsMLB(Stats):
         """Fetch and append new MLB game logs, then trim to the rolling 4-year window.
 
         Queries a 60-day schedule window starting from the last logged date (or
-        season start if the gamelog is empty), parses each Final-status game, and
+        season start if the gamelog is empty) and ending no later than the last day
+        of the schedule lookahead, parses each game whose box score is final, and
         writes the updated gamelog/teamlog/players bundle to disk.
         """
         today = datetime.today().date()
@@ -736,12 +910,15 @@ class StatsMLB(Stats):
         next_day = max(next_day, self.season_start)
         next_day = min(next_day, today)
         end_date = next_day + timedelta(days=60)
-        end_date = min(end_date, today)
+        end_date = min(end_date, today + timedelta(days=_SCHEDULE_LOOKAHEAD_DAYS - 1))
         mlb_games = mlb.schedule(
             start_date=next_day.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
         )
-        mlb_teams = mlb.get("teams", {"sportId": 1})
-        self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
+        mlb_teams = mlb.get("teams", {"sportId": _MLB_SPORT_ID})
+        self.upcoming_games, self.upcoming_games_by_date = _build_mlb_upcoming_games(
+            mlb_games, mlb_teams, today
+        )
+        self._refresh_handedness()
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
         mlb_game_ids = _mlb_final_game_ids(mlb_games, prev_game_ids)
@@ -759,14 +936,57 @@ class StatsMLB(Stats):
 
         self._trim_old_games(today)
 
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+        if self._full_clean_due():
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
 
+    def _refresh_handedness(self):
+        """Overwrite registry ``bats`` / ``throws`` from MLB's people feed.
+
+        ``_resolve_bat_side`` learns a side from a player's first observed plate
+        appearance and never revisits it, which freezes every switch hitter on
+        whichever box he happened to stand in first -- the registry carried zero
+        "S" before this ran. The people feed is authoritative and keyed by the
+        same numeric player id, so existing entries are corrected in place.
+
+        Correct, never add: an absent key is the resolvers' cache-miss signal, and
+        both of them answer a miss with ``None`` to skip an unusable box score.
+        Filling a key they have never seen would silently retire that guard, so a
+        value is only overwritten where one already exists. Feed-only ids are not
+        added and ``name`` is never touched either: registry names are the
+        unaccented spelling downstream matches offers by ("Jose Ramirez"), while
+        the feed returns the accented one.
+
+        This runs in ``_update``'s prelude beside the other hard-failing feed
+        calls rather than next to the write, so a people-feed outage cannot
+        discard a parse loop that already ran; the cost is that a player first
+        seen this run keeps his box-score value until the next cycle. The season
+        is ``season_start.year`` because :meth:`Stats.update`'s season gate and
+        opener adoption hold ``season_start`` on the season being fetched; a
+        forced replay of an older window asks for the hand-set constant's season
+        instead, which is harmless because handedness is career-stable.
+        """
+        feed = mlb.get(
+            "sports_players",
+            {
+                "sportId": _MLB_SPORT_ID,
+                "season": self.season_start.year,
+                "fields": "people,id,batSide,code,pitchHand",
+            },
+        )
+        for person in feed["people"]:
+            entry = self.players.get(person["id"])
+            if entry is None:
+                continue
+            if "bats" in entry and "batSide" in person:
+                entry["bats"] = person["batSide"]["code"]
+            if "throws" in entry and "pitchHand" in person:
+                entry["throws"] = person["pitchHand"]["code"]
+
     def _trim_old_games(self, today):
-        four_years_ago = today - timedelta(days=1461)
+        four_years_ago = today - timedelta(days=GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             self.gamelog["gameDate"].apply(
                 lambda x: four_years_ago <= datetime.strptime(x, "%Y-%m-%d").date() <= today
@@ -830,6 +1050,7 @@ class StatsMLB(Stats):
             game_type = self.upcoming_games.get(team, {}).get("game type")
         return _MLB_SERIES_GAMES_TO_WIN.get(game_type, _MLB_DEFAULT_SERIES_WINS)
 
+    @line_profiler.profile
     def profile_market(self, market, date=datetime.today().date()):
         date = self._begin_profile_market(market, date)
         if date is None:
@@ -854,7 +1075,6 @@ class StatsMLB(Stats):
             .groupby("playerName")
         )
 
-        # defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(["opponent", "gameId"])
         defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg(
             {
@@ -988,17 +1208,7 @@ class StatsMLB(Stats):
         if not pitcher:
             self._project_plate_appearances(offers, date)
             return
-        market = "pitches thrown"
-        self.load_volume_model_params(
-            offers,
-            market,
-            date,
-            {
-                "loc": f"proj {market} mean",
-                "rate": f"proj {market} mean",
-                "scale": f"proj {market} std",
-            },
-        )
+        self.load_volume_model_params(offers, "pitches thrown", date)
 
     def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
         """Hitter cells use structural plate appearances, not the pitch-count model."""
@@ -1029,7 +1239,9 @@ class StatsMLB(Stats):
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
             home_map = day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
         else:
-            home_map = {p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()}
+            home_map = {
+                r["Player"]: self.upcoming_game(r["Team"], r["Date"]).get("Home") for r in records
+            }
 
         teams = set(team_of.values())
         adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
@@ -1066,8 +1278,6 @@ class StatsMLB(Stats):
         alone; an unquoted game yields a neutral market factor via the archive default.
         """
         records = offers if isinstance(offers, list) else list(offers.values())
-        opponent_of = {r["Team"]: r["Opponent"] for r in records}
-        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
 
         if date < datetime.today().date():
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
@@ -1076,9 +1286,15 @@ class StatsMLB(Stats):
                 named = day.loc[day[self.log_strings["team"]] == team, "opponent pitcher"]
                 starter_of[team] = named.mode().iloc[0] if not named.mode().empty else None
         else:
+            # A team gets one multiplier, so its starter, opponent and park side have to
+            # be one game's: the earliest its players are offered on.
+            records = earliest_last(records)
             starter_of = {
-                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher") for team in teams
+                r["Team"]: self.upcoming_game(r["Team"], r["Date"]).get("Opponent Pitcher")
+                for r in records
             }
+        opponent_of = {r["Team"]: r["Opponent"] for r in records}
+        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
 
         adjustment = {}
         for team in teams:
@@ -1198,7 +1414,7 @@ class StatsMLB(Stats):
         hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
         hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
         v = archive.get_ev("MLB", "hits", date, player)
-        subline = archive.get_line("MLB", "hits", date, player)
+        subline = archive.get_reference_line("MLB", "hits", date, player)
         # No archived hits market to scale from: a missing hits EV is NaN and would make
         # get_ev invert a NaN under-prob (brentq raises); a 0 line is a degenerate source.
         if np.isnan(v) or subline == 0:
@@ -1220,7 +1436,7 @@ class StatsMLB(Stats):
             sub_cv = stat_cv.get("MLB", {}).get(submarket, 1)
             sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
             v = archive.get_ev("MLB", submarket, date, player)
-            subline = archive.get_line("MLB", submarket, date, player)
+            subline = archive.get_reference_line("MLB", submarket, date, player)
             if submarket == "pitcher win":
                 ev += (1 - get_odds(subline, v, sub_dist, cv=sub_cv)) * weight
             elif submarket == "quality start":
@@ -1243,6 +1459,111 @@ class StatsMLB(Stats):
                 v_outs = self._keep_positive(v, v_outs)
 
         return ev if book_odds else 0
+
+    def _fantasy_combo_spec(self, market, player):
+        """Component-sum spec for the four MLB fantasy markets (brief §8).
+
+        Pure config: the marginal/Bernoulli/quality-start weights read straight
+        off the `_mlb_fantasy_props` tables, and all player-dependent work (hit
+        shares, the SP-win probability) happens at quote time inside the post
+        builder and `_combo_bernoulli_p`.
+        """
+        if market not in FANTASY_COMBO_MARKETS:
+            return None
+        props = self._mlb_fantasy_props(market)
+        weights = dict(props)
+        if "pitcher" in market:
+            return ComboSpec(
+                marginals=tuple(
+                    (sub, float(w))
+                    for sub, w in props
+                    if sub not in ("pitcher win", "quality start")
+                ),
+                bernoulli=(("pitcher win", float(weights["pitcher win"])),),
+                post_builder=partial(
+                    _build_quality_start_post, weight=float(weights["quality start"])
+                ),
+                analytics=("win_map",),
+            )
+        return ComboSpec(
+            marginals=tuple((sub, float(w)) for sub, w in props if sub not in _HIT_TYPES),
+            sampled=("hits",),
+            post_builder=partial(_build_hit_split_post, market=market),
+            analytics=("hit_shares", "hbp"),
+            assumable=_ASSUMABLE_HITTER_COMPONENTS,
+        )
+
+    def _combo_bernoulli_p(self, name, player, date):
+        """P(pitcher win) for the fantasy spec's Bernoulli component (brief §8b).
+
+        The starter only takes the decision if he completes five innings and
+        the bullpen holds, so the raw team moneyline overstates the pitcher
+        fantasy mean by ~1 point (measured P(SP win)/P(team win) = 0.585
+        overall). Maps the archived team moneyline through the lazily fitted
+        logistic, or through the measured bucket-ratio step table when the fit
+        is infeasible. NaN when the pitcher's team cannot be resolved, which
+        makes the base layer omit the player.
+        """
+        team = self._pitcher_team(player, date)
+        if team is None:
+            return np.nan
+        p_team = archive.get_moneyline(self.league, date, team)
+        if self._sp_win_curve is None:
+            self._sp_win_curve = self._fit_sp_win_curve()
+        if self._sp_win_curve:
+            a, b = self._sp_win_curve
+            clipped = np.clip(p_team, _SP_WIN_P_CLIP, 1 - _SP_WIN_P_CLIP)
+            return float(expit(a + b * logit(clipped)))
+        edges = [edge for edge, _ in SP_WIN_RATIO_BUCKETS]
+        return p_team * SP_WIN_RATIO_BUCKETS[bisect_left(edges, p_team)][1]
+
+    def _pitcher_team(self, player, date):
+        """Team abbreviation for a pitcher on ``date``.
+
+        A settled date reads the player's gamelog row; otherwise the probable
+        starters of ``date``'s own games, then of each team's next game: a pitcher
+        offered a day ahead starts a game the next-game map does not hold.
+        ``None`` when none of them knows the player.
+        """
+        if not isinstance(date, str):
+            date = date.strftime("%Y-%m-%d")
+        rows = self.gamelog[self.gamelog[self.log_strings["player"]] == player]
+        day = rows[rows[self.log_strings["date"]].astype(str).str[:10] == date]
+        if not day.empty:
+            return day.iloc[-1][self.log_strings["team"]]
+        on_date = [
+            (team, game)
+            for (team, game_date), game in self.upcoming_games_by_date.items()
+            if game_date == date
+        ]
+        for team, game in [*on_date, *self.upcoming_games.items()]:
+            if game.get("Pitcher") == player:
+                # doubleheader entries key as e.g. "NYY2"; the archive stores
+                # the bare abbreviation
+                return team.rstrip("0123456789")
+        return None
+
+    def _fit_sp_win_curve(self):
+        """Fit ``logit P(SP win) = a + b * logit P(team win)`` from the gamelog.
+
+        Uses quoted starter rows: ``moneyline`` is the archive-backfilled team
+        win probability, with exact 0.5 excluded as the unquoted-game default
+        rather than a real pick'em. Returns ``(a, b)``, or ``()`` when the
+        gamelog cannot support an honest fit — which routes
+        `_combo_bernoulli_p` to SP_WIN_RATIO_BUCKETS.
+        """
+        log = self.gamelog
+        if "moneyline" not in log.columns:
+            return ()
+        starts = log[log["starting pitcher"]]
+        p_team = pd.to_numeric(starts["moneyline"], errors="coerce")
+        won = pd.to_numeric(starts["pitcher win"], errors="coerce")
+        mask = p_team.notna() & won.notna() & (p_team != 0.5)
+        if int(mask.sum()) < _SP_WIN_FIT_MIN_STARTS:
+            return ()
+        x = logit(np.clip(p_team[mask].to_numpy(float), _SP_WIN_P_CLIP, 1 - _SP_WIN_P_CLIP))
+        fit = LogisticRegression(penalty=None).fit(x.reshape(-1, 1), won[mask].to_numpy(float) > 0)
+        return float(fit.intercept_[0]), float(fit.coef_[0][0])
 
     def get_depth(self, offers, date=datetime.today().date()):
         if isinstance(offers, dict):
@@ -1276,9 +1597,10 @@ class StatsMLB(Stats):
             self.playerProfile.fillna(0, inplace=True)
 
         else:
+            dates = earliest_game_dates(offers)
             depth = {}
             for player in list(players):
-                order = self.upcoming_games.get(teams[player], {}).get("Batting Order", [])
+                order = self.upcoming_game(teams[player], dates[player]).get("Batting Order", [])
 
                 if player in order:
                     depth[player] = order.index(player) + 1

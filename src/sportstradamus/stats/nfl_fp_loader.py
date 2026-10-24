@@ -154,7 +154,7 @@ def load_one_year(year: int) -> pd.DataFrame:
     Missing FP files are skipped silently (file inventory varies by year);
     a player who appears in some files but not others simply carries NaNs
     for the missing columns. The caller's downstream ``fillna(0)`` chain
-    in :meth:`StatsNFL.update_player_comps` absorbs them.
+    in :meth:`StatsNFL._compute_comps` absorbs them.
 
     Args:
         year: NFL season (e.g., 2024).

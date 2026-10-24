@@ -24,7 +24,11 @@ import numpy as np
 import pytest
 
 from sportstradamus.helpers.archive import Archive
-from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev
+from sportstradamus.helpers.distributions import (
+    SN_MAX_MEAN_FACTOR,
+    UNDERDOG_BOOST_BASELINE,
+    get_ev,
+)
 
 # NBA BLK calibration (high zero-inflation count cell).
 BLK_CV = 0.5435
@@ -113,38 +117,43 @@ class _CaptureArchive:
 
     def __init__(self):
         self.evs = []
+        self.under_probs = []
+        self.rungs = []
 
     def _stage_book_ev(
         self, league, market, date, entity, book, ev, observed_at=None, under_prob=None, line=None
     ):
         self.evs.append(ev)
+        self.under_probs.append(under_prob)
 
     def _stage_line(self, *args, **kwargs):
         pass
 
+    def add_ladder(self, league, market, date, entity, book, rungs, observed_at=None):
+        self.rungs.extend(rungs)
 
-def test_add_dfs_missing_under_side_is_never_blown_or_clamped():
-    """A one-sided DFS pick stores a real mean or none — never a bound dressed as one.
 
-    A Rivals/H2H-style pick carries a single Boost and no Boost_Under; the one-sided
-    no_vig fabrication used to drive the count-cell ev into the thousands. BLK's high
-    zero rate then floors the symmetric price below the gate, so the inversion has no
-    solution at all and lands on ``get_ev``'s ceiling — which must be stored as NULL.
+def test_add_dfs_one_sided_underdog_offer_converts_through_baseline():
+    """An Underdog one-sided boost is a payout *modifier*, not decimal odds.
+
+    The raw 1.67 modifier scales what a 1.00x pick is worth to a full decimal
+    payout, so the stored under-probability is that payout's implied complement
+    — not a fabricated symmetric 0.5, and not the raw modifier's breakeven.
     """
     offer = {
         "Player": "Nikola Jokic",
         "League": "NBA",
-        "Market": "BLK",
-        "Line": 1.5,
+        "Market": "PTS",
+        "Line": 25.5,
         "Date": "2025-12-23",
-        "Boost": 1,
+        "Boost_Over": 1.67,
+        "Boost_Under": 0.0,
     }
     cap = _CaptureArchive()
     Archive.add_dfs(cap, [offer], "Underdog", {})
-    assert len(cap.evs) == 1
-    assert cap.evs[0] is None or 0 < cap.evs[0] < SN_MAX_MEAN_FACTOR * 1.5, (
-        f"stored a clamped or blown ev as a mean: {cap.evs}"
-    )
+    expected_under = 1 - 1 / (1.67 * UNDERDOG_BOOST_BASELINE)
+    assert cap.under_probs == [pytest.approx(expected_under)]
+    assert cap.rungs == [(25.5, pytest.approx(1 - expected_under))]
 
 
 # --- Gate-refuted quote persistence (the 2026-06+ NFL tds poisoning) ---------

@@ -45,24 +45,29 @@ model-track WS-2.
 Stable, verified-in-code one-liners (everything in-flight lives in brief
 ledgers, not here):
 
-- Kelly sizing — `strategies/kelly.py` + `kelly` CLI (fractional, shrinkage
-  blend, cvxpy portfolio).
-- Underdog pick'em engine — `strategies/underdog_pickem.py` + `pickem-build`
-  CLI → recommendations YAML; Rivals folded in.
+- Kelly sizing — `strategies/kelly.py` + `sportstradamus bet kelly` (fractional,
+  shrinkage blend, cvxpy portfolio).
+- Pick'em engine — `strategies/underdog_pickem.py` + `sportstradamus bet pickem`
+  (`--platform underdog|sleeper`) → recommendations YAML.
 - Parlay pricing — `prediction/parlay.py` (beam search) + `prediction/payouts.py`
   (`contest_variant` payout tables/curves) + `prediction/joint.py` (Gaussian
   copula, push-aware EV, PSD repair — the swappable Σ seam; ARCHITECTURE
   §Stable Seams).
-- CLV — `clv.py` wired into `nightly.py:reflect`; per-segment summaries.
-- Retrospective strategy backtest — `strategies/profit_sim.py` +
-  `pages/6_Stats_Profit_Sim.py` (Monte Carlo over resolved history).
+- CLV — `clv.py` wired into `nightly.py:run` (the `reflect` command);
+  per-segment summaries.
+- Retrospective strategy backtest — `strategies/profit_sim.py` + the Receipts
+  strategy simulator (nightly precomputed grid + live Customize; Monte Carlo
+  over resolved history).
 - Structured JSON logging — `helpers/logging.py`; fake-mode end-to-end
   integration test — `tests/integration/test_end_to_end.py`.
-- Dashboard — `pages/` incl. Pick'em and Parlays recommendation views reading
-  parquet snapshots only.
+- Dashboard — the `dashboard/` package (Tonight / Board / Games / Receipts +
+  Model Lab): constellation slip builder, story engine, phone money loop,
+  celestial skin; reads parquet snapshots only
+  ([`dashboard_ux_redesign.md`](dashboard_ux_redesign.md)).
 - Model lifecycle — six offline gates ([`ship_gate.md`](ship_gate.md)),
-  live Gate-2 graduation (`check-graduation`, `gate-status` cron),
-  `stat_meta.json` `shipped` release control (CONTRIBUTING §Shipping).
+  live Gate-2 graduation (`sportstradamus ship graduation`, `gate-status` cron),
+  `stat_meta.json` `shipped` release control
+  ([`MODEL_LIFECYCLE.md`](MODEL_LIFECYCLE.md) §4–§5).
 
 ## 4. Swimlane index
 
@@ -73,14 +78,28 @@ an exception. A session works one lane and reads that lane's brief.
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
 | `model-track` | Profit-first: beat the DFS apps/mispriced books live (WS-1) + standing breadth harvest → D3/D5 + MLB/NHL post-GO grind (WS-2); the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
-| `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (D6 resolved; stage 1 commit path next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
-| `sleeper-parity` | Full Sleeper decision-layer parity | ACTIVE — **CRITICAL PATH** (blocks D3 + dfs-products 2b/2c/5); stages 0-4 complete on `feature/sleeper-parity`, PR to devel pending merge; target merge ~Aug 2026 (pre NFL Wk 1) | devel merge → unblocks stage 5 live soak | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
+| `nfl-ship15-recovery` | NFL back to ≥15/20 honest ships after the FantasyPoints bump re-rolled every verdict; passing / rushing / receiving yards, the two yards combos and targets mandatory | OPEN (count goal met: the seven `stat_meta` flips committed `8dfbe48c` 2026-10-10, the NFL rebuilt and retrained 2026-10-15, those models on production since 2026-10-16 (honest-receipts decision 70); passing yards withheld — next step is FantasyPoints feature design) | owner decisions in the brief §6 | [handoffs/nfl-ship15-recovery.md](handoffs/nfl-ship15-recovery.md) |
+| `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (stages 1–2 live from cron; stage 3 analytics + circuit breaker next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
+| `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED (stages 0–4 merged to `devel` 2026-07-14, `b9f8a95e`; stage 5 live soak open, its acceptance `sportstradamus bet pickem --platform sleeper` output on live slates (owner, 2026-10-16); blocks nothing) | — | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
-| `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening + Rivals difference-pricer | ACTIVE | — (stage 0 near-done; 1/2a startable now; 2b/2c/5 queue per §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
+| `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening | ACTIVE | — (stage 0 near-done; 1 retired; 2a/2b/2c/5 startable — stage 5 never interleaves with `parlay-dependence`, §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
 | `mlb-nhl-activation` | Activated both leagues (D1/D2 = GO); post-GO grind runs in model-track WS-2; brief keeps the per-league detail | DONE (absorbed: model-track WS-2) | — | [archive/mlb-nhl-activation.md](archive/mlb-nhl-activation.md) |
-| `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
+| `dashboard-ux` | Narrative-first dashboard: surfaces, slip builder, receipts, celestial skin, phone loop | DONE (closed 2026-09-11; the §5b UI scars flip on behind dfs-products, spec §8) | — | [archive/dashboard-ux.md](archive/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
+| `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
+| `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | DONE | — | [archive/cleanup-pass.md](archive/cleanup-pass.md) |
+| `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | DONE (all four stages closed 2026-09-13; the cache is per-box, so each box runs `sportstradamus fetch headshots` once) | — (owner installs the monthly cron row) | [archive/player-headshots.md](archive/player-headshots.md) |
+| `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | DONE (closed 2026-10-16; 99 of 101 templates have art, `the-chain-gang` and `the-crossover` on the owner's hand-hunt list) | — | [archive/constellation-art.md](archive/constellation-art.md) |
+| `story-balance` | Honest ledger by bet side at platform payouts (Kelly / profit-sim / CLV / Gate-2 fixes), Over-led and Under-led star stories per game, live-analyst voice; selection-shrink lever researched and KILLED | CLOSED 2026-10-18 (lead rule in `prediction/stories/lead.py`; the killed lever in `docs/archive/researcher_selection_shrink.md`; records and the two open asks in honest-receipts §7–§8; the star lean fixed by lever T, nfl-ship15-recovery §11) | — | [handoffs/honest-receipts.md](handoffs/honest-receipts.md) §7 |
+| `live-gap-2` | Why cells pass the six offline gates and lose live: stale 70 % boosters, first-to-pass gate selection, the count cells' broken book leg, the disagreement band; instrumentation first, offline experiments on data in hand, then each fix shipped as proven | OPEN (opened 2026-10-21; week 1 on the owner's go) | — | [handoffs/live-gap-2.md](handoffs/live-gap-2.md) |
+| `honest-receipts` | One pricing truth for realized performance (posted sides, platform payouts, the recommended cohort as the hero), decision-time columns in history, and the three research briefs (selection-aware trust layer, parlay-pricer repairs, train/serve skew) that decide the gated model-side fixes; no model is pulled on money, no model-free engine | OPEN (the 2026-10-08 follow-ups are done and live on `devel` and production, the NHL, NFL and WNBA models sent 2026-10-16; open: the brief's §6 reads and the late-October version-age test) | — | [handoffs/honest-receipts.md](handoffs/honest-receipts.md) |
+
+Model-track sub-lane briefs with no row of their own:
+[breadth75_plan.md](handoffs/breadth75_plan.md),
+[combo-market-pricing.md](handoffs/combo-market-pricing.md),
+[shape_bound_triage.md](handoffs/shape_bound_triage.md). Closed 2026-10-16, code kept:
+[model-strategy-reachability-repairs.md](archive/model-strategy-reachability-repairs.md).
 
 ### 4.1 Build path (visual index)
 
@@ -110,17 +129,16 @@ flowchart LR
         MT5["WS-5 targeted features (M-1 pilots)"]:::opus
     end
 
-    subgraph SP["sleeper-parity — CRITICAL PATH (next code-heavy lane)"]
+    subgraph SP["sleeper-parity — S0-S4 merged 2026-07-14"]
         SP0["S0 product-rules verify (owner-assisted)"]:::sonnet
         SP14["S1-S4 Sleeper EV engine + plumb-through + dashboard + tests"]:::sonnet
-        SP5["S5 live soak (before NFL Wk 1)"]:::haiku
+        SP5["S5 live soak (acceptance needs re-scoping)"]:::haiku
         SP0 --> SP14 --> SP5
     end
-    class SP crit
 
     subgraph DP["dfs-products"]
         DP0["S0 wrap: tax-curve sweep + owner packet"]:::sonnet
-        DP1["S1 Rivals difference-pricer (startable)"]:::sonnet
+        DP1["S1 Rivals difference-pricer (retired)"]:::sonnet
         DP2a["S2a Sleeper alt-line de-vig (startable)"]:::sonnet
         DP2bc["S2b/2c ladder + alt-line snapshot columns"]:::sonnet
         DP3["S3 Ladders QMC pricer + DeepScore"]:::opus
@@ -143,8 +161,11 @@ flowchart LR
         HG23["S2 calibration re-run (owner-assisted) + S3 recurring sweeps"]:::haiku
     end
 
-    DU["dashboard-ux — P8 phases (Phase D: Opus)"]:::sonnet
+    DU["dashboard-ux — DONE 2026-09-11 (archive/dashboard-ux.md)"]:::sonnet
     BB["bestball-2027 S0-S6 (simulators S3-S4: Opus)"]:::sonnet
+    CP["cleanup-pass DONE"]:::sonnet
+    PH["player-headshots DONE"]:::sonnet
+    CA["constellation-art DONE"]:::sonnet
 
     D3{"D3 start parlay-dependence"}:::owner
     D4{"D4 start bestball-2027 (~Nov 2026)"}:::owner
@@ -155,9 +176,9 @@ flowchart LR
 
     MT0 --> D3
     MT0 --> D5
-    SP14 ==> D3
-    SP14 ==> DP2bc
-    SP14 ==> DP5
+    SP14 --> D3
+    SP14 --> DP2bc
+    SP14 --> DP5
     D3 --> PD14
     PD0 -.-> PD14
     DP0 --> DP3
@@ -165,7 +186,6 @@ flowchart LR
     GL --> DP4
     SBL0 --> D6
     D6 --> SBL14
-    SBL14 -. "schema first (preferred)" .- SP14
     SBL14 --> D7
     HG1 --> BB
     D4 --> BB
@@ -188,32 +208,33 @@ Everything not listed here is pivot-free.
 
 1. File serialization on the joint-pricing surface — **operational, not
    architectural** (the import graph is acyclic; the risk is two lanes editing
-   the same files): `sleeper-parity` **before** `parlay-dependence`, never
-   interleaved — both rework `prediction/joint.py` + `correlation.py` Σ
-   assembly (ARCHITECTURE §Stable Seams). `dfs-products` stages touching that
-   surface, `payouts.py`, `training/correlate.py`, or sleeper-parity's
-   declared footprint (`prediction/cli.py`, `persist.py`, pick'em
-   `strategies/`) queue behind the pair; import-only / new-module / ingestion
-   / docs stages are pivot-free.
+   the same files): `parlay-dependence` and the `dfs-products` stages that
+   touch `prediction/joint.py` + `correlation.py` Σ assembly (ARCHITECTURE
+   §Stable Seams), `payouts.py` or `training/correlate.py` never interleave.
+   `sleeper-parity`, the third lane on that surface, merged its code stages
+   first (`b9f8a95e`, 2026-07-14). Import-only / new-module / ingestion / docs
+   stages are pivot-free.
 2. `parlay-dependence` needs ≥ 2 leagues at their breadth target (PITs of
    uncalibrated marginals are noise) **and** an Opus research brief in hand
    (gate D3).
 3. `sim-bettor-ledger` schema lands before `sleeper-parity` finishes
    (preferred, not strict) — so Sleeper logs into the ledger from day one.
+   Met: the ledger landed 2026-07-12, and sleeper-parity stage 4 wired Sleeper
+   in before the 2026-07-14 merge.
 4. Review bandwidth is real: one owner. Advisory, not a rule — keep at most
    one code-heavy lane in flight beside `model-track`.
 
-**Critical path:** `sleeper-parity` is the program's only serial chokepoint —
-D3 and dfs-products 2b/2c/5 all wait on it, and its own window closes at NFL
-Week 1 (Sep). Unscheduled past ~Aug, D3 and the Feb–May `parlay-dependence`
-window slip a season.
+**Critical path:** none today. `sleeper-parity` merged its code stages
+2026-07-14 (`b9f8a95e`) and blocks nothing: D3 is the owner's call once its
+§7 inputs hold, and `dfs-products` 2b/2c/5 are startable, stage 5 never
+interleaving with `parlay-dependence` (constraint 1).
 
 ### Seasonality (advisory — best windows, never a schedule)
 
 | Window | In season | Best-fit lanes |
 |---|---|---|
-| Jun–Aug | WNBA, MLB | model-track live-alignment (WS-1 — WNBA is the only live feedback pre-Sep), ledger (live slates to log), MLB audit (D1 decays with the season), Sleeper parity before NFL |
-| Sep–Jan | NFL, NBA, NHL | NFL cell grind (Gate-2 soak needs live games), Sleeper payoff, NHL activation if D2=GO |
+| Jun–Aug | WNBA, MLB | model-track live-alignment (WS-1 — WNBA is the only live feedback pre-Sep), ledger (live slates to log) |
+| Sep–Jan | NFL, NBA, NHL | NFL cell grind (Gate-2 soak needs live games), Sleeper payoff |
 | Feb–May | NBA | parlay-dependence, Ship-90, Best Ball foundations (D4) |
 
 ## 6. Change-absorption protocol
@@ -245,7 +266,7 @@ flip a gate.
 |---|---|---|---|
 | D1 | MLB activation go/no-go | `mlb-nhl-activation` stage-0 MLB packet | RESOLVED — GO 2026-07-09 |
 | D2 | NHL activation go/no-go | stage-0 NHL packet | RESOLVED — GO 2026-07-09 |
-| D3 | Start `parlay-dependence` | ≥2 leagues at target + Opus research brief + sleeper-parity merged | when inputs exist |
+| D3 | Start `parlay-dependence` | ≥2 leagues at target + Opus research brief + sleeper-parity merged (merged 2026-07-14, `b9f8a95e`) | when inputs exist |
 | D4 | Start `bestball-2027` | calendar ≥ ~Nov 2026 + model-track health | before 2027 drafts open |
 | D5 | Declare Ship-90 | Ship-75 targets met; [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6.8 decision packet | at 75% breadth |
 | D6 | Ledger policy spec v1 sign-off | `sim-bettor-ledger` stage-0 spec | RESOLVED — GO 2026-07-12 |
@@ -275,6 +296,13 @@ sketches live in the archived v2.
   product (archived v2 §Suggestions).
 - **Empirical-vs-model ρ overlay** — Correlations Lab heatmap overlay flagging
   pairs the copula mis-prices (P8 spec §6.4).
+- **Dashboard logo commission** — the ambient files landed; the `st.logo` slot
+  waits on the commissioned mark (`docs/art_briefs/logo_guru.md`).
+- **Dashboard follow-ups at lane close** — the optional `export-line-movement`
+  cron (owner call; `prophecize` already writes the snapshot hourly) and the
+  constellation residuals in [archive/dashboard-ux.md](archive/dashboard-ux.md)
+  §11. The name / star-fill decisions are locked in dfs-products §4; the routed
+  debts, headshots and silhouettes each have a lane (§4).
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
 
 ## 9. Doc map (canonical homes)
@@ -286,7 +314,7 @@ sketches live in the archived v2.
 | Model lever stack, per-league path, stop rules | [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6–§8 |
 | Per-cell gate numbers | `src/sportstradamus/data/training/model_stats.csv` (mirror of the parquet) |
 | Stable code seams (import-don't-edit contracts) | `docs/ARCHITECTURE.md` §Stable Seams |
-| Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md` (model track: [`model_improvement_track.md`](handoffs/model_improvement_track.md)) |
+| Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md`, closed lanes `docs/archive/{lane}.md` (model track: [`model_improvement_track.md`](handoffs/model_improvement_track.md)) |
 | Dashboard UX design (surfaces, slip rail, taxonomy, scars) | [`dashboard_ux_redesign.md`](dashboard_ux_redesign.md) |
 | Package map, league/market how-to | `docs/ARCHITECTURE.md` |
 | Session law (gates, subagents, hard rules) | `CLAUDE.md` |
@@ -295,9 +323,13 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- 2026-10-16 — constellation-art DONE, brief archived; reachability sub-lane closed (code kept), brief archived; sleeper-parity stage 5 acceptance = `bet pickem --platform sleeper` on live slates; NFL row: retrained models on production.
+- 2026-10-16 — trued to git: sleeper-parity merged (`b9f8a95e`) → no critical path, §5 constraint 1 re-cut, constraint 3 met, stage 5 acceptance needs re-scope; honest-receipts / story-balance / nfl-ship15 / ledger / dfs-products rows trued; seven closed briefs → `docs/archive/`; §3 CLI names; §4 sub-lane note.
+- honest-receipts briefs back: R1 trust layer KILL; R2 pricer sound, legs fail (I5 = payout-truth refresh); R3 skews ≤0.7 pp of 12.5 pp selected-tail gap, rest = selection w/ little at-market info → I6 = model information (feature log, version-age test, as-of inputs); `admin tail-scorecard` diagnostic added; §4 row trued.
+- honest-receipts lane opened: Receipts/Lab/reflect graded at platform payouts via `realized.py` (flat −110 retired), history gains decision-time columns, three research briefs dispatched; ship_gate devel→main row trued to the implemented rule (no realized-money threshold); §4 row added.
+- player-headshots lane DONE: `fetch headshots` cache, monthly job, and the face on the ticket card; owner cleared all five league CDNs for the private box; §4 row trued.
+- three follow-on lanes briefed off the dashboard close-out — `cleanup-pass`, `player-headshots`, `constellation-art` (§4 rows, §4.1 nodes); owner locked product names + game-total star fill (dfs-products §4); §8 trimmed.
+- dashboard-ux lane closed: Phase E scaffolding (art catalog, manifest loader, favicon, logo slot), constellation modules split, ledger debts fixed or routed; §3/§4/§8 trued; brief archived.
 - sleeper-parity stages 0-4 done (EV engine, decision-layer plumb-through, live-rail pricing, ledger integration incl. 2 push-refund bug fixes); PR to devel opened; §4 row trued.
 - roadmap trued vs audit: D1/D2 RESOLVED GO; mlb-nhl lane DONE→model-track WS-2; dfs-products ACTIVE; sleeper-parity flagged CRITICAL PATH (next code-heavy lane); §4.1 build-path diagram added; §5 constraints 1+5 merged post parlay.py seam split (payouts.py + joint.py, ARCHITECTURE §Stable Seams); breadth thresholds de-duped to model-track §1; model_stats path fixed.
 - dfs-products lane added (game-line combos verify-first, Ladders graduated from §8, alt-line hardening, Rivals pricer); §5 gains its serialization rule; PARLAY_AUDIT refreshed w/ dispositions; stage-0 briefs in docs/archive.
-- model-track reframed profit-first: WS-1 live-alignment = P1, MLB/NHL activation folded in (ACTIVE), family research done (WS-3), copula stage-0 done (WS-4); g1–g5→g1–g6; seasonality Jun–Aug += live-alignment.
-- P8 planned (spec + 6 phase plans in `docs/archive/superpowers/`, incl. D constellation shapes + E art catalog); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains the ρ-overlay follow-up.
-- model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.

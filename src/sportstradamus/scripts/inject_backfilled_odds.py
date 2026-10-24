@@ -15,26 +15,29 @@ rows. ``Stats.resolve_player_market_odds`` reads only ``stats.index`` and
 ``stats["Avg10"]`` from its frame — both cached — and its combo fallback needs
 only the 300-day log window, not the profile frames built from it. So one
 ``window_short_logs`` call per gameday reproduces what a rebuild resolves, at one
-batched archive query per gameday instead of a full feature rebuild.
+batched archive query per gameday instead of a full feature rebuild. The exception
+is a league's ``depth_quoted_markets`` (NFL's fantasy cells, whose per-position
+spec reads the position ``get_depth`` writes): those pay one ``get_depth`` per
+gameday, roughly 15 s each on NFL.
 
 The whole quote is written, prices included. Repairing the block alone would
 strand a row whose class changed — one relabelled ``combo_ev_inversion`` while
 its ``Odds`` stayed the neutral 0.5 reads as book evidence bought by a coin
 flip, which is what the load-time provenance guard exists to prevent. Writing
-the resolved ``Line`` is likewise what a rebuild produces: once the block is
-present ``_clip_lines`` clips synthetic rows only, so authentic and derived
-lines stay unclipped, and the next ``meditate`` re-trims from the repaired block.
+the resolved ``Line`` is likewise what a rebuild resolves: once the block is
+present ``_clip_lines`` clips synthetic rows only, so every other line stays
+unclipped. It clips only the rows a ``meditate`` appends, though, so a repaired
+synthetic row keeps the unclipped line a rebuild would clip.
 
     poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
         --league NFL --markets "passing yards,attempts,completions" --dry-run
 
 Or sweep every cached matrix at once (the ``*_corr`` feature matrices carry no
-book columns and are skipped). ``--legacy-only`` narrows the sweep to the
-matrices that predate the block, so repairing them cannot disturb the training
-data of a cell that is already serving:
+book columns and are skipped). Every cached matrix now carries the block, so
+``--legacy-only`` (skip those that do) matches nothing and a sweep refreshes
+serving cells too:
 
-    poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
-        --all-cached --legacy-only
+    poetry run python -m sportstradamus.scripts.inject_backfilled_odds --all-cached
 """
 
 import datetime
@@ -79,9 +82,7 @@ def _target_at(game_date: datetime.date) -> datetime.datetime:
 
 def _load_league(league: str):
     """Load one league's gamelog exactly as the training run does, minus the network."""
-    cls = _LEAGUE_CLASSES[league]
-    # Probable pitchers describe the live upcoming slate; a repair reads cached history only.
-    stat_data = cls(load_live_pitchers=False) if cls is StatsMLB else cls()
+    stat_data = _LEAGUE_CLASSES[league]()
     stat_data.load()
     stat_data.trim_gamelog()
     return stat_data
@@ -99,6 +100,8 @@ def resolve_cached_quotes(stat_data: Stats, market: str, M: pd.DataFrame) -> pd.
     ):
         stat_data.window_short_logs(game_date)
         players = rows["Player"]
+        if market in stat_data.depth_quoted_markets:
+            stat_data.get_depth(dict.fromkeys(players), game_date)
         stats = pd.DataFrame({"Avg10": rows["Avg10"].to_numpy()}, index=players)
         stats = stats.loc[~stats.index.duplicated()]
         quotes = stat_data.resolve_player_market_odds(
@@ -114,7 +117,7 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     """Write the re-resolved quotes into ``M`` and describe what moved."""
     quotes = resolve_cached_quotes(stat_data, market, M)
     legacy = "QuoteSource" not in M.columns
-    authentic_before = int(M["Archived"].to_numpy(dtype=bool).sum())
+    archived_before = int(M["Archived"].to_numpy(dtype=bool).sum())
     price_moved = int(
         (~np.isclose(quotes["Odds"].to_numpy(float), M["Odds"].to_numpy(float))).sum()
     )
@@ -131,7 +134,7 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     breakdown = ", ".join(f"{source} {count}" for source, count in sources.most_common())
     return (
         f"{len(M)} rows ({'legacy' if legacy else 'refresh'}); {breakdown}; "
-        f"authentic {authentic_before} -> {int(M['Archived'].sum())}; "
+        f"archived {archived_before} -> {int(M['Archived'].sum())}; "
         f"Odds moved on {price_moved}; EV moved on {ev_moved}"
     )
 

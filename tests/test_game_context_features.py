@@ -11,6 +11,9 @@ The leakage concern for these as-of features is covered by the parity gate
 (archive-baked-at-train == archive-read-at-serve), not the strict ``<``-date
 filter that ``test_meanyr_mean10_leakage.py`` guards — game-script context is read
 from the target gameday's pre-game line, which is correct, not leaked.
+
+The upcoming branch reads the schedule entry of the offer's own game date, and a
+player offered on two dates in one call is built for the earlier one.
 """
 
 from __future__ import annotations
@@ -18,9 +21,10 @@ from __future__ import annotations
 from datetime import date
 
 import pandas as pd
+import pytest
 
-from sportstradamus.stats import StatsNBA, base
-from sportstradamus.stats.base import _BLOWOUT_SPREAD_THRESHOLD
+from sportstradamus.stats import StatsMLB, StatsNBA, base
+from sportstradamus.stats.base import _BLOWOUT_SPREAD_THRESHOLD, Stats, earliest_last
 
 # Two past-date games: a 20-point implied blowout (AAA/BBB) and a 4-point coin-flip
 # (CCC/DDD), so the threshold (NBA 10.0) is exercised on both sides in one frame.
@@ -116,3 +120,106 @@ def test_home_defaults_false_and_stays_bool_when_team_missing_from_upcoming_game
     assert out["Home"].dtype == bool
     assert out.loc["P1", "Home"]  # AAA is present -> real Home value (True)
     assert not out.loc["P2", "Home"]  # BBB missing from upcoming_games -> default False
+
+
+TODAY, TOMORROW = "2099-01-01", "2099-01-02"
+
+
+def _offer(player, team, opponent, game_date):
+    return {"Player": player, "Team": team, "Opponent": opponent, "Date": game_date}
+
+
+def _mlb_on_a_two_day_schedule():
+    """NYY hosts BOS today and visits them tomorrow; SEA is off today and hosts TEX tomorrow."""
+    stats = StatsMLB.__new__(StatsMLB)
+    Stats.__init__(stats)
+    stats.league = "MLB"
+    nyy_today = {"Home": True, "Opponent Pitcher": "Bos Today"}
+    stats.upcoming_games = {"NYY": nyy_today}
+    stats.upcoming_games_by_date = {
+        ("NYY", TODAY): nyy_today,
+        ("NYY", TOMORROW): {"Home": False, "Opponent Pitcher": "Bos Tomorrow"},
+        ("SEA", TOMORROW): {"Home": True, "Opponent Pitcher": "Tex Tomorrow"},
+    }
+    return stats
+
+
+class _RecordingArchive(_StubArchive):
+    """Keeps the day of every total asked for, which is the day a row was built for."""
+
+    def __init__(self):
+        self.days_asked = set()
+
+    def get_total(self, league, game_date, team, **_):
+        self.days_asked.add(game_date)
+        return 4.5
+
+
+def test_an_mlb_offer_dated_tomorrow_reads_tomorrows_game(monkeypatch):
+    """Whether the team is off today (SEA) or plays today too (NYY)."""
+    monkeypatch.setattr(base, "archive", _StubArchive())
+    stats = _mlb_on_a_two_day_schedule()
+    offers = [_offer("Judge", "NYY", "BOS", TOMORROW), _offer("Julio", "SEA", "TEX", TOMORROW)]
+
+    out, _, _, pitchers = stats._game_context(
+        pd.DataFrame(index=["Judge", "Julio"]),
+        offers,
+        "hits",
+        date(2099, 1, 1),
+        {"Judge": "NYY", "Julio": "SEA"},
+        {"Judge": "BOS", "Julio": "TEX"},
+    )
+
+    assert out["Home"].tolist() == [False, True]
+    assert pitchers == {"Judge": "Bos Tomorrow", "Julio": "Tex Tomorrow"}
+
+
+@pytest.mark.parametrize(
+    "offered_on",
+    [[TODAY], [TODAY, TOMORROW], [TOMORROW, TODAY]],
+    ids=["today only", "tomorrow listed last", "today listed last"],
+)
+def test_a_player_is_built_for_the_earliest_date_he_is_offered_on(monkeypatch, offered_on):
+    archive = _RecordingArchive()
+    monkeypatch.setattr(base, "archive", archive)
+    stats = _mlb_on_a_two_day_schedule()
+    offers = [_offer("Judge", "NYY", "BOS", game_date) for game_date in offered_on]
+
+    out, _, _, pitchers = stats._game_context(
+        pd.DataFrame(index=["Judge"]),
+        offers,
+        "hits",
+        date(2099, 1, 1),
+        {"Judge": "NYY"},
+        {"Judge": "BOS"},
+    )
+
+    assert out.loc["Judge", "Home"]
+    assert pitchers == {"Judge": "Bos Today"}
+    assert archive.days_asked == {TODAY}
+
+
+def test_a_two_date_players_team_and_opponent_are_his_earlier_games():
+    """The row's date is the earlier one, so its opponent has to be that game's too."""
+    offers = [_offer("Judge", "NYY", "BOS", TODAY), _offer("Judge", "NYY", "TOR", TOMORROW)]
+
+    players, teams, opponents = Stats()._resolve_offer_entities(offers)
+
+    assert (players, teams, opponents) == (["Judge"], {"Judge": "NYY"}, {"Judge": "BOS"})
+
+
+def test_earliest_last_puts_later_dates_first_and_undated_offers_before_them():
+    """Training records carry no date and a Sleeper game can lack one."""
+    undated, keyless = {"Date": None}, {"Player": "A"}
+    offers = [{"Date": TODAY}, undated, {"Date": TOMORROW}, keyless]
+
+    assert earliest_last(offers) == [undated, keyless, {"Date": TOMORROW}, {"Date": TODAY}]
+
+
+def test_a_league_with_no_dated_schedule_reads_the_next_game():
+    """The NFL and the NHL fill only the next-game map."""
+    stats = Stats()
+    stats.upcoming_games = {"KC": {"Opponent": "DEN", "Home": True}}
+
+    assert stats.upcoming_game("KC", TOMORROW) == {"Opponent": "DEN", "Home": True}
+    assert stats.upcoming_game("DEN", TOMORROW) == {}

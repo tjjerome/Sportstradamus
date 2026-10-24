@@ -3,7 +3,7 @@
 Phase A2 already retoned every figure onto design tokens (no RdYlGn, no off-token
 hexes); this task's gap is real titles/legends per spec §3.6 — ``bias_bar`` colored
 its bars by bucket but suppressed the legend outright, so a reader had no way to know
-what green/orange/red meant. The other seven builders already carry axis titles via
+what green/orange/red meant. The other six builders already carry axis titles via
 ``labels=``/explicit ``xaxis_title``/``yaxis`` and legends via ``color=``/named traces;
 those pins here are a compliance spot-check, not new behavior.
 """
@@ -17,7 +17,6 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     bias_bar,
     bss_bar,
     coverage_bar,
-    crps_line,
     ev_divergence_bar,
     murphy_decomp_bar,
     reliability_diagram,
@@ -83,30 +82,6 @@ def test_reliability_diagram_has_axis_titles():
     fig = reliability_diagram(_CAL_STATS)
     assert fig.layout.xaxis.title.text
     assert fig.layout.yaxis.title.text
-
-
-_CRPS_DAILY = pd.DataFrame(
-    {
-        "_date": pd.to_datetime(["2026-06-01", "2026-06-02", "2026-06-01", "2026-06-02"]),
-        "League": ["NBA", "NBA", "WNBA", "WNBA"],
-        "CRPS": [3.2, 4.8, 5.9, 3.7],
-        "Count": [10, 12, 8, 9],
-    }
-)
-
-
-def test_crps_line_plots_real_mean_crps_values_not_a_placeholder():
-    fig = crps_line(_CRPS_DAILY)
-    plotted = sorted(float(v) for trace in fig.data for v in trace.y)
-    assert plotted == sorted(_CRPS_DAILY["CRPS"].tolist())
-
-
-def test_crps_line_has_axis_titles_and_legend():
-    fig = crps_line(_CRPS_DAILY)
-    assert fig.layout.xaxis.title.text
-    assert fig.layout.yaxis.title.text
-    trace_names = {t.name for t in fig.data}
-    assert trace_names == {"NBA", "WNBA"}
 
 
 _SHARP_DF = pd.DataFrame(

@@ -1,31 +1,32 @@
-# DFS Products — game lines, Ladders, Rivals, alt-line hardening
+# DFS Products — game lines, Ladders, alt-line hardening
 
 > Status: ACTIVE — stage 0 substantially complete (B7-P4 TAXED verified in-app; residue:
-> tax-curve sweep + owner packet); stages 1/2a startable now; 2b/2c/5 queue behind
-> sleeper-parity (roadmap §5); stage 4 owner-gated
+> tax-curve sweep + owner packet); stage 1 retired; 2a, 2b, 2c and 5 startable on their §6
+> entry checks (sleeper-parity merged 2026-07-14, `b9f8a95e`; stage 5 never interleaves with
+> parlay-dependence, roadmap §5); stage 4 owner-gated
 
 ## 1. Mission & money logic
 
 Build the decision engines that turn calibrated marginals into +EV entries on the DFS apps'
-newer product surfaces: Underdog Combo Entries / game-line Prediction Picks, Ladders,
-Sleeper Markets, and the Rivals head-to-head. This lane does **not** train models — it
-prices and sizes products from marginals the model track already certifies.
+newer product surfaces: Underdog Combo Entries / game-line Prediction Picks, Ladders, and
+Sleeper Markets. This lane does **not** train models — it prices and sizes products from
+marginals the model track already certifies.
 
 Money logic: `model_improvement_track.md` §1 — "Gate-4 PIT-KS calibration **is** alt-line
 pricing accuracy — the alt-line/Ladders/Rivals surfaces where the profit concentrates."
-This lane is where that calibration cashes out. §6.11 (WS-4) named three of these products
-(Rivals, Ladders, the copula) as the product-EV lever the model track defers to a
+This lane is where that calibration cashes out. §6.11 (WS-4) named Ladders and the copula
+(and Rivals, since retired) as the product-EV lever the model track defers to a
 downstream lane; this brief is that lane, generalized to the newer surfaces (game-line
 combos, alt-line hardening) two Opus stage-0 briefs since scoped. See also
 [`PARLAY_AUDIT.md`](../PARLAY_AUDIT.md) for the incumbent `find_correlation` /
 `beam_search_parlays` audit + dispositions this lane's pricers plug into (its
-empirical-calibration run stays unpopulated in dev — production host only).
+empirical-calibration run is still open, PARLAY_AUDIT §3).
 
 ## 2. Read first (in order)
 
 1. [`model_improvement_track.md`](model_improvement_track.md) §1.1 + §6.11 — the lens
-   (calibration is the product) and the WS-4 verdicts this lane inherits (Rivals-first,
-   copula default, ladder table census).
+   (calibration is the product) and the WS-4 verdicts this lane inherits (copula default,
+   ladder table census).
 2. [`archive/researcher_ladders_stage0.md`](../archive/researcher_ladders_stage0.md) —
    Ladders pricing brief in full (A1–A8 + VERIFY register). Load-bearing for Stage 3.
 3. [`archive/researcher_gamelines_stage0.md`](../archive/researcher_gamelines_stage0.md) —
@@ -35,12 +36,12 @@ empirical-calibration run stays unpopulated in dev — production host only).
    R3, the dependence-estimator conventions (hierarchical Fisher-z EB, PIT extraction,
    `census_parlay_pairs.py` design) both product briefs extend rather than reinvent.
 5. [`parlay-dependence.md`](parlay-dependence.md) §5 + §7 — the sibling lane rebuilding
-   `parlay.py`/`correlation.py` internals; this lane's Stage 2/5 items queue behind it,
-   never interleave (roadmap §5.1).
+   `parlay.py`/`correlation.py` internals; this lane's stage 5 works the same files and
+   never interleaves with it (roadmap §5.1).
 6. `src/sportstradamus/strategies/underdog_pickem.py` — the orchestrator pattern to rhyme
-   with (`RecommendedEntry`, YAML emit, `pickem-build` CLI); it already **selects and sizes**
-   Rivals entries via the incumbent copula (2/3-leg cap, `_validate_rivals_coverage`) — this
-   lane adds the missing **difference pricer**, it does not build Rivals from scratch.
+   with (`RecommendedEntry`, YAML emit, `sportstradamus bet pickem`). Rivals retired
+   2026-09-10 (owner): the scraper no longer parses `rival_lines` and `underdog_pickem` no
+   longer builds a rivals variant.
 7. `src/sportstradamus/strategies/kelly.py` — `fractional_kelly_stake` conventions
    (quarter-Kelly, 0.5% cap, shrinkage blend) every new pricer wraps, generalized to
    discrete outcome vectors per the ladders brief §A5.
@@ -67,8 +68,8 @@ ls -la src/sportstradamus/data/config/underdog_payouts.json
 # before building it a second time
 find . -iname "census_parlay_pairs.py" 2>/dev/null
 
-# sleeper-parity status — Stage 2/5 queue behind it (roadmap §5.1)
-head -3 docs/handoffs/sleeper-parity.md
+# parlay-dependence status — stage 5 never interleaves with it (roadmap §5.1)
+head -3 docs/handoffs/parlay-dependence.md
 ```
 
 ### Volatile product assumptions
@@ -104,7 +105,11 @@ relevant stage-0 capture, revise this brief in place, resume.
   a void with all others won ⇒ Win paid at the REDUCED pick-count table (4-pick with
   one void pays as a 3-pick win); a 3-pick ladder with void(s) refunds — the pricer
   carries P(void) per pick and re-tiers the payout table on void. Still open: API
-  payload existence (VERIFY-6).
+  payload existence (VERIFY-6) — no ladders endpoint on the web surface (2026-09-10:
+  none in the capture or bundles, three path guesses 404 with a token; the feature
+  flags and deep link point at the mobile apps); `/v2/sports` reports NFL
+  `ladder_status: active` (see
+  [underdog_api.md §6.9](../underdog_api.md#69-not-seen-anywhere)).
 - **Sleeper: team-line × player pairing NOT allowed yet (owner verified in-app
   2026-07-10)** — Sleeper sub-lane is standalone-contract + player-parlay only for now,
   though player×player correlation repricing exists there too. Contract shape + $0.02 fee
@@ -120,14 +125,37 @@ relevant stage-0 capture, revise this brief in place, resume.
   `data/config/banned_combos.json` (platform × league × team/opponent ×
   `"POS.market & POS.market"` → `[same-direction, opposite-direction]` modifiers,
   `0.0` = hard ban) — it drifts and has no prediction-market pairs yet; the stage-0
-  modifier-extraction harness owns refreshing it. Stage-4 edge thesis is therefore
+  modifier-extraction harness owns refreshing it; the tax itself is now readable from
+  the API (`GET /v3/entry_slips/estimate`, token + `UD-User-ID`) and its mechanism is
+  mapped in [underdog_api.md §6.8](../underdog_api.md#68-entry-slip-pricing): the
+  slip pays table × Π(pick multipliers) × m, with m = Π p_i / P(all same-game picks
+  hit), clipped at 1. Flex computes m from a Gaussian copula with one ρ per pair type
+  (QB pass yds × any same-team receiving yds: 0.48, whatever the receiver); Power from
+  a pair-specific, asymmetric joint that is 1.0 wherever it has no history (a rookie
+  TE, opposing QBs' yards). What the pricer does with that: (a) reproduce m_flex
+  offline from our de-vigged line probabilities and that ρ table, so Flex EV is
+  computable without a token; (b) our `corr_same_team.parquet` ρ against their 0.48
+  says which receivers Flex overcharges (low-target TE/RB) and which it undercharges
+  (a WR1 with ρ above 0.48); (c) positive-ρ pairs Power quotes at 1.0 (new pairings,
+  opposing QBs in a shootout) are free correlation and the only place a same-game
+  Power stack is ever fairly priced; (d) opposite-side and WR + WR pairs are quoted as
+  independent although the joint probability is lower, so they are always overpriced.
+  `underdog_payouts.json` carries the Power/Flex tables it quotes. Stage-4 edge thesis is therefore
   tax-vs-true-ρ mismatch per pair-type, not an untaxed coupling; B8's "taxed ⇒ kill"
   fires only if the tax-curve sweep (weak/strong/negative-ρ pairs, filler variation)
-  shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`) still
-  unverified.
+  shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`): probe P1
+  (2026-09-10) found `has_alternates` flagged on 5,447 of 12,272 `v1/over_under_lines`
+  rows but one line per (appearance, stat); `books/underdog.py` now fetches the rungs
+  inside a wall-clock budget, one market per call from
+  `v3/over_unders/<id>/alternate_projections` (spreads 25 rungs, yardage 11–16, TDs 3),
+  costed in [underdog_api.md §9.1/§9.4](../underdog_api.md#94-alternate-rungs), and
+  scrapes the lobby-only team and game markets (team totals, period lines,
+  both-teams-to-score) catalogued in
+  [underdog_api.md §7.6](../underdog_api.md#76-team-and-game-markets).
 - **Payout tables are consumed, not owned.** UD per-season table drift is a
-  `hygiene-closeout` housekeeping item, not this lane's; Sleeper's table lives in
-  `sleeper-parity` stage 0. This lane reads whatever those lanes/stage-0 captures land.
+  `hygiene-closeout` housekeeping item, not this lane's; Sleeper's payout data live in
+  `sleeper_payouts.json`, which `sleeper-parity` owns. This lane reads whatever those
+  lanes/stage-0 captures land.
 
 ## 4. Locked decisions
 
@@ -168,35 +196,45 @@ relevant stage-0 capture, revise this brief in place, resume.
   for Stages 3–4 (CLAUDE.md "research-first" convention). Any later dependence-mechanism
   change (e.g. adopting the ladders brief's t-copula branch, or a new copula family)
   needs a fresh `research-analyst` dispatch — no waiver.
+- 2026-09-12 — **Product names stay the DFS apps' own** (owner). Ladder, Combo Entry
+  and game lines keep their official names everywhere the dashboard voices them; the
+  prophecy-voice candidates ("Ascension" / "Conjunction" / "Omen") are dropped — a
+  renamed product would not match what the owner sees in the app.
+- 2026-09-12 — **Game-total star fill = gradient blend of the two teams' colours**
+  (owner). A game-total pick has no single team, so its constellation star fills with a
+  gradient from one team's primary colour to the other's (`theme.team_colors()`),
+  centre-anchored between the two clusters (spec §5b); moneyline and spread stars keep
+  the single-team fill.
 
 ## 5. Module footprint & canonical paths
 
-Per `CONTRIBUTING.md` §Package Map; do not recreate deleted shims.
+Per `docs/ARCHITECTURE.md` §Package Map; do not recreate deleted shims.
 
 | Path | Status | Role |
 |---|---|---|
 | `strategies/underdog_ladders.py` (NEW) | conflict-free | Ladders pricer + candidate builder, rhyming with `underdog_pickem.py` (ladders brief §0, A6, A8) |
-| `strategies/` Rivals difference-pricer (NEW module, name TBD at Stage 1) | conflict-free | `P(A−B>k)` pricer feeding the existing `underdog_pickem.py` Rivals orchestration — does not replace it |
+| `strategies/` Rivals difference-pricer | **RETIRED** | Never built — Underdog dropped Rivals 2026-09-10 (Stage 1) |
 | `strategies/` combo-EV module (NEW, Stage 4 only) | conflict-free | B1 combo-EV algebra + B5 mixed-slip composition, import-only against `parlay.py` |
 | `scripts/audit_ladder_calibration.py` (NEW) | conflict-free | Ladders brief A7 validation harness (Track 1 reliability, Track 2 joint calibration) |
 | `scripts/estimate_game_line_corr.py` (NEW) | conflict-free | Gamelines brief B3 standalone ρ estimator; **do not build a second census** — extends `census_parlay_pairs.py --source gameline` per both briefs |
 | `scripts/census_parlay_pairs.py` (NEW when built) | conflict-free | Shared with `parlay-dependence` Stage 0; add `--source gameline` mode here rather than forking |
-| `books.py` (ingestion only) | conflict-free | Sleeper alt-line de-vig (Stage 2a); game-line contract/combo payload capture (Stage 0/4); **never touches `prediction/`** |
+| `books/underdog.py` + `books/sleeper.py` (ingestion only) | conflict-free | Underdog team/game markets + budgeted alternate lines now ingested; Sleeper alt-line de-vig (Stage 2a); game-line contract/combo payload capture (Stage 0/4); **never touches `prediction/`** |
 | `data/config/stat_map.json`, payout config | conflict-free | New ingestion entries; payout tables consumed, never owned (§3) |
 | `prediction/correlation.py`, `prediction/parlay.py` | **import-only** | Every new pricer imports Σ assembly / MVN+push-MC machinery; zero edits at v1 (all stage-0 briefs confirmed this composes cleanly) |
-| `prediction/cli.py`, `persist.py` | **QUEUED** | Alt-line columns into snapshots (Stage 2c), scoring-path wiring (Stage 2b) — behind `sleeper-parity`'s declared footprint |
-| `training/correlate.py`, `prediction/correlation.py` Σ assembly | **QUEUED (Stage 5)** | Team markets / game-line legs into the correlation engine — behind `sleeper-parity`, never interleaved with `parlay-dependence` |
+| `prediction/cli.py`, `persist.py` | conflict-free | Alt-line columns into snapshots (Stage 2c), scoring-path wiring (Stage 2b) |
+| `training/correlate.py`, `prediction/correlation.py` Σ assembly | **CONFLICTED (Stage 5)** | Team markets / game-line legs into the correlation engine — never interleaved with `parlay-dependence` |
 | `tests/golden/` | conflict-free | One golden suite per new pricer, vs hand-computed cases |
 
 Serving path is touched at Stages 2b/2c/4/5 ⇒ the inference-path compatibility checklist
-applies (`operation_ship_references.md` — reference, don't restate).
+applies ([`model_improvement_track.md`](model_improvement_track.md) §7.3 — reference, don't
+restate).
 
 ## 6. Stage plan
 
 **Stage 0 — Product verification & payload capture.** Conflict-free; owner-assisted for
 in-app-only facts.
 - Entry: none.
-- Scope: `books.py` read paths (capture only, no scoring changes); manual payload logging.
+- Scope: `books/` read paths (capture only, no scoring changes); manual payload logging.
 - Capture list: UD Prediction Picks + Combo Entries payloads (fee split, roll mechanics,
   pairing restrictions, cash-out, per-contract fee — gamelines brief B7 checklist in full);
   Ladders offer payloads (rung structure, per-slip payout table — never hardcode); `get_ud`
@@ -213,38 +251,26 @@ in-app-only facts.
   API-absent (VERIFY-6 fails) → Stage 3 flips to the manual-entry mode (ladders brief §A8)
   rather than killing.
 
-**Stage 1 — Rivals difference-pricer.** Conflict-free (import-only; verify at entry).
-- Entry: Stage 0 Rivals-relevant facts adjudicated (contract/pairing rules don't touch
-  Rivals directly — this stage can start once the plain margin-behavior audit is done).
-- Scope: `strategies/` new module (import-only against `correlation.py`); `tests/golden/`.
-- Work: margin-behavior audit on Rivals history first, then a `P(A−B>k)` pricer with push
-  handling at integer `k`, consuming the incumbent ρ at d=2 (copula brief Q5 — Rivals-first
-  is a YES; bivariate Gaussian suffices, the upgrade path improves the ρ number, not the
-  machinery). Golden tests vs hand-computed bivariate-normal cases; offline EV table on
-  historical Rivals offers.
-- Acceptance: golden suite green; offline EV table shows the pricer's `P(A−B>k)` tracks
-  realized margin outcomes within the audit harness's reliability band.
-- Est. 1–2 sessions.
-- Kill: audit shows Rivals margins are already sharply priced with no exploitable gap →
-  record verdict + evidence pointer, close this sub-item DONE(no-ship). Note: this is the
-  "cheap early product win" `model_improvement_track.md` §6.11 names — that doc's Rivals
-  bullet now points here.
+**Stage 1 — Rivals difference-pricer.** Retired 2026-09-10 per the owner.
+- Underdog dropped Rivals (`beta/v3/rival_lines` answers empty; Ladders replaced it). Do not
+  start.
 
 **Stage 2 — Alt-line hardening.** Mixed conflict status by sub-item.
-- **2a — Sleeper alt-line de-vig in `books.py` ingestion.** Conflict-free (sleeper-parity
-  holds `books.py` read-only in its own lane per its §4; append a heads-up ledger line to
-  `sleeper-parity.md` §10 on any Sleeper-path change). Entry: Stage 0 Sleeper capture done.
-- **2b — `ladder` table consumption for rung-level book probs at alt lines.** Ingestion-side
-  work is free; any scoring-path edit to `prediction/cli.py` or `model_prob.py` **QUEUES**
-  behind `sleeper-parity`. Entry: `ladder` census (§3 command) confirms sufficient rung
-  density at current offers.
-- **2c — alt-line columns into snapshots** (`persist.py`). **QUEUES** behind
-  `sleeper-parity`; coordinate with `dashboard-ux` before adding any new column the
-  dashboard will read.
+- **2a — Sleeper alt-line de-vig in `books/sleeper.py` ingestion.** Conflict-free
+  (sleeper-parity holds `books/sleeper.py` read-only in its own lane per its §4; append a
+  heads-up ledger line to `sleeper-parity.md` §10 on any Sleeper-path change). Entry: Stage 0
+  Sleeper capture done.
+- **2b — `ladder` table consumption for rung-level book probs at alt lines.** Conflict-free,
+  scoring-path edits to `prediction/cli.py` or `model_prob.py` included. Entry: `ladder`
+  census (§3 command) confirms sufficient rung density at current offers.
+- **2c — alt-line columns into snapshots** (`persist.py`). Conflict-free; check
+  [`dashboard_ux_redesign.md`](../dashboard_ux_redesign.md) §7, the UI's reading list,
+  before adding any new column the dashboard will read.
 - Acceptance: 2a — de-vigged alt lines land in the archive with a golden test; 2b — rung
   join density measured and either lands or is deferred per the kill rule; 2c — new
-  snapshot columns documented in `persist.py`'s schema comment, dashboard-ux notified.
-- Est. 1 session (2a) + 1–2 sessions each for 2b/2c once unqueued.
+  snapshot columns documented in `persist.py`'s schema comment and in
+  `dashboard_ux_redesign.md` §7.
+- Est. 1 session (2a) + 1–2 sessions each for 2b/2c.
 - Kill (2b only): ladder-table join too sparse at current offer volume to beat the
   incumbent dist-inversion path → keep dist-inversion, record verdict. 2a/2c have no kill
   condition (pure hardening); if blocked, PARK AND PIVOT per §8.
@@ -270,8 +296,8 @@ in-app-only facts.
   sub-item BLOCKED (on: model-track calibration) for that league. A t-copula does not
   rescue a marginal-survival miscalibration (ladders brief, KILL rule) — don't try.
 
-**Stage 4 — Game-line combo engine v1 (CONDITIONAL).** Conflict-free (`books.py` ingestion
-+ `stat_map`/payout config + new `strategies/` module + standalone `scripts/`).
+**Stage 4 — Game-line combo engine v1 (CONDITIONAL).** Conflict-free (`books/underdog.py`
+ingestion + `stat_map`/payout config + new `strategies/` module + standalone `scripts/`).
 - Entry: Stage 0 verified **including B7-P4**, and the owner go/no-go from the Stage-0
   packet recorded in this brief's §4 (a new dated line) before any pricer code lands.
 - Scope: new combo-EV `strategies/` module; `scripts/estimate_game_line_corr.py`
@@ -290,19 +316,19 @@ in-app-only facts.
 - Kill: any of the B8 conditions fires (app prices event×pick correlation; pairing rules
   block correlated combos; fees exceed median edge; contract prices are strictly sharper
   than our consensus) → close the combo sub-lane DONE(no-ship); game-line rows stay
-  dashboard-only book-implied per `dashboard_ux_redesign.md` §8 scar item 4.
+  dashboard-only book-implied per the `dashboard_ux_redesign.md` §8 game-line scar.
 
-**Stage 5 — Correlation-engine + snapshot integration.** **CONFLICTED** — queues entirely
-behind `sleeper-parity`; never interleave with `parlay-dependence` (roadmap §5.1).
-- Entry: `sleeper-parity` merged; if `parlay-dependence` (D3) fired first, this stage
+**Stage 5 — Correlation-engine + snapshot integration.** **CONFLICTED** — never interleave
+with `parlay-dependence` (roadmap §5.1).
+- Entry: `sleeper-parity` merged (met); if `parlay-dependence` (D3) fired first, this stage
   delivers through `parlay-dependence`'s stages instead, with this lane supplying the ρ
   design (B3's estimand + estimator) as an input, not a competing implementation.
 - Scope: team markets into `correlate.py`/`correlation.py` Σ assembly; game-line legs into
-  beam/slip scoring; snapshot artifacts flip the `dashboard-ux` scars this lane's earlier
-  stages left open.
+  beam/slip scoring; snapshot artifacts flip the `dashboard_ux_redesign.md` §8 scars this
+  lane's earlier stages left open.
 - Acceptance: held-out joint calibration on team-market pairs beats independence per the
-  copula brief's estimator conventions; `dashboard_ux_redesign.md` §8 scar item 4 clears.
-- Est. 2–3 sessions once unblocked.
+  copula brief's estimator conventions; the `dashboard_ux_redesign.md` §8 game-line scar clears.
+- Est. 2–3 sessions.
 - If-it-fails: `parlay-dependence` replaced Σ assembly first → re-express this stage's ρ
   work on the new path (branch, not kill — the estimator design survives either way).
 
@@ -339,8 +365,7 @@ at the swimlane index for the next lane.
   t-copula branch, a new copula family, or a materially different pricing formulation).
 - `devel-ship-curator` — every devel-bound PR.
 - `refactoring-specialist` — per the five CLAUDE.md triggers.
-- `prompt-engineer` — new briefs / major re-briefs, including the Stage-1 naming decision
-  for the Rivals pricer module once it's made.
+- `prompt-engineer` — new briefs / major re-briefs.
 
 ## 9. Session definition of done
 
@@ -357,6 +382,9 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-09-11 · Underdog scraper rebuilt on the lobby API (`books/underdog.py`): team/game
+  markets + budgeted alternate lines ingested, `/v1/teams` and `rival_lines` requests gone;
+  Rivals retired across scraper, pickem variant and payouts · next: unchanged
 - 2026-07-11 · status trued · roadmap audit: QUEUED→ACTIVE (stage 0 near-done per the
   entries below; residue = tax-curve sweep + owner packet) · next: unchanged
 - 2026-07-11 · reconciler dashboard-only + fold pipeline · interactive CLI deleted (core
@@ -400,4 +428,4 @@ at the swimlane index for the next lane.
   ladders brief (`docs/archive/researcher_ladders_stage0.md`) + gamelines brief
   (`docs/archive/researcher_gamelines_stage0.md`) committed; audit dispositions cross-checked
   against `PARLAY_AUDIT.md`; serve-time budget locked (≤15 min heavy day) · next: Stage-0
-  payload capture (owner-assisted; B7-P4 first) or Stage-1 Rivals pricer.
+  payload capture (owner-assisted; B7-P4 first).

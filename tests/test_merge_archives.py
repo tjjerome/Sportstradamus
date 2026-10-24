@@ -39,6 +39,14 @@ CREATE TABLE odds (
 """
     + _LINES_DDL
 )
+# Created only for the archives that carry ladder rows — a snapshot off a box predating the
+# ladder DDL has no such table, and the merge must soft-skip rather than reject it.
+_LADDER_DDL = """
+CREATE TABLE ladder (
+    league TEXT, market TEXT, game_date DATE, entity TEXT,
+    book TEXT, line DOUBLE, p_over DOUBLE, observed_at TIMESTAMP
+);
+"""
 
 _DATE = datetime.date(2026, 6, 1)
 _T0 = datetime.datetime(2026, 6, 1, 0, 0, 0)
@@ -55,13 +63,19 @@ A_LINE = ("NBA", "PTS", _DATE, "Player A", 25.5, _T0)
 B_LINE = ("NBA", "PTS", _DATE, "Player B", 18.5, _T0)
 C_LINE = ("NBA", "PTS", _DATE, "Player C", 30.5, _T0)
 
+# A and A2 are two rungs of one Underdog poll — same entity and book, different line — so a
+# full-row union has to keep both.
+A_LADDER = ("NBA", "PTS", _DATE, "Player A", "Underdog", 25.5, 0.52, _T0)
+A2_LADDER = ("NBA", "PTS", _DATE, "Player A", "Underdog", 27.5, 0.41, _T0)
+C_LADDER = ("NBA", "PTS", _DATE, "Player C", "fanduel", 30.5, 0.55, _T0)
+
 # Same observations on a migrated (9-col) archive: the 7-col identity + (under_prob, line).
 A_ODDS9 = (*A_ODDS, 0.55, 25.5)
 B_ODDS9 = (*B_ODDS, 0.60, 18.5)
 C_ODDS9 = (*C_ODDS, 0.48, 30.5)
 
 
-def _build(path, odds_rows, lines_rows, *, shapefree=False):
+def _build(path, odds_rows, lines_rows, *, shapefree=False, ladder_rows=()):
     con = duckdb.connect(str(path))
     con.execute(_DDL_V2 if shapefree else _DDL)
     if odds_rows:
@@ -69,6 +83,9 @@ def _build(path, odds_rows, lines_rows, *, shapefree=False):
         con.executemany(f"INSERT INTO odds VALUES ({placeholders})", odds_rows)
     if lines_rows:
         con.executemany("INSERT INTO lines VALUES (?, ?, ?, ?, ?, ?)", lines_rows)
+    if ladder_rows:
+        con.execute(_LADDER_DDL)
+        con.executemany("INSERT INTO ladder VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ladder_rows)
     con.close()
 
 
@@ -209,3 +226,39 @@ def test_merge_both_migrated_dedups_on_identity(tmp_path):
     merge_archives(source, target)
 
     assert set(_read(target, "odds")) == {A_ODDS9, B_ODDS9, C_ODDS9}
+
+
+def test_ladder_rungs_survive_merge_and_dedup(tmp_path):
+    """Alt-line and DFS-poll rungs merge like odds and lines: every rung held by either side
+    survives — including two rungs of the same poll — and bit-identical rungs collapse."""
+    target = tmp_path / "dev.duckdb"
+    source = tmp_path / "prod.duckdb"
+    _build(target, [A_ODDS], [], ladder_rows=[A_LADDER, A2_LADDER])
+    _build(source, [A_ODDS], [], ladder_rows=[A_LADDER, C_LADDER])
+
+    report = merge_archives(source, target)
+
+    assert set(_read(target, "ladder")) == {A_LADDER, A2_LADDER, C_LADDER}
+    assert report["ladder"] == {
+        "target_before": 2,
+        "source": 2,
+        "merged": 3,
+        "added": 1,
+        "shared": 1,
+    }
+
+
+def test_ladder_absent_on_one_side_soft_skips(tmp_path):
+    """A source predating the ladder DDL still merges: odds and lines fold in, the target's
+    ladder rows are left alone rather than dropped, and the report records the skip."""
+    target = tmp_path / "dev.duckdb"
+    source = tmp_path / "prod.duckdb"
+    _build(target, [A_ODDS], [A_LINE], ladder_rows=[A_LADDER, A2_LADDER])
+    _build(source, [C_ODDS], [C_LINE])
+
+    report = merge_archives(source, target)
+
+    assert report["ladder"] is None
+    assert report["odds"]["added"] == 1
+    assert report["lines"]["added"] == 1
+    assert set(_read(target, "ladder")) == {A_LADDER, A2_LADDER}

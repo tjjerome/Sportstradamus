@@ -1,16 +1,13 @@
-"""Tests for Phase 3 Step 1.a/1.b CLV bring-up.
+"""Tests for Phase 3 Step 1.b CLV bring-up.
 
-Covers the close-snapshot freshness warning, the per-segment Kelly
-shrinkage getter, and the side-effect parquet emitted by
-:func:`clv.summarize`.
+Covers the per-segment Kelly shrinkage getter and the segments parquet
+:func:`clv.persist_segments` writes.
 """
 
 from __future__ import annotations
 
-import logging
-from datetime import UTC, datetime, timedelta
+import math
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -23,51 +20,6 @@ def _isolated_segments_parquet(tmp_path, monkeypatch):
     target = tmp_path / "clv_segments.parquet"
     monkeypatch.setattr(clv, "_segments_parquet_path", lambda: target)
     return target
-
-
-def _commence(hour: int = 19) -> datetime:
-    return datetime(2026, 5, 4, hour, 0, tzinfo=UTC)
-
-
-def test_check_close_sample_freshness_emits_one_warning_per_segment(caplog):
-    samples = pd.DataFrame(
-        [
-            # Two stale legs in the same segment → one warning.
-            {
-                "league": "NBA",
-                "market": "points",
-                "date": "2026-05-04",
-                "commence_time": _commence(),
-                "sample_ts": _commence() - timedelta(minutes=180),
-            },
-            {
-                "league": "NBA",
-                "market": "points",
-                "date": "2026-05-04",
-                "commence_time": _commence(),
-                "sample_ts": _commence() - timedelta(minutes=240),
-            },
-            # Fresh leg → no warning even though same segment.
-            {
-                "league": "NBA",
-                "market": "rebounds",
-                "date": "2026-05-04",
-                "commence_time": _commence(),
-                "sample_ts": _commence() - timedelta(minutes=30),
-            },
-        ]
-    )
-    logger = logging.getLogger("test.clv_freshness")
-    logger.setLevel(logging.WARNING)
-    with caplog.at_level(logging.WARNING, logger="test.clv_freshness"):
-        out = clv.check_close_sample_freshness(samples, logger=logger)
-
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "NBA" in warnings[0].getMessage()
-    assert "points" in warnings[0].getMessage()
-    assert len(out) == 1
-    assert int(out.iloc[0]["n"]) == 2
 
 
 def test_persist_segments_writes_parquet(_isolated_segments_parquet):
@@ -110,28 +62,43 @@ def test_persist_segments_writes_parquet(_isolated_segments_parquet):
     assert row["frac_beat_close"] == pytest.approx(1.0)
 
 
-def test_get_segment_calibration_returns_fallback_when_missing(
-    _isolated_segments_parquet,
-):
-    # No parquet on disk yet.
-    shrink, n = clv.get_segment_calibration("NBA", "points")
-    assert shrink == 1.0
-    assert n == 0
-
-
-def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
+def _write_segment(path, *, n, frac_beat_close, market="points"):
     pd.DataFrame(
         [
             {
                 "League": "NBA",
-                "Market": "points",
+                "Market": market,
                 "Platform": "Underdog",
-                "n": 40,
+                "n": n,
                 "market_clv": 0.05,
-                "frac_beat_close": 0.75,
+                "frac_beat_close": frac_beat_close,
             }
         ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
+    ).to_parquet(path, index=False)
+
+
+def test_get_segment_calibration_without_a_segment_is_nan(_isolated_segments_parquet):
+    # No parquet on disk yet. The NaN is what resolve_shrinkage reads as "missing"; the old
+    # 1.0 read as full trust in a cell nothing had measured.
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == 0
+
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.75, market="rebounds")
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == 0
+
+
+def test_get_segment_calibration_below_the_floor_is_nan_with_its_n(_isolated_segments_parquet):
+    _write_segment(_isolated_segments_parquet, n=clv.CLV_SEGMENT_MIN_N - 1, frac_beat_close=1.0)
+    shrink, n = clv.get_segment_calibration("NBA", "points")
+    assert math.isnan(shrink)
+    assert n == clv.CLV_SEGMENT_MIN_N - 1
+
+
+def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.75)
     shrink, n = clv.get_segment_calibration("NBA", "points")
     # 0.75 → 2*(0.75-0.5) = 0.5
     assert shrink == pytest.approx(0.5)
@@ -139,37 +106,7 @@ def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
 
 
 def test_get_segment_calibration_clamps_below_half(_isolated_segments_parquet):
-    pd.DataFrame(
-        [
-            {
-                "League": "NBA",
-                "Market": "points",
-                "Platform": "Underdog",
-                "n": 40,
-                "market_clv": -0.05,
-                "frac_beat_close": 0.30,
-            }
-        ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
+    _write_segment(_isolated_segments_parquet, n=40, frac_beat_close=0.30)
     shrink, n = clv.get_segment_calibration("NBA", "points")
     assert shrink == 0.0
     assert n == 40
-
-
-def test_lookback_warn_threshold_constant_is_stable():
-    assert clv.CLOSE_LOOKBACK_WARN_MINUTES == 90
-    # Exactly at the threshold → not stale.
-    samples = pd.DataFrame(
-        [
-            {
-                "league": "NBA",
-                "market": "points",
-                "date": "2026-05-04",
-                "commence_time": _commence(),
-                "sample_ts": _commence() - timedelta(minutes=90),
-            }
-        ]
-    )
-    out = clv.check_close_sample_freshness(samples)
-    assert out.empty
-    assert not np.isnan(clv.CLOSE_LOOKBACK_WARN_MINUTES)

@@ -1,9 +1,9 @@
 """Empirical calibration audit for beam-search parlay candidates.
 
-Reads ``data/parlay_hist.parquet`` (written by ``prophecize`` and resolved by
-``reflect``), filters to the last ``--days`` (default 90) of resolved
+Reads the parlay history (``data/runtime/parlay_hist/``, written by ``prophecize``
+and resolved by ``reflect``), filters to the last ``--days`` (default 90) of resolved
 parlays, recovers each parlay's predicted joint probability from
-``Model EV`` and the platform payout table, buckets by predicted
+``Model EV`` and the stored payout (``Boost``), buckets by predicted
 probability deciles, and computes the empirical hit rate per decile from
 the resolved ``Legs Resolved`` / ``Misses`` columns.
 
@@ -19,7 +19,7 @@ Outputs (timestamped with today's date):
   predicted-probability bin edges, mean predicted probability, empirical
   hit rate, sample count, and Wilson 95% confidence bounds.
 
-If ``parlay_hist.parquet`` is missing or contains zero resolved rows in the
+If the parlay history is empty or contains zero resolved rows in the
 window, the script writes an empty CSV plus a placeholder PNG explaining
 the data gap, so the audit document can still reference the artifacts.
 """
@@ -36,19 +36,8 @@ from matplotlib import pyplot as plt
 
 from sportstradamus.helpers.io import read_parlay_hist
 
-# Underdog/PrizePicks per-size payout multipliers used inside
-# ``beam_search_parlays`` to convert a joint probability into ``Model EV``.
-# Indexed by ``bet_size - 2`` (i.e. a 2-leg parlay reads index 0).
-PAYOUT_TABLE: dict[str, list[float]] = {
-    "Underdog": [3.5, 6.5, 10.9, 20.2, 39.9],
-    "PrizePicks": [3.0, 5.3, 10.0, 20.8, 38.8],
-    "Sleeper": [1.0, 1.0, 1.0, 1.0, 1.0],
-    "ParlayPlay": [1.0, 1.0, 1.0, 1.0, 1.0],
-    "Chalkboard": [1.0, 1.0, 1.0, 1.0, 1.0],
-}
-
-# Mirrors the ``np.clip(payout_base * boost, 1, 100)`` line in
-# ``beam_search_parlays`` so the inverse computation stays in sync.
+# Mirror prediction.payouts PAYOUT_CLIP_LO/HI, which bound the payout stored as
+# ``Boost``; importing them would load the whole prediction package.
 PAYOUT_FLOOR: float = 1.0
 PAYOUT_CEIL: float = 100.0
 
@@ -64,25 +53,15 @@ DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs" / "archive" / "evi
 
 
 def _recovered_payout(row: pd.Series) -> float:
-    """Reconstruct ``clip(payout_base * boost, 1, 100)`` for a stored row."""
-    platform = row.get("Platform")
-    bet_size = row.get("Bet Size")
-    boost = row.get("Boost", 1.0)
-    if platform not in PAYOUT_TABLE or pd.isna(bet_size):
-        return float("nan")
-    idx = int(bet_size) - 2
-    table = PAYOUT_TABLE[platform]
-    if idx < 0 or idx >= len(table):
-        return float("nan")
-    return float(np.clip(table[idx] * float(boost or 1.0), PAYOUT_FLOOR, PAYOUT_CEIL))
+    """``Boost`` is stored payout-inclusive: the entry-size payout base is already applied."""
+    return float(np.clip(row["Boost"], PAYOUT_FLOOR, PAYOUT_CEIL))
 
 
 def _recover_joint_prob(row: pd.Series) -> float:
     """Recover the copula-based predicted joint probability.
 
-    ``beam_search_parlays`` stores ``Model EV = payout * mvn.cdf(...)``
-    where ``payout = clip(payout_base * boost, 1, 100)``. Inverting gives
-    ``joint_prob = Model EV / payout``.
+    ``beam_search_parlays`` stores ``Model EV = payout * mvn.cdf(...)`` and the
+    payout itself as ``Boost``, so ``joint_prob = Model EV / Boost``.
     """
     payout = _recovered_payout(row)
     model_ev = row.get("Model EV")
@@ -117,11 +96,11 @@ def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
-    """Load ``parlay_hist.parquet`` and filter to resolved rows in the window.
+    """Load the parlay history and filter to resolved rows in the window.
 
     A resolved row has non-null ``Legs Resolved`` and ``Misses`` (filled by
     ``reflect``). Rows whose ``Date`` is before ``window_start`` or whose
-    platform/bet-size is unknown are dropped.
+    recovered ``Joint P`` is missing or outside [0, 1] are dropped.
     """
     df = read_parlay_hist()
     if df.empty:
@@ -138,7 +117,7 @@ def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     }
     missing = required - set(df.columns)
     if missing:
-        raise RuntimeError(f"parlay_hist.parquet missing columns: {sorted(missing)}")
+        raise RuntimeError(f"parlay history missing columns: {sorted(missing)}")
 
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date

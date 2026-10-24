@@ -9,10 +9,10 @@ when Gate-2 graduation runs, cells that pass move ``shipped: "devel"`` →
 
 Usage
 -----
-    poetry run generate-ship-config --branch main          # mutate stat_meta in place
-    poetry run generate-ship-config --branch main --dry-run
-    poetry run generate-ship-config --branch devel         # validate + summarize (no mutation)
-    poetry run generate-ship-config --branch devel --prune
+    sportstradamus ship config --branch main          # mutate stat_meta in place
+    sportstradamus ship config --branch main --dry-run
+    sportstradamus ship config --branch devel         # validate + summarize (no mutation)
+    sportstradamus ship config --branch devel --prune
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ import tabulate
 from sportstradamus.helpers.io import (
     LIVE_METRICS_PATH,
     MODEL_STATS_PATH,
+    VOLUME_STATS,
+    model_pickle_path,
     prune_model_pickle,
 )
 from sportstradamus.training.graduation import (
@@ -139,13 +141,18 @@ def promote_for_main(
     "--model-stats",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate 1 parquet path (defaults to data/model_stats.parquet). Read for both branches.",
+    help=(
+        "Gate 1 parquet path (defaults to data/training/model_stats.parquet). "
+        "Read for both branches."
+    ),
 )
 @click.option(
     "--live-metrics",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet). main only.",
+    help=(
+        "Gate 2 parquet path (defaults to data/runtime/live_metrics_per_market.parquet). main only."
+    ),
 )
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Print the changes; do not mutate or prune."
@@ -177,15 +184,18 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
             f"# branch=devel: active={n_active} withheld={n_withheld} "
             f"(stat_meta.json validated; no mutation)"
         )
+        # Report-only, like the free-passer sweep below: the weekly meditate warns on the
+        # same cells and the human owns the cull decision (flip shipped=withheld, or --prune).
         failing = served_cells_failing_ship(meta_map, model_stats_path)
         if failing:
             for lg, mk in failing:
                 click.echo(
-                    f"  ERROR {lg}/{mk}: shipped on devel but ship=False (offline gates fail)"
+                    f"  WARN {lg}/{mk}: shipped on devel but ship=False (offline gates fail)"
                 )
-            raise click.ClickException(
-                f"{len(failing)} served cell(s) fail the ship gate; "
-                "demote each to shipped=withheld in stat_meta.json"
+            click.secho(
+                f"# {len(failing)} served cell(s) fail the ship gate — cull by flipping "
+                "shipped=withheld in stat_meta.json (add --prune for immediate dark-out)",
+                fg="yellow",
             )
 
     # Free-passer sweep (report-only): cells the offline gate now passes that are
@@ -203,15 +213,24 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
         )
 
     if prune:
-        # Use the resolved (post-mutation) config to decide what to prune.
+        # Use the resolved (post-mutation) config to decide what to prune. A volume
+        # denominator is never pruned (prune_model_pickle's rule), so it is never listed.
         config = load_ship_config(branch=branch, path=meta_path)
-        pruned = 0
-        for league in ALL_MARKETS:
-            for market in ALL_MARKETS[league]:
-                cell = config.get(league, {}).get(market, WITHHELD)
-                if cell == WITHHELD and prune_model_pickle(league, market):
-                    pruned += 1
-        click.echo(f"pruned {pruned} withheld pickles")
+        prunable = [
+            (league, market)
+            for league, markets in ALL_MARKETS.items()
+            for market in markets
+            if config.get(league, {}).get(market, WITHHELD) == WITHHELD
+            and market not in VOLUME_STATS[league]
+            and model_pickle_path(league, market).exists()
+        ]
+        if dry_run:
+            for league, market in prunable:
+                click.echo(f"  would prune {league}/{market}")
+            click.echo(f"# (dry-run) {len(prunable)} withheld pickle(s) left in place")
+        else:
+            pruned = sum(prune_model_pickle(league, market) for league, market in prunable)
+            click.echo(f"pruned {pruned} withheld pickles")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.helpers import archive_market
+
 FILTER_AXES = (
     "dist",
     "target_normalization",
@@ -50,7 +52,10 @@ def _render_full(meta: pd.DataFrame) -> dict[str, list[str]]:
     for col, axis in zip(cols, FILTER_AXES, strict=True):
         options = sorted(meta[axis].dropna().unique()) if axis in meta.columns else []
         with col:
-            sel[axis] = st.multiselect(_AXIS_LABELS[axis], options, key=_widget_key(axis))
+            # Straight in a column, chips default to one scrolling row that hides selections.
+            sel[axis] = st.multiselect(
+                _AXIS_LABELS[axis], options, key=_widget_key(axis), wrap=True
+            )
     return sel
 
 
@@ -94,6 +99,10 @@ def apply_lab_filters(
     cells before the join, so only those ``(league, market)`` pairs survive in the
     result. Pure — no Streamlit calls — and returns ``df``'s own columns unchanged.
 
+    ``df``'s market is matched under the league's own key
+    (:func:`~sportstradamus.helpers.archive_market`), the name a cell goes by: history
+    keeps the platform's name for NBA and WNBA Underdog fantasy points.
+
     Args:
         df: Frame to filter; needs a league and a market column (either casing).
         meta: Frame from :func:`~sportstradamus.dashboard.data.load_stat_meta`.
@@ -110,10 +119,12 @@ def apply_lab_filters(
     for axis, values in sel.items():
         if values:
             mask &= meta[axis].isin(values)
-    allowed_cells = meta.loc[mask, ["league", "market"]]
+    allowed = set(meta.loc[mask, ["league", "market"]].itertuples(index=False, name=None))
 
     keys = pd.MultiIndex.from_frame(df[[league_col, market_col]])
-    allowed = pd.MultiIndex.from_frame(
-        allowed_cells.rename(columns={"league": league_col, "market": market_col})
-    )
-    return df.loc[keys.isin(allowed)]
+    kept = [
+        (league, market)
+        for league, market in keys.unique()
+        if (league, archive_market(league, market)) in allowed
+    ]
+    return df.loc[keys.isin(kept)]

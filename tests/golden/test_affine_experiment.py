@@ -122,31 +122,6 @@ def test_cli_rejects_structural_pool_method_on_nontraining_paths(monkeypatch, pa
     assert "requires model training" in result.output
 
 
-def test_structural_pool_method_skips_calibrated_g4_retry(monkeypatch):
-    """A structural cell (its ``posthoc_slug`` names a structural method) never takes the
-    g4-only calibrated retry — that path has no structural closure.
-    """
-    model_stats_row = MagicMock()
-    monkeypatch.setattr(training_cli, "_model_stats_row", model_stats_row)
-
-    training_cli._retry_calibrated_if_g4_only(
-        "NFL",
-        "rushing yards",
-        MagicMock(),
-        MagicMock(),
-        None,
-        {
-            "deterministic": False,
-            "matrix_only": False,
-            "posthoc_slug": AFFINE_STRATEGY,
-        },
-        {},
-        MagicMock(),
-    )
-
-    model_stats_row.assert_not_called()
-
-
 def test_affine_context_discovers_experts_and_routes_unfielded_positions_pooled():
     context = build_affine_expert_context(
         _context_splits(), league="NFL", support_floor=_tiny_support_floor()

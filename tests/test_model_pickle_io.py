@@ -33,3 +33,12 @@ def test_prune_missing_pickle_is_noop(tmp_path, monkeypatch) -> None:
     target = tmp_path / "NBA_PTS.mdl"
     monkeypatch.setattr(io, "model_pickle_path", lambda _lg, _mkt: target)
     assert io.prune_model_pickle("NBA", "PTS") is False
+
+
+def test_prune_keeps_volume_dependency_pickle(tmp_path, monkeypatch) -> None:
+    """A withheld volume denominator keeps its pickle: every other cell projects from it."""
+    target = tmp_path / "NFL_targets.mdl"
+    target.write_bytes(b"denominator")
+    monkeypatch.setattr(io, "model_pickle_path", lambda _lg, _mkt: target)
+    assert io.prune_model_pickle("NFL", "targets") is False
+    assert target.exists()

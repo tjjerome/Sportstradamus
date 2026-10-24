@@ -69,12 +69,14 @@ from sportstradamus.stats.nfl_fp_loader import (
 _ANY_A_TD_BONUS = 20
 _ANY_A_INT_PENALTY = 45
 
-# Coverage-scheme percentage columns in qb_coverage_matchup.parquet are
-# named ``playerStatsCoverageScheme{Scheme}PassingDropbacksPercentage``;
-# the MAN bucket is the per-game fraction of dropbacks faced against
-# man coverage. Cover2/3/4/6 buckets exist but aren't load-bearing for
-# the current comp config.
-_QB_COV_MAN_PCT_COL = "playerStatsCoverageSchemeManPassingDropbacksPercentage"
+# Man-coverage exposure in qb_coverage_matchup.parquet, as the dropback
+# counts rather than the per-game percentage beside them. The two forms are
+# algebraically the same season-to-date rate -- the percentage IS
+# man-dropbacks over dropbacks -- but only the counts survived FP's API
+# rebuild, and the count form avoids the displayed percentage's rounding.
+# Cover2/3/4/6 buckets exist but aren't load-bearing for the current comp
+# config.
+_QB_COV_MAN_DROPBACKS_COL = "playerStatsCoverageSchemeManPassingDropbacksTotal"
 _QB_COV_DROPBACKS_COL = "playerStatsPassingDropbacksTotal"
 
 # In the season-CSV separation-by-coverage file, the 5th sub-stratum
@@ -630,6 +632,32 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "sum",
         ("playerStatsSnapsOffenseTotal",),
     ),
+    # The inside-N snap columns moved out of the unfiltered snap tool when FP
+    # rebuilt its API -- they are now a filtered request, collected as their
+    # own kinds. Both spellings are listed so archived legacy snapshots and
+    # new pulls aggregate identically; whichever kind carries the column for a
+    # given week wins and the other yields nothing.
+    _Recipe(
+        "off_snaps_INSIDE10",
+        "offense_snaps_inside10",
+        "sum",
+        ("playerStatsInside10SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE20",
+        "offense_snaps_inside20",
+        "sum",
+        ("playerStatsInside20SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE10_pct",
+        "offense_snaps_inside10",
+        "weighted_mean",
+        (
+            "marketShareInside10SnapsOffenseTotal",
+            "playerStatsGamesPlayed",
+        ),
+    ),
     _Recipe(
         "off_snaps_INSIDE10",
         "offense_snaps",
@@ -682,8 +710,8 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
     _Recipe(
         "qb_cov_QB_MAN_pct",
         "qb_coverage_matchup",
-        "weighted_mean",
-        (_QB_COV_MAN_PCT_COL, _QB_COV_DROPBACKS_COL),
+        "weighted_rate",
+        (_QB_COV_MAN_DROPBACKS_COL, _QB_COV_DROPBACKS_COL),
     ),
     # Phase 3+4 asof additions -- QB pressure & throw-away & route-share signal.
     # These are recipe-only additions that the Phase 3+4
@@ -712,6 +740,138 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "receiving_route_share_report",
         "game_mean",
         ("marketShareReceivingRoutesTotal",),
+    ),
+    # passing_situation -- QB context splits (new-API raw counts, no column-map rename)
+    _Recipe(
+        "ps_blitz_share",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_man_share",
+        "passing_situation",
+        "weighted_rate",
+        ("man_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_two_high_share",
+        "passing_situation",
+        "weighted_rate",
+        ("two_high_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_pa_share",
+        "passing_situation",
+        "weighted_rate",
+        ("pa_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_motion_share",
+        "passing_situation",
+        "weighted_rate",
+        ("motion_dropbacks", "overall_dropbacks"),
+    ),
+    _Recipe(
+        "ps_pressured_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_yards", "pressured_attempts"),
+    ),
+    _Recipe(
+        "ps_clean_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("clean_yards", "clean_attempts"),
+    ),
+    _Recipe(
+        "ps_blitz_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_yards", "blitz_attempts"),
+    ),
+    _Recipe("ps_man_ypa", "passing_situation", "weighted_rate", ("man_yards", "man_attempts")),
+    _Recipe("ps_zone_ypa", "passing_situation", "weighted_rate", ("zone_yards", "zone_attempts")),
+    _Recipe(
+        "ps_two_high_ypa",
+        "passing_situation",
+        "weighted_rate",
+        ("two_high_yards", "two_high_attempts"),
+    ),
+    _Recipe("ps_pa_ypa", "passing_situation", "weighted_rate", ("pa_yards", "pa_attempts")),
+    _Recipe(
+        "ps_pressured_epa_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_epa", "pressured_dropbacks"),
+    ),
+    _Recipe(
+        "ps_clean_epa_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("clean_epa", "clean_dropbacks"),
+    ),
+    _Recipe(
+        "ps_blitz_int_rate",
+        "passing_situation",
+        "weighted_rate",
+        ("blitz_interceptions", "blitz_attempts"),
+    ),
+    _Recipe(
+        "ps_pressured_int_rate",
+        "passing_situation",
+        "weighted_rate",
+        ("pressured_interceptions", "pressured_attempts"),
+    ),
+    _Recipe(
+        "ps_scramble_yards_per_db",
+        "passing_situation",
+        "weighted_rate",
+        ("overall_scramble_yards", "overall_dropbacks"),
+    ),
+    # passing/rushing/receiving_basic -- expected-TD, RYOE + red-zone shares (new-API raw counts)
+    _Recipe(
+        "pass_xtd_per_att",
+        "passing_basic",
+        "weighted_rate",
+        ("exp_pass_td_total", "attempts"),
+    ),
+    _Recipe(
+        "pass_endzone_att_rate",
+        "passing_basic",
+        "weighted_rate",
+        ("endzone_attempts", "attempts"),
+    ),
+    _Recipe(
+        "rush_xtd_per_att",
+        "rushing_basic",
+        "weighted_rate",
+        ("exp_rush_td_total", "attempts"),
+    ),
+    _Recipe("rush_ryoe_per_att", "rushing_basic", "weighted_rate", ("ryoe_total", "attempts")),
+    _Recipe(
+        "rush_rz10_carry_share",
+        "rushing_basic",
+        "weighted_rate",
+        ("inside_10_rushes", "team_inside_10_active"),
+    ),
+    _Recipe(
+        "rush_rz5_carry_share",
+        "rushing_basic",
+        "weighted_rate",
+        ("inside_5_rushes", "team_inside_5_active"),
+    ),
+    _Recipe(
+        "rec_xtd_per_target",
+        "receiving_basic",
+        "weighted_rate",
+        ("exp_rec_td_total", "targets"),
+    ),
+    _Recipe(
+        "rec_xyards_per_target",
+        "receiving_basic",
+        "weighted_rate",
+        ("exp_rec_yards_total", "targets"),
     ),
 )
 
@@ -770,6 +930,19 @@ _COVERAGE_YPRR_SCHEMES: dict[str, tuple[str, ...]] = {
     "cover4": ("Cover4",),
     "cover6": ("Cover6",),
 }
+
+# Kinds pooled to build the per-scheme YPRR panel. The archived legacy
+# snapshots carry all five schemes in ``wr_coverage_matchup``; the current API
+# serves the Man leg there and each zone shell as its own filtered pull, so
+# every scheme's columns are present on some subset of the concatenated rows
+# and ``_fold_coverage_schemes`` sums across them either way.
+_COVERAGE_YPRR_KINDS: tuple[str, ...] = (
+    "wr_coverage_matchup",
+    "wr_coverage_matchup_cover2",
+    "wr_coverage_matchup_cover3",
+    "wr_coverage_matchup_cover4",
+    "wr_coverage_matchup_cover6",
+)
 
 # Phase 3+4 per-coverage separation (receiving_separation_by_coverage).
 # Bucket JSON has scheme-keyed inner dicts with
@@ -906,7 +1079,7 @@ def load_multi_window_one_year(
     season in the window set (the one whose comp pool we're really
     computing for). Players who only appear in earlier seasons inherit
     NaN on the PBP columns, which the downstream ``fillna(0)`` chain
-    in ``update_player_comps`` absorbs.
+    in ``_compute_comps`` absorbs.
 
     Args:
         windows: List of ``(season, start_week, end_week)`` triples.
@@ -942,11 +1115,6 @@ def _broadcast_team_coverage(
     the player-comp profile broadcasts them onto each player via the
     player's ``Team`` so the KNN distance metric can see them.
 
-    Uses the Pattern-A-only entry point on the team bridge to avoid
-    pulling matchup-specific ``lm_*`` columns (Pattern B) into the
-    comp profile -- those are forecasts for a specific game, not
-    season-to-date features.
-
     Args:
         profile: Per-player wide frame indexed by accent-stripped name
             with a ``Team`` column carrying the player's team abbreviation.
@@ -961,7 +1129,7 @@ def _broadcast_team_coverage(
     """
     if profile.empty or "Team" not in profile.columns:
         return profile
-    team_features = nfl_fp_team_weekly_aggregate.load_pattern_a_team_features(windows)
+    team_features, _ = nfl_fp_team_weekly_aggregate.load_team_and_defense_features(windows)
     if team_features.empty:
         return profile
     keep_cols = [
@@ -1254,7 +1422,7 @@ def _aggregate_separation_by_routes(
 def _aggregate_per_coverage_yprr(
     windows: Sequence[tuple[int, int, int]],
 ) -> pd.DataFrame:
-    """Per-(player, coverage-bucket) YPRR from ``wr_coverage_matchup`` snapshots.
+    """Per-(player, coverage-bucket) YPRR aggregated across :data:`_COVERAGE_YPRR_KINDS`.
 
     Emits two columns:
 
@@ -1272,8 +1440,15 @@ def _aggregate_per_coverage_yprr(
     man-vs-zone split is the load-bearing decomposition for the
     pass-catcher matchup signal.
     """
-    df = _load_kind_multi(windows, "wr_coverage_matchup")
-    if df.empty or PLAYER_GROUP_COL not in df.columns:
+    frames = [
+        frame
+        for kind in _COVERAGE_YPRR_KINDS
+        if not (frame := _load_kind_multi(windows, kind)).empty
+    ]
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
+    if PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
 
     pieces: dict[str, pd.Series] = {}

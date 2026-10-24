@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
@@ -17,29 +18,59 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import context_strip, game_headline, home_away
+from sportstradamus.dashboard.narrative import (
+    SHAPE_CAPTION,
+    SHAPE_DISPLAY,
+    context_strip,
+    game_headline,
+    home_away,
+    storyless_prophecy,
+)
+from sportstradamus.dashboard.theme import TONIGHT_CARD_HAS_ART
 
-# Legend glyph size: smaller than the default (40px) card glyph so five fit across
-# one row of st.columns(5).
+# Card-side glyph is the largest on this page; the legend row below shrinks to fit
+# five across one line of st.columns(5).
+_CARD_GLYPH_SIZE = 58
 _LEGEND_GLYPH_SIZE = 28
-
-# (shape, display name, meaning) for the legend row. The glyph-type name (comet,
-# supernova, …) is dropped — the glyph itself carries that; only the game-script
-# meaning stays as the caption.
-_SHAPE_LEGEND = [
-    ("shootout", "Shootout", "fast total"),
-    ("blowout", "Blowout", "lopsided"),
-    ("coinflip", "Coinflip", "close ML"),
-    # Not a game script: "even" is what classify_shape returns when no moneyline was
-    # quoted, so the caption names the gap rather than implying a read on the game.
-    ("even", "No line yet", "unquoted"),
-    ("grind", "Grind", "low total"),
-]
 
 # A game tipping off within this many minutes is "urgent" — it rises to the top of the
 # slate and its kicker turns red. Needs the Commence tip-off timestamp on the offers;
 # absent it (older snapshots, Sleeper), every game reads as non-urgent.
 _URGENT_MINUTES = 60
+
+# Each card shows the next horizontal slice of the ambient_tonight image: theme.py scales
+# it to the column width and tiles it downward, and this script shifts every card's image
+# layer up by the heights of the cards above it, so the slices abut and the sky loops once
+# the column outruns the image. Card heights depend on wrapped prose and the viewport, so
+# the offsets are measured in the browser rather than computed here. The observers are
+# created in the parent window so they outlive this iframe across Streamlit reruns; a
+# reload disconnects the previous pair first.
+_SLICE_SCRIPT = """
+<script>
+(() => {
+  const top = window.parent;
+  const doc = top.document;
+  const cards = () => doc.querySelectorAll(".tonight-card");
+  const layout = () => {
+    let offset = 0;
+    for (const card of cards()) {
+      card.style.backgroundPosition = `0 0, 0 ${-offset}px`;
+      offset += card.clientHeight;
+    }
+  };
+  const sizes = new top.ResizeObserver(layout);
+  const watch = () => {
+    cards().forEach((card) => sizes.observe(card));
+    layout();
+  };
+  (top.__tonightSlice || []).forEach((observer) => observer.disconnect());
+  const churn = new top.MutationObserver(watch);
+  churn.observe(doc.body, { childList: true, subtree: true });
+  top.__tonightSlice = [sizes, churn];
+  watch();
+})();
+</script>
+"""
 
 
 def _format_countdown(minutes: float) -> str:
@@ -52,11 +83,11 @@ def _format_countdown(minutes: float) -> str:
 
 def _render_shape_legend() -> None:
     """Compact 5-column glyph + name + caption row, shared vocabulary for the cards below."""
-    cols = st.columns(len(_SHAPE_LEGEND))
-    for col, (shape, name, sub) in zip(cols, _SHAPE_LEGEND, strict=False):
+    cols = st.columns(len(SHAPE_CAPTION))
+    for col, (shape, sub) in zip(cols, SHAPE_CAPTION.items(), strict=True):
         with col:
             st.markdown(game_shape_glyph(shape, size=_LEGEND_GLYPH_SIZE), unsafe_allow_html=True)
-            st.caption(f"**{name}**  \n{sub}")
+            st.caption(f"**{SHAPE_DISPLAY[shape]}**  \n{sub}")
 
 
 meta = load_current_meta()
@@ -69,7 +100,7 @@ stories = load_current_game_stories()
 game_context = load_current_game_context()
 
 if offers.empty:
-    st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
+    st.info("No current predictions. Run `sportstradamus prophecize` to generate offers.")
     st.caption("Prophecies arrive with the next data wave.")
     st.stop()
 
@@ -83,24 +114,31 @@ if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
+# The model-liked picks (Kelly > 0) are the legs the constellation draws as stars. Their
+# Star prominence is read against the league's own slate max, so a league with no depth
+# term (MLB tops out at 2.0) competes on equal footing with one that has it.
+liked = (
+    pd.to_numeric(offers["Kelly"], errors="coerce") > 0
+    if "Kelly" in offers.columns
+    else pd.Series(False, index=offers.index)
+)
+league_star_max = offers.loc[liked].groupby("League")["Star"].max()
+
 now = pd.Timestamp.now(tz="UTC")
 cards = []
 for game_key, group in offers.groupby(game_key_cols, sort=False):
     if isinstance(game_key, str):
         game_key = (game_key,)
     key_dict = dict(zip(game_key_cols, game_key, strict=False))
+    league = key_dict.get("League", "")
     game = str(group["Game"].iloc[0])
     date_raw = key_dict.get("Date", "")
     home, away = home_away(group)
 
-    # Favored legs: the model-liked picks (Kelly > 0) the constellation draws as stars,
-    # deduped to distinct Player/Market/Bet across books and alt-lines.
-    kelly = pd.to_numeric(group["Kelly"], errors="coerce") if "Kelly" in group else None
-    favored = (
-        group.loc[kelly > 0].drop_duplicates(["Player", "Market", "Bet"]).shape[0]
-        if kelly is not None
-        else 0
-    )
+    # Favored legs dedupe to distinct Player/Market/Bet across books and alt-lines.
+    picks = group.loc[liked[group.index]]
+    favored = picks.drop_duplicates(["Player", "Market", "Bet"]).shape[0]
+    star = picks["Star"].max() / league_star_max[league] if not picks.empty else 0.0
     # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
     edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
     top_edge = edges.max() if edges is not None and edges.notna().any() else None
@@ -115,11 +153,12 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     minutes = (commence - now).total_seconds() / 60 if pd.notna(commence) else float("inf")
     cards.append(
         {
-            "league": key_dict.get("League", ""),
+            "league": league,
             "home": home,
             "away": away,
             "date": date_raw,
             "favored": favored,
+            "star": star,
             "offer_count": len(group),
             "top_edge": top_edge,
             "headline": game_headline(stories, parlays, game=game, date=date_raw),
@@ -129,14 +168,16 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
         }
     )
 
-# Games tipping off within the hour rise to the top; then most favored legs first,
-# soonest tip-off as the tiebreak.
-cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["favored"], c["minutes"]))
+# Games tipping off within the hour rise to the top; within a tier the brightest star
+# leads, then the most favored legs, soonest tip-off as the tiebreak.
+cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["star"], -c["favored"], c["minutes"]))
 
 for c in cards:
     league, home, away = c["league"], c["home"], c["away"]
     top_edge, favored, offer_count = c["top_edge"], c["favored"], c["offer_count"]
     shape, minutes = c["shape"], c["minutes"]
+    # A game with no context row has no shape at all, which is the clouded reading too.
+    shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
 
     # A positive top edge lights the card; without one it drops to the muted "no edge"
     # state. The prophecy is the oracle voice — the story headline, or a dim placeholder.
@@ -150,7 +191,7 @@ for c in cards:
     prophecy = (
         f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]
-        else '<div class="tc-prophecy tc-dim">No prophecy tonight — thin edges</div>'
+        else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(favored)}</div>'
     )
     countdown = _format_countdown(minutes) if minutes != float("inf") else ""
     league_esc = html.escape(league)
@@ -171,7 +212,10 @@ for c in cards:
         f'<div class="tc-foot">{edge_badge}<span class="tc-meta">'
         f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
         f'<span class="tc-viewcue">View game →</span></div></div>'
-        f'<div class="tc-side">{game_shape_glyph(shape, size=58)}'
-        f'<span class="tc-shapename">{html.escape(shape.title())}</span></div></div>',
+        f'<div class="tc-side">{game_shape_glyph(shape, size=_CARD_GLYPH_SIZE)}'
+        f'<span class="tc-shapename">{shape_name}</span></div></div>',
         unsafe_allow_html=True,
     )
+
+if TONIGHT_CARD_HAS_ART:
+    components.html(_SLICE_SCRIPT, height=0)

@@ -24,11 +24,15 @@ from pathlib import Path
 from sportstradamus import creds
 
 # Headers that should never be persisted in a catalog entry —
-# Authorization and Cookie come from creds/keys.json, host/connection/
-# length are per-request, UA is set by the client, accept-encoding is
-# set by requests itself (we can only decompress gzip + deflate without
-# extra packages; letting the catalog ask for br/zstd produces undecoded
-# binary bodies that fail json parsing).
+# Authorization and Cookie come from creds/keys.json, Referer/Origin/UA are
+# set by the client, host/connection/length are per-request, and
+# accept-encoding is set by requests itself (we can only decompress gzip +
+# deflate without extra packages; letting the catalog ask for br/zstd
+# produces undecoded binary bodies that fail json parsing).
+#
+# The rest is browser telemetry a "Copy as cURL" drags along. Referer is the
+# one that actually bites: it records whichever page you happened to have
+# open, so two captures of the same tool yield different catalog entries.
 _STRIPPED_CURL_HEADERS = frozenset(
     {
         "authorization",
@@ -42,6 +46,22 @@ _STRIPPED_CURL_HEADERS = frozenset(
         "alt-used",
         "te",
         "accept-encoding",
+        "referer",
+        "origin",
+        "accept-language",
+        "cache-control",
+        "pragma",
+        "dnt",
+        "sec-gpc",
+        "priority",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "sec-fetch-user",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
     }
 )
 

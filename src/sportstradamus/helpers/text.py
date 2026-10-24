@@ -1,9 +1,9 @@
-"""String normalization and small collection utilities.
+"""Name normalization and the MLB schedule readers.
 
 The name-normalization path is load-bearing: sportsbooks spell player
 names inconsistently (accents, suffixes, parenthesized team tags) and
 ``remove_accents`` is the canonical entry point that the archive, the
-stats loaders, and the prop-export writer all run names through.
+stats loaders and the DFS scrapers all run names through.
 """
 
 import datetime
@@ -11,19 +11,34 @@ import functools
 import re
 import unicodedata
 
-import numpy as np
-import pandas as pd
 import statsapi as mlb
 
 from sportstradamus.helpers.config import name_map
 
-# Trailing rows used to fit the recent-form slope in ``get_trends``; below
-# MIN_TREND_ROWS the fit is too noisy to trust, so the slope is reported as 0.
-TREND_WINDOW = 5
-MIN_TREND_ROWS = 3
-
 # How far ahead to fetch MLB schedules when building the probable-pitcher dict.
 MLB_PITCHER_LOOKAHEAD_DAYS = 7
+
+# The MLB feed's detailed game states whose box score will not change again. A game called
+# early stays "Completed Early" for good. "Game Over" is left out: its box score is not
+# final yet, and the feed lists that game again as "Final".
+MLB_FINAL_BOX_SCORE_STATES = frozenset({"Final", "Completed Early"})
+
+# The MLB feed's detailed game states that end a game or call it off; a cause, when one
+# is given, follows a colon ("Postponed: Rain"). Every other state is a game still to
+# come or under way: "Warmup" and "Delayed Start: Rain" both come before first pitch.
+MLB_FINISHED_STATES = MLB_FINAL_BOX_SCORE_STATES | {
+    "Game Over",
+    "Postponed",
+    "Cancelled",
+    "Forfeit",
+}
+
+# Team abbreviation corrections applied by both DFS scrapers. PDX→POR makes
+# Portland's WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept
+# for Sleeper's wire format only — abbreviations.json now emits POR, so nothing
+# writes PDX into the archive; it used to, and every archived Portland total read
+# back as the league default.
+ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI", "PDX": "POR"}
 
 
 def remove_accents(input_str):
@@ -63,64 +78,16 @@ def remove_accents(input_str):
     return out_str
 
 
-def merge_dict(a, b, path=None):
-    """Recursively merge ``b`` into ``a``, in place. Returns ``a``.
-
-    The archive uses a few keys (``Line``, ``EV``) with domain-specific
-    merge semantics rather than the default overwrite — ``Line`` lists
-    extend, ``EV`` dicts update, everything else gets overwritten.
-    """
-    if path is None:
-        path = []
-    for key in b:
-        if key in a:
-            if isinstance(a[key], dict) and isinstance(b[key], dict):
-                merge_dict(a[key], b[key], [*path, str(key)])
-            elif np.all(a[key] == b[key]):
-                pass  # same leaf value
-            elif key == "Line":
-                a[key].extend(b[key])
-            elif key == "EV":
-                a[key].update(b[key])
-            else:
-                a[key] = b[key]
-        else:
-            a[key] = b[key]
-    return a
-
-
-def get_trends(x):
-    """Return per-column slope of the trailing 5 rows of ``x`` as a Series."""
-    if len(x) < MIN_TREND_ROWS:
-        trend = np.zeros(len(x.columns))
-    else:
-        recent = x.tail(TREND_WINDOW)
-        trend = np.polyfit(np.arange(0, len(recent)), recent, 1)[0]
-    return pd.Series(trend, index=x.columns)
-
-
-def hmean(items):
-    """Harmonic mean of numeric ``items``, ignoring zeros and strings.
-
-    Returns ``0`` when no finite non-zero values are present (callers rely
-    on the zero sentinel rather than a raised exception).
-    """
-    total = 0
-    count = 0
-    for i in items:
-        if (i != 0) and type(i) is not str:
-            count += 1
-            total += 1 / i
-
-    if total != 0:
-        return count / total
-    return 0
+def mlb_game_is_over(status: str) -> bool:
+    """Whether the MLB feed's detailed game state says the game is finished or called off."""
+    return status.split(":")[0] in MLB_FINISHED_STATES
 
 
 @functools.cache
 def get_mlb_pitchers():
     """Return a ``{team_abbr: pitcher_name}`` dict for the next week of MLB.
 
+    A game counts until it is over, so today's starter stays listed through warm-up.
     Hits mlb-statsapi once per process; subsequent calls return the cache.
     The LA/ANA/ARI/WAS aliases exist because different sportsbooks spell
     those franchises differently from the league feed.
@@ -132,7 +99,7 @@ def get_mlb_pitchers():
     mlb_teams = mlb.get("teams", {"sportId": 1})
     pitchers = {}
     for game in mlb_games:
-        if game["status"] in ["Pre-Game", "Scheduled"]:
+        if not mlb_game_is_over(game["status"]):
             abbrs = _resolve_team_abbrs(game, mlb_teams)
             if abbrs is None:
                 continue

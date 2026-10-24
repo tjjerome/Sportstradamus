@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from sportstradamus import data
+from sportstradamus.dashboard.assets import ambient_css
 
 # Celestial gold accent — oracle decoration (kickers, prophecy, constellation) and
 # interactive-highlight (active/selected/hovered UI states); never a data mark except
@@ -23,6 +24,10 @@ GRAY = "#8A91A0"
 # Fallback secondary for an unmapped team_colors() code — darker neutral than GRAY
 # so the (primary, secondary) fallback pair still reads as two distinct tones.
 GRAY_SECONDARY = "#5A6070"
+
+# Hairline separator — chart gridlines, card edges, and the sparkline's reference rule.
+# Reads as structure against the dark ground without competing with a data mark.
+BORDER = "#2A2E37"
 
 # Diverging heatmap ramp (red ↔ neutral ↔ blue) for above/below-centre table cells
 # — mirrors config.toml chartDivergingColors so runtime grid code reaches it without a
@@ -105,7 +110,7 @@ def register_plotly_template() -> None:
         layout={
             "paper_bgcolor": "rgba(0,0,0,0)",
             "plot_bgcolor": "rgba(0,0,0,0)",
-            "font": {"family": "IBM Plex Sans", "color": "#E6E9EF", "size": 12},
+            "font": {"family": "IBM Plex Mono", "color": "#E6E9EF", "size": 12},
             "colorway": [
                 "#2E6BE6",
                 "#1F9D55",
@@ -116,8 +121,8 @@ def register_plotly_template() -> None:
                 "#0072B2",
                 "#F0E442",
             ],
-            "xaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
-            "yaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
+            "xaxis": {"gridcolor": BORDER, "zerolinecolor": BORDER},
+            "yaxis": {"gridcolor": BORDER, "zerolinecolor": BORDER},
         }
     )
     pio.templates.default = "sportstradamus"
@@ -132,6 +137,23 @@ _STARFIELD_MAX_ALPHA = 0.20  # DESIGN §3 static-ambient ceiling (twinkles exemp
 # Phase M breakpoint — the CSS twin of viewport.is_mobile()'s UA branch. Style-only
 # rules reshape below this width; render-level differences go through is_mobile().
 MOBILE_MAX_PX = 767
+
+# Tonight card nebula wash (mockup p8-tonight.html .card) — the ambient_tonight manifest
+# slot's fallback, rendered as-is until a file lands (DESIGN §3 scar contract via
+# assets.ambient_css).
+_TONIGHT_CARD_BG_FALLBACK = (
+    "radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),\n"
+    "    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), "
+    "rgba(26,29,36,.84)"
+)
+# The no-edge card drops the wash for a flat surface; with art in the slot it shows its
+# slice like every other card, so the sky stays continuous down the column.
+_TONIGHT_CARD_MUTED_BG_FALLBACK = "rgba(26,29,36,.82)"
+_TONIGHT_CARD_BG = ambient_css("ambient_tonight", _TONIGHT_CARD_BG_FALLBACK)
+_TONIGHT_CARD_MUTED_BG = ambient_css("ambient_tonight", _TONIGHT_CARD_MUTED_BG_FALLBACK)
+# surfaces/tonight.py injects the per-card slice offsets only when there is art to slice —
+# on the gradient fallback the offsets would shift its second radial stop instead.
+TONIGHT_CARD_HAS_ART = _TONIGHT_CARD_BG != _TONIGHT_CARD_BG_FALLBACK
 
 
 def _starfield_background() -> str:
@@ -192,20 +214,21 @@ _APP_CSS_TEMPLATE = """
 /* Tonight prophecy cards (mockup p8-tonight.html .card): matchup-first in sober Plex,
    the oracle voice demoted to a gold Cormorant subline (DESIGN §1 broadcast-fact +
    mystic-chrome split). Two-stop nebula wash over the surface so stars glow through
-   faintly; the game-shape glyph + Cinzel name ride the right rail. .muted is the
-   no-edge state. #3a3450 is the mockup's celestial border (solid, not a gradient). */
+   faintly — or, with art in the ambient_tonight slot, the image scaled to the column and
+   tiled down it, each card offset to its own slice by tonight.py's script; the game-shape
+   glyph + Cinzel name ride the right rail. .muted is the no-edge state. #3a3450 is the
+   mockup's celestial border (solid, not a gradient). */
 .tonight-card{position:relative;overflow:hidden;display:flex;gap:14px;border:1px solid #3a3450;
   border-radius:4px;padding:15px 17px;margin:12px 0;text-decoration:none;color:inherit;
   cursor:pointer;transition:border-color .15s ease;
-  background:radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),
-    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), rgba(26,29,36,.84)}
+  background:__TONIGHT_CARD_BG__}
 /* The card shell is a <div> (a block tag st.markdown passes verbatim; an outer <a> is not a
    CommonMark block tag, so the parser splits it into one box per child). A stretched, transparent
    <a> overlay (.tc-cardlink) turns the whole card into the View-game link; gold border on hover
    signals it clicks through. */
 .tonight-card:hover{border-color:#C9A227}
 .tc-cardlink{position:absolute;inset:0;z-index:1;border-radius:inherit}
-.tonight-card.muted{border-color:#2A2E37;background:rgba(26,29,36,.82)}
+.tonight-card.muted{border-color:#2A2E37;background:__TONIGHT_CARD_MUTED_BG__}
 .tonight-card .tc-main{flex:1;min-width:0}
 .tonight-card .tc-side{flex:0 0 72px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:6px}
@@ -240,6 +263,15 @@ _APP_CSS_TEMPLATE = """
 .st-key-constellation_legpanel{border:1px solid rgba(201,162,39,.42);border-radius:4px;padding:8px 14px;
   background:radial-gradient(ellipse at 50% -30%, rgba(201,162,39,.07), transparent 62%), rgba(26,29,36,.5);
   box-shadow:0 0 0 3px rgba(201,162,39,.05), inset 0 0 12px rgba(201,162,39,.05), 0 2px 14px rgba(0,0,0,.35)}
+/* The Games map and astrolabe paint their own pending state -- a clicked star lights in the
+   frame it was clicked, the dials sweep toward each new price -- so Streamlit's stale-element
+   fade while a rerun is out would only dim a picture that is already current. The card-asset
+   carrier (constellation_component) is a data-only script block and must take no rail space,
+   so the rule hides its layout wrapper: hiding only the keyed block leaves that wrapper behind
+   as an empty flex item, which still takes the column's gap. */
+.st-key-cb_constellation[data-stale="true"],.st-key-cb_astrolabe[data-stale="true"]{
+  opacity:1!important;transition:none!important}
+[data-testid="stLayoutWrapper"]:has(> .st-key-cb_constellation_cards){display:none}
 /* DESIGN §2: gold marks the selected segment of a segmented_control (the global sport
    switch, Board lens/side, Receipts window, and the Games constellation lenses). Streamlit
    has no token slot for the active segment, so reach the gold token on its kind-scoped
@@ -310,8 +342,11 @@ button[data-testid="stBaseButton-segmented_controlActive"]{
 </style>
 """
 
-APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background()).replace(
-    "__MOBILE_MAX__", str(MOBILE_MAX_PX)
+APP_CSS = (
+    _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background())
+    .replace("__MOBILE_MAX__", str(MOBILE_MAX_PX))
+    .replace("__TONIGHT_CARD_BG__", _TONIGHT_CARD_BG)
+    .replace("__TONIGHT_CARD_MUTED_BG__", _TONIGHT_CARD_MUTED_BG)
 )
 
 # Dust + wash render via .starfield's own CSS background above; these 11 divs are

@@ -48,16 +48,21 @@ def _render_shelf_entry(row: Mapping, offers: pd.DataFrame) -> None:
             f"EV {_fnum(row.get('model_ev'), 1.0) - 1:+.0%} · "
             f"${_fnum(row.get('stake')):,.2f} · {row.get('status') or 'pending'}"
         )
-        view_col, edit_col, del_col = st.columns(3)
-        if view_col.button("View", key=f"shelf_view_{row['slip_id']}"):
+        # Content-sized buttons: in three equal columns the sidebar is too narrow for
+        # "Delete", and Streamlit truncates a label that overflows its column.
+        with st.container(horizontal=True, gap="xsmall", horizontal_alignment="distribute"):
+            view = st.button("View", key=f"shelf_view_{row['slip_id']}")
+            edit = st.button("Edit", key=f"shelf_edit_{row['slip_id']}")
+            delete = st.button("Delete", key=f"shelf_del_{row['slip_id']}")
+        if view:
             _slip_dialog(row)
         target = (
             "surfaces/games.py" if row["builder_type"] == "constellation" else "surfaces/board.py"
         )
-        if edit_col.button("Edit", key=f"shelf_edit_{row['slip_id']}"):
+        if edit:
             load_slip(row, offers)
             st.switch_page(target)
-        if del_col.button("Delete", key=f"shelf_del_{row['slip_id']}"):
+        if delete:
             delete_user_slip(row["slip_id"])
             st.rerun()
 

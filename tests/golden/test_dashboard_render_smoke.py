@@ -68,6 +68,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
+from sportstradamus.dashboard.narrative import bet_arrow
 from sportstradamus.leg_schema import build_leg
 
 _APP = Path("src/sportstradamus/dashboard/app.py").resolve()
@@ -94,6 +95,7 @@ _OFFER_ROWS = [
         "Win Prob": 0.58,
         "Model EV": 1.07,
         "Market EV": 1.02,
+        "Star": 2.4,
     },
     {
         "League": "WNBA",
@@ -112,6 +114,7 @@ _OFFER_ROWS = [
         "Win Prob": 0.61,
         "Model EV": 1.11,
         "Market EV": 1.03,
+        "Star": 1.9,
     },
 ]
 
@@ -130,26 +133,128 @@ def _hero_title(at: AppTest) -> str:
     return match.group(1)
 
 
-def test_app_boots_and_tonight_renders():
-    """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page)."""
+def test_app_boots_and_tonight_renders(monkeypatch, tmp_path):
+    """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page).
+
+    ``current_offers`` points at the schema fixture so the boot exercises the card loop
+    against the current contract rather than whatever snapshot is on disk.
+    """
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     assert not at.exception
     assert _hero_title(at) == "Tonight"
 
 
-def test_app_sport_switch_rerenders_without_exception():
+def test_app_sport_switch_rerenders_without_exception(monkeypatch, tmp_path):
     """Interacting with the global sport segmented-control triggers a clean rerun.
 
     Exercises the ``st.session_state["sport"]`` handoff at the top of ``app.py``
     (the widget-key-to-plain-key copy every surface reads) through an actual
     widget interaction, not just the initial render.
     """
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     at.segmented_control(key="_sport_widget").set_value("NBA").run()
     assert not at.exception
     assert at.session_state["sport"] == "NBA"
+
+
+def test_tonight_card_names_favored_legs_when_no_story_binds_them(monkeypatch, tmp_path):
+    """A storyless game with model-liked legs says so instead of claiming thin edges.
+
+    Three offers in one game, two of them favored (``Kelly > 0``, distinct
+    Player/Market/Bet), with the story and parlay snapshots pointed at absent files so
+    ``narrative.game_headline`` returns "". The counts differ on purpose: the card must
+    print its ``favored`` 2, never the ``offer_count`` 3 computed a line away.
+    """
+    rows = [
+        {**_OFFER_ROWS[0], "Kelly": 0.03},
+        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02},
+        {**_OFFER_ROWS[0], "Player": "M. Bridges", "Market": "AST", "Kelly": 0.0},
+    ]
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(rows).to_parquet(fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", tmp_path / "no_stories.parquet")
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", tmp_path / "no_parlays.parquet")
+    st.cache_data.clear()
+
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.run()
+    assert not at.exception
+    # The injected APP_CSS is markdown too and carries every .tc-* selector; the card
+    # itself is the block that opens on the .tonight-card div.
+    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    assert cards, "no Tonight game card rendered"
+    assert "No prophecy yet — 2 favored legs, no story binds them" in cards[0]
+
+
+def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
+    """The brightest star leads the slate, ahead of a game with more favored legs.
+
+    Two NBA games on one date, neither urgent (no ``Commence``): A carries two
+    model-liked legs at Star 1.0, B one at Star 2.8, so B's card renders first. B's
+    lead story (``lead``, ``lead_side == "Over"``) reads as its quoted headline alone:
+    the card carries no side arrow.
+    """
+    rows = [
+        {**_OFFER_ROWS[0], "Kelly": 0.03, "Star": 1.0},
+        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02, "Star": 1.0},
+        {
+            **_OFFER_ROWS[0],
+            "Team": "BOS",
+            "Opponent": "LAL",
+            "Home": True,
+            "Game": "BOS/LAL",
+            "Player": "J. Tatum",
+            "Kelly": 0.02,
+            "Star": 2.8,
+        },
+    ]
+    stories = [
+        {
+            "platform": "Underdog",
+            "League": "NBA",
+            "Game": "BOS/LAL",
+            "Date": "2026-07-04",
+            "story_id": "BOS/LAL#1",
+            "objective": "builder",
+            "headline": "Tatum takes over",
+            "model_ev": 1.2,
+            "lead": True,
+            "lead_side": "Over",
+        }
+    ]
+    offers_fixture = tmp_path / "current_offers.parquet"
+    stories_fixture = tmp_path / "current_game_stories.parquet"
+    pd.DataFrame(rows).to_parquet(offers_fixture)
+    pd.DataFrame(stories).to_parquet(stories_fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", stories_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", tmp_path / "no_parlays.parquet")
+    st.cache_data.clear()
+
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.run()
+    assert not at.exception
+    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    matchups = [re.search(r'class="tc-matchup">(\w+)', c).group(1) for c in cards]
+    assert matchups == ["BOS", "NYK"]
+    assert "“Tatum takes over”" in cards[0]
+    assert bet_arrow("Over") not in cards[0]
+    assert bet_arrow("Under") not in cards[0]
 
 
 def test_board_renders_condensed_grid(monkeypatch, tmp_path):
@@ -225,6 +330,7 @@ def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
     fixture = tmp_path / "parlay_hist.parquet"
     pd.DataFrame(_PARLAY_ROWS).to_parquet(fixture)
     monkeypatch.setattr("sportstradamus.helpers.io.PARLAY_HIST_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.PARLAY_HIST_DIR", tmp_path / "parlay_hist")
     monkeypatch.setattr("sportstradamus.dashboard.data.PARLAY_HIST_PATH", fixture)
 
     at = AppTest.from_file(str(_APP), default_timeout=30)
@@ -276,10 +382,13 @@ def _diag_row(league: str, market: str, i: int) -> dict:
 
 
 # 25 rows/cell so the market table (n>=5), the sharpness view, and the Murphy
-# decomposition panel (n>=20) all render real content for both cells.
-_DIAG_ROWS = [_diag_row("NBA", "PTS", i) for i in range(25)] + [
-    _diag_row("NBA", "AST", i) for i in range(25)
-]
+# decomposition panel (n>=20) all render real content for the PTS and AST cells. REB is
+# Boost 0 throughout: no platform posted it, so it was never a bet and must not surface.
+_DIAG_ROWS = (
+    [_diag_row("NBA", "PTS", i) for i in range(25)]
+    + [_diag_row("NBA", "AST", i) for i in range(25)]
+    + [{**_diag_row("NBA", "REB", i), "Boost": 0.0} for i in range(25)]
+)
 
 
 def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, tmp_path):
@@ -305,8 +414,37 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     assert not at.exception
     assert _hero_title(at) == "Market Diagnostics & Forecast Quality"
     assert any("Start here" in c.value for c in at.caption)
+    assert any("Posted sides only" in c.value for c in at.caption)
     tile_labels = {m.label for m in at.metric}
     assert {"NBA - PTS", "NBA - AST"} <= tile_labels
+    assert "NBA - REB" not in tile_labels
+
+
+def test_lab_diagnostics_keeps_a_market_history_names_by_its_platform(monkeypatch, tmp_path):
+    """History keeps Underdog's name for NBA fantasy points, ``fantasy points underdog``,
+    and stat_meta names the cell ``fantasy points prizepicks``: the rows pass the Lab
+    filter and the market table reads the cell's Family beside them.
+    """
+    fixture = tmp_path / "history.parquet"
+    rows = [_diag_row("NBA", "fantasy points underdog", i) for i in range(25)]
+    pd.DataFrame(rows).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.HISTORY_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.HISTORY_PATH", fixture)
+    tables = []
+    monkeypatch.setattr(
+        "sportstradamus.dashboard.components.grid.render_themed_grid",
+        lambda table, **_: tables.append(table),
+    )
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_diagnostics.py")
+    at._page_hash = calc_hash("lab-diagnostics")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert "NBA - fantasy points underdog" in {m.label for m in at.metric}
+    assert tables[-1]["Family"].notna().all()
 
 
 def _training_cell(league: str, market: str, *, ship: bool, n_fails: int) -> dict:
@@ -510,6 +648,46 @@ def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):
     assert not at.exception
     solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
     assert list(solved.values()) == [[0.9, 1.0]]
+
+
+def test_lab_modifiers_pair_key_names_a_market_by_the_leagues_own_key(monkeypatch, tmp_path):
+    """The default pair key names a leg's market as ``banned_combos`` does: the league's
+    own key, not the name the platform's map gives the board.
+
+    The legs sit on no board row, so each key is the market alone, with no position prefix.
+    """
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH",
+        tmp_path / "modifier_overrides.json",
+    )
+    st.cache_data.clear()
+
+    skater = dict(_OFFER_ROWS[0], League="NHL", Player="Skater", Market="AST", Stat="assists")
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(skater),
+        # A leg saved while the board's Stat copied its Market.
+        build_leg(dict(skater, Player="Winger", Market="PTS", Stat="PTS")),
+        build_leg(dict(_OFFER_ROWS[1], Player="Guard", Market="fantasy points underdog")),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert [at.text_input(key=f"mod_key_rail_{i}").value for i in range(3)] == [
+        "assists",
+        "points",
+        "fantasy points prizepicks",
+    ]
 
 
 @pytest.mark.xfail(

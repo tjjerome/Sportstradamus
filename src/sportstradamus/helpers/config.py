@@ -34,7 +34,11 @@ import json
 import numpy as np
 
 from sportstradamus import creds, data
-from sportstradamus.helpers.distributions import skewnormal_params_from_moments
+from sportstradamus.helpers.distributions import (
+    _DP_PHI_CEILING,
+    _DP_PHI_FLOOR,
+    skewnormal_params_from_moments,
+)
 
 # --- API keys ---------------------------------------------------------------
 
@@ -151,14 +155,52 @@ def book_skewnormal_shape(
     return skewnormal_params_from_moments(var, coeffs["skew_c"] + coeffs["skew_d"] * mu)
 
 
+def book_count_dispersion(
+    league: str, market: str, mean: float | np.ndarray, cv: float
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """The book's fitted count dispersion at conditional ``mean``, as ``(phi, r)``.
+
+    The count analogue of :func:`book_skewnormal_shape`: evaluates the same fitted
+    ``var = a·μ^b`` at the row's own mean and converts it to the family's native
+    parameter — ``phi = μ/var`` for Double Poisson, ``r = μ²/(var − μ)`` for
+    NegBin/ZINB — in place of the ``var = μ(1 + cv·μ)`` both families otherwise assert
+    from the cell's *marginal* cv. Measured across 30 count cells, that assertion
+    overstates the book's conditional variance by 1.41× at the median and ~3.5× on the
+    high-mean NBA cells, and every mean inverted out of it inherits the error. A single
+    market never notices — ``get_odds`` re-derives the same probability under the same
+    convention — but a component sum adds the means, so they have to be right rather than
+    merely self-consistent. Exactly one element is non-``None``, keyed off the cell's
+    family; a cell with no fit returns ``(None, None)`` and prices off ``cv``.
+
+    Scored against outcomes on NBA, the correction is worth most of the cells' entire
+    mean error: ``REB`` recovers a mean 19.4% high under the convention and **0.0%** high
+    under the fit (n=5025), ``PA`` 17.1% → 2.4% (n=4290).
+
+    Takes the **smaller** of the fitted and conventional variances. Every contaminant in
+    the fit's estimator — within-bin spread of true means, the book's own mean bias —
+    inflates measured variance, so a fit asking for *more* dispersion than the convention
+    is the reading least likely to be real; taking those at face value overshot MLB
+    ``rbi`` and ``total bases`` badly, and it is why the raw fit lost on 5 of 7 NegBin
+    cells before this guard existed. The two curves cross at most once, so the choice is
+    continuous in ``mean``. A fit at or below Poisson variance has no NegBin
+    representation at all (``r`` would be infinite), so those rows keep the convention.
+    """
+    coeffs = stat_meta.get(league, {}).get(market, {}).get("book_shape")
+    dist = stat_dist.get(league, {}).get(market)
+    if coeffs is None or dist not in ("DPO", "NegBin", "ZINB"):
+        return None, None
+    mu = np.asarray(mean, dtype=float)
+    variance = np.minimum(coeffs["a"] * mu ** coeffs["b"], mu * (1.0 + cv * mu))
+    if dist == "DPO":
+        return np.clip(mu / variance, _DP_PHI_FLOOR, _DP_PHI_CEILING), None
+    return None, np.where(variance > mu, mu**2 / (variance - mu), 1.0 / cv)
+
+
 with (_config_dir / "stat_map.json").open() as infile:
     stat_map = json.load(infile)
 
 with (_config_dir / "book_weights.json").open() as infile:
     book_weights = json.load(infile)
-
-with (_config_dir / "prop_books.json").open() as infile:
-    books = json.load(infile)
 
 with (_config_dir / "goalies.json").open() as infile:
     nhl_goalies = json.load(infile)

@@ -3,12 +3,9 @@ Usage: sportstradamus fetch fp import-curl [OPTIONS] CURL_FILE
   Register a new endpoint from a DevTools-copied curl command.
 
   With ``--replace``, overwrite an existing catalog entry instead of appending a
-  new one — useful when a tool needs per-tool filters (position + filterResult
-  qualifier) the SPA injects per tool but discover can't infer from the
-  registry. The pasted body's literal ``game.season`` value is rewritten to the
-  integer sentinel so the entry stays usable across seasons; the ``weeks`` block
-  doesn't need sentinelisation because ``body_substitute`` overrides it per call
-  based on ``--mode``.
+  new one — useful when a tool gains a situational filter that needs capturing
+  from a working request. Every other captured filter is kept verbatim; only the
+  season/week the capture happened to use is templated back out.
 
 Options:
   --name TEXT                     Catalog name for this endpoint.  [required]
@@ -18,9 +15,8 @@ Options:
   --response-format [json|csv|html]
   --weekly / --season-long
   --replace                       Overwrite an existing entry of this name
-                                  instead of erroring. Use to patch a discover-
-                                  generated body with the SPA's tool-specific
-                                  filters (position, qualifier, etc.) from a
-                                  working DevTools curl.
+                                  instead of erroring. Use to patch an entry's
+                                  query filters (mode, position, situational
+                                  slice) from a fresh DevTools curl.
   --catalog FILE
   --help                          Show this message and exit.

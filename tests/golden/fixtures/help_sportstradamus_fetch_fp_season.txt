@@ -1,0 +1,17 @@
+Usage: sportstradamus fetch fp season [OPTIONS]
+
+  Fetch every tool for a whole season, one request per tool.
+
+  Covers weeks 1-18 and the four postseason rounds (folders week_19..22).
+
+Options:
+  --season INTEGER                Season (year).  [required]
+  --only TEXT                     Only fetch these endpoint names (repeatable).
+  --refetch                       Re-download every week even when it is on
+                                  disk. Default is to ask only for the weeks
+                                  that are missing or hold zero rows.
+  --catalog FILE                  Override catalog path (default: bundled
+                                  config).
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --help                          Show this message and exit.

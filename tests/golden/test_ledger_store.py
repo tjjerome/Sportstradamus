@@ -92,26 +92,29 @@ def test_already_committed_entries_spans_both_run_slots(monkeypatch, tmp_path) -
     entries = _ledger_store.already_committed_entries(DATE, persona="safe", replicate_id=0)
     assert sorted(rec["id"] for rec in entries) == ["id-afternoon", "id-morning"]
 
-    morning_ids = _ledger_store.already_committed_ids(
-        DATE, run_slot="morning", persona="safe", replicate_id=0
+
+def test_committed_replicates_are_those_holding_a_record_from_the_run_slot(
+    monkeypatch, tmp_path
+) -> None:
+    _redirect(monkeypatch, tmp_path)
+    _ledger_store.append_entries(
+        DATE,
+        [
+            _record("id-1", run_slot="morning", persona="safe", replicate_id=0),
+            _record("id-2", run_slot="morning", persona="high_ev", replicate_id=3),
+            _record("id-3", run_slot="afternoon", persona="safe", replicate_id=7),
+        ],
     )
-    afternoon_ids = _ledger_store.already_committed_ids(
-        DATE, run_slot="afternoon", persona="safe", replicate_id=0
-    )
-    assert morning_ids == {"id-morning"}
-    assert afternoon_ids == {"id-afternoon"}
+
+    assert _ledger_store.committed_replicates(DATE, "morning") == {0, 3}
+    assert _ledger_store.committed_replicates(DATE, "afternoon") == {7}
 
 
 def test_missing_file_returns_empty_without_error(monkeypatch, tmp_path) -> None:
     _redirect(monkeypatch, tmp_path)
 
     assert _ledger_store.read_records(DATE) == []
-    assert (
-        _ledger_store.already_committed_ids(
-            DATE, run_slot="morning", persona="safe", replicate_id=0
-        )
-        == set()
-    )
+    assert _ledger_store.committed_replicates(DATE, "morning") == set()
     assert _ledger_store.already_committed_entries(DATE, persona="safe", replicate_id=0) == []
 
 
@@ -126,7 +129,37 @@ def test_append_entries_writes_distinct_ids_for_same_slot(monkeypatch, tmp_path)
     written = _ledger_store.append_entries(DATE, same_slot_records)
 
     assert written == 3
-    ids = _ledger_store.already_committed_ids(
-        DATE, run_slot="morning", persona="safe", replicate_id=0
+    held = _ledger_store.already_committed_entries(DATE, persona="safe", replicate_id=0)
+    assert {rec["id"] for rec in held} == {"id-a", "id-b", "id-c"}
+
+
+def test_copies_that_draw_the_same_candidate_each_keep_it(monkeypatch, tmp_path) -> None:
+    """A candidate's id is the same whoever draws it. Up to policy_v3 the store kept an id
+    once per day, so a copy lost every candidate an earlier copy had drawn."""
+    _redirect(monkeypatch, tmp_path)
+    _ledger_store.append_entries(DATE, [_record("shared", persona="safe", replicate_id=0)])
+
+    written = _ledger_store.append_entries(
+        DATE,
+        [
+            _record("shared", persona="safe", replicate_id=1),
+            _record("shared", persona="high_ev", replicate_id=0),
+        ],
     )
-    assert ids == {"id-a", "id-b", "id-c"}
+
+    assert written == 2
+    assert sorted(_ledger_store.entry_key(rec) for rec in _ledger_store.read_records(DATE)) == [
+        ("shared", "high_ev", 0),
+        ("shared", "safe", 0),
+        ("shared", "safe", 1),
+    ]
+
+
+def test_copy_cannot_hold_a_candidate_twice_in_a_day(monkeypatch, tmp_path) -> None:
+    _redirect(monkeypatch, tmp_path)
+    morning = _record("shared", run_slot="morning", persona="safe", replicate_id=0)
+    afternoon = _record("shared", run_slot="afternoon", persona="safe", replicate_id=0)
+
+    assert _ledger_store.append_entries(DATE, [morning, dict(morning)]) == 1
+    assert _ledger_store.append_entries(DATE, [afternoon]) == 0
+    assert _ledger_store.read_records(DATE) == [morning]

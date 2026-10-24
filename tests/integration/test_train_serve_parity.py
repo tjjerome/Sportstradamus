@@ -33,7 +33,6 @@ from sportstradamus.helpers.distributions import (
     decode_predictive_mean,
     set_model_start_values,
 )
-from sportstradamus.stats import StatsNBA
 
 # A blown archive book EV in the thousands (the shape add_dfs wrote on 2026-06-05).
 _CORRUPT_BOOK_EV = 7802.0

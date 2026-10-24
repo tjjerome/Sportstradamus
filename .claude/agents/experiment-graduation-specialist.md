@@ -17,25 +17,27 @@ You operate inside this repository's conventions, not generic ones.
 Calibration/model methods in this codebase have a deliberate lifecycle:
 
 1. **Experiment.** A new method is born hard-gated to ONE pilot `(league, market)`
-   cell, selected via the `--experiment` / `structural_calibration` lever, and
-   validated there with the sweep + offline ship gates.
+   cell, selected via the cell's stat_meta `posthoc` slug (or `meditate --posthoc`),
+   and validated there with the sweep + offline ship gates.
 2. **Pass.** The method clears the gates on its pilot — it demonstrably improved
-   that cell. (Two examples that have already passed: the two-part
-   group-conditional-CDF method on `NFL / receiving yards`; the affine
-   group-CDF-bookpool method on `NFL / rushing yards`.)
+   that cell. (Two examples, both since graduated into `STRUCTURAL_STAGE`: the
+   two-part group-conditional-CDF method, piloted on `NFL / receiving yards`; the
+   affine group-CDF-bookpool method, piloted on `NFL / rushing yards`.)
 3. **Graduate (YOUR JOB).** The proven method moves out of its one-cell cage into
-   the **sweep option pool** — the mutually-exclusive per-cell selector the sweep
-   draws from (`POSTHOC_SLUGS` in
-   [`training/posthoc.py`](../../src/sportstradamus/training/posthoc.py)). Now the
-   sweep can try it on any market and let the gates decide whether it helps there
-   too.
+   the **sweep option pool** — the mutually-exclusive per-cell `posthoc` selector
+   (`POSTHOC_SLUGS` in
+   [`training/posthoc.py`](../../src/sportstradamus/training/posthoc.py)) and the
+   sweep's candidate lists in
+   [`training/model_strategy/specs.py`](../../src/sportstradamus/training/model_strategy/specs.py).
+   Now the sweep can try it on any market and let the gates decide whether it
+   helps there too.
 4. **Per-cell ship** happens later, by the normal machinery (sweep → offline ship
-   gates → `check-graduation` → human). You do NOT ship cells.
+   gates → `sportstradamus ship graduation` → human). You do NOT ship cells.
 
-**This is METHOD graduation, not CELL graduation.** `training/graduation.py` /
-`check-graduation` promote a *cell* to production once it clears Gate 2 — a
-completely separate lifecycle. Do not touch it, do not conflate the vocabulary.
-You promote a *method into the option pool*.
+**This is METHOD graduation, not CELL graduation.** `training/graduation.py` (shown
+by `sportstradamus ship graduation`) decides a *cell's* Gate-2 graduation from
+`devel` to `main` — a completely separate lifecycle. Do not touch it, do not
+conflate the vocabulary. You promote a *method into the option pool*.
 
 ## The one principle that governs everything: codify the METHOD, not the artifact
 
@@ -62,11 +64,11 @@ stop — that is the artifact leaking into the method.
    over-engineering, reuse-before-you-write, no magic numbers, no new monoliths),
    the "Research-first" convention, and the three quality gates.
 2. `docs/STYLE_GUIDE.md` — cite `§N` in commits/notes when you justify a change.
-3. `CONTRIBUTING.md` — package map; where strategy/dispatch code lives.
+3. `docs/ARCHITECTURE.md` §Package Map — where strategy/dispatch code lives.
 4. The **reference graduation already in the tree**: study how the two-part method
    was made market-agnostic (`git show` the "market-agnostic generalization"
    commits — subjects mention *two-part*, *market-agnostic*, *structural*; the
-   generalization landed around commit `cee7304`). It replaced pilot-specific
+   generalization landed in commit `b683fe99`). It replaced pilot-specific
    literals with matrix-derived discovery (position codes discovered from the cell,
    roles derived per cell, group construction that prunes absent positions). That
    before→after is the pattern you copy. Read the diff before you write code.
@@ -108,17 +110,19 @@ generalization the two-part method already solved.
    hurdle on a zero-sparse role), audited per cell, never a hardcoded league/market
    exclusion. Kills should be **rare**; if the method kills on many cells, the
    guard or the method is wrong, not the markets.
-4. **Move the method into the option pool.** Add its slug to `POSTHOC_SLUGS`
-   (`training/posthoc.py`) as a **mutually-exclusive** value (the field is
-   single-valued by design — at most one method per cell). Remove its entry from
-   the single-cell `STRUCTURAL_STRATEGIES` gate and any
-   `validate_experiment_selection` cell-rejection that caged it.
+4. **Move the method into the option pool.** Its slug must sit in the matching
+   `*_STAGE` set of `training/posthoc.py` (structural methods: `STRUCTURAL_STAGE`),
+   whose union is `POSTHOC_SLUGS`, as a **mutually-exclusive** value (the field is
+   single-valued by design — at most one method per cell). Then remove what pins it
+   to the pilot in `training/model_strategy/specs.py`: a structural spec's
+   `enrollments` lock gives way to data-derived `applicability` (`942120fd` did
+   this for affine); a light corrector joins the `_POSTHOC` axis tuple.
 5. **Wire the three control sites.** Promoting a stat_meta knob to a live training
    control touches THREE places or it crashes at train time: the control-flags
    registry (`_CONTROL_FLAGS`), the `runtime_controls` builder, and the CLI resolve
    site. Grep all three, wire the new slug through each. Confirm the sweep actually
-   enumerates the new slug (the `--posthoc` CLI `Choice` draws from `POSTHOC_SLUGS`;
-   the sweep draws the same axis).
+   enumerates the new slug: the `--posthoc` CLI `Choice` draws from `POSTHOC_SLUGS`,
+   but the sweep draws the step-4 lists in `training/model_strategy/specs.py`.
 6. **Dispatch on the field.** A structural method is not a light post-distribution
    corrector — it reshapes the target / CDF earlier in the fit. Route the pool
    value to the method's real stage (its structural-context build + fit/apply),

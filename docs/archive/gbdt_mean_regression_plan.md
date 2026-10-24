@@ -2,7 +2,7 @@
 
 > **⚠ SUPERSEDED 2026-05-23 — read-only archive.** This plan is retired.
 > The new home-of-record is
-> [`docs/operation_ship_75.md`](../operation_ship_75.md); load-bearing
+> [`operation_ship_75.md`](operation_ship_75.md); load-bearing
 > facts (P1/P2.B verdicts, ZTNB refutation, Stage A1 ICC, A1.5 T5 kill,
 > B1.5 §7a verdict, B1.6 research verdict, references [1]–[48]) are
 > preserved in

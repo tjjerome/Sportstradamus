@@ -1,7 +1,10 @@
 """Lab Diagnostics — market diagnostics and forecast quality.
 
 Combines market-level diagnostics with professional forecasting metrics
-following Gneiting & Raftery (2007) and Murphy (1973).
+following Gneiting & Raftery (2007) and Murphy (1973). Accuracy, Brier, BSS and
+reliability score the posted offers ``realized.settled_offers`` keeps; interval
+coverage scores every prediction once, posted or not, since it does not depend on
+the side.
 """
 
 import numpy as np
@@ -18,10 +21,10 @@ from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
-    filtered_history_or_stop,
     get_prediction_history,
     load_resolved_history_or_stop,
     load_stat_meta,
+    posted_offers_or_stop,
     sidebar_filters,
     sport_filtered,
 )
@@ -30,12 +33,12 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     bias_color,
     bss_bar,
     coverage_bar,
-    crps_line,
     ev_divergence_bar,
     murphy_decomp_bar,
     reliability_diagram,
     sharpness_histogram,
 )
+from sportstradamus.helpers import archive_market
 
 # Minimum predicted-probability std; markets below this cluster too tightly
 # to discriminate, flagged as likely under-dispersed.
@@ -64,14 +67,12 @@ if history.empty:
 filters = sidebar_filters(history, key_prefix="mkt_", time_window_key="mkt_time")
 cutoff = filters["cutoff"]
 
-df = filtered_history_or_stop(history, filters)
+df = posted_offers_or_stop(history, filters)
 df = apply_lab_filters(df, stat_meta, lab_sel)
 if df.empty:
     st.info("No data matches the current Lab filter selection.")
     st.stop()
 
-prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
-df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
 if cutoff is not None:
@@ -80,6 +81,11 @@ if cutoff is not None:
 if df.empty:
     st.info("No data for selected time window.")
     st.stop()
+
+st.caption(
+    "Posted sides only: a side the platform never posted was never a bet. "
+    "Each offer counts once per platform."
+)
 
 # Coverage is a diagnostics fact (share of predictions carrying a stored distribution),
 # not a filter — it lives in the page body, not the shared sidebar filter panel.
@@ -90,8 +96,6 @@ if "Dist" in df.columns:
         help="Share of predictions in the current filter carrying a stored distribution family.",
     )
 
-# CRPS arrives as a precomputed per-prediction column; here we only aggregate
-# the stored values instead of re-integrating per row on every rerun.
 pred_df = get_prediction_history(
     history,
     leagues=filters["leagues"],
@@ -101,13 +105,6 @@ pred_df = apply_lab_filters(pred_df, stat_meta, lab_sel)
 pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
 if cutoff is not None:
     pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
-
-crps_by_market = pd.Series(dtype=float)
-crps_counts = pd.Series(dtype=int)
-if "CRPS" in pred_df.columns:
-    _crps_grp = pred_df.dropna(subset=["CRPS"]).groupby(["League", "Market"])["CRPS"]
-    crps_by_market = _crps_grp.mean()
-    crps_counts = _crps_grp.size()
 
 st.header("Market-Level Diagnostics")
 
@@ -121,7 +118,7 @@ for (league, market), grp in df.groupby(["League", "Market"]):
     actual_over_pct = (grp["Result"] == "Over").mean()
     balance = pred_over_pct - actual_over_pct
 
-    brier = brier_score_loss(hits, grp[prob_col].clip(0, 1))
+    brier = brier_score_loss(hits, grp["Win Prob"].clip(0, 1))
     bss = compute_brier_skill_score(grp)
 
     row = {
@@ -133,17 +130,16 @@ for (league, market), grp in df.groupby(["League", "Market"]):
         "BSS": round(bss, 4) if not np.isnan(bss) else None,
         "Samples": len(grp),
     }
-
-    if (league, market) in crps_by_market.index and crps_counts.get((league, market), 0) >= 5:
-        row["CRPS"] = round(float(crps_by_market.loc[(league, market)]), 4)
-
     market_rows.append(row)
 
 market_df = pd.DataFrame(market_rows)
 if not market_df.empty:
+    # stat_meta names a cell by the league's own key, and history keeps the platform's
+    # name for NBA and WNBA Underdog fantasy points.
+    market_df["market"] = list(map(archive_market, market_df["League"], market_df["Market"]))
     market_df = market_df.merge(
         stat_meta[["league", "market", "dist", "target_normalization"]],
-        left_on=["League", "Market"],
+        left_on=["League", "market"],
         right_on=["league", "market"],
         how="left",
     ).rename(columns={"dist": "Family", "target_normalization": "Norm"})
@@ -157,14 +153,9 @@ if not market_df.empty:
         for tile, (_, cell) in zip(tiles, worst_cells.iterrows(), strict=True):
             tile.metric(f"{cell['League']} - {cell['Market']}", f"{cell['BSS']:+.3f} BSS")
 
-    numeric_cols = [
-        c
-        for c in ("Accuracy", "Balance", "Brier", "BSS", "CRPS", "Samples")
-        if c in market_df.columns
-    ]
     render_themed_grid(
         market_df,
-        numeric_cols=numeric_cols,
+        numeric_cols=["Accuracy", "Balance", "Brier", "BSS", "Samples"],
         flag_col="BSS",
         flag_below=0.0,
         height=min(720, max(200, 40 + 32 * len(market_df))),
@@ -194,9 +185,9 @@ sharp_df = df if selected_league == "All" else df.loc[df["League"] == selected_l
 if not sharp_df.empty:
     markets_to_show = sorted(sharp_df["Market"].value_counts().head(12).index)
     sharp_subset = sharp_df.loc[sharp_df["Market"].isin(markets_to_show)]
-    st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), width="stretch")
+    st.plotly_chart(sharpness_histogram(sharp_subset, "Win Prob"), width="stretch")
 
-    sharpness_df = sharp_df.groupby("Market")[prob_col].std().reset_index()
+    sharpness_df = sharp_df.groupby("Market")["Win Prob"].std().reset_index()
     sharpness_df.columns = ["Market", "Std(Win Prob)"]
     sharpness_df = sharpness_df.sort_values("Std(Win Prob)")
     low_sharp = sharpness_df.loc[sharpness_df["Std(Win Prob)"] < _LOW_SHARPNESS_STD]
@@ -224,11 +215,11 @@ st.header("Forecast Quality (Proper Scoring Rules)")
 st.subheader("Reliability Diagram")
 cal_df = df.copy()
 bins = np.linspace(0.5, 1.0, 11)
-cal_df["bin"] = pd.cut(cal_df[prob_col], bins=bins)
+cal_df["bin"] = pd.cut(cal_df["Win Prob"], bins=bins)
 cal_stats = (
     cal_df.groupby("bin", observed=False)
     .agg(
-        Predicted=(prob_col, "mean"),
+        Predicted=("Win Prob", "mean"),
         Actual=("Hit", "mean"),
         Count=("Hit", "count"),
     )
@@ -263,20 +254,7 @@ if decomp_rows:
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
     )
 
-has_crps = "CRPS" in pred_df.columns and pred_df["CRPS"].notna().any()
-has_dist = "Dist" in pred_df.columns and "Actual" in pred_df.columns
-if has_crps:
-    crps_df = pred_df.dropna(subset=["CRPS"]).copy()
-    if len(crps_df) >= 10:
-        st.subheader("CRPS Over Time")
-        crps_daily = (
-            crps_df.groupby(["_date", "League"])
-            .agg(CRPS=("CRPS", "mean"), Count=("CRPS", "count"))
-            .reset_index()
-        )
-        st.plotly_chart(crps_line(crps_daily), width="stretch")
-
-if has_dist:
+if "Dist" in pred_df.columns and "Actual" in pred_df.columns:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
     if len(cov_df) >= 20:
         st.subheader("Prediction Interval Coverage")

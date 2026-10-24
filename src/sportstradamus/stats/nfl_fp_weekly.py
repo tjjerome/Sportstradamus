@@ -33,7 +33,7 @@ Layout on disk::
             efficiency.parquet
             fantasy_points_allowed.parquet  <-- see PLACEHOLDER caveat
             fantasy_points_scored.parquet   <-- see PLACEHOLDER caveat
-            ...                             <-- 24 file_kinds total
+            ...                             <-- 31 file_kinds total
 
 Most file_kinds publish per-player-per-game rows. Two kinds currently
 land as 1-row placeholders showing a single (team, opponent, position)
@@ -63,9 +63,12 @@ FILE_KINDS: dict[str, str] = {
     "fpts_scored_report": "fpts_scored_report.parquet",
     "offense_snap_share_report": "offense_snap_share_report.parquet",
     "offense_snaps": "offense_snaps.parquet",
+    "offense_snaps_inside10": "offense_snaps_inside10.parquet",
+    "offense_snaps_inside20": "offense_snaps_inside20.parquet",
     "passing_advanced": "passing_advanced.parquet",
     "passing_basic": "passing_basic.parquet",
     "passing_depth": "passing_depth.parquet",
+    "passing_situation": "passing_situation.parquet",
     "qb_coverage_matchup": "qb_coverage_matchup.parquet",
     "receiving_advanced": "receiving_advanced.parquet",
     "receiving_basic": "receiving_basic.parquet",
@@ -81,7 +84,26 @@ FILE_KINDS: dict[str, str] = {
     "rushing_basic": "rushing_basic.parquet",
     "rushing_bell_cow": "rushing_bell_cow.parquet",
     "wr_coverage_matchup": "wr_coverage_matchup.parquet",
+    "wr_coverage_matchup_cover2": "wr_coverage_matchup_cover2.parquet",
+    "wr_coverage_matchup_cover3": "wr_coverage_matchup_cover3.parquet",
+    "wr_coverage_matchup_cover4": "wr_coverage_matchup_cover4.parquet",
+    "wr_coverage_matchup_cover6": "wr_coverage_matchup_cover6.parquet",
 }
+
+# Kinds the current API only exposes behind a request filter, where the
+# legacy API carried the same numbers inside the unfiltered tool's response.
+# Both spellings are read so archived legacy snapshots and new pulls
+# aggregate identically; a full history re-pull retires the legacy leg.
+FILTERED_SPLIT_KINDS: frozenset[str] = frozenset(
+    {
+        "offense_snaps_inside10",
+        "offense_snaps_inside20",
+        "wr_coverage_matchup_cover2",
+        "wr_coverage_matchup_cover3",
+        "wr_coverage_matchup_cover4",
+        "wr_coverage_matchup_cover6",
+    }
+)
 
 # File_kinds whose current parquets contain a single placeholder row
 # (a tile pull rather than the full per-game enumeration). Aggregating

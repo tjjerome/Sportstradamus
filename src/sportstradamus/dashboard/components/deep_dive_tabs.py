@@ -1,5 +1,5 @@
-"""The five tab bodies of the offer-detail dialog (History, Model, Comps, Other stats,
-Correlated).
+"""The History, Model, Comps, Other-stats and Correlated tab bodies of the offer-detail
+dialog (the Movement tab is ``deep_dive_movement``).
 
 ``deep_dive.show_detail`` builds the header/case/context strip and the ``st.tabs``
 shell, then calls the five public renderers here. Split out of ``deep_dive.py`` so the
@@ -24,18 +24,19 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
     history_chart,
-    resolve_std,
     sparkline,
 )
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     GAMELOG_SCHEMA,
-    load_current_game_corr,
+    load_game_ctxs,
+    load_pair_modifiers,
     load_stat_tooltips,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.slip_engine import ev_lift
 from sportstradamus.dashboard.theme import DIVERGING_COLORS, GRAY, SEQUENTIAL_COLORS
+from sportstradamus.helpers.distributions import resolve_std
 from sportstradamus.leg_schema import build_leg, leg_label
 
 # Comps-tab heatmap on the "vs their avg" column: same diverging-ramp bucket semantics
@@ -217,7 +218,8 @@ def _lift_survivors(
     items: list[dict],
     filtered: pd.DataFrame,
     focus_leg: dict,
-    corr: pd.DataFrame,
+    ctxs: dict,
+    mods: dict,
     platform: str | None,
 ) -> list[tuple[dict, int, float]]:
     """``(item, offer_idx, lift)`` for each partner with positive EV lift.
@@ -227,14 +229,15 @@ def _lift_survivors(
     against the focus alone. A partner that isn't in the current grid (``idx is None``,
     e.g. a Board selection narrower than the offer pool) has no computable lift and is
     dropped, as is any candidate whose lift isn't positive (``ev_lift`` returns a raw EV
-    multiplier, so "positive lift" is ``> 1.0`` — the ``_edge_badge`` convention).
+    multiplier, so "positive lift" is ``> 1.0`` — the ``_edge_badge`` convention). A
+    partner the book refuses beside the focus prices at $0, so it drops the same way.
     """
     survivors = []
     for item in items:
         idx = find_offer_idx(item, filtered, platform=platform)
         if idx is None:
             continue
-        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), corr, platform=platform or "")
+        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), ctxs, mods, platform=platform or "")
         if lift > 1.0:
             survivors.append((item, idx, lift))
     return survivors
@@ -353,9 +356,10 @@ def render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
     opp_items = [] if raw_opp is None else list(raw_opp)
     platform = row.get("Platform")
     focus_leg = build_leg(row)
-    corr = load_current_game_corr()
-    same = _lift_survivors(same_items, filtered, focus_leg, corr, platform)
-    opp = _lift_survivors(opp_items, filtered, focus_leg, corr, platform)
+    ctxs = load_game_ctxs()
+    mods = load_pair_modifiers()
+    same = _lift_survivors(same_items, filtered, focus_leg, ctxs, mods, platform)
+    opp = _lift_survivors(opp_items, filtered, focus_leg, ctxs, mods, platform)
     _render_corr_cards(same, f"Same team — {row['Team']}", filtered, "corr_same")
     _render_corr_cards(opp, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
     if not same and not opp:

@@ -1,8 +1,16 @@
 # Fantasy Points Data Suite snapshotter
 
-`fp-fetch` walks a catalog of Fantasy Points Data Suite endpoints and
-writes each tool's response to disk every week. The catalog and the
-session token are the only two things you maintain.
+`sportstradamus fetch fp` walks a catalog of Fantasy Points Data Suite
+endpoints and writes each tool's response to disk every week. The catalog
+and the session cookie are the only two things you maintain.
+
+The API is `fantasypointsdata.com/api/nfl/{tool}` — a GET per tool, filters
+in the query string, and a bare JSON array of flat rows back. The columns it
+returns are **not** the ones the NFL models were trained on; the collector
+translates them back to the legacy vocabulary on the way to parquet. See
+[Column translation](#column-translation) for what that means when you add a
+tool. What the new API makes newly *possible* is surveyed separately in
+[fantasypoints_expansion.md](fantasypoints_expansion.md).
 
 This page covers FP-specific setup. The shared collector framework — the
 `run`/`verify`/`list`/`refresh-auth` CLI surface, curl→keys.json auth rotation,
@@ -19,80 +27,61 @@ account suspension is a realistic risk if their ToS forbids this.
 
 ## One-time setup
 
-### 1. Grab a fresh `Authorization` token
+### 1. Store your login
 
-The Data Suite v2 API authenticates via a bearer-style `Authorization`
-header (not a cookie). You capture it once per session:
+The API authenticates on the `ds_session` cookie alone. It accepts nothing
+else — an `Authorization` header is ignored, and a request carrying only
+one gets a 401. The cookie is a **seven-day** token (its own payload
+carries the expiry) and it does **not** slide: using it does not push the
+expiry out, so it lapses a week after login no matter how often the
+collector runs.
 
-1. Log in to <https://data.fantasypoints.com/> in a desktop browser.
-2. Open DevTools → **Network** tab, filter to **Fetch/XHR**.
-3. Click any tool (line matchups is fine) so the SPA fires its data
-   call.
-4. Click the request row in the Network list → **Headers** panel →
-   **Request Headers**. Copy the *value* of the `Authorization:`
-   header (everything after `Authorization: `).
-5. (Optional but recommended) Copy the `Cookie:` header value too —
-   some endpoints want analytics/session cookies alongside the token.
-6. Paste into `src/sportstradamus/creds/keys.json`:
+That would mean a DevTools paste every week, so the collector signs in for
+itself instead. Put your **fantasypoints.com** account credentials — the
+email and password the site's sign-in form takes — in
+`src/sportstradamus/creds/keys.json`:
 
 ```json
 {
-  "fantasypoints_authorization": "Bearer eyJ...",
-  "fantasypoints_cookie": "_shopify_y=...; ..."
+  "fantasypoints_email": "<your fantasypoints.com email>",
+  "fantasypoints_password": "<your password>"
 }
 ```
 
-Optionally set `fantasypoints_user_agent` to your browser's UA in the
-same file — the default Firefox UA is fine for most users.
+Then prove they work:
 
-The tokens rotate on a schedule we don't control. When they expire the
-weekly job alerts via Healthchecks.io and you redo this step.
+```bash
+sportstradamus fetch fp login
+```
+
+That makes the same two hops the sign-in form makes — Firebase trades the
+email and password for an `idToken`, then `/api/auth/firebase-login` trades
+that for the cookie — writes the result into `fantasypoints_cookie`, and
+reports the length. From then on `run` renews the cookie by itself the first
+time a call comes back 401 — under cron too, with no TTY — so nothing has to
+be pasted again.
+
+Firebase is the only way in, so the email must be the one the account was
+created with. The sign-in page also shows an account-name form posting to
+`/api/auth/login`, but that path is disabled site-wide and answers `404 Not
+found.` for any Firebase-backed account, which is every account now.
+Google and Apple sign-in are not supported here — they need an interactive
+popup — so an account created that way has to be given a password on
+fantasypoints.com before the collector can use it.
+
+`fantasypoints_authorization` is no longer read; delete it from both
+boxes. Optionally set `fantasypoints_user_agent` to your browser's UA —
+the default Firefox UA is fine for most users.
+
+If you would rather not store the password, paste a cookie into
+`fantasypoints_cookie` by hand (DevTools → Network → any `/api/nfl/` XHR →
+copy the `Cookie:` header value) and accept the weekly refresh; without
+credentials there is nothing for the collector to renew from.
 
 ### 2. Register endpoints
 
-Two paths — pick one (or combine):
-
-**Bulk: `fp-fetch discover`** — auto-populates from FP's tool registry.
-
-```bash
-poetry run sportstradamus fetch fp discover --dry-run    # preview new entries
-poetry run sportstradamus fetch fp discover              # write them
-```
-
-`discover` hits `POST /v2/ds/all/tools`, walks every published tool,
-and adds one catalog entry per `(tool, context)` pair (e.g.
-`passingBasic` with `context: ["player","team","opponent"]` becomes
-three entries):
-
-- `player` → `POST .../tools/player/{slug}/values`
-- `team` → `POST .../tools/team/{slug}/values` (team's offensive
-  view — there is no `/offense/` segment, the SPA hits the bare
-  `/team/{slug}` path for offense)
-- `opponent` → `POST .../tools/team/defense/{slug}/values` (team's
-  defensive view, one row per opponent faced)
-
-Existing names are preserved by default — re-run any time and only
-new tools land. Pass `--replace` to discard the existing catalog
-and regenerate from scratch; needed once after upgrading from a
-pre-v2 catalog so old bodies pick up the integer week/season
-sentinels (otherwise FP keeps returning whole-season data
-regardless of `--week`).
-
-Defaults: skips `isPrivate: true` (debug / VIP-only / concept
-tables); pass `--include-private` to keep them. Skips the `other`
-context (no observed URL pattern). League defaults to `nfl`; override
-with `--league wnba` etc. once FP launches one.
-
-Per-tool body matches the v2 `/values` contract observed via
-DevTools: `tableProperty`, `routeContextTarget`, integer
-`weeks: {"REG": [N]}`, `filterMatch.game.season.eq`, plus the
-per-tool `requires*` and `requiredRoles` flags pulled from the
-registry entry. Week + season are stored as sentinel strings
-(`__WEEK_INT__`, `__SEASON_INT__`) and rewritten to integers per
-call by `body_substitute.substitute_runtime`. The `weeks` block is
-also re-shaped per mode (see `--mode` below).
-
-**Manual: `fp-fetch import-curl`** — for the per-tool path:
+There is no tool registry to enumerate — the SPA has no equivalent of the
+old `/v2/ds/all/tools` — so every entry comes from a captured request:
 
 1. Open the tool in your browser with DevTools' **Network** tab open
    and filter by `Fetch/XHR`.
@@ -109,70 +98,66 @@ also re-shaped per mode (see `--mode` below).
 5. Register:
 
    ```bash
-   poetry run sportstradamus fetch fp import-curl /tmp/line_matchups.curl \
-       --name line_matchups \
-       --output-subdir team/line_matchups
+   sportstradamus fetch fp import-curl /tmp/coverage_matrix.curl \
+       --name team_coverage_matrix \
+       --output-subdir team/coverage_matrix
    ```
 
    The endpoint lands in
    `src/sportstradamus/data/config/fantasypoints_endpoints.json`.
 
-`import-curl` handles both GET and POST out of the box. POST requests
-with a `--data-raw '{...}'` JSON body are parsed and stored in the
-catalog as `json_body`. `Authorization`, `Cookie`, and `User-Agent`
-headers are stripped automatically (they come from `creds/keys.json`).
+`Authorization`, `Cookie` and `User-Agent` are stripped automatically (they
+come from `creds/keys.json`), along with the browser telemetry a "Copy as
+cURL" drags in — `Referer`, `Origin`, `Accept-Language`, `Sec-Fetch-*`, `DNT`,
+`Sec-GPC`, `Priority`, `TE` and the rest. `Referer` is the one that matters:
+it records whichever page you had open, so keeping it would make two captures
+of the same tool produce two different entries, and the client sets its own.
 
-Two substitution paths coexist for hand-imported entries:
+**Name the entry `player_` / `team_` / `opponent_` + the file kind you
+want**, because the prefix picks `player_data/` vs `team_data/` and the
+rest becomes the parquet basename, which is what `FILE_KINDS` in
+`stats/nfl_fp_weekly.py` and `stats/nfl_fp_team_weekly.py` look for.
 
-- **Legacy `{week}` / `{season}` string substitution** — recursive
-  through nested dicts and lists; only strings containing the literal
-  placeholders are touched. Useful for v1-style endpoints with a
-  `filters.{week,season}` shape.
-- **Integer sentinels** (`__WEEK_INT__`, `__SEASON_INT__`) — used by
-  discover-generated entries. Rewritten to integers per call so FP's
-  v2 schema (which type-checks these as ints) accepts the body.
+The captured query string is stored as `params` verbatim, minus the
+period: every entry carries `"seasons": "{season}"` and
+`"regWeeks": "{week}"`, templated so the dry-run listing and the run
+report print a URL you can paste into a browser. The source overrides
+both per call from `--season` / `--week` / `--mode`, so a captured
+literal would be a lie rather than a bug — `--replace` normalises it
+either way. Keep every *other* captured filter: `mode=offense|defense`,
+`positions=`, and any situational slice (`down=3`, `ydsToScoreMax=10`,
+`scoreDiffMin=7`) are what define the entry.
 
 For season-long aggregates that should not be re-fetched per week,
 pass `--season-long` at `import-curl` time (or set `"weekly": false`
 in the catalog entry).
 
-#### Patching a discover-generated entry (`--replace`)
+#### Patching an existing entry (`--replace`)
 
-A handful of FP tools return 0 rows when called with the minimal
-body discover generates, because the SPA injects per-tool filters
-(position, stat-availability qualifier) that the registry doesn't
-expose. Symptom: those tools land in the report with `status: "empty"`
-and a `response_preview` showing `"count": 0`.
-
-Fix: capture a working DevTools curl for the failing tool, then
-overlay it onto the existing catalog entry with `--replace`:
+When a tool gains a filter, re-capture it and overlay the new request
+onto the existing catalog entry:
 
 ```bash
 pbpaste > /tmp/passing_advanced.curl
-poetry run sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
+sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
     --name player_passing_advanced \
     --replace
 ```
 
-`--replace` preserves the existing `output_subdir` (so you don't
-have to re-specify it) and rewrites the captured body's literal
-`game.season.eq` value to the `__SEASON_INT__` sentinel — the entry
-stays usable across seasons even though you captured it on one
-specific week. The `weeks` block doesn't need sentinelisation: the
-runtime substitutor overrides it per call based on `--mode`.
+`--replace` preserves the existing `output_subdir`, so you don't have to
+re-specify it.
 
 ### 3. Verify locally
 
 ```bash
-poetry run sportstradamus fetch fp list
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --dry-run
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --only team_line_matchups
+sportstradamus fetch fp list
+sportstradamus fetch fp run --week 5 --season 2025 --dry-run
+sportstradamus fetch fp run --week 5 --season 2025 --only team_coverage_matrix
 ```
 
-`run` fetches each endpoint, parses `content.rows.values` (v2
-endpoints) or `content.table.rows.values` (legacy) into a pandas
+`run` fetches each endpoint, parses the returned JSON array into a pandas
 DataFrame, and writes one parquet per (tool, week, mode), grouped
-into a per-week subfolder so 45 files don't clutter the season dir:
+into a per-week subfolder so 60 files don't clutter the season dir:
 
 - player-context entries →
   `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
@@ -200,20 +185,26 @@ for postseason mode; the `+18` shift happens during path resolution.
 
 ```bash
 # default — one regular-season week only (REG: [N])
-poetry run sportstradamus fetch fp run --week 5 --season 2025
+sportstradamus fetch fp run --week 5 --season 2025
 
 # season-to-date through week N (REG: [1..N])
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
+sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
 
 # postseason week N (POST: [N])
-poetry run sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
+sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
 ```
 
-The mode rewrites `context.weeks` in the request body so FP returns
-exactly the slice you ask for. Bodies in the catalog ship with
-`weeks: {"REG": ["__WEEK_INT__"]}` as the canonical shape and
-`body_substitute.substitute_runtime` rewrites both the int and the
-mode shape per call.
+The mode sets the period query parameters, which are merged over the
+catalog entry's own params per call (`source.period_params`):
+
+| mode | parameters |
+|---|---|
+| `weekly` | `seasons=2025&regWeeks=5` |
+| `season_to_date` | `seasons=2025&regWeeks=1,2,3,4,5` |
+| `postseason` | `seasons=2025&regWeeks=&postWeeks=1` |
+
+`regWeeks=` with an empty value returns zero regular-season rows, which is
+how a postseason request excludes them.
 
 Re-running the same (week, mode) **skips** cells that already have a
 non-empty parquet — `run` and `backfill` both default to "don't
@@ -232,66 +223,130 @@ After a run, sanity-check what landed on disk against what you
 asked for:
 
 ```bash
-poetry run sportstradamus fetch fp verify --week 5 --season 2025
-poetry run sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
-poetry run sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
+sportstradamus fetch fp verify --week 5 --season 2025
+sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
+sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
 ```
 
-For every catalog entry the verifier:
+Each response row is one aggregate per entity over the requested weeks,
+so there is no per-row week column to check. What every row does carry is
+``games`` — how many of that entity's games went into the aggregate — and
+that is exactly what the week filter controls. For every catalog entry the
+verifier:
 
 - Confirms the expected parquet exists at the routed path.
-- Loads the file and checks ``gameSeason`` matches the requested
-  season exactly (no stray rows from other years).
-- Checks ``gameWeek`` matches the week set implied by ``--mode``:
-  ``{N}`` for ``weekly`` / ``postseason``, ``{1..N}`` for
-  ``season_to_date``.
-- When ``gameType`` is present, confirms ``weekly`` /
-  ``season_to_date`` carries only regular-season games and
-  ``postseason`` carries only playoff games.
+- Checks no row aggregates more games than ``--mode`` allows: 1 for
+  ``weekly`` / ``postseason``, N for ``season_to_date`` through week N.
+  This is the check that catches a week filter that didn't bind — an
+  unfiltered response still lands at the right path with a healthy row
+  count, and fails here on 17 games per entity.
+- Confirms the identity columns survived (``playerPlayerId`` /
+  ``playerFirstName`` / ``playerLastName`` on player entries,
+  ``teamTeamId`` / ``teamAbbreviation`` on team ones). A dropped identity
+  column is indistinguishable from an empty week downstream and silently
+  removes every feature built on the file.
 
 Output is one line per spec (``OK`` / ``WARN`` / ``FAIL``) with
 indented issue detail when something's off. Exit code is non-zero
 if any spec hits an error so you can chain it into a script.
 
-This is the check that catches the pre-v2 "no week filter" bug —
-if you upgrade an older catalog without running ``discover
---replace``, ``verify`` will FAIL every spec with ``week_mismatch``
-pointing at the same fix.
+### Cookie expired mid-run
 
-### Token expired mid-run
+The first 401 triggers a login, and the failing call is retried with the
+fresh cookie — the batch continues and `keys.json` is updated in passing.
+This needs no terminal, so the weekly cron recovers on its own.
 
-If the Authorization or Cookie expires partway through `fp-fetch
-run`, the CLI pauses, prints a banner, and waits for you to paste
-a fresh DevTools curl on stdin (end with EOF / Ctrl+D). It updates
-`creds/keys.json` and the in-memory client, then retries the
-failing call and resumes the batch. Non-TTY contexts (cron) skip
-the prompt and fail fast so Healthchecks.io pings `/fail`.
+Only when there are no stored credentials (or the login is rejected) does
+it fall back to the old behaviour: at a TTY it pauses and waits for a
+fresh DevTools curl on stdin (end with EOF / Ctrl+D); under cron it fails
+fast so Healthchecks.io pings `/fail`.
 
 ## Historical backfill
 
 ```bash
-poetry run sportstradamus fetch fp backfill \
-    --start-season 2021 --end-season 2024 \
-    --start-week 1 --end-week 18
+sportstradamus fetch fp season --season 2024   # weeks 1-18 + rounds 1-4 -> week_01..22
 ```
 
-Iterates every (season, week) pair and runs the same fetch +
-parse + write as `run`. Pacing is conservative by default:
+`season` asks for the whole season, postseason included, with the API's
+`splits=week` switch, which returns one row per entity-week, and writes
+the same per-week parquets `run` does. One request per tool replaces
+22, so a season costs ~200 calls instead of ~1,300. Four API
+behaviours shape it:
 
-- **2–8 s** random pause between endpoints in the same week
-  (`--request-pause-min` / `--request-pause-max`).
-- **8–28 s** random pause when transitioning to a new week
-  (`--week-pause-min` / `--week-pause-max`).
+- **Row cap.** A response is cut at a per-tool row count (1,500 on the
+  receiving tools, up to 3,700 on the snap tools); past it the
+  lowest-volume players drop out of *every* week asked for. The API
+  flags such a response with `x-result-truncated: 1` (and the cap in
+  `x-result-cap`), also on a server-cache hit. The command halves the
+  window until each part comes back unflagged; team tools and the QB
+  tools fit in one request, the big receiving tools need about ten.
+- **`lineup-combos/ol` ignores the switch** and answers aggregated
+  rows; the command notices the missing `split_week` and falls back to
+  per-week calls for that tool.
+- **`bell-cow` split rows are not its per-week rows.** Under
+  `splits=week` the tool counts a carry fewer for some backs (two in
+  2025 weeks 1–15, in a one-week window too), which moves
+  `attempts_pct` and the attempt market share a recipe reads, and it
+  joins a traded player's teams into one `team` string (`"HST, KC"`).
+  The command never sends that tool a split request; it goes week by
+  week.
+- **Some columns are window-scoped, not per-week**, so a split-pulled
+  parquet differs from a per-week one in them: on team files `snaps`,
+  `routes`, the receiving route rates and the drive block
+  (`drives`, `points_per_drive`, `score_pct`, …); on player files the
+  team-context block of the rushing and receiving tools
+  (`team_targets`, `team_routes`, the personnel / coverage / formation
+  rates, `snap_pct`) goes empty for the weeks a player spent with a
+  second team inside one window, and `sep_market_share` /
+  `*_bucket_share_pct` are shares of the window. No recipe reads any
+  of them: on 2025 weeks 1–15, all 60 tools, every aggregated feature
+  from a `season` pull matched the per-week pull exactly. A recipe
+  that wants one of these columns needs per-week pulls (`backfill`)
+  for its history.
 
-With ~45 tools × 18 weeks × N seasons at the defaults plan for
-several hours per season — designed for an overnight one-time
-grab, not a cron job. `--only`, `--dry-run`, and `--mode` work the
-same as on `run` (e.g. `--mode season_to_date` to backfill
-cumulative weekly snapshots).
+Only weeks that are missing or hold zero rows are asked for
+(`--refetch` asks for all 22), so a rerun costs one request per tool
+with a gap and nothing for a finished one. `split_pct` /
+`split_rte_pct` (a week's share of its window) are dropped on write.
+
+`backfill` is the per-week walk — the same fetch + parse + write as
+`run` over every (season, week) pair — for filling a few cells:
+
+```bash
+sportstradamus fetch fp backfill \
+    --start-season 2021 --end-season 2021 \
+    --start-week 18 --end-week 18
+```
+
+Its pacing (2–8 s between endpoints, 8–28 s between weeks;
+`--request-pause-*` / `--week-pause-*`) is not the constraint; the
+**daily request budget** is. The account gets 1,000 requests per UTC
+day (measured 2026-09-19); past it every call answers
+`429 {"code":"daily_limit"}` with `x-budget-remaining: 0` and
+`retry-after: <seconds to 00:00 UTC>`. `x-budget-remaining` arrives
+on every uncached response (a server-cache hit carries no header and
+costs nothing), so read it before a big pull.
+
+- Pull **whole seasons**, most recent first. Inside one season every
+  kind must come from the same API era (player ids differ across
+  eras — see *One identity space*), so never leave a season half
+  re-pulled when something downstream reads it.
+- Clear the season's old parquets first, then pull **without**
+  `--refetch`: a 429 writes nothing, missing weeks get asked for on
+  the next run, finished ones are skipped, so the pull resumes across
+  resets.
+- Leave ~100 calls of headroom on Wednesdays for the production
+  cron below, which shares the account.
+
+`--only` works the same as on `run`; `backfill` also takes `--mode`
+and `--dry-run` (`--mode season_to_date` backfills cumulative weekly
+snapshots; `--mode postseason --start-week 1 --end-week 4` fills the
+playoff folders `week_19..22`).
 
 ## Weekly cron
 
-On the production box (see `CLAUDE.md` for the full crontab):
+On the production box (see [OPERATIONS.md](OPERATIONS.md) for the full
+crontab):
 
 ```cron
 0 10 * * 3   /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
@@ -301,14 +356,28 @@ Wednesday 10:00 server time — after Monday/Tuesday stat corrections
 settle, well before Sunday games. Set `HEALTHCHECK_URL_FP_FETCH` in
 the environment so token-expiry failures alert via Healthchecks.io.
 
-## When the token expires
+## When auth fails anyway
 
-The healthcheck alert (`/fail` ping with the last 50 log lines) quotes a `401`
-message pointing here. Refresh in one paste with
-`poetry run sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
-then confirm with `fp-fetch run --only line_matchups`. The extract-headers,
-preserve-other-keys, redacted-preview mechanics are the shared refresh-auth flow
-documented in [data_collectors.md](data_collectors.md#auth).
+A `/fail` healthcheck quoting a `401` now means the *sign-in* failed, not that
+the cookie lapsed — the cookie renews itself. The alert quotes the reason
+directly, and Firebase's codes say which half is wrong: `EMAIL_NOT_FOUND`
+means the stored email is not an account, `INVALID_PASSWORD` means the email
+is right and only the password is stale. `sportstradamus fetch fp login`
+reproduces it on demand.
+
+A rejected sign-in **stops the run** rather than moving to the next endpoint.
+The credential is shared by every endpoint, so finishing the walk cannot
+succeed — it would only fire one more refused sign-in per endpoint, and
+dozens of those in a burst is what gets an account locked. The run report is
+still written, so whatever was fetched before the credential died stays
+visible.
+
+The manual paths still work if you need them:
+`sportstradamus fetch fp login` to re-mint from credentials, or
+`sportstradamus fetch fp refresh-auth /tmp/fresh.curl` to install a cookie
+captured by hand. The extract-headers, preserve-other-keys, redacted-preview
+mechanics are the shared refresh-auth flow documented in
+[data_collectors.md](data_collectors.md#auth).
 
 ## Output layout
 
@@ -329,7 +398,82 @@ super bowl). `mode_suffix` is `""` (weekly, default), `_s2d`
 collision because they target different filenames (`_s2d`) or
 different folders (postseason).
 
+## Column translation
+
+The API's column names are its own — `yards`, `cpoe`, `man_routes` — and none
+of them is what the 104 aggregate outputs of the port-era recipes read. Those
+names are frozen: the `expected_columns` list inside every NFL model pickle is
+sliced strictly at serve time, so a column that stops appearing is a `KeyError`
+in production, not a degraded feature. Rather than rename those outputs, the
+collector translates back on the way to parquet. Recipes added after the port
+(the `ps_*`, `pace_*`, `ol_*` and expected-TD families) read the new-schema
+names directly, so a kind needs a map entry only when it feeds a legacy-named
+recipe.
+
+`config/fantasypoints_column_map.json` holds the translation, keyed by file
+kind, and `collectors/fantasypoints/column_map.py` applies it. Three additive
+sections:
+
+- **`rename`** copies a column to its legacy camelCase name, applying any
+  **`scale`**. Those carry the legacy conventions the API dropped: rates
+  stored as fractions where the API reports percents (`scale: 0.01`), and
+  sack yardage stored as a loss (`scale: -1.0`).
+- **`derive`** builds a legacy rate from a numerator/denominator pair in the
+  row's `__raw` block. Preferred wherever the API's displayed rate is
+  pre-rounded, since the counts are exact.
+- **`bucket`** re-nests flat `{bucket}_{stat}` columns into the single JSON
+  cell the legacy schema carried, so the bucket-parsing aggregators read
+  archived legacy snapshots and new pulls alike.
+
+Every section is additive — the new-schema columns stay on the frame, so one
+parquet serves both the frozen feature set and anything built on the wider
+schema later.
+
+`tests/test_fantasypoints.py::test_every_aggregate_output_column_survives_the_new_schema`
+walks the catalog, the map and both recipe tables and fails if any aggregate
+output column has become underivable. It is the gate on the silent chain that
+otherwise ends at a serve-time `KeyError`: a recipe whose source columns are
+missing is skipped without a word.
+
+### What the port cost
+
+The cutover was verified by re-pulling a week that already existed as a legacy
+snapshot and diffing the production aggregates: **team 16/16 and defense 7/7
+columns, zero suspect; player 154/154 columns present**, of which 150 are
+numeric and comparable. Of those 150, four differences are real and the rest is
+±1 charting noise (86–99% of entities exact, near-zero-mean residuals).
+
+The four are FP redefinitions with no closer endpoint or filter, so the port
+takes the substitutes rather than the retrain it exists to avoid:
+
+| aggregate column | correlation | cause |
+|---|---|---|
+| `eff_XFP` | 0.898 | FP redefined expected fantasy points (~2% high) |
+| `rush_bellcow_XFP_pct` | 0.948 | same xFP redefinition |
+| `bellcow_score` | derived | composite of the above |
+| `rush_adv_EXP_YDS` | 0.915 | explosive-run yardage threshold moved |
+
+All four are low-weight inputs. Re-examine if one shows up in a ship-gate
+regression.
+
+### One identity space
+
+Every season on disk (2021 onward, postseason included) was pulled through the
+current API, so both trees share one identity space: `playerPlayerId` is the
+GSIS id (`00-0039424`) and `teamTeamId` the 3-letter abbreviation, which makes
+`_build_team_abbreviation_map` an identity mapping. The legacy pulls keyed
+players by an FP-internal hex id and teams by an integer with zero overlap, so
+a lookback window spanning the two eras split each entity into two aggregate
+rows and kept one; the team aggregate still re-keys each window through its own
+season's map (`_pool_windows`), so a stray legacy file cannot reopen the split.
+Keep it that way: never restore a legacy-era week beside current ones.
+
 ## Adding new endpoints later
 
-Re-run `fp-fetch import-curl` whenever Fantasy Points adds a new tool
-you want snapshotted. Existing catalog entries are untouched.
+Re-run `sportstradamus fetch fp import-curl` whenever Fantasy Points adds
+a new tool you want snapshotted. Existing catalog entries are untouched.
+
+Then give the kind a `FILE_KINDS` entry and recipes that read its new-schema
+names (`tests/fixtures/fantasypoints_tool_columns.json` pins the vocabulary the
+schema-survival test checks them against). Add a `fantasypoints_column_map.json`
+entry only when the tool must feed a legacy-named recipe.

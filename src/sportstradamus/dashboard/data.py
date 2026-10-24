@@ -15,28 +15,37 @@ import streamlit as st
 
 from sportstradamus import data
 from sportstradamus.analysis import annotate_offer_outcomes
+from sportstradamus.dashboard.components import constellation_shapes
+from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
 from sportstradamus.dashboard.components.lab_filters import FILTER_AXES
+from sportstradamus.dashboard.slip_engine import modifier_map
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
+    CURRENT_LINE_MOVEMENT_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
+    CURRENT_PAIR_MODIFIERS_PATH,
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
+    LINE_MOVEMENT_COLS,
     MODEL_STATS_PATH,
+    PAIR_MODIFIER_COLS,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     USER_SLIPS_PATH,
+    parlay_hist_mtime,
     read_history,
     read_parlay_hist,
     read_parquet_safe,
     read_user_slips,
 )
-from sportstradamus.history_schema import PREDICTION_KEY, PREDICTION_LEVEL_COLS
+from sportstradamus.history_schema import DECISION_COLS, PREDICTION_KEY, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.stories.context import ctxs_from_frame
+from sportstradamus.realized import last_scored_lines, settled_offers
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -142,7 +151,12 @@ def _load_history_cached(path: Path, mtime: float) -> pd.DataFrame:
     fresh cron write invalidates it. ``read_history()`` re-resolves the path
     itself, so ``path`` isn't touched in the body beyond keying the cache.
     """
-    history = read_history()
+    # The decision-time columns are research inputs no page reads, except Scored At, by
+    # which realized.last_scored_lines counts a moved prop once; dropping the rest keeps the
+    # cached frame flat (errors="ignore": parquets written before they existed).
+    history = read_history().drop(
+        columns=[col for col in DECISION_COLS if col != "Scored At"], errors="ignore"
+    )
     if history.empty:
         return history
 
@@ -181,19 +195,27 @@ def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache.
 
     ``columns`` projects the read to a scalar subset (Lab Correlations does this — the
-    full 1.7M-row file carries multi-GB ``list<float>`` struct columns it never plots).
+    full history carries multi-GB ``list<float>`` struct columns it never plots).
     """
     key = tuple(columns) if columns else None
-    return _load_parlays_cached(PARLAY_HIST_PATH, _mtime(PARLAY_HIST_PATH), key)
+    return _load_parlays_cached(PARLAY_HIST_PATH, parlay_hist_mtime(), key)
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
 def _load_current_offers_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    df = read_parquet_safe(path)
+    if "Star" not in df.columns:
+        df = df.reindex(columns=[*df.columns, "Star"], fill_value=0.0)
+    return df
 
 
 def load_current_offers() -> pd.DataFrame:
-    """Today's scored offers from the latest ``prophecize`` snapshot."""
+    """Today's scored offers from the latest ``prophecize`` snapshot.
+
+    ``Star`` (player prominence) reads 0.0 on a snapshot written before the column
+    existed, so a dashboard restarted on the pull that brought it keeps rendering
+    until the next ``prophecize`` writes the real values.
+    """
     return _load_current_offers_cached(CURRENT_OFFERS_PATH, _mtime(CURRENT_OFFERS_PATH))
 
 
@@ -216,15 +238,39 @@ def load_current_game_corr() -> pd.DataFrame:
     """Per-game leg-pair correlation slices from the latest ``prophecize`` snapshot.
 
     Columns ``League, Game, leg_a, leg_b, rho`` with leg key ``Player|Market|Bet``;
-    joins ``current_offers`` on the canonical ``Game`` key. Feeds the slip rail
-    copula, the constellation, and the swap dialog.
+    joins ``current_offers`` on the canonical ``Game`` key. Feeds the game contexts'
+    rho (:func:`load_game_ctxs`) and the night's shape deal (:func:`load_slate_shapes`).
     """
     return _load_current_game_corr_cached(CURRENT_GAME_CORR_PATH, _mtime(CURRENT_GAME_CORR_PATH))
 
 
+# cache_resource, not cache_data: the slip scorer reads this map on every price, and
+# cache_data would unpickle a fresh copy of it per call. Nothing writes to it.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pair modifiers...")
+def _load_pair_modifiers_cached(path: Path, mtime: float) -> dict:
+    return modifier_map(read_parquet_safe(path).reindex(columns=PAIR_MODIFIER_COLS))
+
+
+def load_pair_modifiers() -> dict:
+    """Per-platform same-game leg-pair payout modifiers from the latest ``prophecize`` snapshot.
+
+    Indexed ``Platform`` → ``Game`` → the pair's two ``Player|Market|Bet`` keys → modifier
+    (``slip_engine.modifier_map``). Only pairs whose modifier isn't 1.0 are on record, and
+    0.0 means the app refuses the pair; a missing snapshot (before the first run that
+    writes it) reads as no pairs.
+    """
+    return _load_pair_modifiers_cached(
+        CURRENT_PAIR_MODIFIERS_PATH, _mtime(CURRENT_PAIR_MODIFIERS_PATH)
+    )
+
+
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")
 def _load_current_game_stories_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    df = read_parquet_safe(path)
+    for col, default in (("lead", False), ("lead_side", "")):
+        if col not in df.columns:
+            df = df.reindex(columns=[*df.columns, col], fill_value=default)
+    return df
 
 
 def load_current_game_stories() -> pd.DataFrame:
@@ -232,8 +278,9 @@ def load_current_game_stories() -> pd.DataFrame:
 
     Keys ``platform, League, Game, story_id, objective`` with ``legs`` a JSON
     leg-desc list; ``headline``/``joint_p``/``model_ev``/``kelly_stake``/
-    ``bet_size`` per row. Seeds the Slips constellation builder (Bankroll
-    Builder / Shoot the Moon).
+    ``bet_size``/``lead``/``lead_side`` per row (``lead``/``lead_side`` default to
+    ``False``/``""`` for a snapshot written before those columns existed). Seeds
+    the Slips constellation builder (Bankroll Builder / Shoot the Moon).
     """
     return _load_current_game_stories_cached(
         CURRENT_GAME_STORIES_PATH, _mtime(CURRENT_GAME_STORIES_PATH)
@@ -261,11 +308,12 @@ def _load_calibration_summary_cached(path: Path, mtime: float) -> pd.DataFrame:
 
 
 def load_calibration_summary() -> pd.DataFrame:
-    """Precomputed reliability (prob bin x alt-line split) grid from the latest ``reflect`` run.
+    """Precomputed reliability grid from the latest ``reflect`` run.
 
-    Columns ``Alt Line, Bin, Predicted, Actual, N, ECE, ROI``. Receipts reads this
-    instead of re-binning history at page load; empty when ``reflect`` has not
-    written it yet.
+    ``realized.calibration_summary``: one row per (cohort x alt-line split x prob bin),
+    columns ``Cohort, Alt Line, Bin, Predicted, Actual, N, ECE, ROI`` with ``Cohort``
+    ``"posted"`` or ``"recommended"``. Receipts reads this instead of re-binning history
+    at page load; empty when ``reflect`` has not written it yet.
     """
     return _load_calibration_summary_cached(
         CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH)
@@ -288,20 +336,83 @@ def load_current_game_context() -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_game_ctxs_cached(ctx_mtime: float, corr_mtime: float) -> dict:
+# cache_resource, not cache_data: every context carries its game's whole rho dict, and
+# cache_data unpickled a fresh copy of all of them on every call, most of a second per
+# rerun. GameCtx is frozen and nothing writes to its rho.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_game_ctxs_cached(
+    ctx_path: Path, ctx_mtime: float, corr_path: Path, corr_mtime: float
+) -> dict:
     return ctxs_from_frame(load_current_game_context(), load_current_game_corr())
 
 
 def load_game_ctxs() -> dict:
-    """Per-game :class:`GameCtx` map, built once per snapshot instead of every rerun.
+    """Per-game :class:`GameCtx` map, built once per snapshot and shared across reruns.
 
     ``ctxs_from_frame`` walks the whole ``current_game_corr`` slice (tens of thousands of
-    rows) to attach each game's rho, so rebuilding it on every constellation click was the
-    Games surface's biggest per-rerun cost. Cache-keyed on both source files' mtimes so a
-    fresh ``prophecize`` snapshot still refreshes it.
+    rows) to attach each game's rho, the pair lookup the thesis engine, the slip scorer and
+    the star map's edges all read. Cache-keyed on both source files so a fresh
+    ``prophecize`` snapshot still refreshes it.
     """
-    return _load_game_ctxs_cached(_mtime(CURRENT_GAME_CONTEXT_PATH), _mtime(CURRENT_GAME_CORR_PATH))
+    return _load_game_ctxs_cached(
+        CURRENT_GAME_CONTEXT_PATH,
+        _mtime(CURRENT_GAME_CONTEXT_PATH),
+        CURRENT_GAME_CORR_PATH,
+        _mtime(CURRENT_GAME_CORR_PATH),
+    )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_slate_shapes_cached(
+    offers_path: Path,
+    offers_mtime: float,
+    corr_path: Path,
+    corr_mtime: float,
+    catalog_mtime_ns: int,
+    date: str,
+) -> dict[str, GameShape]:
+    slate = load_current_offers()
+    return slate_shapes(
+        slate.loc[slate["Date"].astype(str) == date], load_current_game_corr(), date
+    )
+
+
+def load_slate_shapes(date: str) -> dict[str, GameShape]:
+    """Every game on ``date`` dealt its constellation (``constellation_slate.slate_shapes``).
+
+    Dealing classifies each game's correlation web across the whole night, about a second
+    of work, so it is cached on both snapshots and on the shape catalog's mtime: a tuning
+    edit still re-deals on the next rerun.
+    """
+    return _load_slate_shapes_cached(
+        CURRENT_OFFERS_PATH,
+        _mtime(CURRENT_OFFERS_PATH),
+        CURRENT_GAME_CORR_PATH,
+        _mtime(CURRENT_GAME_CORR_PATH),
+        constellation_shapes.CATALOG_PATH.stat().st_mtime_ns,
+        date,
+    )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading line movement...")
+def _load_current_line_movement_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path).reindex(columns=LINE_MOVEMENT_COLS)
+
+
+def load_current_line_movement() -> pd.DataFrame:
+    """Per-offer DFS line trajectories from the latest ``prophecize`` snapshot.
+
+    One row per ``League, Platform, Market, Player, Date`` (``Market`` the raw slug): the
+    posted main line's ``open_line``/``close_line``/``move``/``n_moves`` and ``series``, the
+    fair line's ``n_price_moves``/``fair_move``/``fair_series`` the Board draws, the
+    per-poll ``changes``, and the first/last timestamps (the two series and ``changes`` are
+    JSON text). Reindexed to ``LINE_MOVEMENT_COLS``, so an absent export — or a snapshot
+    written before a column existed, until the next ``prophecize`` — still reads
+    column-stable, the missing columns blank, and the Board's join simply finds nothing.
+    """
+    return _load_current_line_movement_cached(
+        CURRENT_LINE_MOVEMENT_PATH, _mtime(CURRENT_LINE_MOVEMENT_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading offer details...")
@@ -331,7 +442,9 @@ def load_user_slips() -> pd.DataFrame:
     return _load_user_slips_cached(USER_SLIPS_PATH, _mtime(USER_SLIPS_PATH))
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+# cache_resource, not cache_data: the Games map's hover cards read the whole season log on
+# every rerun, and cache_data unpickled a fresh copy of it each time.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
 def _load_gamelog_cached(league: str, mtime: float) -> pd.DataFrame:
     schema = GAMELOG_SCHEMA.get(league)
     if schema is None:
@@ -344,7 +457,7 @@ def load_gamelog(league: str) -> pd.DataFrame:
 
     Returns an empty DataFrame if the league is unrecognised or the file is
     missing.  Callers are responsible for filtering to the relevant player and
-    stat column.
+    stat column, and must not modify the frame: every caller shares one copy.
     """
     schema = GAMELOG_SCHEMA.get(league)
     gamelog_path = pkg_resources.files(data) / schema["file"] if schema else None
@@ -369,7 +482,8 @@ def load_corr_market_summary(league: str) -> pd.DataFrame:
     """Market-pair mean-correlation summary for a league (mtime-keyed cache).
 
     Columns ``market_a, market_b, rho_mean, n_teams, scope`` (scope is
-    ``same_team`` or ``opposing``), written by ``training.correlate``'s
+    ``same_team``, ``opposing``, or ``same_player``; regenerated files add
+    ``n_teams_distinct``), written by ``training.correlate``'s
     ``_write_corr_outputs`` alongside the dashboard-forbidden per-team corr
     parquets. Returns an empty DataFrame for a league with no corr data
     generated yet — callers caption that rather than crash.
@@ -486,7 +600,7 @@ def get_filtered_history(
     date_range: tuple | None = None,
     min_model_p: float | None = None,
 ) -> pd.DataFrame:
-    """Annotate offer outcomes and apply sidebar filters.
+    """Annotate offer outcomes, keep each prop at its last scoring and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
     Line, Boost, Platform, Bet, Win Prob, Market Prob, Result, Hit, Model EV, Market EV, Kelly.
@@ -495,6 +609,9 @@ def get_filtered_history(
     if df.empty:
         return df
 
+    # Ahead of the drops: with a pushed last line gone, an older line of the prop would read
+    # as its last scoring and count in its place.
+    df = df.loc[last_scored_lines(df)]
     df = df.dropna(subset=["Result"])
     df = df.loc[df["Result"] != "Push"]
 
@@ -521,7 +638,7 @@ def get_prediction_history(
     leagues: list | None = None,
     date_range: tuple | None = None,
 ) -> pd.DataFrame:
-    """Return one row per prediction (deduped on the identity key) for CRPS/coverage analysis.
+    """Return one row per prediction (deduped on the identity key) for coverage analysis.
 
     Filters by league and date range, then collapses the flat one-row-per-offer
     frame down to one row per :data:`~sportstradamus.history_schema.PREDICTION_KEY`.
@@ -563,6 +680,7 @@ def sidebar_filters(
         help="Force-reload all parquet snapshots, bypassing the data cache.",
     ):
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
     st.sidebar.header("Filters")
 
@@ -639,3 +757,18 @@ def filtered_history_or_stop(history: pd.DataFrame, filters: dict) -> pd.DataFra
         st.info("No resolved predictions match the current filters.")
         st.stop()
     return df
+
+
+def posted_offers_or_stop(history: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    """Sidebar-filtered settled offers the platform posted, at its payout, or ``st.stop()``.
+
+    ``realized.settled_offers`` over :func:`filtered_history_or_stop`: one row per posted
+    offer per platform carrying ``Payout``, ``Breakeven``, ``Hit``, ``Unit``,
+    ``Recommended`` and ``Quote``. Unposted sides (``Boost == 0``) drop out here, so every
+    realized number a page shows reads the universe the nightly ledger prices.
+    """
+    offers = settled_offers(filtered_history_or_stop(history, filters))
+    if offers.empty:
+        st.info("No posted, settled offers match the current filters.")
+        st.stop()
+    return offers

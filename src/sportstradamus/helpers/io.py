@@ -10,6 +10,7 @@ removed from the data package; readers no longer fall back to them.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.resources as pkg_resources
 import json
 import math
@@ -26,16 +27,46 @@ from sportstradamus import data
 _RUNTIME_DIR = pkg_resources.files(data) / "runtime"
 _TRAINING_DIR = pkg_resources.files(data) / "training"
 HISTORY_PATH = _RUNTIME_DIR / "history.parquet"
+# Legacy single-file parlay history. Reads fall back to it until the first
+# upsert_parlay_hist migrates its rows into PARLAY_HIST_DIR and deletes it.
 PARLAY_HIST_PATH = _RUNTIME_DIR / "parlay_hist.parquet"
+# One parquet per game date ("YYYY-MM-DD.parquet"). Partitioned so the
+# hot-path writers (prophecize upsert, reflect resolution) rewrite only the
+# days they touch instead of the whole multi-million-row history each slot.
+PARLAY_HIST_DIR = _RUNTIME_DIR / "parlay_hist"
 CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
+# Per-platform pair payout modifiers prophecize priced with, sparse (1.0 rows
+# dropped), keyed Player|Market|Bet like the corr slice so the dashboard joins
+# without positions.
+CURRENT_PAIR_MODIFIERS_PATH = _RUNTIME_DIR / "current_pair_modifiers.parquet"
+PAIR_MODIFIER_COLS = ["Platform", "League", "Game", "leg_a", "leg_b", "modifier"]
 CURRENT_GAME_CONTEXT_PATH = _RUNTIME_DIR / "current_game_context.parquet"
 CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
 # Per-offer deep-dive detail prerender (comps-vs-opponent, volume trend, SHAP "other
 # stats"), keyed by (League, Date, Player, Market, Opponent). Written by prophecize.
 CURRENT_OFFER_DETAILS_PATH = _RUNTIME_DIR / "current_offer_details.parquet"
-CURRENT_PICKEM_PATH = _RUNTIME_DIR / "current_pickem.parquet"
+# Per-offer trajectory of the DFS book's main line, and of the fair line its price
+# implies, since the offer went up. Written by prophecize; the dashboard left-joins it
+# onto current_offers on the key columns, so producer and reader share one spelling of
+# the schema.
+CURRENT_LINE_MOVEMENT_PATH = _RUNTIME_DIR / "current_line_movement.parquet"
+LINE_MOVEMENT_KEYS = ["League", "Platform", "Market", "Player", "Date"]
+LINE_MOVEMENT_COLS = [
+    *LINE_MOVEMENT_KEYS,
+    "open_line",
+    "close_line",
+    "move",
+    "n_moves",
+    "first_seen",
+    "last_seen",
+    "series",
+    "n_price_moves",
+    "fair_move",
+    "fair_series",
+    "changes",
+]
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # Plain-text mirror of model_stats.parquet for filesystem browsing in VSCode.
@@ -43,9 +74,18 @@ MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # by code (parquet is the authoritative source on disagreement).
 MODEL_STATS_CSV_PATH = _TRAINING_DIR / "model_stats.csv"
 LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
+# Selected-tail scorecard, one row per cell, written by `admin tail-scorecard --parquet`;
+# a monitor read beside Gate 1 and Gate 2, never a gate (docs/handoffs/train-live-gap.md).
+TAIL_SCORECARD_PATH = _TRAINING_DIR / "tail_scorecard.parquet"
+# Live half of that read: the recommended cohort's (read - hit) per cell over the
+# graduation window, written nightly by reflect.
+LIVE_GAP_PATH = _RUNTIME_DIR / "live_gap_per_cell.parquet"
 # Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
 # running the Monte-Carlo backtest at page load). Written nightly by reflect.
 PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
+# Realized hit rate / ROI by bet side at the platform payouts (Receipts reads it to
+# answer whether each side makes money). Written nightly by reflect.
+REALIZED_BY_SIDE_PATH = _RUNTIME_DIR / "realized_by_side.parquet"
 # Precomputed reliability (prob bin x alt-line split) grid (Receipts reads it instead
 # of re-binning history at page load). Written nightly by reflect.
 CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"
@@ -54,10 +94,24 @@ USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 # Dashboard-captured correlation modifiers/rakes awaiting fold-in to the
 # committed configs (helpers.config merges it at load; the CLI folds it).
 MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
+# Serve-time feature log: "date=YYYY-MM-DD/{LEAGUE}_{market}.parquet", partitioned by
+# game date. Train/serve parity diagnostics model_prob writes as it scores; the dashboard
+# never reads it.
+FEATURE_LOG_DIR = _RUNTIME_DIR / "feature_log"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
-# from this root; prune_model_pickle deletes one to dark-out a withheld cell.
+# from this root; prune_model_pickle deletes a withheld cell's.
 MODELS_DIR = pkg_resources.files(data) / "models"
+
+# Serve-time volume denominators Stats.load_volume_model_params reads for every other cell
+# of the league; a withheld one keeps its pickle (its own offers still serve the book consensus).
+VOLUME_STATS: dict[str, tuple[str, ...]] = {
+    "NBA": ("MIN",),
+    "WNBA": ("MIN",),
+    "MLB": ("pitches thrown",),
+    "NFL": ("attempts", "carries", "targets"),
+    "NHL": ("timeOnIce", "shotsAgainst"),
+}
 
 # Tuple-typed columns in parlay_hist that round-trip as homogeneous float lists.
 _PARLAY_LIST_COLS = ("Leg Probs", "Corr Pairs", "Boost Pairs", "Markets", "Players")
@@ -86,7 +140,7 @@ def model_pickle_path(league: str, market: str) -> Path:
     Built from :func:`market_file_slug`, e.g.
     ``("NFL", "rushing tds") -> models/NFL_rushing-tds.mdl``. This is the single
     path both the training writer and the prediction loader use, and the one
-    ``prune_model_pickle`` deletes to dark-out a withheld cell.
+    ``prune_model_pickle`` deletes for a withheld cell.
 
     Args:
         league: League code (e.g. ``"NBA"``).
@@ -98,20 +152,48 @@ def model_pickle_path(league: str, market: str) -> Path:
     return Path(str(MODELS_DIR / f"{market_file_slug(league, market)}.mdl"))
 
 
-def prune_model_pickle(league: str, market: str) -> bool:
-    """Delete a cell's production model pickle so inference skips that market.
+# resolve_model_version's memo of synthesized legacy ids, keyed by (pickle path, mtime).
+_MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
 
-    Used by ``meditate`` to dark-out a cell marked ``shipped="withheld"`` in
-    ``stat_meta.json``: with no pickle on disk, ``model_prob`` returns ``[]``
-    and the market is not scored.
+
+def resolve_model_version(filepath: str, filedict: dict) -> str:
+    """The stamped ``model_version``, or a stable ``legacy.<sha10>`` for pre-stamp pickles.
+
+    ~53 pickles trained before the train-time stamp carry no ``model_version``;
+    for those we synthesize one from a sha1 of the pickle bytes so each legacy
+    model still attributes to a distinct, reproducible id. Memoized per
+    ``(path, mtime)`` so the file-hash cost is paid once per model per process.
+    """
+    version = filedict.get("model_version")
+    if version is not None:
+        return version
+    key = (filepath, Path(filepath).stat().st_mtime)
+    cached = _MODEL_VERSION_CACHE.get(key)
+    if cached is None:
+        cached = "legacy." + hashlib.sha1(Path(filepath).read_bytes()).hexdigest()[:10]
+        _MODEL_VERSION_CACHE[key] = cached
+    return cached
+
+
+def prune_model_pickle(league: str, market: str) -> bool:
+    """Delete a withheld cell's production model pickle.
+
+    Used by ``meditate`` on a cell marked ``shipped="withheld"`` in
+    ``stat_meta.json``. Serving already prices such a cell at the book consensus
+    (``prediction.scoring.match_offers``), so this only keeps a stale model off disk.
+    A volume denominator (``VOLUME_STATS``) is never deleted: the league's other
+    cells project their volume from it.
 
     Args:
         league: League code.
         market: Market stem.
 
     Returns:
-        ``True`` if a pickle existed and was removed, ``False`` if none was present.
+        ``True`` if a pickle existed and was removed; ``False`` if none was
+        present or the cell is a volume denominator.
     """
+    if market in VOLUME_STATS[league]:
+        return False
     path = model_pickle_path(league, market)
     existed = path.exists()
     path.unlink(missing_ok=True)
@@ -162,6 +244,15 @@ def read_parquet_safe(path, columns: list[str] | None = None) -> pd.DataFrame:
     return pd.read_parquet(p, engine="pyarrow", columns=columns)
 
 
+def _read_json(path, default):
+    """Parse the JSON at ``path``, or return ``default`` when the file is absent."""
+    p = Path(str(path))
+    if not p.is_file():
+        return default
+    with p.open() as f:
+        return json.load(f)
+
+
 # ---------------------------------------------------------------------------
 # History parquet (flat, one row per prediction x book offer)
 # ---------------------------------------------------------------------------
@@ -194,27 +285,111 @@ def _list_to_tuple(v):
     return v
 
 
-def write_parlay_hist(df: pd.DataFrame) -> None:
-    """Atomically write the parlay history parquet."""
-    out = df.copy()
-    # _date is a transient column added by analysis.compute_parlay_metrics; never persist it.
-    out = out.drop(columns=[c for c in ("_date",) if c in out.columns])
+def _parlay_day_path(day) -> Path:
+    return Path(str(PARLAY_HIST_DIR)) / f"{day}.parquet"
+
+
+def _parlay_day_files() -> list[Path]:
+    return sorted(Path(str(PARLAY_HIST_DIR)).glob("*.parquet"))
+
+
+def _write_parlay_day(day_df: pd.DataFrame, day) -> None:
+    out = day_df.copy()
     for col in _PARLAY_LIST_COLS:
         if col in out.columns:
             out[col] = out[col].apply(_seq_to_list)
-    _atomic_write_parquet(out, PARLAY_HIST_PATH)
+    _atomic_write_parquet(out, _parlay_day_path(day))
 
 
-def read_parlay_hist(columns: list[str] | None = None) -> pd.DataFrame:
-    """Read the parlay history.
+def write_parlay_hist(df: pd.DataFrame, days: list[str] | None = None) -> None:
+    """Write the parlay history as one parquet per game date.
+
+    ``days=None`` is a full rewrite: every date in ``df`` is written, day files
+    for dates absent from ``df`` are deleted, and the legacy single-file parquet
+    is removed (this is also the migration path). Passing ``days`` writes only
+    those dates' partitions — for callers like reflect that mutate a few recent
+    days of an otherwise-unchanged frame.
+    """
+    if days is None:
+        days = [] if df.empty else df["Date"].unique()
+        keep = {f"{day}.parquet" for day in days}
+        for stale in _parlay_day_files():
+            if stale.name not in keep:
+                stale.unlink()
+        Path(str(PARLAY_HIST_PATH)).unlink(missing_ok=True)
+    for day in days:
+        _write_parlay_day(df.loc[df["Date"] == day], day)
+
+
+def upsert_parlay_hist(new_df: pd.DataFrame, dedup_subset: list[str]) -> None:
+    """Merge freshly built parlays into their day partitions.
+
+    Reads only the day files ``new_df`` touches, keeps the new row on a
+    ``dedup_subset`` collision, and rewrites just those partitions. If the
+    legacy single-file history still exists it is migrated (partitioned and
+    deleted) first, so the first post-deploy run self-migrates. Retention is
+    :func:`trim_parlay_hist`'s job — it has to run on days that build no parlays.
+    """
+    if Path(str(PARLAY_HIST_PATH)).is_file():
+        write_parlay_hist(read_parlay_hist())
+    for day in new_df["Date"].unique():
+        day_new = new_df.loc[new_df["Date"] == day]
+        day_old = read_parquet_safe(_parlay_day_path(day))
+        if not day_old.empty:
+            day_new = pd.concat([day_new, day_old], ignore_index=True)
+        _write_parlay_day(day_new.drop_duplicates(subset=dedup_subset, ignore_index=True), day)
+
+
+def trim_parlay_hist(retention_days: int) -> int:
+    """Delete day partitions older than the retention window; returns the count.
+
+    Separate from ``upsert_parlay_hist`` so retention still runs on days that
+    build no parlays -- folded into the upsert it silently stops trimming for
+    any stretch where the pipeline produces nothing.
+    """
+    cutoff = pd.Timestamp.today().date() - pd.Timedelta(days=retention_days)
+    trimmed = 0
+    for day_file in _parlay_day_files():
+        if pd.Timestamp(day_file.stem).date() < cutoff:
+            day_file.unlink()
+            trimmed += 1
+    return trimmed
+
+
+def parlay_hist_mtime() -> float:
+    """Latest mtime across the day partitions and the legacy file (0.0 if none).
+
+    Cache-invalidation key for the dashboard: every partition write replaces its
+    file atomically with a fresh mtime, so the max moves on any upsert.
+    """
+    paths = [*_parlay_day_files(), Path(str(PARLAY_HIST_PATH))]
+    return max((p.stat().st_mtime for p in paths if p.is_file()), default=0.0)
+
+
+def read_parlay_hist(
+    columns: list[str] | None = None, days: list[str] | None = None
+) -> pd.DataFrame:
+    """Read the parlay history (all day partitions, plus the legacy file if present).
 
     ``columns`` projects the read (pyarrow-level) for callers that only need scalar
     columns; the list<->tuple normalization then only touches whichever list columns
-    were actually requested.
+    were actually requested. ``days`` restricts the read to those date partitions,
+    for callers that resolve a handful of recent days -- reading the whole history
+    materializes every nested ``legs`` list as Python objects and costs GBs.
+
+    A ``days`` read deliberately skips the legacy single file, which is not
+    date-partitioned: callers that pass ``days`` migrate it first (see
+    ``write_parlay_hist``) so the partitions are the sole source.
     """
-    df = read_parquet_safe(PARLAY_HIST_PATH, columns=columns)
-    if df.empty:
-        return df
+    if days is not None:
+        frames = [read_parquet_safe(_parlay_day_path(d), columns=columns) for d in days]
+    else:
+        frames = [read_parquet_safe(p, columns=columns) for p in _parlay_day_files()]
+        frames.append(read_parquet_safe(PARLAY_HIST_PATH, columns=columns))
+    frames = [f for f in frames if not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
     for col in _PARLAY_LIST_COLS:
         if col in df.columns:
             df[col] = df[col].apply(_list_to_tuple)
@@ -260,20 +435,19 @@ def delete_user_slip(slip_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Upcoming-events ledger (close-line scheduler input)
+# Upcoming-events ledger (close-line scheduler input) and close-line capture spool
 # ---------------------------------------------------------------------------
 
 UPCOMING_EVENTS_PATH = _RUNTIME_DIR / "upcoming_events.json"
+# Close-lines' fetches, held until a tick that gets the archive lock archives them. Only
+# close-lines writes it, so it never races the broad confer's rewrite of the ledger above.
+CLOSE_LINE_CAPTURES_PATH = _RUNTIME_DIR / "close_line_captures.json"
 ODDS_USAGE_LEDGER_PATH = _RUNTIME_DIR / "odds_api_usage.jsonl"
 
 
 def read_upcoming_events() -> list[dict]:
     """Return the list of upcoming events, or empty list if the file is absent."""
-    p = Path(str(UPCOMING_EVENTS_PATH))
-    if not p.is_file():
-        return []
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(UPCOMING_EVENTS_PATH, [])
 
 
 def write_upcoming_events(events: list[dict]) -> None:
@@ -286,6 +460,16 @@ def _has_nan(values) -> bool:
     return any(isinstance(v, float) and math.isnan(v) for v in values)
 
 
+def read_close_line_captures() -> list[dict]:
+    """Return close-lines' spooled captures, or empty list if the file is absent."""
+    return _read_json(CLOSE_LINE_CAPTURES_PATH, [])
+
+
+def write_close_line_captures(captures: list[dict]) -> None:
+    """Atomically write close-lines' capture spool as JSON."""
+    _atomic_write_json(captures, CLOSE_LINE_CAPTURES_PATH)
+
+
 # ---------------------------------------------------------------------------
 # League-activity snapshot (feed-derived season windows)
 # ---------------------------------------------------------------------------
@@ -295,11 +479,7 @@ LEAGUE_ACTIVITY_PATH = _RUNTIME_DIR / "league_activity.json"
 
 def read_league_activity() -> dict:
     """Return the league-activity snapshot, or empty dict if the file is absent."""
-    p = Path(str(LEAGUE_ACTIVITY_PATH))
-    if not p.is_file():
-        return {}
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(LEAGUE_ACTIVITY_PATH, {})
 
 
 def write_league_activity(activity: dict) -> None:
@@ -315,11 +495,7 @@ def write_league_activity(activity: dict) -> None:
 
 def read_modifier_overrides() -> dict:
     """Return the modifier-overrides overlay, or the empty shape if absent."""
-    p = Path(str(MODIFIER_OVERRIDES_PATH))
-    if not p.is_file():
-        return {"modifiers": {}, "rake": {}}
-    with p.open() as f:
-        return json.load(f)
+    return _read_json(MODIFIER_OVERRIDES_PATH, {"modifiers": {}, "rake": {}})
 
 
 def write_modifier_overrides(overlay: dict) -> None:

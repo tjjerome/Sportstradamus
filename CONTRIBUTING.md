@@ -20,14 +20,20 @@ Participation in this project is governed by the
 ## Setup
 
 ```bash
-git clone https://github.com/tjjerome/sportstradamus.git
+git clone https://github.com/tjjerome/Sportstradamus.git
 cd Sportstradamus
 poetry install
 poetry run pre-commit install   # required once — wires ruff + the smoke test into commits
+
+# Puts `sportstradamus` on PATH, which is how the docs spell every CLI example.
+ln -sf "$(poetry env info --path)/bin/sportstradamus" ~/.local/bin/sportstradamus
 ```
 
 `poetry install` pulls PyTorch CPU-only from a custom source; the first install
 downloads ~1–2 GB.
+
+The symlink covers the project CLI only — the quality gates below still run
+through `poetry run`, since `pytest` and `ruff` stay inside the venv.
 
 ### Credential and config stubs
 
@@ -45,9 +51,9 @@ cp tests/ci_fixtures/data/*.json src/sportstradamus/data/config/
 The creds stub is just empty strings:
 
 ```json
-{"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "",
- "fantasypoints_authorization": "", "fantasypoints_cookie": "",
- "fantasypoints_user_agent": ""}
+{"odds_api": "", "odds_api_plus": "", "scrapeops": "",
+ "fantasypoints_email": "", "fantasypoints_password": "",
+ "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}
 ```
 
 `creds/` is git-ignored — real keys never enter the repo.
@@ -62,8 +68,9 @@ poetry run pytest tests/golden/             # snapshot + regression suite (paral
 poetry run pytest -m integration -n0        # end-to-end smoke, fake mode, no network
 ```
 
-The integration suite runs `confer → meditate → prophecize` against cached
-fixtures with all external APIs stubbed. It is not xdist-safe, hence `-n0`.
+The integration suite runs `confer → meditate → prophecize` and the model
+live-path checks against cached fixtures with all external APIs stubbed. It is
+not xdist-safe, hence `-n0`.
 
 The test tree, for orientation:
 
@@ -71,7 +78,10 @@ The test tree, for orientation:
   (distributions, calibration, feature engineering, schema round-trips, …)
 - `tests/golden/` — CLI `--help` snapshots plus regression pins on config,
   imports, and dashboard invariants
-- `tests/integration/` — the end-to-end smoke test
+- `tests/integration/` — the end-to-end smoke test, plus live-path and
+  determinism checks that train on cached fixtures
+- `tests/diagnostics/` — dev-only tooling tests, outside the default loop
+  (`poetry run pytest -m diagnostics`)
 
 If you intentionally change a CLI flag or add a command, regenerate the
 affected snapshot and commit the new fixture with your change:

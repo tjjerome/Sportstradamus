@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from scipy.special import expit, logit
+from sklearn.linear_model import LogisticRegression
 
 from sportstradamus.training import posthoc
 
@@ -44,6 +45,23 @@ def test_prob_recal_reduces_brier(slug):
     brier_before = np.mean((p - y) ** 2)
     brier_after = np.mean((p_corr - y) ** 2)
     assert brier_after < brier_before
+
+
+def test_platt_on_a_binary_label_is_the_direct_logistic_fit():
+    p, y, _ = _miscalibrated_probs()
+    blob = posthoc.fit_posthoc("prob_recal_platt", p, y)
+    direct = LogisticRegression(C=posthoc._PLATT_C).fit(logit(p).reshape(-1, 1), y)
+    assert (blob["a"], blob["b"]) == (direct.coef_[0, 0], direct.intercept_[0])
+
+
+@pytest.mark.parametrize("slug", ["prob_recal_isotonic", "prob_recal_platt"])
+def test_prob_recal_counts_a_tie_as_half_an_over(slug):
+    p, y, _ = _miscalibrated_probs()
+    y[::6] = 0.5
+    blob = posthoc.fit_posthoc(slug, p, y)
+    # Both maps reproduce the mean of the label they were fit to, so a tie adds half an Over.
+    fitted_mean = posthoc.apply_posthoc(slug, blob, p).mean()
+    assert fitted_mean == pytest.approx(y.mean(), abs=1e-4)
 
 
 def test_prob_recal_blob_is_plain_types():

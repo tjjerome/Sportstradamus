@@ -1,10 +1,12 @@
-"""Twice-daily commit orchestrator for the simulated-bettor ledger (Policy v1).
+"""Twice-daily commit orchestrator for the simulated-bettor ledger.
 
 Implements ``docs/handoffs/sim-bettor-ledger.md`` §10: builds the shared
 same-game + cross-game candidate universe once per run -- one live scrape per
-platform (Underdog and Sleeper), combined into a single pool -- then draws and
-sizes entries for 3 personas × 40 Monte-Carlo replicates and appends them to
-the append-only JSONL ledger. Pure orchestration over
+platform (Underdog and Sleeper), combined into a single pool, plus the
+``even_picks`` persona's own pool, cross-game entries of the Underdog even
+picks the product recommends -- then draws and sizes entries for each
+persona × 40 Monte-Carlo replicates and appends them to the append-only JSONL
+ledger. Pure orchestration over
 :mod:`sportstradamus.strategies._ledger_selection`,
 :mod:`sportstradamus.strategies._ledger_cross_game`, and
 :mod:`sportstradamus.strategies._ledger_store` — no selection/pricing logic
@@ -18,6 +20,7 @@ import datetime
 from decimal import Decimal
 
 import click
+import pandas as pd
 
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.helpers.provenance import git_sha
@@ -27,7 +30,7 @@ from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_en
 
 _logger = get_logger("ledger-commit")
 
-POLICY_VERSION = "policy_v1"
+POLICY_VERSION = "policy_v4"
 
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
@@ -62,36 +65,63 @@ def _partition_by_size_rule(
     ]
 
 
+def _platform_candidates(
+    parlay_dfs: dict[str, pd.DataFrame],
+    offers_df: pd.DataFrame,
+    date: datetime.date,
+    run_slot: str,
+    platform: str,
+) -> list[_ledger_selection.LedgerCandidate]:
+    """One platform's same-game entries off ``parlay_dfs`` plus cross-game combos off
+    ``offers_df``. Do not call construct_entries without parlay_dfs here -- that would
+    trigger a second, redundant scrape for whichever platform it's called under.
+    """
+    entries = construct_entries(
+        _ledger_selection.BANKROLL_PER_REPLICATE,
+        _SHARED_CONFIG,
+        parlay_dfs=parlay_dfs,
+        platform=platform,
+    )
+    same_game = _partition_by_size_rule(
+        [_ledger_selection.from_recommended_entry(e) for e in entries]
+    )
+    cross_game = _ledger_cross_game.build_cross_game_candidates(
+        offers_df, _SHARED_CONFIG, date, run_slot, platform=platform
+    )
+    return same_game + cross_game
+
+
 def build_candidate_universe(
     date: datetime.date, run_slot: str
-) -> list[_ledger_selection.LedgerCandidate]:
-    """One live scrape per platform (via live_load), reused by that
-    platform's own same-game and cross-game candidate builders. Do not call
-    construct_entries without parlay_dfs/offers_df here -- that would
-    trigger a second, redundant scrape for whichever platform it's called
-    under.
+) -> dict[str, list[_ledger_selection.LedgerCandidate]]:
+    """One league load for the run and one live scrape per platform (via live_load), reused
+    by every candidate builder.
+
+    Returns:
+        The candidates each persona draws from, keyed by persona. Every persona
+        shares one universe except ``even_picks``, whose pool is built beside it
+        from Underdog's offers alone: cross-game entries of the even picks the
+        product recommends on ``date``'s games, at their served read. The shared
+        builders keep few such picks: their leg gate wants a read close to the
+        book, which sits near a coin flip on an even pick, and they cut the read
+        by its cell's trust.
     """
+    # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
+    from sportstradamus.stats import load_live_leagues
+
+    # A league whose gamelog update failed is logged by the loader and sits this build
+    # out; the board run of the same hour is what raises the alarm.
+    stats, _ = load_live_leagues()
     universe: list[_ledger_selection.LedgerCandidate] = []
+    even_picks_pool: list[_ledger_selection.LedgerCandidate] = []
     for platform in _PLATFORMS:
-        parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform)
-        same_game = _partition_by_size_rule(
-            [
-                _ledger_selection.from_recommended_entry(e)
-                for e in construct_entries(
-                    date,
-                    _ledger_selection.BANKROLL_PER_REPLICATE,
-                    _SHARED_CONFIG,
-                    parlay_dfs=parlay_dfs,
-                    offers_df=offers_df,
-                    platform=platform,
-                )
-            ]
-        )
-        cross_game = _ledger_cross_game.build_cross_game_candidates(
-            offers_df, _SHARED_CONFIG, date, run_slot, platform=platform
-        )
-        universe.extend(same_game + cross_game)
-    return universe
+        parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform, stats)
+        universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
+        if platform == "Underdog":
+            even_picks_pool = _ledger_cross_game.build_even_pick_candidates(
+                offers_df, _SHARED_CONFIG, date, run_slot
+            )
+    return dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": even_picks_pool}
 
 
 def _committed_record(
@@ -130,6 +160,7 @@ def _committed_record(
         "ev": candidate.ev,
         "date": date.isoformat(),
         "platform": candidate.platform,
+        "pair_modifier": candidate.pair_modifier,
     }
 
 
@@ -161,6 +192,9 @@ def _resize_kelly_growth(
 def run_commit(date: datetime.date, run_slot: str) -> int:
     """Build candidates, draw + size per persona/replicate, and append.
 
+    A replicate that already holds a record from ``run_slot`` has drawn in it
+    and is left alone, so a re-run of the slot adds nothing to it.
+
     Returns the count of newly-appended records (0 on an empty candidate
     universe or when a re-run finds nothing new to commit).
     """
@@ -168,8 +202,8 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
         msg = f"run_slot must be one of {_ledger_selection.RUN_SLOTS}, got {run_slot!r}"
         raise ValueError(msg)
 
-    universe = build_candidate_universe(date, run_slot)
-    if not universe:
+    pools = build_candidate_universe(date, run_slot)
+    if not any(pools.values()):
         _logger.info(
             "empty candidate universe for %s %s -- recording as an empty decision, not a failure",
             date.isoformat(),
@@ -178,9 +212,11 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
         return 0
 
     rngs = _ledger_selection.replicate_rngs(date, run_slot)
+    already_drew = _ledger_store.committed_replicates(date, run_slot)
     total = 0
-    for replicate_id in range(_ledger_selection.LEDGER_REPLICATES):
-        rng = rngs[replicate_id]
+    for replicate_id, rng in enumerate(rngs):
+        if replicate_id in already_drew:
+            continue
         records: list[dict] = []
         for persona in _ledger_selection.PERSONAS:
             remaining, seen = _ledger_selection.remaining_budget_and_seen_players(
@@ -189,19 +225,17 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
             if remaining <= 0:
                 continue
             drawn = _ledger_selection.draw_entries(
-                universe, _ledger_selection.PERSONA_SCORERS[persona], seen, remaining, rng
+                pools[persona], _ledger_selection.PERSONA_SCORERS[persona], seen, remaining, rng
             )
             if not drawn:
                 continue
             if persona == "kelly_growth":
                 drawn = _resize_kelly_growth(drawn, date, replicate_id)
-            already_ids = _ledger_store.already_committed_ids(date, run_slot, persona, replicate_id)
             records.extend(
                 _committed_record(
                     c, date=date, run_slot=run_slot, persona=persona, replicate_id=replicate_id
                 )
                 for c in drawn
-                if c.id not in already_ids
             )
         total += _ledger_store.append_entries(date, records)
     return total
@@ -211,7 +245,7 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
 @click.option("--run-slot", type=click.Choice(_ledger_selection.RUN_SLOTS), required=True)
 @click.option("--date", default="today")
 def ledger_commit(run_slot: str, date: str) -> None:
-    """Twice-daily policy_v1 commit: build candidates, draw, size, append."""
+    """Twice-daily ledger commit: build candidates, draw, size, append."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     appended = run_commit(slate_date, run_slot)
     click.echo(f"committed {appended} new entries -> {_ledger_store.entries_path(slate_date)}")

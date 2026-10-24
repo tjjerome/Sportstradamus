@@ -89,6 +89,15 @@ class Applicability:
         return required <= (cell.data_columns or frozenset())
 
 
+# Spec fields deliberately kept out of ``canonical_signature``: they describe what the sweep and
+# the CLI may do next, not how a trained artifact was produced or is served. Signing them meant a
+# one-line axis edit (``crps_1se`` into the shared ``_BLENDING``) rotated every family's signature
+# and orphaned every pickle, board row, and ledger row at once. Corner membership already rejects
+# an artifact whose controls left the pool (:func:`strategy_controls`), so the hash added nothing.
+# Deny-list, not allow-list — a field added later is signed by default, which fails closed.
+_UNSIGNED_SPEC_FIELDS = frozenset({"axes", "cli_flags", "persist"})
+
+
 @dataclass(frozen=True)
 class StrategySpec:
     slug: str
@@ -111,7 +120,6 @@ class StrategySpec:
     legacy_schema_field: str
     legacy_status_field: str
     split_fingerprint_path: tuple[str, ...]
-    matrix_hash_path: tuple[str, ...]
     structural: bool = False
 
     @property
@@ -127,7 +135,14 @@ class StrategySpec:
 
     @property
     def canonical_signature(self) -> str:
-        return _signature(asdict(self))
+        """Hash of the fields that decide whether a stored artifact is still valid.
+
+        Answers "did this strategy's implementation change?", never "did the search space
+        change?" — see :data:`_UNSIGNED_SPEC_FIELDS`.
+        """
+        return _signature(
+            {key: value for key, value in asdict(self).items() if key not in _UNSIGNED_SPEC_FIELDS}
+        )
 
     def enrolled_for(self, cell: CellContext) -> bool:
         enrolled = not self.enrollments or (cell.league, cell.market) in self.enrollments

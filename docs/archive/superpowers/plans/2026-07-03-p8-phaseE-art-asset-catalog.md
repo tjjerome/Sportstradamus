@@ -1,5 +1,9 @@
 # P8 Phase E — Art Asset Catalog, Scaffolding & Sourcing Implementation Plan
 
+> Status: E1–E4 SHIPPED 2026-09-11 at lane close (catalog `docs/art_assets.md`, manifest +
+> `dashboard/assets.py`, `static/favicon.svg`, logo brief + `st.logo` slot). E5 parked — owner
+> sourcing; the manifest needs zero code when files land. Brief: `docs/archive/dashboard-ux.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking. Sized for a **Sonnet implementer**.
@@ -59,7 +63,7 @@ Seed rows (verify each in code, then extend — the sweep must also grep for
 The catalog ends with a **"what the owner does next"** section: the commissioned-logo brief
 pointer, the two owner-decision rows, and the free-stock shortlist from E5 awaiting approval.
 
-- [ ] Sweep, write, commit `docs(p8-e): art asset catalog — every slot, source, license`
+- [x] Sweep, write, commit `docs(p8-e): art asset catalog — every slot, source, license`
 
 ---
 
@@ -103,7 +107,7 @@ Golden pins: null-file slot → fallback byte-identical to today's gradient; opa
 `<= 0.20` asserted for every slot; **a file entry with `license: null` renders the fallback**
 (the license gate is code, not policy); manifest schema validated.
 
-- [ ] Tests first → build → wire the two surfaces → gates → commit
+- [x] Tests first → build → wire the two surfaces → gates → commit
   `feat(p8-e): ambient manifest + license-gated slot loader (gradient scars)`
 
 ---
@@ -133,7 +137,7 @@ export it 64×64 PNG (one-time, any editor — record the export in the commit b
 `page_icon` at the PNG instead. Catalog row `favicon` stays open: the commissioned logo's square
 mark replaces this file later — same path, zero code change.
 
-- [ ] Pin (`page_icon` present + file exists) → author → wire → live check → gates → commit
+- [x] Pin (`page_icon` present + file exists) → author → wire → live check → gates → commit
   `feat(p8-e): interim favicon — gold oracle mark`
 
 ---
@@ -183,7 +187,7 @@ if _LOGO.exists():
 lands, the owner drops two files in and the logo appears with zero code change. Record both
 paths in the E1 catalog + the manifest's attribution convention.)
 
-- [ ] Brief → slot wiring + golden (logo block present, guarded on existence) → gates → commit
+- [x] Brief → slot wiring + golden (logo block present, guarded on existence) → gates → commit
   `feat(p8-e): commissioned-logo brief + zero-code-change logo slot`
 
 ---
@@ -211,7 +215,8 @@ text contrast above it). **Present the shortlist + rendered screenshots to the o
 committing binaries** — art is an owner-taste call; the code path is already safe either way.
 
 - [ ] Shortlist per slot in the catalog → owner picks → download + manifest + live check →
-  gates → commit `feat(p8-e): first licensed ambient assets (owner-approved)`
+  gates → commit `feat(p8-e): first licensed ambient assets (owner-approved)` — parked at
+  lane close: owner sourcing (roadmap §8)
 
 ---
 

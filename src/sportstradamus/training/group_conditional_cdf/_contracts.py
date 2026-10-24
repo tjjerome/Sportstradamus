@@ -15,7 +15,10 @@ from typing import Literal, NotRequired, TypedDict
 
 import numpy as np
 
-from sportstradamus.helpers.integer_distribution import RANDOMIZED_PIT_DRAWS, RANDOMIZED_PIT_SEED
+from sportstradamus.helpers.integer_distribution import (  # noqa: F401 — re-exported
+    RANDOMIZED_PIT_DRAWS,
+    RANDOMIZED_PIT_SEED,
+)
 from sportstradamus.training.group_conditional_cdf.probability_pool import ProbabilityPoolBlob
 
 TWO_PART_STRATEGY_NAME = "role-position-two-part-groupcdf-fixedlinear-v3"

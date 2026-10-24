@@ -3,7 +3,7 @@
 > **Archived 2026-06-05.** Two completed, self-contained NBA-overconfidence
 > records, merged verbatim into one file. Both describe abandoned / negative-result
 > work; the live model-quality plan is
-> [`docs/operation_ship_75.md`](../operation_ship_75.md).
+> [`operation_ship_75.md`](operation_ship_75.md).
 >
 > 1. **Overconfidence Investigation** (FGA-under / FG3M-over; investigation paused,
 >    exploratory code reverted to baseline) — was `docs/OVERCONFIDENCE_INVESTIGATION.md`.

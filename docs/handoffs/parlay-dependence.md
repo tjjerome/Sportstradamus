@@ -1,9 +1,14 @@
 # Parlay Dependence — copula on PIT residuals
 
-> Status: BLOCKED (on: D3 — see roadmap v3 §7). Of D3's three inputs the stage-0 research brief is
-> **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
-> live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
-> owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
+> Status: BLOCKED (on: D3 — owner gate, roadmap v3 §7). All three D3 inputs exist: breadth (§3),
+> the stage-0 research brief (R3, [archive/researcher_copula_stage0.md](../archive/researcher_copula_stage0.md))
+> and sleeper-parity (merged to `devel` 2026-07-14, `b9f8a95e`); the census is a one-session
+> Sonnet task.
+> Premise revised (2026-10-04): the R2 brief
+> [archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md) found Underdog does tax
+> same-game correlation (per-game m ≤ 1) and Sleeper bans the pairs, so parlay EV is leg EV compounded;
+> the §1 money logic and the §3 volatile assumption carry the brief's text
+> ([honest-receipts.md](honest-receipts.md) §6, I5e).
 
 ## 1. Mission & money logic
 
@@ -19,13 +24,21 @@ same-game groups vs the under-independence prediction. At parlay dimensions
 Gaussian-vs-t is the open question for the research brief.
 
 Money logic: the five ship gates certify **marginals only**; the product is
-**parlays**; and the DFS apps largely don't tax leg correlation — that
-asymmetry is the core of why they're beatable. The predecessor design calls
-this "the audit's single largest *product*-EV lever"
-([archived v2 §1.2](../archive/sportstradamus_roadmap_v2.md)); the model
-track defers it here (roadmap v3 §4 lane row — "biggest product-EV lever",
-gated on calibrated marginals, D3). Better joint pricing multiplies the EV of
-every entry on both apps.
+**parlays**. Underdog does tax same-game correlation: it prices each same-game
+pick set with its own Gaussian ρ per pair type and pays T × Π b × m with m ≤ 1,
+and Sleeper bans the correlated pairs outright, so a correlated stack earns its
+independence EV times P_true / P_platform — at most break-even on the one
+untaxed pair type where the truth departs from the platform (opposing RB
+carries Over/Under, EV 0.96–1.07 at even picks) and never enough to carry an
+entry without leg edge. Parlay EV is therefore leg EV compounded: post-fix,
+admitted legs read 8–11 pp above their hit rate, the joint over-prediction
+grows with entry size (realized/priced 0.71–0.77 at two legs, 0.41–0.44 at
+five), and no Σ or payout repair moves it; only selection-calibrated leg
+probabilities do. T is the payout-table entry for the slip's size, b a pick's
+own multiplier and m the per-game modifier
+([underdog_api.md §6.8](../underdog_api.md#68-entry-slip-pricing)); post-fix
+is Date ≥ 2026-08-31; the evidence is the R2 brief
+([archive/researcher_parlay_engine.md](../archive/researcher_parlay_engine.md)).
 
 ## 2. Read first (in order)
 
@@ -40,19 +53,19 @@ every entry on both apps.
    `parlay.py` split but the logic analysis stands.
 4. `src/sportstradamus/prediction/joint.py` — incumbent pricing (the swap
    seam, post parlay.py split): analytical `multivariate_normal.cdf` path in
-   `parlay_payout_prob`, `_nearest_psd` repair, the `legacy` flag pattern to
-   mirror. The 50K-draw MC push/flex path (`_PUSH_MC_SAMPLES`,
-   `expected_payout_with_pushes`) lives in `prediction/payouts.py`; beam
-   search stays in `prediction/parlay.py`.
+   `parlay_payout_prob`, `_nearest_psd` repair. The 50K-draw MC push/flex
+   path (`_PUSH_MC_SAMPLES`, `expected_payout_with_pushes`) lives in
+   `prediction/payouts.py`; beam search stays in `prediction/parlay.py`.
 5. `src/sportstradamus/prediction/correlation.py` — how Σ is assembled today:
-   stratified parquet lookups (correlation.py:632–638) →
-   `_build_game_corr_map` (correlation.py:120) → per-leg-pair sums in
-   `_build_correlation_matrices` (correlation.py:201).
+   `find_correlation` reads the stratified `corr_same_team` / `corr_opposing`
+   parquets → `_build_game_corr_map` → per-leg-pair sums in
+   `_build_correlation_matrices`.
 6. `src/sportstradamus/training/correlate.py` — the residual machinery to
-   REUSE: `_residualize_gamelog` 8-game rolling residualization
-   (correlate.py:45, 461), stratified same-team/opposing matrices,
-   Spearman→Pearson remap `2·sin(πρ_s/6)` (correlate.py:839), linear
-   overlap-credibility shrinkage (correlate.py:54, 678).
+   REUSE: `_residualize_gamelog` rolling residualization
+   (`ROLLING_WINDOW_GAMES` = 8), stratified same-team/opposing matrices
+   (`_stratify_team_pairs`), Spearman→Pearson remap `2·sin(πρ_s/6)` (in
+   `_correlate_teams`), linear overlap-credibility shrinkage
+   (`_shrink_correlations`, `MIN_OVERLAP_FOR_FULL_WEIGHT`).
 7. `src/sportstradamus/scripts/audit_parlay_calibration.py` — the calibration
    harness this lane must re-run; already separates copula vs independence
    gaps (`gap_copula` / `gap_indep`).
@@ -79,18 +92,21 @@ ls /tmp/researcher_*copula* docs/archive/researcher_*copula* 2>/dev/null
 # both lanes rebuild parlay.py / correlation.py internals)
 head -3 docs/handoffs/sleeper-parity.md
 
-# Stage-4 input — resolved parlay history (production host only; absent in
-# dev checkouts, see PARLAY_AUDIT.md §3)
-ls -la data/parlay_hist.parquet 2>/dev/null
+# Stage-4 input — resolved parlay history (day partitions production writes;
+# scripts/sync_from_prod.sh copies them to dev)
+ls src/sportstradamus/data/runtime/parlay_hist/ | tail -3
 ```
 
 ### Volatile product assumptions
 
-- **Apps don't fully tax leg correlation.** The whole lane's edge. Re-verify
-  at stage 0 and stage 4: the audit harness's `gap_indep` vs `gap_copula`
-  split shows what the apps' pricing already absorbs.
-- **Payout curves / leg caps** (`data/underdog_payouts.json`, Sleeper 3-leg
-  cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
+- **Platforms price leg correlation** (Underdog's per-game m, Sleeper's bans).
+  Re-verify the payout table and the pair-type ρ by owner in-app quote each
+  season (`docs/underdog_api.md` §6.8, §7.4); any edge in this lane lives only
+  in pair types where the platform's ρ departs from the hit-event ρ at posted
+  lines.
+- **Payout curves / leg caps** (`data/config/underdog_payouts.json`,
+  `data/config/sleeper_payouts.json`, the Sleeper size caps in
+  `prediction/payouts.py`) feed `payout_curve_for`. On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own
   the payout tables; this lane only consumes them.
 
@@ -105,10 +121,9 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   discrete/hurdle marginals (randomized PIT). No waiver — do not use
   `.claude/.state/research_waiver` for this lane.
 - 2026-06-10 — The incumbent path stays behind a flag until the offline A/B
-  verdict; mirror the existing `legacy` flag pattern
-  (`beam_search_parlays(legacy=…)` in parlay.py, `psd_or_none` /
-  `parlay_payout_prob` in joint.py, correlation.py:554). Default stays
-  incumbent until stage 3 acceptance.
+  verdict. Default stays incumbent until stage 3 acceptance. The `legacy`
+  flag this decision named as the pattern to mirror was removed in
+  `7509b77c` (2026-08-09).
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
   pass (model_improvement_track.md §1/§8 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
@@ -117,36 +132,39 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 ## 5. Module footprint & canonical paths
 
 - `sportstradamus.prediction` — `prediction/joint.py` (pricing, sampling, PSD
-  repair — the swap seam; CONTRIBUTING §Stable Seams),
+  repair — the swap seam; docs/ARCHITECTURE.md §Stable Seams),
   `prediction/payouts.py` (payout curves, consumed not owned),
   `prediction/correlation.py` (Σ/group assembly, `find_correlation`).
 - `sportstradamus.training` — `training/correlate.py`. The residual machinery
   already lives here (`_residualize_gamelog` 8-game rolling residualization;
-  stratified same-team/opposing/cross-game matrices) — **REUSE it, don't
+  stratified same-team/opposing matrices) — **REUSE it, don't
   duplicate it**. PIT extraction extends this module or a sibling under
   `training/`, not a new parallel pipeline.
-- `src/sportstradamus/scripts/audit_parlay_calibration.py` — harness; note it
-  mirrors the payout table by hand (audit_parlay_calibration.py:42) and must
-  stay in sync with any pricing change.
+- `src/sportstradamus/scripts/audit_parlay_calibration.py` — harness; it
+  recovers each stored parlay's payout from its persisted `Boost` (already
+  `payout_base × boost`, clipped to 1–100), so there is no payout table to
+  keep in sync.
 - `tests/golden/` — copula-vs-hand-computed joints, flag-path equivalence.
 
 Serving path is touched ⇒ the inference-path compatibility checklist applies
-([`operation_ship_references.md`](../operation_ship_references.md) — reference,
-don't restate). **File-conflict constraint:** this lane must not run while
-`sleeper-parity` is mid-flight in the same files (roadmap v3 §5.1). Editing
-outside this footprint is a stop condition (§8).
+([`model_improvement_track.md`](model_improvement_track.md) §7.3 — reference,
+don't restate). **File-conflict constraint:** this lane never interleaves with
+another lane's edits to the same files (roadmap v3 §5.1): `sleeper-parity`'s
+code merged in `b9f8a95e`, and `dfs-products` stage 5 works the same Σ
+assembly. Editing outside this footprint is a stop condition (§8).
 
 ## 6. Stage plan
 
 **Stage 0 — Research dive + data census. Research half DONE (R3); census remains.**
 - Goal: an Opus statistician's brief answering the §4 questions, plus a
   census of usable history.
-- **Research verdict (done early, Fable R3 — `/tmp/researcher_copula_stage0.md`):** Gaussian
+- **Research verdict (done early, Fable R3 — `docs/archive/researcher_copula_stage0.md`):** Gaussian
   copula default; **t-copula only as a tested branch** (adopt iff pooled exceedance-Spearman clears
   a simulated Gaussian null in both tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10,
   ν̂≤15 — never per-pair ν). EB shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type
-  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first is a YES (2-dim,
-  incumbent ρ suffices at d=2 — the cheap early product win, model_improvement_track.md §6.11).
+  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first was a YES (2-dim,
+  incumbent ρ suffices at d=2) but the product is retired (Underdog dropped Rivals 2026-09-10,
+  model_improvement_track.md §6.11).
   Full stage-acceptance gates and the PIT-source recipe are in the brief and mirrored in §6.11.
 - **Remaining Stage-0 work: the census script** `census_parlay_pairs.py` (read-only Sonnet task
   over the `{LEAGUE}_corr.parquet` caches). **Kill rule: a league is viable iff ≥15 fit-eligible
@@ -197,9 +215,9 @@ outside this footprint is a stop condition (§8).
 **Stage 4 — Dependence diagnostic + production calibration re-run.**
 - Goal: the diagnostic (avg pairwise rank correlation of residual PITs within
   same-game groups vs under-independence) and a populated
-  `audit_parlay_calibration.py` re-run on production archive data
-  (owner-assisted; production host — dev checkouts lack
-  `data/parlay_hist.parquet`).
+  `audit_parlay_calibration.py` re-run on production's resolved parlay
+  history (the `data/runtime/parlay_hist/` day partitions, which
+  `scripts/sync_from_prod.sh` copies to dev).
 - Acceptance: diagnostic table committed; populated reliability artifacts
   with the new path's decile gap ≤ incumbent's.
 - Est. 1 session + owner time.
@@ -221,9 +239,9 @@ valuable verdict.
   extends them, never re-implements them beside themselves.
 - Marginals are read-only here. This lane never edits distribution families,
   `stat_meta.json`, or gate code — joint structure only.
-- Keep the audit harness's hand-mirrored payout table
-  (audit_parlay_calibration.py:42) in sync with any pricing change, or the
-  inverse `Model EV → joint_p` recovery silently drifts.
+- The audit harness recovers `joint_p = Model EV / Boost` from the stored
+  `Boost` (the full payout); a pricing change that stops persisting the full
+  payout in `Boost` silently breaks that recovery.
 
 ## 8. Escalation & stop conditions
 

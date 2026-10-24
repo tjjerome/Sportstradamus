@@ -6,6 +6,7 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  ctg     Snapshot Cleaning the Glass NBA advanced tables to disk.
-  fp      Snapshot Fantasy Points Data Suite tools to disk.
-  savant  Snapshot Baseball Savant (Statcast) MLB leaderboards to disk.
+  ctg        Snapshot Cleaning the Glass NBA advanced tables to disk.
+  fp         Snapshot Fantasy Points Data Suite tools to disk.
+  headshots  Fill this box's player-headshot cache, one square WebP per...
+  savant     Snapshot Baseball Savant (Statcast) MLB leaderboards to disk.

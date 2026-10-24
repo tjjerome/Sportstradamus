@@ -86,13 +86,21 @@ def _no_seed_corners(monkeypatch):
     monkeypatch.setattr(mc, "_seed_corners", lambda context: [])
 
 
-def _fake_meta_disk(monkeypatch, tmp_path):
-    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file.
+@pytest.fixture(autouse=True)
+def _no_calibrated_retry(monkeypatch):
+    """Keep the walk's calibrated fallback out of unrelated tests.
 
-    The ship path re-reads the cell from disk after the meditate subprocess
-    (``_sync_cell_from_disk`` — the subprocess may have pinned ``hpo_selection``),
-    so a bare no-op write mock would make the sync read the real repo file and
-    clobber the in-memory candidate. Returns the write-call list.
+    The real predicate reads the production ``MODEL_STATS_PATH``; the retry tests below patch
+    it back to a truthy stub.
+    """
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda candidate, cell: False)
+
+
+def _fake_meta_disk(monkeypatch, tmp_path):
+    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file and return the write-call list.
+
+    Keeps every persist — including the calibrated-retry pin, the only mid-walk write besides a
+    nominee's own edits — off the repo's committed stat_meta.json.
     """
     meta_file = tmp_path / "stat_meta.json"
     monkeypatch.setattr(mc, "_STAT_META", meta_file)
@@ -235,9 +243,14 @@ def _structural_row(slug, market, ships=True, slack=0.4):
     return _signed_row("NFL", market, slug, dict(get_strategy(slug).fixed_controls), ships, slack)
 
 
-def _nominate(*rows, live=False):
+def _nominate(*rows, live=False, **kw):
     """Every nominee for the single-cell board made of ``rows``, in the order confirm will try them."""
-    return mc._nominees(pd.DataFrame(list(rows)), live=live)
+    return mc._nominees(pd.DataFrame(list(rows)), live=live, **kw)
+
+
+def _weighted_row(norm, slack, weight):
+    """A SkewNormal board row carrying the deterministic corner's fitted blend weight."""
+    return {**_sn_row(norm, "crps", "crps", True, slack), "model_weight": weight}
 
 
 def _withheld_meta(board):
@@ -535,6 +548,197 @@ def test_nominees_sort_by_discounted_slack_when_present_else_slack():
     assert nominated[0]["edits"]["target_normalization"] == "centered_additive_mean10"
     assert nominated[0]["source"] == "board slack +0.300"
     assert nominated[0]["board_rank"] == 0.25
+
+
+def test_nominees_veto_on_veto_slack_and_rank_on_discounted_slack():
+    """brief R3: admissibility is priced at the milder q50 ``veto_slack`` while ordering stays on
+    the q75 ``discounted_slack``, so a cell whose corners all go rank-negative under the
+    confirm-priced discount still walks when the median price says they clear the gates.
+    """
+    rescued = _sn_row("ratio_meanyr", "crps", "nll", False, 0.10)
+    rescued["discounted_slack"], rescued["veto_slack"] = -0.05, 0.04
+    runner_up = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.08)
+    runner_up["discounted_slack"], runner_up["veto_slack"] = -0.12, 0.02
+
+    nominated = _nominate(rescued, runner_up)
+    board = [n for n in nominated if n["source"].startswith("board")]
+    # Both corners survive the q50 veto and keep their q75 ordering; board_rank stays the
+    # rank-column max so rescued cells sort last in the walk order.
+    assert [n["slack"] for n in board] == [0.10, 0.08]
+    assert nominated[0]["board_rank"] == pytest.approx(-0.05)
+
+    # A row negative under both prices never nominates even beside a rescued one.
+    dead = _sn_row("centered_additive_eb_meanyr_k10", "crps", "crps", False, 0.30)
+    dead["discounted_slack"], dead["veto_slack"] = -0.40, -0.20
+    with_dead = _nominate(rescued, dead)
+    assert [n["slack"] for n in with_dead if n["source"].startswith("board")] == [0.10]
+
+    # All rows dead under the q50 veto: the cell nominates nothing, not even its seed.
+    rescued_dead = dict(rescued)
+    rescued_dead["discounted_slack"], rescued_dead["veto_slack"] = -0.05, -0.01
+    assert _nominate(rescued_dead, dead) == []
+
+    # Legacy boards without the veto column keep the rank-column veto.
+    no_veto = _sn_row("ratio_meanyr", "crps", "nll", False, 0.10)
+    no_veto["discounted_slack"] = -0.05
+    assert _nominate(no_veto) == []
+
+
+def test_nominees_drop_book_riding_corners_under_min_model_weight():
+    """Gate 1 is free at the book, so on a weak cell the best slack is the lowest blend weight and
+    the board structurally prefers corners that ride the sportsbook. ``min_model_weight`` filters
+    those out of the lane without touching the ordering: ``board_rank`` still reads the board's own
+    best corner, so the walk order over cells is unchanged.
+    """
+    book_rider = _weighted_row("ratio_meanyr", 0.30, 0.05)
+    fitted = _weighted_row("centered_additive_mean10", 0.20, 0.90)
+
+    unfiltered = _nominate(book_rider, fitted)
+    assert [n["slack"] for n in unfiltered if n["source"].startswith("board")] == [0.30, 0.20]
+    assert _nominate(book_rider, fitted, min_model_weight=None) == unfiltered
+
+    filtered = _nominate(book_rider, fitted, min_model_weight=0.3)
+    assert [n["slack"] for n in filtered if n["source"].startswith("board")] == [0.20]
+    assert all(n["board_rank"] == 0.30 for n in filtered)
+
+
+@pytest.mark.parametrize("missing", [float("nan"), pd.NA], ids=["nan", "pd.NA"])
+def test_nominees_keep_bookless_and_pre_weight_corners_under_min_model_weight(missing):
+    """Exactly 1.0 means the cell had no authentic validation quotes to blend against — it is not
+    riding a book — and a missing weight (NaN, or the ``pd.NA`` a disk-read board backfills) is a
+    board swept before the column existed. Neither is evidence of a book-rider, so the floor lets
+    both through.
+    """
+    bookless = _weighted_row("ratio_meanyr", 0.30, 1.0)
+    pre_weight = _weighted_row("centered_additive_mean10", 0.20, missing)
+    kept = _nominate(bookless, pre_weight, min_model_weight=0.3)
+    assert [n["slack"] for n in kept if n["source"].startswith("board")] == [0.30, 0.20]
+
+
+def test_nominees_fall_back_to_seeds_when_every_positive_corner_rides_the_book(monkeypatch):
+    """The floor is a lane filter, not a cell veto: a cell whose only admissible corners are
+    book-riders still nominates its seeds and incumbent, which retrain and are judged at ship time.
+    """
+    _seed_corners(monkeypatch, _sn_controls("ratio_projvol", "nll", "nll"))
+    nominated = _nominate(_weighted_row("ratio_meanyr", 0.30, 0.05), min_model_weight=0.3)
+    assert [n["source"] for n in nominated] == ["seed/incumbent"]
+    assert nominated[0]["board_rank"] == 0.30
+
+
+def test_nominees_break_exact_rank_ties_by_fingerprint():
+    """brief L5: with equal rank values the lane order is fingerprint order, not row order —
+    the same board must nominate the same lane on every run.
+    """
+    rows = [
+        _sn_row("ratio_meanyr", "nll", "crps_1se", False, 0.06, posthoc="prob_recal_platt"),
+        _sn_row("ratio_meanyr", "nll", "nll", False, 0.06),
+    ]
+    forward = [n["corner_fingerprint"] for n in _nominate(*rows)]
+    backward = [n["corner_fingerprint"] for n in _nominate(*reversed(rows))]
+    assert forward == backward
+    board_lane = [f for f in forward if f in {r["corner_fingerprint"] for r in rows}]
+    assert board_lane == sorted(board_lane)
+
+
+def test_nominees_drop_ledger_decided_corners_at_selection():
+    """brief L4: a corner with a full-HPO verdict on this matrix never spends a lane slot —
+    the lane fills with undecided corners the walk can actually run. A verdict from an older
+    matrix does not match.
+    """
+    decided = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.40)
+    stale = _sn_row("ratio_projvol", "crps", "crps", False, 0.35)
+    fresh = [
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.30),
+        _sn_row("centered_additive_eb_meanyr_k10", "crps", "crps", False, 0.20),
+        _sn_row("ratio_meanyr", "nll", "crps", False, 0.10),
+    ]
+    pd.DataFrame(
+        [
+            {
+                "strategy_corner_fingerprint": decided["corner_fingerprint"],
+                "strategy_matrix_hash": _MATRIX_SHA,
+            },
+            {
+                "strategy_corner_fingerprint": stale["corner_fingerprint"],
+                "strategy_matrix_hash": "old-matrix",
+            },
+        ]
+    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
+
+    nominated = _nominate(decided, stale, *fresh)
+    board = [n for n in nominated if n["source"].startswith("board")]
+    assert len(board) == mc.CONFIRM_TOP_K
+    slacks = [n["slack"] for n in board]
+    assert decided["corner_fingerprint"] not in {n["corner_fingerprint"] for n in nominated}
+    assert slacks[0] == 0.35  # the stale-matrix corner leads — its verdict no longer binds
+
+
+def test_next_slot_promotes_a_shaping_corner_at_an_exact_tie_only():
+    """brief L2: when the lane holds no PIT-reshaping corner and the diversity pick is exactly
+    tied (``_SHAPING_SLOT_TIE_TOL``) with a remaining unseen-mechanism corner that reshapes the
+    PIT, take the reshaping corner. A lower-ranked reshaper is never promoted, and a lane that
+    already holds a reshaper keeps the plain rule.
+    """
+
+    def cand(norm, dl, bl, posthoc, slack):
+        row = _sn_row(norm, dl, bl, False, slack, posthoc=posthoc)
+        return {
+            "strategy_slug": "SkewNormal",
+            "family": "SkewNormal",
+            "controls": _sn_controls(norm, dl, bl, "direct", posthoc),
+            "corner_fingerprint": row["corner_fingerprint"],
+        }
+
+    platt = cand("ratio_meanyr", "nll", "crps_1se", "prob_recal_platt", 0.06)
+    plain = cand("ratio_meanyr", "nll", "nll", "none", 0.06)
+    shaped = cand("ratio_meanyr", "nll", "crps", "cdf_recal_isotonic", 0.06)
+    pool, ranks = [platt, plain, shaped], [0.06, 0.06, 0.06]
+    lane_state = ({"SkewNormal"}, {mc._gate4_mechanism(platt)})
+
+    # Exact tie, no reshaper in the lane: the reshaper wins the slot over the plain corner.
+    pick = mc._next_slot(pool, ranks, [1, 2], *lane_state)
+    assert pick == 2
+
+    # The reshaper ranks strictly lower: the plain rule stands.
+    pick = mc._next_slot(pool, [0.06, 0.06, 0.05], [1, 2], *lane_state)
+    assert pick == 1
+
+    # The lane already carries a reshaper: no preference fires even over a tied reshaper.
+    seen = ({"SkewNormal"}, {mc._gate4_mechanism(platt), mc._gate4_mechanism(shaped)})
+    shaped_crps = cand("ratio_meanyr", "crps", "nll", "cdf_recal_isotonic", 0.06)
+    pick = mc._next_slot([platt, plain, shaped_crps], [0.06, 0.06, 0.06], [1, 2], *seen)
+    assert pick == 1
+
+
+def test_walk_nominees_reports_the_real_outcome_over_a_trailing_skip(monkeypatch, capsys):
+    """brief L4 bug fix: a decided nominee after a real REVERTED must not overwrite the report —
+    the walk's verdict is the strongest thing that actually ran; all-decided still reads SKIPPED.
+    """
+    monkeypatch.setattr(mc, "_pin_cell_matrix", lambda lg, mkt: None)
+    monkeypatch.setattr(mc, "_decided_pairs", lambda: {("decided-fp", _MATRIX_SHA)})
+    walked = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.300",
+        "corner_fingerprint": "fresh-fp",
+        "matrix_hash": _MATRIX_SHA,
+    }
+    skipped = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.200",
+        "corner_fingerprint": "decided-fp",
+        "matrix_hash": _MATRIX_SHA,
+    }
+
+    result = mc._walk_nominees(
+        {}, [walked, skipped], lambda meta, cand: ("WNBA", "AST", "REVERTED", ["g4"])
+    )
+    assert result[2] == "REVERTED"
+    assert "already holds this corner's verdict" in capsys.readouterr().out
+
+    result = mc._walk_nominees({}, [skipped], lambda meta, cand: pytest.fail("must not run"))
+    assert result[2] == "SKIPPED"
 
 
 def test_nominees_structural_method_persists_full_recipe_and_identity():
@@ -871,7 +1075,7 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
         lambda *args: pytest.fail("a gate miss must not be diagnosed through the pruned pickle"),
     )
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["g4"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, {"WNBA": {"AST": {}}}) == ["g4"]
 
 
 def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
@@ -880,17 +1084,18 @@ def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
     alone never blocks a ship (the gates already decide).
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
+    meta = {"WNBA": {"AST": {}}}
     monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
     monkeypatch.setattr(mc, "_record_nominee_gates", lambda *args: True)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, meta) == ["diverged", "g1", "g4"]
 
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == []
+    assert mc._confirm_meditate("WNBA", "AST", candidate, meta) == []
 
 
 def test_record_nominee_gates_marks_dispersion_floor_as_diverged(monkeypatch, tmp_path):
@@ -960,7 +1165,15 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
 
     monkeypatch.setattr(mc, "_produced_artifacts_match", artifacts_match)
 
-    assert mc._confirm_meditate(candidate["league"], candidate["market"], candidate) == []
+    assert (
+        mc._confirm_meditate(
+            candidate["league"],
+            candidate["market"],
+            candidate,
+            {candidate["league"]: {candidate["market"]: {}}},
+        )
+        == []
+    )
     # The pickle leg is held to the retrain's matrix too, so a stale artifact still fails there.
     assert seen["matrix_hash"] == retrained_hash
 
@@ -977,7 +1190,9 @@ def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_
         "_ship_from_model_stats",
         lambda *args: pytest.fail("unverified artifacts must never reach the ship verdict"),
     )
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["artifact identity"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, {"WNBA": {"AST": {}}}) == [
+        "artifact identity"
+    ]
 
 
 # --- persist / confirm / revert --------------------------------------------------------------
@@ -987,7 +1202,8 @@ def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
     meta = {"WNBA": {"AST": _sn_original()}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: [])
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate, meta: [])
+    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
 
@@ -1026,7 +1242,7 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
         current_meta[lg][mkt] = prior
 
     monkeypatch.setattr(mc, "_restore_cell", restore)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: ["g4"])
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate, meta: ["g4"])
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
@@ -1063,7 +1279,7 @@ def test_confirm_one_exception_restores_once_after_single_candidate_transition(
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, candidate: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda lg, mkt, candidate, meta: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
@@ -1081,6 +1297,102 @@ def test_confirm_one_exception_restores_once_after_single_candidate_transition(
     assert states[1]["WNBA"]["AST"] == original
     assert meta["WNBA"]["AST"] == original
     assert pruned == [("WNBA", "AST")]
+
+
+def test_confirm_one_retry_ships_and_persists_the_pin(monkeypatch, tmp_path):
+    """A g4-only near-miss nominee retries once under calibrated; a shipping retry persists the
+    pin in stat_meta AND in the edits the report/diff shows."""
+    meta = {"WNBA": {"AST": _sn_original()}}
+    writes = _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    runs = []
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mc, "_candidate_identity", lambda cand, matrix_hash: None)
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
+    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(
+        mc, "prune_model_pickle", lambda lg, mkt: pytest.fail("a shipped retry must not prune")
+    )
+
+    cand = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.300",
+        "strategy_slug": "SkewNormal",
+        "edits": {"target_normalization": "centered_additive_mean10"},
+    }
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
+    assert runs == ["board slack +0.300", "board slack +0.300 +calibrated-retry"]
+    assert meta["WNBA"]["AST"]["hpo_selection"] == "calibrated"
+    assert cand["edits"]["hpo_selection"] == "calibrated"
+    assert len(writes) == 2  # the nominee's persist + the retry pin
+
+
+def test_confirm_one_retry_failure_reverts_the_pin(monkeypatch, tmp_path):
+    """A retry that still fails reverts like any loser — the pin leaves stat_meta with the rest
+    of the nominee's edits and the pickle is pruned."""
+    original = _sn_original()
+    meta = {"WNBA": {"AST": dict(original)}}
+    _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
+    runs = []
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    pruned = []
+    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
+
+    cand = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "seed/incumbent",
+        "strategy_slug": "SkewNormal",
+        "edits": {"target_normalization": "centered_additive_mean10"},
+    }
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "REVERTED", ["g4"])
+    assert len(runs) == 2  # loss attempt + calibrated retry
+    assert meta["WNBA"]["AST"] == original  # the pin reverted with everything else
+    assert pruned == [("WNBA", "AST")]
+
+
+def test_confirm_one_reverts_a_gate_passing_cell_below_min_model_weight(monkeypatch, tmp_path):
+    """The board's ``model_weight`` is a fixed-HP proxy the full-HPO retrain refits, so the
+    campaign's floor is checked on the pickle the cell would actually serve. A 6/6 cell that lands
+    back on the book reverts like any other loser.
+    """
+    original = _sn_original()
+    meta = {"WNBA": {"AST": dict(original)}}
+    _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, cand, meta: [])
+    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.1)
+    pruned = []
+    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
+
+    cand = {"league": "WNBA", "market": "AST", "edits": {"target_normalization": "ratio_meanyr"}}
+    assert mc._confirm_one(meta, cand, min_model_weight=0.3) == (
+        "WNBA",
+        "AST",
+        "REVERTED",
+        ["w=0.100<0.3"],
+    )
+    assert meta["WNBA"]["AST"] == original
+    assert pruned == [("WNBA", "AST")]
+    # Without the knob the same 6/6 cell still ships — the floor is opt-in.
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
 
 
 # --- nominee walk ------------------------------------------------------------------------------
@@ -1129,13 +1441,14 @@ def test_walk_nominees_reverts_a_loser_before_the_next_nominee_persists(monkeypa
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
     confirmed = []
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, cand: (
+        lambda lg, mkt, cand, meta: (
             confirmed.append(cand["source"]) or ([] if len(confirmed) > 1 else ["g4"])
         ),
     )
@@ -1182,7 +1495,7 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, cand: confirmed.append(cand["source"]) or [],
+        lambda lg, mkt, cand, meta: confirmed.append(cand["source"]) or [],
     )
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: False)
 
@@ -1260,12 +1573,12 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     monkeypatch.setattr(
         mc,
         "_confirm_one",
-        lambda m, c: calls["confirm"].append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
+        lambda m, c, **kw: calls["confirm"].append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
     )
     monkeypatch.setattr(
         mc,
         "_supersede_one",
-        lambda m, c, *, auto_promote: (
+        lambda m, c, **kw: (
             calls["supersede"].append(c["market"]) or ("NBA", "PTS", "SUPERSEDED", [])
         ),
     )
@@ -1303,10 +1616,12 @@ def test_run_confirm_fresh_only_skips_the_live_lane(monkeypatch, capsys):
     monkeypatch.setattr(
         mc,
         "_confirm_one",
-        lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
+        lambda m, c, **kw: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
     )
     monkeypatch.setattr(
-        mc, "_supersede_one", lambda m, c: pytest.fail("fresh_only must never walk the live lane")
+        mc,
+        "_supersede_one",
+        lambda m, c, **kw: pytest.fail("fresh_only must never walk the live lane"),
     )
 
     mc.run_confirm(board, yes=True, fresh_only=True)
@@ -1339,7 +1654,7 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
     monkeypatch.setattr(
         mc,
         "_confirm_one",
-        lambda m, c: (
+        lambda m, c, **kw: (
             confirmed.append((c["league"], c["market"]))
             or (c["league"], c["market"], "SHIPPED", [])
         ),
@@ -1354,10 +1669,11 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
     assert "1 skipped" in out
 
 
-def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, capsys):
-    """A resumed batch re-nominates cells an interrupted run already walked; a corner with a
-    full-HPO verdict on the identical matrix is skipped, and the walk moves to the next nominee.
-    A ledger row from an older matrix does not match, so a cache regen voids the skip."""
+def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch):
+    """A corner with a full-HPO verdict on the identical matrix never reaches the walk — brief L4
+    drops it at lane selection, so the slot goes to a corner that can actually run. A ledger row
+    from an older matrix does not match, so a cache regen voids the skip. (The walk keeps its own
+    skip as a concurrent-run backstop — pinned separately.)"""
     decided, fresh = (
         _sn_row("centered_additive_mean10", "crps", "crps", False, 0.30),
         _sn_row("ratio_meanyr", "crps", "nll", False, 0.25),
@@ -1385,9 +1701,8 @@ def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, ca
     result = mc._walk_nominees(
         meta, mc._candidates(pd.DataFrame([decided, fresh, stale]), meta)[0], attempt
     )
-    assert attempted == [0.25, 0.20]  # the decided leader is skipped, the stale-matrix row retrains
+    assert attempted == [0.25, 0.20]  # the decided leader never nominates, the stale row retrains
     assert result[2] == "REVERTED"  # the cell's verdict comes from the corners that actually ran
-    assert "already holds this corner's verdict" in capsys.readouterr().out
 
 
 def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable(
@@ -1444,7 +1759,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
     monkeypatch.setattr(
         mc,
         "_confirm_one",
-        lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
+        lambda m, c, **kw: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
     )
 
     mc.run_confirm(board, yes=True)
@@ -1575,6 +1890,7 @@ def _verdict(*, ship, s1=True, s2=True, s3=True):
 def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_ok=True):
     """Patch the heavy IO of _supersede_one; return (restored, pruned) spy lists."""
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/bk"))
+    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
     monkeypatch.setattr(
         mc, "_run_meditate", lambda lg, mkt, candidate: "" if meditate_ok else "exit 1"
     )
@@ -1628,6 +1944,28 @@ def test_supersede_pass_and_yes_keeps_candidate(monkeypatch):
     assert pruned == []
 
 
+def test_supersede_retry_pins_calibrated_into_the_promoted_edits(monkeypatch):
+    """The live lane gets the same fallback; a shipping retry's pin reaches the promote prompt."""
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
+    runs = []
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    prompts = []
+    monkeypatch.setattr(mc.click, "confirm", lambda msg, **k: prompts.append(msg) or True)
+
+    cand = _supersede_cand()
+    result = mc._supersede_one(meta, cand)
+    assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
+    assert len(runs) == 2
+    assert cand["edits"]["hpo_selection"] == "calibrated"
+    assert meta["NBA"]["PTS"]["hpo_selection"] == "calibrated"
+    assert "hpo_selection=calibrated" in prompts[0]
+    assert restored == [] and pruned == []
+
+
 def test_supersede_auto_promote_swaps_without_prompting(monkeypatch, capsys):
     """``auto_promote`` answers the promote prompt so an unattended run can swap live cells; the
     S1/S2/S3 verdict still decides, and the swap is announced."""
@@ -1652,19 +1990,90 @@ def test_supersede_auto_promote_still_holds_a_losing_verdict(monkeypatch):
     assert restored[0][:2] == ("NBA", "PTS") and pruned == []
 
 
-def test_walk_lanes_threads_auto_promote_into_the_live_lane(monkeypatch):
-    """``run_confirm``'s flag has to reach ``_supersede_one``; the fresh lane never sees it."""
+def test_walk_lanes_threads_the_run_flags_into_both_lanes(monkeypatch):
+    """``run_confirm``'s flags have to reach the attempt functions; only the live lane promotes."""
     seen = {}
     monkeypatch.setattr(
-        mc,
-        "_supersede_one",
-        lambda m, c, *, auto_promote: (
-            seen.update(auto_promote=auto_promote) or ("NBA", "PTS", "HELD", [])
-        ),
+        mc, "_supersede_one", lambda m, c, **kw: seen.update(live=kw) or ("NBA", "PTS", "HELD", [])
     )
+    monkeypatch.setattr(
+        mc,
+        "_confirm_one",
+        lambda m, c, **kw: seen.update(fresh=kw) or ("WNBA", "AST", "SHIPPED", []),
+    )
+    fresh = [[{"league": "WNBA", "market": "AST", "source": "seed/incumbent"}]]
     live = [[{"league": "NBA", "market": "PTS", "source": "board slack +0.300"}]]
-    mc._walk_lanes({}, [], live, None, True)
-    assert seen == {"auto_promote": True}
+    mc._walk_lanes({}, fresh, live, None, True, 0.3)
+    assert seen == {
+        "fresh": {"min_model_weight": 0.3},
+        "live": {"auto_promote": True, "min_model_weight": 0.3},
+    }
+
+
+def _patch_weights(monkeypatch, *, incumbent, candidate):
+    """``_served_weight`` for the supersession pair — the snapshot dir holds the incumbent's pickle."""
+    monkeypatch.setattr(
+        mc, "_served_weight", lambda path: incumbent if "bk" in path.parts else candidate
+    )
+
+
+def test_supersede_waives_s2_s3_when_the_incumbent_rides_the_book(monkeypatch, capsys):
+    """A w=0.05 incumbent and its w=0.45 challenger both sit on the book at the line, so their
+    paired Brier difference is ~0 by construction and S2/S3 can never fire. Where the floor
+    separates them, S1 plus that separation is the whole evidence available for the swap.
+    """
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(
+        monkeypatch, verdict=_verdict(ship=False, s2=False, s3=False)
+    )
+    _patch_weights(monkeypatch, incumbent=0.05, candidate=0.45)
+    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
+    assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
+    assert restored == [] and pruned == []
+    out = capsys.readouterr().out
+    assert "w 0.050→0.450" in out
+    assert "S2/S3 waived" in out
+
+
+def test_supersede_waiver_is_scoped_to_the_pair_it_is_justified_for(monkeypatch):
+    """An incumbent already above the floor keeps the full S1+S2+S3 bar, a failing S1 is never
+    waived, and with the knob off nothing changes — the waiver only buys the book-riding swap.
+    """
+    meta = _shipped_meta()
+    losing = _verdict(ship=False, s2=False, s3=False)
+    _patch_supersede_io(monkeypatch, verdict=losing)
+
+    _patch_weights(monkeypatch, incumbent=0.5, candidate=0.45)
+    fitted_incumbent = mc._supersede_one(
+        meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3
+    )
+    assert fitted_incumbent[:3] == ("NBA", "PTS", "HELD")
+    assert fitted_incumbent[3] == ["S2", "S3"]
+
+    _patch_weights(monkeypatch, incumbent=0.05, candidate=0.45)
+    knob_off = mc._supersede_one(meta, _supersede_cand(), auto_promote=True)
+    assert knob_off[:3] == ("NBA", "PTS", "HELD")
+    assert knob_off[3] == ["S2", "S3"]
+
+    monkeypatch.setattr(
+        mc, "supersede_verdict", lambda *a, **k: _verdict(ship=False, s1=False, s2=False, s3=False)
+    )
+    no_s1 = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
+    assert no_s1[:3] == ("NBA", "PTS", "HELD")
+    assert no_s1[3] == ["S1", "S2", "S3"]
+
+
+def test_supersede_holds_a_candidate_below_min_model_weight(monkeypatch):
+    """The floor is a ship criterion on this lane too: a candidate that rides the book is held even
+    with all three supersession legs passing."""
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
+    _patch_weights(monkeypatch, incumbent=0.5, candidate=0.2)
+    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
+    assert result[:3] == ("NBA", "PTS", "HELD")
+    assert result[3] == ["w=0.200<0.3"]
+    assert restored[0][:2] == ("NBA", "PTS")
+    assert pruned == []
 
 
 def test_supersede_pass_but_no_restores_incumbent(monkeypatch):

@@ -200,6 +200,7 @@ src/sportstradamus/data/leagues/*/comps.json
 src/sportstradamus/data/leagues/*/comps_metric.npz
 src/sportstradamus/data/runtime/
 src/sportstradamus/data/fantasypoints/
+/data/ledger/
 src/profile_output.lprof
 profile_output.lprof
 *.dat:Zone.Identifier
@@ -228,3 +229,9 @@ src/sportstradamus/data/runtime/*
 
 # Timestamped stat_meta backups a confirm/supersede walk writes before each persist
 src/sportstradamus/data/config/stat_meta.*.bak.json
+
+# Underdog web-session HAR captures (docs/underdog_api.md source): hold live tokens + PII
+new_ud_api/
+
+# DevTools HAR captures anywhere in the tree: they hold live session cookies
+*.har

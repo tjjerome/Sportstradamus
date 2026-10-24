@@ -2,10 +2,11 @@
 
 The catalog is the owner's live tuning surface for P8 Phase D: hand-edited
 coordinates and classifier thresholds, reloaded on the next browser rerun with
-no dashboard restart. So these pins split in two — raw-JSON structural checks
-that every authored template obeys the S1–S9 authoring rules (the loader's
-module docstring is their reference), and loader-contract checks through the
-public accessors, including the hot-reload behavior the tuning loop depends on.
+no dashboard restart. So these pins split in two — structural checks, on the raw
+JSON and the art layers it names, that every authored template obeys the S1–S9
+authoring rules (the loader's module docstring is their reference), and
+loader-contract checks through the public accessors, including the hot-reload
+behavior the tuning loop depends on.
 
 The bank floor pins at the bottom are what keep the assigner from running out of
 deck *and* from putting a league on a shape that says nothing about its sport:
@@ -18,11 +19,15 @@ floors starts handing games ``None`` and the map reverts to the spring layout.
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections import Counter
+from itertools import combinations
 from pathlib import Path
 
+import numpy as np
 import pytest
+from PIL import Image
 
 from sportstradamus.dashboard.components import constellation_shapes as cs
 
@@ -32,9 +37,30 @@ _CATALOG_PATH = _REPO / "src" / "sportstradamus" / "data" / "config" / "constell
 _LEAGUES = ("NBA", "WNBA", "NFL", "MLB", "NHL")
 _CLASSES = ("hub", "chain", "twin", "mesh")
 
+# The keys the S-rules name; anything else in a template is a key nothing reads.
+_TEMPLATE_KEYS = {"label", "leagues", "topology", "min_nodes", "vertices", "outline", "image"}
+
 # S2's vertex band. Below 5 a template can't name an object; above 13 a real
 # game runs out of legs to fill it and the shape reads as noise.
 _MIN_VERTS, _MAX_VERTS = 5, 13
+
+# S1: a vertex higher than this clips the frame's ceiling at the mobile star floor.
+_Y_CEILING = 0.90
+
+# S1: the closest the hand-authored bank ever put two stars; nearer, settle nudges one
+# off its vertex, and so off its drawing.
+_MIN_STAR_GAP = 0.18
+
+# S1: half the box on each axis, under which the renderer's x-squeeze turns a shape
+# into a column — or, across a drawing narrower than the box, this share of the drawing.
+_MIN_SPAN = 1.0
+_DRAWING_SPAN_SHARE = 0.8
+
+# S5: two of the art tool's sixteen alpha steps, the faintest stored line that still
+# shows at ART_OPACITY, and how near a star must sit to one (about ten px of a 600 px
+# layer, under a glyph's radius at the phone floor).
+_LINE_ALPHA = 34
+_ON_DRAWING_TOL = 0.035
 
 _SANE_TUNING = {
     "cluster_rho": 0.35,
@@ -62,7 +88,7 @@ _SANE_TEMPLATES = {
             {"id": 4, "x": 0.9, "y": -0.6, "side": "R", "prominence": 5},
         ],
         "outline": [[0, 1], [1, 2], [2, 3], [3, 4]],
-        "silhouette": "M -0.9 -0.6 L 0 0.9 L 0.9 -0.6 Z",
+        "image": None,
     }
 }
 
@@ -104,6 +130,7 @@ def test_tuning_block_is_exactly_the_shipped_knobs_in_range(raw):
 def test_template_obeys_authoring_rules(raw, slug):
     tpl = raw["templates"][slug]
     assert slug == slug.lower() and " " not in slug
+    assert set(tpl) == _TEMPLATE_KEYS, "every key a template carries has its S-rule"
     assert tpl["label"].strip(), "S7: the cockpit's name for the shape is non-empty"
 
     leagues = tpl["leagues"]
@@ -132,17 +159,63 @@ def test_template_obeys_authoring_rules(raw, slug):
     for a, b in tpl["outline"]:
         assert a in ids and b in ids and a != b, "S4: outline refs real, distinct ids"
 
-    assert tpl["silhouette"].startswith("M"), "S5: one SVG path"
-    assert tpl["silhouette"].rstrip().endswith("Z"), "S5: the gesture is filled, so closed"
+    assert tpl["image"] is None or (cs.ART_DIR / tpl["image"]).is_file(), "S5: a shipped layer"
+
+
+def _drawing(tpl: dict) -> tuple[np.ndarray, float] | None:
+    """The template's layer alpha and its px per box unit (the longer side spans 2), if drawn."""
+    if tpl["image"] is None:
+        return None
+    with Image.open(cs.ART_DIR / tpl["image"]) as layer:
+        alpha = np.asarray(layer.getchannel("A"))
+    return alpha, max(alpha.shape) / 2
 
 
 def test_templates_use_the_box(raw):
-    """S1: a shape hugging one corner of [-1,1]² renders as a postage stamp."""
+    """S1: a shape hugging one corner of [-1,1]² renders as a postage stamp.
+
+    Stars can reach no further than their drawing, so on an axis where the drawing is
+    narrower than the box (a banner, a torch) the floor is a share of the drawing.
+    """
     for slug, tpl in raw["templates"].items():
-        xs = [v["x"] for v in tpl["vertices"]]
-        ys = [v["y"] for v in tpl["vertices"]]
-        assert max(xs) - min(xs) >= 1.0, f"{slug} too narrow"
-        assert max(ys) - min(ys) >= 1.0, f"{slug} too short"
+        extent = (2.0, 2.0)
+        if (drawing := _drawing(tpl)) is not None:
+            alpha, px_per_unit = drawing
+            rows, cols = np.nonzero(alpha >= _LINE_ALPHA)
+            extent = (np.ptp(cols) / px_per_unit, np.ptp(rows) / px_per_unit)
+        for axis, reach in zip("xy", extent, strict=True):
+            coords = [v[axis] for v in tpl["vertices"]]
+            floor = min(_MIN_SPAN, _DRAWING_SPAN_SHARE * reach)
+            assert max(coords) - min(coords) >= floor, f"{slug} spans under {floor:.2f} in {axis}"
+
+
+def test_stars_clear_the_ceiling_and_each_other(raw):
+    """S1: no star clips the frame's ceiling, and no two sit close enough for settle to split."""
+    for slug, tpl in raw["templates"].items():
+        verts = tpl["vertices"]
+        assert all(abs(v["y"]) <= _Y_CEILING for v in verts), f"{slug} clips the ceiling"
+        for p, q in combinations(verts, 2):
+            gap = math.dist((p["x"], p["y"]), (q["x"], q["y"]))
+            assert gap >= _MIN_STAR_GAP, f"{slug}: stars {p['id']} and {q['id']} pile up"
+
+
+def test_every_star_sits_on_its_drawing(raw):
+    """S5: the drawing is the constellation's picture; a star off its lines floats in empty sky."""
+    for slug, tpl in raw["templates"].items():
+        if (drawing := _drawing(tpl)) is None:
+            continue
+        alpha, px_per_unit = drawing
+        height, width = alpha.shape
+        reach = math.ceil(_ON_DRAWING_TOL * px_per_unit)
+        for v in tpl["vertices"]:
+            col = round(width / 2 + v["x"] * px_per_unit)
+            row = round(height / 2 - v["y"] * px_per_unit)
+            window = alpha[
+                max(row - reach, 0) : row + reach + 1, max(col - reach, 0) : col + reach + 1
+            ]
+            assert window.size and window.max() >= _LINE_ALPHA, (
+                f"{slug}: star {v['id']} is off its drawing"
+            )
 
 
 def test_shape_catalog_and_tuning_read_the_shipped_file(raw):
@@ -196,6 +269,7 @@ def test_catalog_hot_reloads_on_an_owner_edit(tmp_path, monkeypatch):
         ("noncontiguous_ids", "contiguous"),
         ("unknown_topology", "topology"),
         ("coord_out_of_box", r"\[-1, 1\]"),
+        ("art_not_on_disk", "image"),
     ],
 )
 def test_a_malformed_catalog_fails_loud_naming_the_field(tmp_path, monkeypatch, break_, needle):
@@ -217,6 +291,8 @@ def test_a_malformed_catalog_fails_loud_naming_the_field(tmp_path, monkeypatch, 
         templates["the-wedge"]["topology"]["primary"] = "spiral"
     elif break_ == "coord_out_of_box":
         verts[1]["x"] = 4.2
+    elif break_ == "art_not_on_disk":
+        templates["the-wedge"]["image"] = "the-nowhere.png"
 
     path = tmp_path / "constellation_shapes.json"
     _write_catalog(path, tuning, templates)
@@ -257,7 +333,7 @@ def _stub_deck(tmp_path, monkeypatch, per_class=8, min_nodes=2):
                 "min_nodes": min_nodes,
                 "vertices": vertices,
                 "outline": [[i, i + 1] for i in range(count - 1)],
-                "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
+                "image": None,
             }
     path = tmp_path / "constellation_shapes.json"
     _write_catalog(path, _SANE_TUNING, templates)
@@ -331,7 +407,7 @@ def _mixed_league_deck(tmp_path, monkeypatch):
             "min_nodes": 2,
             "vertices": vertices,
             "outline": [[i, i + 1] for i in range(3)],
-            "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
+            "image": None,
         }
         for slug, leagues in (("mitt", ["MLB"]), ("net", "all"), ("backboard", ["NBA"]))
     }

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Print the lifecycle status table for every (league, market) cell.
 
-Stage 0 deliverable 0.4. Joins ``data/model_stats.parquet`` (Gate 1) and
-``data/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
+Stage 0 deliverable 0.4. Joins ``data/training/model_stats.parquet`` (Gate 1) and
+``data/runtime/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
 ``training.graduation`` and prints the classification colored to stdout. The
-8-metric body shows 4 Gate 1 and 4 Gate 2 columns alongside the lifecycle state.
+10-metric body shows 4 Gate 1 and 6 Gate 2 columns alongside the lifecycle state,
+then the selected-tail read (``tail_gap``, ``tail_gap_hi``, ``live_gap``,
+``tail_state``) as monitor columns that never gate.
 
 Usage
 -----
-    poetry run check-graduation
-    poetry run check-graduation --league NBA
+    sportstradamus ship graduation
+    sportstradamus ship graduation --league NBA
 """
 
 from __future__ import annotations
@@ -30,9 +32,9 @@ _STATE_COLORS = {
     "demoted": "red",
     "not-shipped": "cyan",
 }
-# Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
-# precision_over_live is the new Gate-2 demote driver (see
-# graduation.MIN_PRECISION_OVER); precision_under_live is informational.
+# Column order used by the printed table. 3 keys + 4 Gate 1 + 6 Gate 2 + 1 state
+# + 4 selected-tail monitor columns. precision_over_live and precision_under_live
+# are both Gate-2 demote drivers (see graduation.MIN_PRECISION_SIDE).
 _DISPLAY_COLUMNS = (
     "league",
     "market",
@@ -48,6 +50,10 @@ _DISPLAY_COLUMNS = (
     "precision_under_live",
     "profit_sim_yield",
     "lifecycle_state",
+    "tail_gap",
+    "tail_gap_hi",
+    "live_gap",
+    "tail_state",
 )
 
 
@@ -63,7 +69,8 @@ def _print_header() -> None:
         f"{'g1_bss':>7} {'g1_p_or':>7} {'g1_e_or':>7} {'g1_kelly':>8} "
         f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} "
         f"{'g2_prec_o':>9} {'g2_prec_u':>9} {'g2_yield':>8} "
-        f"{'state':<12}"
+        f"{'state':<12} "
+        f"{'tail_gap':>8} {'tail_g_hi':>9} {'live_gap':>8} {'tail_state':<10}"
     )
 
 
@@ -81,7 +88,11 @@ def _print_row(row: pd.Series) -> None:
         f"{_format_metric(row.get('precision_over_live')):>9} "
         f"{_format_metric(row.get('precision_under_live')):>9} "
         f"{_format_metric(row.get('profit_sim_yield')):>8} "
-        f"{row['lifecycle_state']:<12}"
+        f"{row['lifecycle_state']:<12} "
+        f"{_format_metric(row.get('tail_gap')):>8} "
+        f"{_format_metric(row.get('tail_gap_hi')):>9} "
+        f"{_format_metric(row.get('live_gap')):>8} "
+        f"{row.get('tail_state')!s:<10}"
     )
     color = _STATE_COLORS.get(row["lifecycle_state"])
     click.secho(line, fg=color)
@@ -100,13 +111,13 @@ def _print_summary(states: pd.Series) -> None:
     "--model-stats-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Override Gate 1 parquet path (defaults to data/model_stats.parquet).",
+    help="Override Gate 1 parquet path (defaults to data/training/model_stats.parquet).",
 )
 @click.option(
     "--live-metrics-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Override Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet).",
+    help="Override Gate 2 parquet path (defaults to data/runtime/live_metrics_per_market.parquet).",
 )
 def main(league: str | None, model_stats_path: Path | None, live_metrics_path: Path | None) -> None:
     """Print the lifecycle status table joining Gate 1 (offline) and Gate 2 (live)."""

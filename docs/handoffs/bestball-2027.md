@@ -22,8 +22,9 @@ play, with high variance and settlement deferred to season end
 
 ## 2. Read first (in order)
 
-1. [CONTRIBUTING.md §Package Map](../../CONTRIBUTING.md) — where the new
-   `drafts` package must register; helpers to reuse (`Scrape`, config loaders).
+1. [docs/ARCHITECTURE.md §Package Map](../ARCHITECTURE.md#package-map) — where
+   the new `drafts` package must register; helpers to reuse (`Scrape`, config
+   loaders).
 2. [roadmap v3 §5 + §7](../sportstradamus_roadmap_v3.md) — seasonality window
    and the D4 gate this lane is blocked on.
 3. [archive/sportstradamus_roadmap_v2.md §Phase 5](../archive/sportstradamus_roadmap_v2.md)
@@ -52,7 +53,7 @@ date +%F   # unblocks ≥ ~Nov 2026; math must land before 2027 drafts open (~Ma
 
 # Model-track health (D4 input) — shipped counts per league
 python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
-ls -la data/training/model_stats.csv      # per-cell gate numbers fresh?
+ls -la src/sportstradamus/data/training/model_stats.csv   # per-cell gate numbers fresh?
 
 # Hygiene-closeout triage verdicts (feed stage 0); absent until Phase 1.6 runs
 ls docs/DEPRECATED_TRIAGE.md
@@ -112,7 +113,8 @@ owner-only.
   lane code lives here. Modules track stages: `adp.py` (stage 1),
   `projections.py` (stage 2), then Battle Royale / advance-equity / companion /
   exposure modules (archived spec names where given). Adding the package
-  requires a CONTRIBUTING §Package Map row at stage 1 — flag for owner review.
+  requires an ARCHITECTURE §Package Map entry at stage 1 — flag for owner
+  review.
 - **Read-only model access** — existing LightGBMLSS pickles via
   `sportstradamus.training` interfaces. The projection layer is a TRANSLATION
   layer; no new model (archived v2 §5.2). Never edit serving-path modules from
@@ -120,9 +122,9 @@ owner-only.
   [model_improvement_track.md](model_improvement_track.md) §7.3.
 - `sportstradamus.helpers` — `Scrape` for ADP HTTP, config loaders. Reuse,
   don't fork.
-- `src/sportstradamus/pages/` — companion/exposure views (stages 5–6). Parquet
-  snapshots only, never DuckDB (CLAUDE.md §Hard rules).
-- `pyproject.toml` — CLI registration (`drafts-adp-update`,
+- `src/sportstradamus/dashboard/surfaces/` — companion/exposure surfaces
+  (stages 5–6). Parquet snapshots only, never DuckDB (CLAUDE.md §Hard rules).
+- `src/sportstradamus/cli.py` — command-map entries (`drafts-adp-update`,
   `battle-royale-build`, `draft-recommend`, `drafts-exposure`).
 - `tests/golden/` — fixture-only tests (captured HTML, no live HTTP).
 - Data roots (all under `src/sportstradamus/data/`):
@@ -154,8 +156,8 @@ stage before any code.
   idempotent `drafts-adp-update` CLI writing stochastic ADP (mean **and**
   stdev) parquet to `src/sportstradamus/data/adp/{contest_slug}/{YYYY-MM-DD}.parquet`.
   Entry: D4 resolved (or owner early-start) + stage 0 done. Scope: `drafts/adp.py`,
-  `pyproject.toml`, `tests/golden/`; CONTRIBUTING Package-Map row (owner
-  review). Acceptance: archived §5.1 (fixture tests, no live HTTP). Est: 1–2.
+  `cli.py`, `tests/golden/`; ARCHITECTURE Package Map entry (owner review).
+  Acceptance: archived §5.1 (fixture tests, no live HTTP). Est: 1–2.
   If-it-fails: scraping ToS-blocked or endpoint gone → manual-CSV becomes the
   primary source — that branch is in-spec, not a blocker; record in ledger.
 - **Stage 2 — season projection distributions** (archived §5.2). Goal:
@@ -185,13 +187,13 @@ stage before any code.
   `recommend(state, ...)` in <10s + `draft-recommend` CLI; module-level
   `lru_cache` shares the non-candidate sample matrix and opponent sims across
   candidate evaluations. Entry: stage 4. Scope: one `drafts/` module (+
-  optional `pages/` view) + tests. Acceptance: archived §5.5. Est: 2. Kill:
+  optional dashboard surface) + tests. Acceptance: archived §5.5. Est: 2. Kill:
   <10s unreachable → shrink `candidate_pool_size`/`n_simulations` per spec
   knobs; still over → park the stage (stage 6 does not depend on it).
 - **Stage 6 — portfolio exposure tracker** (archived §5.6). Goal:
   `compute_exposure(contest, entry_pool)` + `drafts-exposure` CLI surfacing
   player/stack concentration, archetype mix, leverage. Entry: stage 3 (entry
-  pools exist). Scope: one `drafts/` module (+ optional `pages/` view) +
+  pools exist). Scope: one `drafts/` module (+ optional dashboard surface) +
   tests. Acceptance: archived §5.6. Est: 1. Kill: n/a — pure reporting.
 
 ## 7. Working rules
@@ -203,8 +205,8 @@ Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > home-of-record doc
   orientation only — never treat its numbers as acceptance criteria.
 - Every simulation is deterministic with an explicit seed; tests run on
   fixtures, never live HTTP (archived §5.1–§5.4).
-- Dashboard pages read parquet snapshots only, never DuckDB (CLAUDE.md §Hard
-  rules); no module-level `Archive()` imports in `pages/`.
+- Dashboard surfaces read parquet snapshots only, never DuckDB (CLAUDE.md
+  §Hard rules); no module-level `Archive()` imports in `dashboard/surfaces/`.
 - New modules stay under ~300 lines; one module per subagent for multi-module
   work (CLAUDE.md).
 - `click` for CLIs, `tqdm` on long loops (CLAUDE.md §General Rules).

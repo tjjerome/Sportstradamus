@@ -5,7 +5,8 @@ archetypes from the actual legs in a slip and the game it belongs to, with no
 dependency on the legacy parlay-family clustering:
 
 * **player** — one player demonstrably drives the slip (a *unique* leg-majority,
-  ≥ 2 legs). The uniqueness gate is the fix for v1's arbitrary alphabetical
+  ≥ 2 legs), or the menu's ``lead`` player when the legs don't make a stack
+  around them. The uniqueness gate is the fix for v1's arbitrary alphabetical
   "star" on no-standout slips.
 * **stack** — a correlated same-game bundle (≥ 3 legs, ≥ 2 players, mean
   bet-signed ρ over the slip's pairs clears the floor).
@@ -18,7 +19,9 @@ bank; the variant is a deterministic md5 of the leg-set + date, so a snapshot
 always renders the same copy yet the same matchup rotates day to day. Bank
 direction is *narrative*, not bet-literal: a leg on a negative market (TOV,
 sacks taken, ...) thrives on the Under, so its side flips before any
-unanimity or contrast read.
+unanimity or contrast read. A Mixed direction carries ``up`` / ``down`` effect
+clauses from :func:`~sportstradamus.prediction.stories.effects.split_effects`
+so the headline can name what rises and what falls.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ from itertools import combinations
 
 from sportstradamus.prediction.stories.bank import bank_cell, team_assets
 from sportstradamus.prediction.stories.context import GameCtx, Leg
+from sportstradamus.prediction.stories.effects import split_effects
+from sportstradamus.prediction.stories.legs import narrative_side
 
 # League → phrase-bank voice. NBA and WNBA share the basketball voice; an unknown
 # league reads straight from the league-neutral ``shared`` cells.
@@ -52,9 +57,12 @@ _DIRECTIONS_BY_ARCHETYPE = {
     "game-script": ("Over", "Under", "Mixed"),
 }
 
-# Unit {grp} display words where the raw depth-chart letter reads poorly in
-# prose; unmapped labels (QB, RB, G, D, ...) pass through raw. NBA letters per
-# correlation._resolve_player_positions.
+# Unit {grp} display words: a raw depth-chart letter reads poorly in prose, so
+# every group correlation._LEAGUE_POSITIONS emits carries one, as do MLB's B/P
+# (labelled B1..B9/P there, rank digit stripped by _pos_group). Anything else
+# passes through raw. The unit templates inflect the word as "{grp}s",
+# "{grp} room", "{grp} group", so a bare "back" (reads as a place) takes its
+# two-word form and an irregular plural ("defensemen") is out.
 _UNIT_GROUP_DISPLAY = {
     ("MLB", "B"): "bat",
     ("MLB", "P"): "arm",
@@ -66,24 +74,39 @@ _UNIT_GROUP_DISPLAY = {
     ("WNBA", "G"): "guard",
     ("WNBA", "F"): "forward",
     ("WNBA", "C"): "center",
+    ("NFL", "QB"): "quarterback",
+    ("NFL", "RB"): "running back",
+    ("NFL", "WR"): "receiver",
+    ("NFL", "TE"): "tight end",
     ("NHL", "C"): "center",
     ("NHL", "W"): "wing",
+    ("NHL", "D"): "defender",
+    ("NHL", "G"): "goalie",
 }
 
 # Archetype firing gates (named per CLAUDE.md §9). A player must hold a *unique*
 # leg majority of at least _PLAYER_MIN_LEGS; a stack needs _STACK_MIN_LEGS
-# correlated legs averaging at least _STACK_MEAN_RHO; a unit needs
-# _UNIT_MIN_LEGS legs in one (team, group, direction) whose matchup edge clears
-# _UNIT_EDGE_FLOOR (the same 0.05 floor the per-offer "why" uses).
+# correlated legs across at least _STACK_MIN_PLAYERS players, averaging at
+# least _STACK_MEAN_RHO; a unit needs _UNIT_MIN_LEGS legs in one (team, group,
+# direction) whose matchup edge clears _UNIT_EDGE_FLOOR (the DVPOA floor the
+# per-offer "why" uses, not the menu's model-EV floor).
 _PLAYER_MIN_LEGS: int = 2
 _STACK_MIN_LEGS: int = 3
+_STACK_MIN_PLAYERS: int = 2
 _STACK_MEAN_RHO: float = 0.10
 _UNIT_MIN_LEGS: int = 2
 _UNIT_EDGE_FLOOR: float = 0.05
 
 
-def route(legs: Sequence[Leg], ctxs: Mapping[str, GameCtx]) -> tuple[str, dict]:
-    """Pick the archetype and its slot subject for a leg-set. Pure, bank-free."""
+def route(
+    legs: Sequence[Leg], ctxs: Mapping[str, GameCtx], *, lead: str | None = None
+) -> tuple[str, dict]:
+    """Pick the archetype and its slot subject for a leg-set. Pure, bank-free.
+
+    A ``lead`` (the player a story menu seeds on) with a leg in the primary game
+    makes the story theirs: a unanimous stack anchors on them, a contrast stands
+    only when they anchor it, and anything else becomes their player story.
+    """
     if not legs:
         return "game-script", {}
     game = _primary_game(legs)
@@ -91,6 +114,11 @@ def route(legs: Sequence[Leg], ctxs: Mapping[str, GameCtx]) -> tuple[str, dict]:
     label = game or ""
     glegs = _primary_legs(legs, game)
 
+    if lead in {leg.player for leg in glegs}:
+        stack = _try_stack(glegs, ctx, label, lead=lead)
+        if stack is not None:
+            return "stack", stack
+        return "player", {"p": lead, "g": label}
     player = _try_player(glegs, label)
     if player is not None:
         return "player", player
@@ -115,12 +143,17 @@ def _try_player(legs: Sequence[Leg], label: str) -> dict | None:
     return None
 
 
-def _try_stack(legs: Sequence[Leg], ctx: GameCtx | None, label: str) -> dict | None:
-    if ctx is None or len(legs) < _STACK_MIN_LEGS or _distinct_players(legs) < 2:
+def _try_stack(
+    legs: Sequence[Leg], ctx: GameCtx | None, label: str, *, lead: str | None = None
+) -> dict | None:
+    if ctx is None or len(legs) < _STACK_MIN_LEGS or _distinct_players(legs) < _STACK_MIN_PLAYERS:
         return None
     if _mean_rho(legs, ctx) < _STACK_MEAN_RHO:
         return None
-    direction, anchor = _stack_focus(legs)
+    focus = _stack_focus(legs, lead=lead)
+    if focus is None:
+        return None
+    direction, anchor = focus
     return {"n": len(legs), "p": anchor, "g": label, "dir": direction}
 
 
@@ -157,13 +190,6 @@ def _mean_rho(legs: Sequence[Leg], ctx: GameCtx) -> float:
     return sum(found) / len(found) if found else 0.0
 
 
-def _narrative_side(leg: Leg) -> str:
-    """The leg's thriving direction: its bet, flipped on a negative market."""
-    if not leg.negative:
-        return leg.bet
-    return "Under" if leg.bet == "Over" else "Over"
-
-
 def _player_stats(legs: Sequence[Leg]) -> dict[str, tuple[int, float]]:
     """Per player: (leg count, conviction = max win prob over their legs, None→0)."""
     counts = Counter(leg.player for leg in legs)
@@ -179,34 +205,38 @@ def _anchor(legs: Sequence[Leg]) -> str:
     return min(stats, key=lambda p: (-stats[p][0], -stats[p][1], p))
 
 
-def _stack_focus(legs: Sequence[Leg]) -> tuple[str, str]:
+def _stack_focus(legs: Sequence[Leg], *, lead: str | None = None) -> tuple[str, str] | None:
     """A stack's (direction, anchor): unanimous, contrast, or mixed.
 
     Contrast needs clean sides — no player straddling narrative sides — and a
     side held by a single player: that player fronts the prose and the
     direction names *their* thriving side. When both sides are single-player,
-    the higher-conviction player anchors (then more legs, then name).
+    the higher-conviction player anchors (then more legs, then name). A
+    ``lead`` takes a unanimous stack's anchor and keeps only a contrast it
+    anchors; any other read is ``None``.
     """
     sides_by_player: dict[str, set[str]] = defaultdict(set)
     for leg in legs:
-        sides_by_player[leg.player].add(_narrative_side(leg))
+        sides_by_player[leg.player].add(narrative_side(leg))
     all_sides = set().union(*sides_by_player.values())
     if len(all_sides) == 1:
-        return next(iter(all_sides)), _anchor(legs)
+        return next(iter(all_sides)), lead or _anchor(legs)
     if any(len(sides) > 1 for sides in sides_by_player.values()):
-        return "Mixed", _anchor(legs)
+        return None if lead else ("Mixed", _anchor(legs))
     holders = {
         side: [p for p, sides in sides_by_player.items() if side in sides] for side in all_sides
     }
     lone = {side: players[0] for side, players in holders.items() if len(players) == 1}
     if not lone:
-        return "Mixed", _anchor(legs)
+        return None if lead else ("Mixed", _anchor(legs))
     if len(lone) == 2:
         stats = _player_stats(legs)
         anchor = min(lone.values(), key=lambda p: (-stats[p][1], -stats[p][0], p))
         side = next(iter(sides_by_player[anchor]))
     else:
         side, anchor = next(iter(lone.items()))
+    if lead and anchor != lead:
+        return None
     return ("ContrastOver" if side == "Over" else "ContrastUnder"), anchor
 
 
@@ -241,13 +271,13 @@ def _unit_legs(legs: Sequence[Leg], team: str, grp: str, bet: str) -> list[Leg]:
 
 
 def _modal_side(legs: Sequence[Leg]) -> str:
-    counts = Counter(_narrative_side(leg) for leg in legs)
+    counts = Counter(narrative_side(leg) for leg in legs)
     return min(counts, key=lambda side: (-counts[side], side))
 
 
 def _unit_groups(legs: Sequence[Leg]) -> Counter:
     """Count legs per ``(team, position-group, direction)`` — a unit candidate."""
-    groups: Counter = Counter()
+    groups = Counter()
     for leg in legs:
         if leg.team and leg.position:
             groups[(leg.team, _pos_group(leg.position), leg.bet)] += 1
@@ -335,29 +365,29 @@ def _localize_g(variant: str) -> str:
 
 
 def thesis_variants(
-    legs: Sequence[Leg], ctxs: Mapping[str, GameCtx]
+    legs: Sequence[Leg], ctxs: Mapping[str, GameCtx], *, lead: str | None = None
 ) -> tuple[list[str], int, dict]:
     """Rendered variant list, the seeded pick index, and slot subject for a leg-set.
 
     The slate-uniqueness pass bumps the index among the rendered variants on a
     collision, so the engine hands back the whole cell, not just one string.
+    ``lead`` names the player the story should be about; :func:`route` says when
+    it applies.
     """
     if not legs:
         return [], 0, {}
-    archetype, subject = route(legs, ctxs)
+    archetype, subject = route(legs, ctxs, lead=lead)
     game = _primary_game(legs)
     ctx = ctxs.get(game)
     sub_legs = _subject_legs(legs, game, archetype, subject)
     shape = ctx.shape if ctx else "even"
     league = ctx.league if ctx else ""
-    cell = bank_cell(
-        _VOICE_BY_LEAGUE.get(league, "shared"),
-        archetype,
-        shape,
-        subject.get("dir") or _direction(sub_legs),
-        _modal_category(sub_legs),
-    )
+    voice = _VOICE_BY_LEAGUE.get(league, "shared")
+    direction = subject.get("dir") or _direction(sub_legs)
+    cell = bank_cell(voice, archetype, shape, direction, _modal_category(sub_legs))
     fmt_subject = {**subject, "home": _home_city(ctx, subject.get("g", ""))}
+    if direction == "Mixed":
+        fmt_subject |= split_effects(sub_legs, voice, league)
     rendered = [_localize_g(variant).format(**fmt_subject) for variant in cell]
     if not rendered:
         return [], 0, subject
@@ -379,7 +409,7 @@ def _subject_legs(
 
 
 def _direction(legs: Sequence[Leg]) -> str:
-    sides = {_narrative_side(leg) for leg in legs}
+    sides = {narrative_side(leg) for leg in legs}
     return next(iter(sides)) if len(sides) == 1 else "Mixed"
 
 

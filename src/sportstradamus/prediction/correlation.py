@@ -23,15 +23,18 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, cell_market, stat_map
+from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
     beam_search_parlays,
+    leg_market_map,
     resolve_leg_stat,
 )
 from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.base import earliest_last
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
 # (where the team is the offensive actor) are weighted higher than the
@@ -84,6 +87,11 @@ _LEAGUE_POSITIONS = {
     "NHL": ["C", "W", "D", "G"],
     "WNBA": ["G", "F", "C"],
 }
+
+# The MLB correlation matrices key hitters B1..B9, so a leg whose resolved slot
+# falls outside the lineup — a pitcher, or a hitter get_depth could not place —
+# takes the pitcher label.
+_MLB_LINEUP_SLOTS: int = 9
 
 
 def _team_slice(corr_df: pd.DataFrame, team: str) -> pd.Series:
@@ -165,11 +173,18 @@ def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
     n1 = leg1["Player"]
     n2 = leg2["Player"]
 
+    distinct = not (n1 in n2 or n2 in n1)
     rho = 0
-    boost = 0 if (n1 in n2 or n2 in n1) else 1
+    boost = 1 if distinct else 0
     for xi, x in enumerate(cm1):
         for yi, y in enumerate(cm2):
-            increment = c_map.get((x, y), c_map.get((y, x), 0))
+            # Two players resolved to one position key (MLB's modal batting-slot
+            # fallback before lineups post) would read the slot's own block — a
+            # within-player correlation that says nothing about the pair.
+            if distinct and x.split(".", 1)[0] == y.split(".", 1)[0]:
+                increment = 0
+            else:
+                increment = c_map.get((x, y), c_map.get((y, x), 0))
             if b1[xi] != b2[yi]:
                 increment = -increment
             rho += increment
@@ -189,7 +204,7 @@ def _leg_opp_boost(game_df, platform):
     """Opposite-side payout multiplier per leg — Sleeper Flex devig input only.
 
     ``Boost_Over``/``Boost_Under`` mean different things per platform: for
-    Sleeper they are raw decimal odds (books.py::get_sleeper); for Underdog
+    Sleeper they are raw decimal odds (books/sleeper.py::get_sleeper); for Underdog
     they are baseline-scaled promo components (model_prob.py's
     UNDERDOG_BOOST_BASELINE multiply). Gate on platform explicitly rather
     than column presence alone, or Underdog's values would silently feed
@@ -205,25 +220,27 @@ def _leg_opp_boost(game_df, platform):
 
 
 def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
-    """Per-leg Kelly shrinkage weight, cached by ``(league, canonical market)``.
+    """Per-leg Kelly shrinkage weight, cached by ``(league, cell market)``.
 
     ``shrinkage_cache`` is caller-owned and shared across every game in one
     league's processing loop — ``resolve_market_shrinkage`` hits training/CLV
     I/O per call, and markets repeat heavily across a slate's legs, so this
     avoids re-resolving the same cell hundreds of times per league. Legs
-    whose ``Market`` has no ``stat_map`` entry for this platform fall back to
-    ``1.0`` (full trust), matching ``resolve_shrinkage``'s own no-signal default.
+    whose ``Market`` has no ``stat_map`` entry for this platform keep ``1.0``:
+    those are game legs (moneylines, totals) with no per-market calibration
+    concept, not no-evidence player cells — ``resolve_shrinkage``'s own
+    no-evidence default is the smaller :data:`NO_EVIDENCE_SHRINKAGE`.
     """
     from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
 
-    canonical = game_df["Market"].map(stat_map.get(platform, {}))
     out = np.ones(len(game_df), dtype=float)
-    for i, market in enumerate(canonical):
-        if not isinstance(market, str):
+    for i, label in enumerate(game_df["Market"]):
+        cell = cell_market(league, platform, label)
+        if cell is None:
             continue
-        key = (league, market)
+        key = (league, cell)
         if key not in shrinkage_cache:
-            shrinkage_cache[key] = resolve_market_shrinkage(league, market)[0]
+            shrinkage_cache[key] = resolve_market_shrinkage(*key)[0]
         out[i] = shrinkage_cache[key]
     return out
 
@@ -304,12 +321,14 @@ def _build_correlation_matrices(
 
 
 def _resolve_player_positions(league_df, league, stat_data):
-    """Map each leg's numeric depth-chart slot to a position+rank label.
+    """Label each leg with the position+rank the correlation matrices are keyed by.
 
     Non-MLB: drop combo / ``vs.`` legs, rank players within (team, position) by
     the league's usage profile, and suffix the rank (``G1``/``G2``/...). MLB:
-    batting order to ``B{n}`` (or ``P`` for pitchers). Returns the updated
-    ``league_df`` (the non-MLB branch drops rows, so the caller must rebind).
+    re-resolve the batting order through ``stat_data`` and label the slot
+    ``B1``..``B9``, or ``P`` for a pitcher or an unresolved hitter. Returns the
+    updated ``league_df`` (the non-MLB branch drops rows, so the caller must
+    rebind).
     """
     if league != "MLB":
         league_df["Player position"] = league_df["Player position"].apply(
@@ -350,56 +369,62 @@ def _resolve_player_positions(league_df, league, stat_data):
         player_df = player_df["Player position"].to_dict()
         league_df["Player position"] = league_df.Player.map(player_df)
     else:
-        league_df["Player position"] = league_df["Player position"].apply(
-            lambda x: (
-                ("B" + str(x) if x > 0 else "P")
-                if isinstance(x, int)
-                else ["B" + str(i) if i > 0 else "P" for i in x]
-            )
-        )
+        # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
+        # only for non-MLB leagues — and base_profile has since rebuilt playerProfile
+        # from scratch for this date, zeroing the depth process_offers resolved.
+        # Re-resolve it here, one record a leg: get_depth raises on a combo leg listed twice.
+        # The leg's earliest game is the one kept, the game its feature row is built on.
+        records = earliest_last(league_df[["Player", "Team", "Date"]].to_dict("records"))
+        stat_data.get_depth(list({record["Player"]: record for record in records}.values()))
+        depth = stat_data.playerProfile["depth"].to_dict()
+        slot_labels = []
+        for player in league_df.Player:
+            # find_correlation has already collapsed a " vs. " leg's Team to one
+            # abbreviation, so its second component carries that player's modal slot
+            # rather than the slot his own team posted.
+            slots = [depth.get(p, 0) for p in player.replace(" vs. ", " + ").split(" + ")]
+            labels = [f"B{int(s)}" if 1 <= s <= _MLB_LINEUP_SLOTS else "P" for s in slots]
+            slot_labels.append(labels[0] if len(labels) == 1 else labels)
+        league_df["Player position"] = pd.Series(slot_labels, index=league_df.index, dtype=object)
     return league_df
 
 
-def _build_cmarket(league_df, league, new_map):
-    """Add the ``cMarket`` (position.corr-name) display column.
+def _build_cmarket(league_df, league, platform):
+    """Add ``cMarket``, each leg's key into the league's correlation matrices.
 
-    Mutates the shared ``new_map`` with the league's correlation-name overrides
-    (accumulating across leagues, matching the legacy single-dict behavior), then
-    builds one ``position.market`` token per leg — a list, for multi-position
-    combo legs.
+    One ``position.market`` token per leg — a list, for multi-position combo
+    legs — with the market under the league's own name, the one its correlation
+    matrices are keyed by.
     """
-    if league == "NHL":
-        new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
-    if league in ("NBA", "WNBA"):
-        new_map.update({"Fantasy Points": "fantasy points prizepicks"})
-
+    stat_by_label = leg_market_map(league, platform)
     league_df["cMarket"] = league_df.apply(
         lambda x: (
-            [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]
+            [x["Player position"] + "." + resolve_leg_stat(x["Market"], stat_by_label)]
             if isinstance(x["Player position"], str)
-            else [p + "." + resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
+            else [
+                p + "." + resolve_leg_stat(x["Market"], stat_by_label) for p in x["Player position"]
+            ]
         ),
         axis=1,
     )
     return league_df
 
 
-def _assemble_game_frame(league_df, team):
+def _assemble_game_frame(date_df, team):
     """Concatenate a team's legs with its opponent's and any split (combo) legs.
 
-    Opponent and split legs get their ``cMarket`` tokens ``_OPP_``-prefixed so
-    the correlation lookup can tell the two sides of the matchup apart. Returns
-    ``(game_df, opp, date)``.
+    ``date_df`` is one game date's legs. Opponent and split legs get their
+    ``cMarket`` tokens ``_OPP_``-prefixed so the correlation lookup can tell the
+    two sides of the matchup apart. Returns ``(game_df, opp)``.
     """
-    team_df = league_df.loc[league_df["Team"] == team]
+    team_df = date_df.loc[date_df["Team"] == team]
     opp = team_df.Opponent.mode().values[0]
-    date = team_df.Date.mode().values[0]
-    opp_df = league_df.loc[league_df["Team"] == opp]
+    opp_df = date_df.loc[date_df["Team"] == opp]
     if not opp_df.empty:
         opp_df["cMarket"] = opp_df.apply(lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
-    split_df = league_df.loc[
-        league_df["Team"].str.contains("/")
-        & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))
+    split_df = date_df.loc[
+        date_df["Team"].str.contains("/")
+        & (date_df["Team"].str.contains(team) | date_df["Team"].str.contains(opp))
     ]
     if not split_df.empty:
         split_df["cMarket"] = split_df.apply(
@@ -411,7 +436,27 @@ def _assemble_game_frame(league_df, team):
         )
     game_df = pd.concat([team_df, opp_df, split_df])
     game_df.drop_duplicates(subset=["Player", "Market", "Bet", "Line"], inplace=True)
-    return game_df, opp, date
+    return game_df, opp
+
+
+def _game_frames(league_df):
+    """Yield ``(game_df, team, opp, date)`` for each game of a league's slate.
+
+    One frame per game date: a team with offers on two dates (an MLB series, an
+    NBA back-to-back) plays two games, and their legs do not parlay together. The
+    earliest date comes first, because the stored correlation slice and
+    pair-modifier file keep the first of two rows for one game and leg pair, and
+    both games of a series carry the same ``Game`` key.
+    """
+    # groupby sorts its keys, and an ISO date string sorts by date.
+    for date, date_df in league_df.groupby("Date"):
+        checked_teams = set()
+        for team in date_df.Team.unique():
+            if "/" in team or team in checked_teams:
+                continue
+            game_df, opp = _assemble_game_frame(date_df, team)
+            checked_teams.update((team, opp))
+            yield game_df, team, opp, date
 
 
 def _select_bet_offers(game_df):
@@ -442,27 +487,34 @@ def _select_bet_offers(game_df):
     )
 
 
-def _corr_partners(legs: pd.DataFrame) -> list[dict]:
-    """One structured record per correlated partner: player/market/bet/line/mult."""
+def _corr_partners(legs: pd.DataFrame, market_map: dict[str, str]) -> list[dict]:
+    """One structured record per correlated partner: player/market/bet/line/league/mult.
+
+    ``market`` is the board's name for it (``market_map`` mirrors the remap ``cli``
+    applies after ``process_offers``), so the deep dive finds the partner's row in
+    ``current_offers.parquet``; ``league`` is what ``leg_label`` needs to show that
+    name the way the board does.
+    """
     return [
         {
             "player": r["Player"],
-            "market": r["Market"],
+            "market": market_map.get(r["Market"], r["Market"]),
             "bet": r["Bet"],
             "line": float(r["Line"]),
+            "league": r["League"],
             "mult": round(float(r["Corr Mult"]), 2),
         }
         for _, r in legs.iterrows()
     ]
 
 
-def _annotate_correlation_columns(df, game_df, g):
+def _annotate_correlation_columns(df, game_df, g, market_map):
     """Fill each offer's ``Corr Same`` / ``Corr Opp`` correlated-partner columns in ``df``.
 
     For every leg, surface its top correlated same-team and opponent partners
     (one per player) that clear the display EV / correlation gates. Each partner
-    is a structured record (player/market/bet/line/mult), not a display string —
-    ``leg_schema.leg_label`` renders it on demand.
+    is a structured record (player/market/bet/line/league/mult), not a display
+    string — ``leg_schema.leg_label`` renders it on demand.
     """
     EV, EVb, C, V = g.EV, g.EVb, g.C, g.V
     for i, offer in game_df.iterrows():
@@ -476,26 +528,34 @@ def _annotate_correlation_columns(df, game_df, g):
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
         same = corr.loc[corr["Team"] == offer["Team"]]
         other = corr.loc[corr["Team"] != offer["Team"]]
-        # A (Player, Market) pair can span more than one row (Sleeper alt lines).
+        # A (Player, Market) pair can span more than one row (Sleeper alt lines), and
+        # the same pair plays again on a series' next date, which is another game.
         # Broadcasting via a same-length Series (not a bare list, which numpy casts
         # to a 2D array and mis-shapes on an empty partner list) mirrors the old
         # scalar-string assignment's broadcast-to-every-matched-row semantics.
-        mask = (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"])
-        same_partners = _corr_partners(same)
-        other_partners = _corr_partners(other)
+        mask = (
+            (df["Player"] == offer["Player"])
+            & (df["Market"] == offer["Market"])
+            & (df["Date"] == offer["Date"])
+        )
+        same_partners = _corr_partners(same, market_map)
+        other_partners = _corr_partners(other, market_map)
         df.loc[mask, "Corr Same"] = pd.Series([same_partners] * mask.sum(), index=df.index[mask])
         df.loc[mask, "Corr Opp"] = pd.Series([other_partners] * mask.sum(), index=df.index[mask])
 
 
-def _collect_game_corr(game_df, C, league, game_label, market_map):
-    """Per-game upper-triangle correlation slice for the dashboard rail/constellation.
+def _collect_game_corr(game_df, C, M, platform, league, game_label, market_map):
+    """Per-game upper-triangle correlation + pair-modifier slice for the dashboard.
 
     Emits one row per distinct leg pair, keyed by ``Player|Market|Bet`` with the
     canonical ``Market`` code (``market_map`` mirrors the post-``process_offers``
-    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C`` is
-    positionally aligned to ``game_df`` (the caller reset its index). Correlation
+    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C``/``M``
+    are positionally aligned to ``game_df`` (the caller reset its index). Correlation
     is line-independent, so same-key pairs at different lines collapse on the
-    caller's dedup.
+    caller's dedup. ``modifier`` is carried through exactly as prophecize priced the
+    pair, including 0.0 for a same-player pair — the dashboard uses those rows to
+    mark a slip player's other markets as mutually exclusive, the same way the DFS
+    apps refuse them.
     """
     players = game_df["Player"].to_numpy()
     markets = game_df["Market"].to_numpy()
@@ -509,11 +569,13 @@ def _collect_game_corr(game_df, C, league, game_label, market_map):
         leg_a, leg_b = sorted((leg_i, leg_j))
         rows.append(
             {
+                "Platform": platform,
                 "League": league,
                 "Game": game_label,
                 "leg_a": leg_a,
                 "leg_b": leg_b,
                 "rho": float(C[i, j]),
+                "modifier": float(M[i, j]),
             }
         )
     return rows
@@ -566,11 +628,14 @@ def _append_story_context(
             payout_base_by_size={
                 s: search_payouts[s - 2] for s in range(2, len(search_payouts) + 2)
             },
-            max_size=max(full_payouts),
+            # The search list, not the payout table: Underdog's table runs to
+            # sizes the engine does not build.
+            max_size=len(search_payouts) + 1,
         )
     )
 
 
+@line_profiler.profile
 def _process_league_games(
     df,
     league_df,
@@ -583,33 +648,26 @@ def _process_league_games(
     search_payouts,
     full_payouts,
     parlay_df,
-    contest_variant,
     corr_sink,
     story_sink,
     market_map,
-    stat_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
-    For each (team, opponent) pairing: assemble the game frame, build the
-    correlation / boost matrices, annotate ``df``'s display columns, collect the
-    per-game correlation slice into ``corr_sink`` (when not None), and — unless
-    the platform/league is parlay-ineligible — beam-search parlays onto
-    ``parlay_df`` (returned).
+    For each game frame (:func:`_game_frames`): build the correlation / boost
+    matrices, annotate ``df``'s display columns, collect the per-game correlation
+    slice into ``corr_sink`` (when not None), and — unless the platform/league is
+    parlay-ineligible — capture the game's scoring bundle into ``story_sink``
+    (when not None) and beam-search parlays onto ``parlay_df`` (returned).
     """
-    checked_teams = []
     # Shared across every game this league processes below — resolve_market_shrinkage
     # hits training/CLV I/O per (league, market), and markets repeat heavily
     # across a slate, so caching here (not per-game) keeps it out of the hot path.
     shrinkage_cache: dict[tuple[str, str], float] = {}
-    teams = [team for team in league_df.Team.unique() if "/" not in team]
-    for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
-        if team in checked_teams:
-            continue
-        game_df, opp, date = _assemble_game_frame(league_df, team)
-        checked_teams.append(team)
-        checked_teams.append(opp)
-
+    # Listed up front so the bar has a total.
+    for game_df, team, opp, date in tqdm(
+        list(_game_frames(league_df)), desc=f"Checking {league} games", unit="game"
+    ):
         c_map = _build_game_corr_map(team, opp, c_same, c_opp)
         game_df.reset_index(drop=True, inplace=True)
         game_dict = game_df.to_dict("index")
@@ -627,17 +685,26 @@ def _process_league_games(
             league,
             shrinkage_cache,
         )
-        _annotate_correlation_columns(df, game_df, g)
+        _annotate_correlation_columns(df, game_df, g, market_map)
 
+        game = "/".join(sorted([team, opp]))
         if corr_sink is not None:
             corr_sink.extend(
-                _collect_game_corr(game_df, g.C, league, "/".join(sorted([team, opp])), market_map)
+                _collect_game_corr(
+                    game_df,
+                    g.C,
+                    g.M,
+                    platform,
+                    league,
+                    game,
+                    market_map,
+                )
             )
 
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
             continue
         info = {
-            "Game": "/".join(sorted([team, opp])),
+            "Game": game,
             "Date": date,
             "League": league,
             "Platform": platform,
@@ -648,7 +715,7 @@ def _process_league_games(
             story_sink,
             platform,
             league,
-            info["Game"],
+            game,
             date,
             g,
             bet_df,
@@ -666,8 +733,6 @@ def _process_league_games(
             info,
             team,
             opp,
-            stat_map,
-            contest_variant=contest_variant,
             full_refund_below_size=full_refund_below_size,
         )
         if best_bets:
@@ -681,7 +746,7 @@ def find_correlation(
     stats,
     platform,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
+    contest_variant: Literal["pooled", "power", "flex"] = "pooled",
     corr_sink: list | None = None,
     story_sink: list | None = None,
 ):
@@ -695,14 +760,16 @@ def find_correlation(
         offers: List of scored offer dicts from :func:`process_offers`.
         stats: ``{league: Stats}`` dict for active leagues.
         platform: DFS platform name (e.g. ``"Underdog"``).
-        contest_variant: Underdog payout pool. Default ``"pooled"`` combines
-            ``power`` (sizes 2-3) and ``flex`` (sizes 4+) into one pool;
-            the single-variant names are accepted for the ``pickem-build``
-            path. Ignored for non-Underdog platforms.
+        contest_variant: Underdog or Sleeper payout pool. Default ``"pooled"``
+            combines ``power`` (sizes 2-3) and ``flex`` (sizes 4-6) into one
+            pool; the single-variant names are accepted for the
+            ``bet pickem`` path. The legacy single-payout platforms ignore it.
         corr_sink: When provided, each game appends its upper-triangle
-            correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
-            for the dashboard rail/constellation. The pickem variant-sweep caller
-            leaves it None.
+            correlation + pair-modifier slice (``Platform, League, Game, leg_a,
+            leg_b, rho, modifier``) to this list for the dashboard rail/
+            constellation, where ``modifier`` is the exact pair payout multiplier
+            priced in (0.0 for a banned/same-player pair). The pickem
+            variant-sweep caller leaves it None.
         story_sink: When provided, each game appends a
             :class:`~sportstradamus.prediction.parlay.GameScoringContext` to this
             list so the story-menu generator can price story subsets. The pickem
@@ -711,11 +778,17 @@ def find_correlation(
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
             ``offer_df`` is the full scored slate sorted by ``Model EV`` and
-            ``parlay_df`` has beam-search parlay candidates.
+            ``parlay_df`` has beam-search parlay candidates. An empty ``offers``
+            list returns empty frames carrying the same offer columns.
     """
+    if not offers:
+        # cli.py maps Market and divides Boost before it checks .empty, so a platform
+        # whose every league was skipped still has to hand back the full schema.
+        empty_cols = [*SCORED_RECORD_COLS, "Corr Same", "Corr Opp", "Position", "Game"]
+        return pd.DataFrame(columns=empty_cols), pd.DataFrame()
+
     logger.info("Finding Correlations")
 
-    new_map = stat_map[platform].copy()
     warnings.simplefilter("ignore")
 
     df = pd.DataFrame(offers)
@@ -787,10 +860,15 @@ def find_correlation(
 
         league_df = _resolve_player_positions(league_df, league, stat_data)
         # _resolve_player_positions returns a slice the function otherwise drops;
-        # persist the depth-chart labels onto the returned frame (combos absent
-        # from its index keep "") so build_game_context can read Position.
-        df.loc[league_df.index, "Position"] = league_df["Player position"]
-        league_df = _build_cmarket(league_df, league, new_map)
+        # persist the depth-chart labels onto the returned frame so
+        # build_game_context can read Position. Combo legs keep "" — outside MLB
+        # they are absent from the slice, and inside it they carry one label per
+        # component, which pyarrow refuses to mix with the plain strings when
+        # persist writes the offers parquet.
+        df.loc[league_df.index, "Position"] = league_df["Player position"].map(
+            lambda p: p if isinstance(p, str) else ""
+        )
+        league_df = _build_cmarket(league_df, league, platform)
         parlay_df = _process_league_games(
             df,
             league_df,
@@ -803,11 +881,9 @@ def find_correlation(
             search_payouts,
             full_payouts,
             parlay_df,
-            contest_variant,
             corr_sink,
             story_sink,
             stat_map[platform],
-            stat_map,
         )
 
     return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df

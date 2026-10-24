@@ -1,32 +1,20 @@
 """StatsWNBA: WNBA player stats, inherits from StatsNBA."""
 
-import importlib.resources as pkg_resources
-import json
 from datetime import date, datetime, timedelta
 
 import nba_api.stats.endpoints as nba
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import BallTree
 
-from sportstradamus import data
-from sportstradamus.helpers import (
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_mlb_pitchers,
-    get_odds,
-    remove_accents,
-)
+from sportstradamus.helpers import remove_accents
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import archive, clean_data, fetch_upcoming_games
+from sportstradamus.stats.base import fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
 # stats.wnba.com abbreviations differ from our canonical set; remapped wherever a
-# team code enters (player index, player logs, team logs).
+# team code enters (player index, shot locations, player logs, team logs).
 _WNBA_TEAM_ABBR_MAP = {
     "CONN": "CON",
     "NY": "NYL",
@@ -42,8 +30,6 @@ def _remap_abbr(series: pd.Series) -> pd.Series:
     return series.map(lambda x: _WNBA_TEAM_ABBR_MAP.get(x, x))
 
 
-# Days since season start before triggering a full gamelog re-enrichment pass.
-_STALE_SEASON_DAYS = 300
 # Calendar month (inclusive) at which playoff logs are fetched in addition to regular season.
 _PLAYOFF_MONTH = 9
 # Days between latest_date and today that also triggers a playoff-log fetch mid-season.
@@ -119,7 +105,9 @@ class StatsWNBA(StatsNBA):
             latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
             latest_date = max(latest_date, self.season_start)
 
-        self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
+        self.upcoming_games, self.upcoming_games_by_date = fetch_upcoming_games(
+            "10", self.season_start.year, today
+        )
 
         (nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog, adv_teamlog) = (
             self._fetch_wnba_logs(latest_date, today)
@@ -149,10 +137,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
-        if (
-            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
-            or clean_data
-        ):
+        if self._full_clean_due():
             self._enrich_team_markets(
                 self.gamelog,
                 date_col=self.log_strings["date"],
@@ -230,7 +215,7 @@ class StatsWNBA(StatsNBA):
                 if fga > 0:
                     record = {
                         "PLAYER_NAME": remove_accents(row[1]),
-                        "TEAM_ABBREVIATION": row[3],
+                        "TEAM_ABBREVIATION": _WNBA_TEAM_ABBR_MAP.get(row[3], row[3]),
                         "RA_PCT": (row[7] if row[7] else 0) / fga,
                         "ITP_PCT": (row[10] if row[10] else 0) / fga,
                         "MR_PCT": (row[13] if row[13] else 0) / fga,
@@ -274,13 +259,7 @@ class StatsWNBA(StatsNBA):
             player_dict = {
                 level: player_dict.xs(level).T.to_dict() for level in player_dict.index.levels[0]
             }
-            if self.season_start.year in self.players:
-                self.players[self.season_start.year] = {
-                    team: players | player_dict.get(team, {})
-                    for team, players in self.players[self.season_start.year].items()
-                }
-            else:
-                self.players[self.season_start.year] = player_dict
+            self._merge_season_roster(self.season_start.year, player_dict)
         return player_df
 
     def _fetch_wnba_logs(self, latest_date, today):
@@ -379,9 +358,9 @@ class StatsWNBA(StatsNBA):
             - stat_df["TOV"]
         )
         stat_df["fantasy points parlay"] = stat_df["PRA"] + stat_df["BLST"] * 2 - stat_df["TOV"]
-        stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
-        stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
+        stat_df["FTR"] = (stat_df["FTM"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
+        stat_df["FG3_RATIO"] = (stat_df["FG3A"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
+        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).where(stat_df["BLKA"] > 0, 0)
         stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
         stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
         stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
@@ -391,7 +370,6 @@ class StatsWNBA(StatsNBA):
         stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
         stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
         stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
-        stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
         stat_df.TEAM_ABBREVIATION = _remap_abbr(stat_df.TEAM_ABBREVIATION)
         stat_df.OPP = _remap_abbr(stat_df.OPP)
 
@@ -417,9 +395,8 @@ class StatsWNBA(StatsNBA):
 
         team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
         team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
-        team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
-        team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
-        team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+        team_df["FTR"] = (team_df["FTM"] / team_df["FGA"]).where(team_df["FGA"] > 0, 0)
+        team_df["BLK_RATIO"] = (team_df["BLK"] / team_df["BLKA"]).where(team_df["BLKA"] > 0, 0)
         team_df.TEAM_ABBREVIATION = _remap_abbr(team_df.TEAM_ABBREVIATION)
         team_df.OPP = _remap_abbr(team_df.OPP)
 

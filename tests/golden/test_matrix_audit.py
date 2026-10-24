@@ -49,6 +49,7 @@ def test_auditor_reports_identity_lattice_positions_and_quote_classes(tmp_path):
     assert report["positions"] == {1: 1, 2: 1}
     assert report["quote_counts"] == {
         "authentic": 1,
+        "pickem": 0,
         "synthetic": 0,
         "derived": 1,
         "bookless": 1,
@@ -80,6 +81,40 @@ def test_auditor_flags_duplicate_invalid_and_missing_provenance(tmp_path):
         "invalid archived quote",
         "missing quote provenance",
     }
+
+
+def _write_pickem_matrix(path: Path, *, archived: bool) -> None:
+    _write_matrix(
+        path,
+        Archived=[True, archived],
+        Odds_synthetic=[False, False],
+        QuoteSource=["book_direct", "book_direct"],
+        QuoteAuthenticity=["authentic", "pickem"],
+        QuoteSyntheticReason=[None, None],
+        QuoteObservedAt=["2024-12-31T12:00:00", "2024-12-31T12:00:00"],
+        QuoteBookCount=[2, 1],
+    )
+
+
+def test_auditor_accepts_a_pickem_row_as_an_archived_line_but_not_book_evidence(tmp_path):
+    path = tmp_path / "NFL_fantasy-points-underdog.parquet"
+    _write_pickem_matrix(path, archived=True)
+
+    report = audit_matrix(path)
+
+    assert report["violations"] == []
+    assert report["quote_counts"]["pickem"] == 1
+    assert report["quote_counts"]["archive_coverage"] == 1.0
+    assert report["quote_classification"] == "partial"
+
+
+def test_auditor_flags_a_pickem_row_not_marked_archived(tmp_path):
+    path = tmp_path / "NFL_fantasy-points-underdog.parquet"
+    _write_pickem_matrix(path, archived=False)
+
+    report = audit_matrix(path)
+
+    assert report["violations"] == ["Archived disagrees with explicit authenticity"]
 
 
 def test_incomplete_provenance_counts_only_the_half_populated_block(tmp_path):

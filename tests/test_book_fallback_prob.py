@@ -3,21 +3,27 @@
 
 ``book_fallback_prob`` is routed to by ``process_offers`` whenever a cell would
 otherwise score empty (no trained model pickle, or a model that matched no
-players). It must devig the composite book odds into the model slot so the leg
-still scores — ``Model`` mirroring ``Books`` — with full feature parity when a
-feature matrix is available and neutral fills (never a NaN ``Player position``,
-which would crash correlation) when it is not.
+players). It resolves the same modal-line cohort quote the training matrix uses
+(``resolve_training_quote``) and mirrors it into the model slot — ``Model``
+mirroring ``Books`` — with full feature parity when a feature matrix is
+available and neutral fills (never a NaN ``Player position``, which would crash
+correlation) when it is not. Rows with no servable quote (nothing a real
+sportsbook or combo consensus priced) are dropped, never served at a guess.
 """
 
 from __future__ import annotations
 
+import datetime
 import importlib
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.helpers import get_odds
+from sportstradamus.helpers.distributions import get_ev
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+from sportstradamus.prediction import book_quotes, offer_records
+from sportstradamus.stats import base
 
 # ``sportstradamus.prediction`` re-exports the ``model_prob`` function, which
 # shadows the submodule under attribute access — fetch the module explicitly so
@@ -27,9 +33,11 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 _LEAGUE = "NBA"
 _RAW_MARKET = "points"
 _PLATFORM = "Underdog"
-_BOOK_EV = 22.0
+_BOOK_UNDER = 0.42
 _LINE = 25.5
 _CV = 0.5
+_TS = datetime.datetime(2026, 6, 3, 12, 0, 0)
+_PASS_DATE = datetime.date(2026, 6, 3)
 
 
 class _StubArchive:
@@ -37,11 +45,19 @@ class _StubArchive:
 
     default_totals = {_LEAGUE: 220.0}
 
-    def __init__(self, ev):
-        self._ev = ev
+    def __init__(self, rows_by_player):
+        self._rows = rows_by_player
 
-    def get_ev(self, league, market, date, player):
-        return self._ev
+    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+        return {e: (self._rows.get(e, []), None) for e in entities}
+
+
+@pytest.fixture(autouse=True)
+def _stub_record_archive(monkeypatch):
+    # finalize_records reads default_totals off offer_records' own LazyArchive, so a test
+    # that stubs only book_quotes still opens the real archive and, under xdist, waits on
+    # the lock of whichever worker already holds it.
+    monkeypatch.setattr(offer_records, "archive", _StubArchive({}))
 
 
 class _StubStats:
@@ -49,14 +65,21 @@ class _StubStats:
 
     league = _LEAGUE
 
-    def __init__(self, feature_frame):
+    def __init__(self, feature_frame, combo_ev=float("nan")):
         self._features = feature_frame
+        self._combo_ev = combo_ev
+        self.feature_dates = []
 
-    def get_stats(self, market, offers):
+    def get_stats(self, market, offers, date):
+        self.feature_dates.append(date)
         return self._features
 
     def check_combo_markets(self, market, player, date):
-        return float("nan")
+        return self._combo_ev
+
+    # Bound rather than stubbed: the serving second pass prices through the real
+    # component-sum kernel, so a stand-in would stop tracking its admission rules.
+    combo_quote = base.Stats.combo_quote
 
 
 def _offer(player="Test Player", line=_LINE):
@@ -72,6 +95,10 @@ def _offer(player="Test Player", line=_LINE):
         "Boost_Under": 1.0,
         "Boost": 1.0,
     }
+
+
+def _quote_rows(player="Test Player", book="fanduel", under=_BOOK_UNDER, line=_LINE, ev=None):
+    return {player: [ArchivedBookQuote(book, ev, under, line, _TS)]}
 
 
 def _patch_cell(monkeypatch, dist="NegBin", cv=_CV):
@@ -102,17 +129,23 @@ def _feature_frame(players, player_position=1):
 
 def test_full_parity_model_mirrors_book(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_BOOK_EV))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(_feature_frame(["Test Player"], player_position=1))
 
-    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
 
     assert len(records) == 1
     rec = records[0]
     # The model slot is the book: identical probability and EV-weighted value.
     assert rec["Win Prob"] == pytest.approx(rec["Market Prob"])
     assert rec["Model EV"] == pytest.approx(rec["Market EV"])
-    assert rec["Projection"] == pytest.approx(_BOOK_EV)
+    # An offer at the quote line round-trips the cohort probability exactly.
+    assert rec["Bet"] == "Over"
+    assert rec["Win Prob"] == pytest.approx(1 - _BOOK_UNDER, abs=1e-6)
+    # The projection is the mean implied by the quote under the cell's shape.
+    assert rec["Projection"] == pytest.approx(
+        get_ev(_LINE, _BOOK_UNDER, _CV, dist="NegBin"), abs=1e-6
+    )
     assert rec["Dist"] == "NegBin"
     # A model-less devigged leg attributes to the book-fallback sentinel.
     assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
@@ -121,17 +154,47 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert rec["Player position"] == 1
     assert rec["Avg 5"] == pytest.approx(20.0 - _LINE)
     assert rec["Home"] is True
-    # Probability equals the devigged book over/under at the line.
-    over = 1 - get_odds(_LINE, _BOOK_EV, "NegBin", _CV, step=1.0, gate=None)
-    assert rec["Win Prob"] == pytest.approx(max(over, 1 - over))
+
+
+def test_a_two_date_players_book_leg_is_read_for_his_earlier_game(monkeypatch):
+    """His one feature row is built for the earlier game, so the quote is that game's too."""
+    _patch_cell(monkeypatch)
+    asked = []
+
+    class _RecordingArchive(_StubArchive):
+        def get_training_quote_inputs(self, league, market, date, entities, at=None):
+            asked.append(date)
+            return super().get_training_quote_inputs(league, market, date, entities, at)
+
+    monkeypatch.setattr(book_quotes, "archive", _RecordingArchive(_quote_rows()))
+    stats = _StubStats(_feature_frame(["Test Player"]))
+    listed_last = _offer() | {"Date": "2026-06-04"}
+
+    mp.book_fallback_prob(
+        [_offer(), listed_last], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE
+    )
+
+    assert asked == ["2026-06-03"]
+
+
+def test_features_are_built_as_of_the_callers_pass_date(monkeypatch):
+    """The caller's pass prepared depth and volume for its date; a feature row built at
+    any other date would rebuild the profile and read them wiped."""
+    _patch_cell(monkeypatch)
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
+    stats = _StubStats(_feature_frame(["Test Player"]))
+
+    mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
+
+    assert stats.feature_dates == [_PASS_DATE]
 
 
 def test_neutral_fill_when_no_feature_matrix(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_BOOK_EV))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())  # no players matched -> no features
 
-    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
+    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE)
 
     assert len(records) == 1
     rec = records[0]
@@ -146,15 +209,65 @@ def test_neutral_fill_when_no_feature_matrix(monkeypatch):
 
 def test_returns_empty_when_market_unknown(monkeypatch):
     monkeypatch.setattr(mp, "stat_dist", {})  # no distribution to devig with
-    monkeypatch.setattr(mp, "archive", _StubArchive(_BOOK_EV))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
 
 
-def test_returns_empty_when_no_book_odds(monkeypatch):
+def test_returns_empty_when_no_book_quote(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(float("nan")))  # no archive price
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive({}))  # no archived rows at all
     stats = _StubStats(pd.DataFrame())  # check_combo_markets also returns NaN
 
-    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
+
+
+def test_dfs_only_cohort_never_serves(monkeypatch):
+    """A cohort of DFS platforms alone is the platform quoting itself — no serve."""
+    _patch_cell(monkeypatch)
+    monkeypatch.setattr(
+        book_quotes, "archive", _StubArchive(_quote_rows(book="Sleeper", under=0.5))
+    )
+    stats = _StubStats(pd.DataFrame())
+
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
+
+
+def test_pure_ev_inversion_never_serves(monkeypatch):
+    """A legacy ev-only row (no native under-prob) is derived, not independent support."""
+    _patch_cell(monkeypatch)
+    monkeypatch.setattr(
+        book_quotes, "archive", _StubArchive(_quote_rows(under=None, line=None, ev=22.0))
+    )
+    stats = _StubStats(pd.DataFrame())
+
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )
+
+
+def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
+    """A combo market with unquoted components serves nothing at all.
+
+    The second pass now prices the component sum rather than inverting
+    ``check_combo_markets``' scalar mean under a generic cv, so a market whose
+    components nothing priced has no honest quote left to fall back to. The stub
+    still offers the scalar; the board must refuse it.
+    """
+    _patch_cell(monkeypatch)
+    stub = _StubArchive({})
+    monkeypatch.setattr(book_quotes, "archive", stub)
+    monkeypatch.setattr(base, "archive", stub)
+    monkeypatch.setitem(book_quotes.combo_props, _RAW_MARKET, ["A", "B"])
+    stats = _StubStats(pd.DataFrame(), combo_ev=22.0)
+
+    assert (
+        mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats, _PASS_DATE) == []
+    )

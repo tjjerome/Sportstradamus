@@ -6,8 +6,8 @@ Orchestrates the full prediction pipeline:
 2. Scrape DFS offers (Underdog, Sleeper)
 3. Score via :func:`process_offers` (feature extraction + distributional model)
 4. Snapshot scored offers + parlays as parquet for the Streamlit dashboard
-5. Persist a rolling year of predictions to ``data/history.parquet`` and
-   the new parlays to ``data/parlay_hist.parquet``
+5. Persist a rolling year of predictions to ``data/runtime/history.parquet`` and
+   the new parlays to the ``data/runtime/parlay_hist/`` day partitions
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime
 import importlib.resources as pkg_resources
 import os
-from functools import partialmethod
+from functools import partial, partialmethod
 
 import click
 import line_profiler
@@ -23,31 +23,34 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import creds, data
+from sportstradamus import data
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
+    archive_market,
+    cell_market,
     get_logger,
-    odds_budget,
     stat_dist,
     stat_map,
 )
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     read_history,
-    read_parlay_hist,
+    trim_parlay_hist,
+    upsert_parlay_hist,
     write_history,
-    write_parlay_hist,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_KEY
+from sportstradamus.prediction.feature_log import prune_feature_log
+from sportstradamus.prediction.line_movement import build_line_movement
 from sportstradamus.prediction.persist import (
     write_current_game_context,
     write_current_game_corr,
     write_current_game_stories,
     write_current_offer_details,
     write_current_offers,
-    write_current_pickem,
+    write_line_movement,
 )
 from sportstradamus.prediction.scoring import process_offers
 from sportstradamus.prediction.stories import (
@@ -57,8 +60,10 @@ from sportstradamus.prediction.stories import (
     build_game_stories,
 )
 from sportstradamus.prediction.stories.details import build_offer_details
+from sportstradamus.prediction.stories.lead import attach_prominence
+from sportstradamus.prediction.stories.lineup import attach_lineup_columns
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+from sportstradamus.stats import load_live_leagues
 
 pd.set_option("mode.chained_assignment", None)
 pd.set_option("future.no_silent_downcasting", True)
@@ -137,17 +142,70 @@ def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataF
     )
 
 
-def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
-    """Flag rows whose ``Line`` diverges from ``Consensus Line`` beyond tolerance.
+def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
+    """Snapshot how each offer's DFS line and price have moved since it was posted.
 
-    Tolerance is picked per-row from the cell's distribution family in
-    ``stat_meta.json`` (count stats move in coarser steps than continuous ones);
-    NaN ``Consensus Line`` (no archive line yet) leaves ``Alt Line`` False.
+    Reads the ladder — every rung the offers' own platforms posted on every poll,
+    each with its price — folds it into one row per offer (main line, fair line,
+    change log; see ``build_line_movement``), and writes the dashboard snapshot.
+    Shared with the standalone ``export-line-movement`` refresh so both scan the
+    archive the same way.
+
+    Must run after ``archive.write()``: rungs staged this run stay invisible to
+    reads until that flush, so an earlier snapshot misses the run's own poll and
+    gives an offer first posted this run no row at all.
+
+    Returns:
+        The frame that was written, so a caller can report on it.
+    """
+    observations = pd.DataFrame()
+    if not offers.empty:
+        # Stat, not Market: the archive files a ladder under the league's own market key.
+        keys = (
+            offers[["League", "Player", "Stat"]]
+            .drop_duplicates()
+            .rename(columns={"League": "league", "Player": "entity", "Stat": "market"})
+        )
+        observations = archive.get_book_line_histories(
+            keys,
+            books=sorted(offers["Platform"].unique()),
+            since=datetime.date.fromisoformat(offers["Date"].min()),
+        )
+    movement = build_line_movement(observations, offers)
+    write_line_movement(movement)
+    return movement
+
+
+def _name_markets(offers: pd.DataFrame, platform: str) -> pd.DataFrame:
+    """Give a platform's scored offers their two market names, ``Stat`` and ``Market``.
+
+    ``Stat`` is the league's own key for the market, the name its gamelog column, model
+    cell and archive rows go by. ``Market`` becomes the board's name for it, which is not
+    that key for every league: NHL assists is AST on the board. Both are read off the
+    platform's raw label, so ``Stat`` is set before ``Market`` is renamed.
+    """
+    offers["Stat"] = [
+        cell_market(league, platform, label)
+        for league, label in zip(offers["League"], offers["Market"], strict=True)
+    ]
+    offers["Market"] = offers["Market"].map(stat_map[platform])
+    return offers
+
+
+def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
+    """Flag rows whose ``Line`` diverges from ``Reference Line`` beyond tolerance.
+
+    The reference is the sportsbook consensus line, else the entry's line of record
+    (``Archive.get_reference_line``), so an entry no sportsbook posts is judged
+    against its platform's own main rung. Tolerance is picked per-row from the
+    cell's distribution family in ``stat_meta.json`` (count stats move in coarser
+    steps than continuous ones); NaN ``Reference Line`` (no archive line yet)
+    leaves ``Alt Line`` False.
     """
     dist = offers.apply(lambda r: stat_dist.get(r["League"], {}).get(r["Market"]), axis=1)
     tol = np.where(dist.isin(_COUNT_DISTS), _ALT_LINE_TOL_COUNT, _ALT_LINE_TOL_CONTINUOUS)
-    diff = (offers["Line"] - offers["Consensus Line"]).abs()
-    offers["Alt Line"] = (diff > tol).where(offers["Consensus Line"].notna(), False)
+    diff = (offers["Line"] - offers["Reference Line"]).abs()
+    offers["Alt Line"] = (diff > tol).where(offers["Reference Line"].notna(), False)
     return offers
 
 
@@ -155,12 +213,12 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @click.option(
     "--contest-variant",
-    type=click.Choice(["pooled", "power", "flex", "insurance", "rivals"]),
+    type=click.Choice(["pooled", "power", "flex"]),
     default="pooled",
     help=(
         "Underdog payout pool for parlay scoring. Default 'pooled' "
-        "combines power (2-3 legs) and flex (4+ legs) into one pool; "
-        "single-variant names are kept for the pickem-build path."
+        "combines power (2-3 legs) and flex (4-6 legs) into one pool; "
+        "single-variant names are kept for the bet pickem path."
     ),
 )
 @LOG_LEVEL_OPTION
@@ -169,7 +227,7 @@ def main(progress, contest_variant, log_level):
     """Run the full prediction pipeline and write parquet snapshots for the dashboard."""
     # style: allow-complexity — prophecize entrypoint: a flat top-level pipeline
     # (per-league load/update, per-platform fetch+score, snapshot + history
-    # persistence). The residual CC is sequential stages and per-platform/-league
+    # persistence). The residual CC is sequential stages and per-platform
     # guards, not nested logic; decomposing it would only scatter the pipeline.
     cli_log = get_logger("prophecize")
     cli_log.setLevel(log_level)
@@ -178,49 +236,33 @@ def main(progress, contest_variant, log_level):
         extra={"contest_variant": contest_variant},
     )
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
+    # One stamp per run: every history row this run writes joins the archive state
+    # the run saw, which is what point-in-time research needs.
+    scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
-    sports = []
-    stats = {}
-    for lg_name, cls in (
-        ("NBA", StatsNBA),
-        ("NFL", StatsNFL),
-        ("WNBA", StatsWNBA),
-        ("MLB", StatsMLB),
-        ("NHL", StatsNHL),
-    ):
-        struct = cls()
-        struct.load()
-        if odds_budget.league_is_live(lg_name, struct.season_start):
-            struct.update()
-            stats[lg_name] = struct
-            sports.append(lg_name)
+    stats, updates_failed = load_live_leagues()
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
     platforms_run: list[str] = []
+    platforms_failed: list[str] = []
     corr_sink: list[dict] = []
     story_sink: list = []
-    scored_ud: pd.DataFrame | None = None
-    scored_sl: pd.DataFrame | None = None
 
+    # Each platform scores into its own sinks and only merges them into the shared
+    # ones from ``else``, so a raise mid-block cannot leave that platform's parlays
+    # or corr slices in state the snapshot then publishes without its offers.
+    ud_corr, ud_story = [], []
     try:
-        ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(
-            ud_dict,
+        ud_offers, ud_parlays = process_offers(
+            get_ud(),
             "Underdog",
             stats,
             contest_variant=contest_variant,
-            corr_sink=corr_sink,
-            story_sink=story_sink,
+            corr_sink=ud_corr,
+            story_sink=ud_story,
         )
-        parlay_df = pd.concat([parlay_df, ud5])
-        # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
-        # Pick'em snapshot — find_correlation expects the process_offers shape.
-        scored_ud = ud_offers.copy()
-        ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Stat"] = ud_offers[
-            "Market"
-        ]  # preserve gamelog key for dashboard history lookups
+        ud_offers = _name_markets(ud_offers, "Underdog")
         # model_prob pre-multiplied Boost by UNDERDOG_BOOST_BASELINE so that
         # ``Model = Model P * Boost`` is per-$1 EV. The persisted snapshot
         # (current_offers.parquet, history.parquet) is consumed downstream
@@ -229,38 +271,41 @@ def main(progress, contest_variant, log_level):
         # user sees on Underdog (1.00 = no promo, 1.05 = 5% promo).
         ud_offers["Boost"] = ud_offers["Boost"] / UNDERDOG_BOOST_BASELINE
         ud_offers["Platform"] = "Underdog"
-        all_offers.append(ud_offers)
-        platforms_run.append("Underdog")
     except Exception:
         logger.exception("Failed to get Underdog")
+        platforms_failed.append("Underdog")
+    else:
+        parlay_df = pd.concat([parlay_df, ud_parlays])
+        all_offers.append(ud_offers)
+        platforms_run.append("Underdog")
+        corr_sink.extend(ud_corr)
+        story_sink.extend(ud_story)
 
+    sl_corr, sl_story = [], []
     try:
-        sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(
-            sl_dict,
+        sl_offers, sl_parlays = process_offers(
+            get_sleeper(),
             "Sleeper",
             stats,
             contest_variant=contest_variant,
-            corr_sink=corr_sink,
-            story_sink=story_sink,
+            corr_sink=sl_corr,
+            story_sink=sl_story,
         )
-        parlay_df = pd.concat([parlay_df, sl5])
-        # Capture the raw scored frame (pre Market-remap) for the Pick'em
-        # snapshot — find_correlation expects the process_offers shape.
-        scored_sl = sl_offers.copy()
-        sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
-        sl_offers["Stat"] = sl_offers[
-            "Market"
-        ]  # preserve gamelog key for dashboard history lookups
-        # Sleeper Boost stays at the raw books.py value (model_prob only
+        sl_offers = _name_markets(sl_offers, "Sleeper")
+        # Sleeper Boost stays at the raw books/sleeper.py value (model_prob only
         # applies UNDERDOG_BOOST_BASELINE to platform == "Underdog"), so no
         # division is needed here for display/storage to match the raw
         # Sleeper promo multiplier.
         sl_offers["Platform"] = "Sleeper"
-        all_offers.append(sl_offers)
-        platforms_run.append("Sleeper")
     except Exception:
         logger.exception("Failed to get Sleeper")
+        platforms_failed.append("Sleeper")
+    else:
+        parlay_df = pd.concat([parlay_df, sl_parlays])
+        all_offers.append(sl_offers)
+        platforms_run.append("Sleeper")
+        corr_sink.extend(sl_corr)
+        story_sink.extend(sl_story)
 
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
@@ -292,16 +337,24 @@ def main(progress, contest_variant, log_level):
             ]
 
         key_cols = ["League", "Market", "Date", "Player"]
-        line_map = {
-            key: archive.get_line(*key)
-            for key in snapshot_offers[key_cols]
-            .drop_duplicates()
+        # The archive files a row under its own market key, not the board's label
+        # (an NHL board says AST where the archive says assists). A label missing from
+        # its platform's stat_map arrives NaN: it has no key, so it reads no line.
+        archive_keys = [
+            (league, archive_market(league, market), date, player)
+            for league, market, date, player in snapshot_offers[key_cols]
+            .fillna({"Market": ""})
             .itertuples(index=False, name=None)
-        }
-        snapshot_offers["Consensus Line"] = [
-            line_map[key] for key in snapshot_offers[key_cols].itertuples(index=False, name=None)
         ]
+        consensus = {key: archive.get_line(*key) for key in set(archive_keys)}
+        reference = {
+            key: line or archive.get_reference_line(*key) for key, line in consensus.items()
+        }
+        snapshot_offers["Consensus Line"] = [consensus[key] or np.nan for key in archive_keys]
+        snapshot_offers["Reference Line"] = [reference[key] or np.nan for key in archive_keys]
 
+    snapshot_offers = attach_lineup_columns(snapshot_offers, stats)
+    snapshot_offers = attach_prominence(snapshot_offers)
     snapshot_offers = attach_offer_why(snapshot_offers)
     game_context = build_game_context(snapshot_offers, archive.default_totals)
     parlay_df = attach_parlay_theses(
@@ -313,7 +366,7 @@ def main(progress, contest_variant, log_level):
     write_current_offers(
         snapshot_offers,
         parlay_df,
-        sports,
+        list(stats),
         platforms_run,
         contest_variant=contest_variant,
     )
@@ -322,19 +375,15 @@ def main(progress, contest_variant, log_level):
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
 
-    _write_pickem_snapshot({"Underdog": scored_ud, "Sleeper": scored_sl}, stats)
-
     if not parlay_df.empty:
-        old_parlays = read_parlay_hist()
-        if not old_parlays.empty:
-            combined = pd.concat([parlay_df, old_parlays], ignore_index=True).drop_duplicates(
-                subset=["Model EV", "Market EV"], ignore_index=True
-            )
-        else:
-            combined = parlay_df
-        write_parlay_hist(combined)
+        upsert_parlay_hist(parlay_df, dedup_subset=["Model EV", "Market EV"])
+    # Outside the empty check: a stretch of slates that build no parlays must not
+    # stop retention, or the history grows past the window unnoticed.
+    trim_parlay_hist(_HISTORY_RETENTION_DAYS)
 
     archive.write()
+    # After the flush, or the snapshot misses the ladder rungs this run just staged.
+    snapshot_line_movement(snapshot_offers)
     logger.info("Checking historical predictions")
 
     history = read_history()
@@ -345,23 +394,29 @@ def main(progress, contest_variant, log_level):
         all_df = pd.concat(all_offers)
         if not snapshot_offers.empty and "Consensus Line" in snapshot_offers.columns:
             all_df = all_df.merge(
-                snapshot_offers[[*PREDICTION_KEY, "Consensus Line"]].drop_duplicates(
-                    PREDICTION_KEY
-                ),
+                snapshot_offers[
+                    [*PREDICTION_KEY, "Consensus Line", "Reference Line"]
+                ].drop_duplicates(PREDICTION_KEY),
                 on=PREDICTION_KEY,
                 how="left",
             )
-        all_df.loc[(all_df["Market"] == "AST") & (all_df["League"] == "NHL"), "Market"] = "assists"
-        all_df.loc[(all_df["Market"] == "PTS") & (all_df["League"] == "NHL"), "Market"] = "points"
-        all_df.loc[(all_df["Market"] == "BLK") & (all_df["League"] == "NHL"), "Market"] = "blocked"
+        # History names a leg by its model cell except on NBA and WNBA, which keep the
+        # platform's "... underdog" markets: only the NHL names are folded here.
+        nhl = all_df["League"] == "NHL"
+        all_df.loc[nhl, "Market"] = all_df.loc[nhl, "Market"].map(partial(archive_market, "NHL"))
         all_df.dropna(subset="Market", inplace=True, ignore_index=True)
         if "Consensus Line" in all_df.columns:
             all_df = _stamp_alt_line(all_df)
         else:
             all_df["Alt Line"] = False
+            all_df["Consensus Line"] = np.nan
         # Freshly scored offers always start unresolved; reflect fills these in.
         for col in ("Actual", "Close Market Prob", "Market CLV", "Model CLV"):
             all_df[col] = np.nan
+        all_df["Payout Over"] = all_df["Boost_Over"]
+        all_df["Payout Under"] = all_df["Boost_Under"]
+        all_df["Scored At"] = scored_at
+        all_df["First Scored At"] = scored_at
         new_df = all_df[HISTORY_COLS].copy() if not all_df.empty else pd.DataFrame()
     else:
         new_df = pd.DataFrame()
@@ -377,46 +432,20 @@ def main(progress, contest_variant, log_level):
         <= gameDates
     ]
     write_history(history)
+    # Last, so a prune that raises costs the run no capture or snapshot.
+    prune_feature_log()
 
+    # Non-zero only after every capture and snapshot has landed: run_job.sh pings
+    # Healthchecks /fail on the exit code, and a swallowed platform that exits 0
+    # is how Underdog went dark for four days without an alert. A league that sat
+    # the run out on a failed gamelog update alerts the same way.
+    if updates_failed:
+        logger.error("gamelog updates failed: %s", ", ".join(updates_failed))
+    if platforms_failed:
+        logger.error("platforms failed: %s", ", ".join(platforms_failed))
+    if updates_failed or platforms_failed:
+        raise SystemExit(1)
     logger.info("Success!")
-
-
-def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], stats: dict) -> None:
-    """Build the per-platform Pick'em entries snapshot from already-scored offers.
-
-    Reuses prophecize's scored frames — no second scrape, no extra archive
-    lock — and writes one combined ``current_pickem.parquet`` for the
-    dashboard, tagged by ``platform``. Each platform's entry construction is
-    guarded independently so one platform's failure logs and continues
-    rather than blanking the other's entries.
-    """
-    from sportstradamus.strategies._pickem_emit import entries_to_frame
-    from sportstradamus.strategies.underdog_pickem import (
-        PLATFORM_CONTEST_VARIANTS,
-        REFERENCE_BANKROLL,
-        PickemConfig,
-        build_entries_from_scored,
-    )
-
-    all_entries = []
-    for platform, scored in scored_by_platform.items():
-        if scored is None or scored.empty:
-            continue
-        try:
-            config = PickemConfig(contest_variants=PLATFORM_CONTEST_VARIANTS[platform])
-            all_entries.extend(
-                build_entries_from_scored(
-                    datetime.date.today(),
-                    REFERENCE_BANKROLL,
-                    scored,
-                    stats,
-                    config,
-                    platform=platform,
-                )
-            )
-        except Exception:
-            logger.exception("Failed to build %s pickem snapshot", platform)
-    write_current_pickem(entries_to_frame(all_entries))
 
 
 def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
@@ -432,17 +461,25 @@ def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame
     covers prediction-level freshness (Team/Projection/etc.) for the offer-keys
     touched this run, since those columns are just duplicated across every
     offer row for a prediction and ``keep="last"`` prefers the newer row.
+    ``First Scored At`` is the one column a re-score never refreshes: whichever
+    row the dedup keeps carries the stamp the key was stored with.
     """
     if new_df.empty:
         return history
     if history.empty:
         return new_df
 
+    key = [*PREDICTION_KEY, "Line", "Platform"]
     combined = pd.concat([history, new_df], ignore_index=True)
+    # Stored rows precede this run's, so a key's first row is its stored one: a re-score keeps
+    # the stored stamp (NaN where that row predates the column); only a new key takes this run's.
+    combined["First Scored At"] = combined.groupby(key, dropna=False)["First Scored At"].transform(
+        "first", skipna=False
+    )
     combined["_closed"] = combined["Close Market Prob"].notna()
     return (
         combined.sort_values("_closed", kind="stable")
-        .drop_duplicates(subset=[*PREDICTION_KEY, "Line", "Platform"], keep="last")
+        .drop_duplicates(subset=key, keep="last")
         .drop(columns="_closed")
     )
 

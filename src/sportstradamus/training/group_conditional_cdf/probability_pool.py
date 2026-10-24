@@ -42,7 +42,7 @@ def fit_probability_pool(
     Args:
         candidate_over: Candidate over-probabilities for validation rows.
         book_over: Bookmaker over-probabilities on the same rows and lines.
-        over_result: Binary realized-over indicators on the same rows.
+        over_result: Realized over labels on the same rows (0.5 at a tie).
 
     Returns:
         A plain-typed, portable blob containing clipped and unconstrained weights.
@@ -55,8 +55,6 @@ def fit_probability_pool(
     outcome = _probability_array(over_result, "over_result")
     if candidate.shape != book.shape or candidate.shape != outcome.shape:
         raise ValueError("candidate, book, and outcome arrays must have identical shapes")
-    if not np.isin(outcome, (0.0, 1.0)).all():
-        raise ValueError("over_result must contain only binary 0/1 values")
 
     direction = candidate - book
     denominator = float(np.dot(direction.ravel(), direction.ravel()))

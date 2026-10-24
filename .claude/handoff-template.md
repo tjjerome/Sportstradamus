@@ -44,7 +44,7 @@ owner (material). Typical block:
 
     git fetch origin && git log --oneline origin/devel -3
     python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
-    ls -la data/training/model_stats.csv     # gate numbers fresh?
+    ls -la src/sportstradamus/data/training/model_stats.csv     # gate numbers fresh?
     <existence checks for prior-stage artifacts>
 -->
 
@@ -64,10 +64,10 @@ relitigate; changes are owner-only. Workstream-scoped decisions live HERE
 
 <!-- Exhaustive list of modules this lane may touch, with canonical import
 paths (sportstradamus.stats / .training / .prediction / .helpers — per
-CONTRIBUTING §Package Map) so deleted shims are not recreated. Editing outside
-the footprint is a stop condition (§8). If the lane touches the serving path,
-add the inference-path compatibility pointer (model_improvement_track.md §7.3)
-— reference it, don't restate it. -->
+docs/ARCHITECTURE.md §Package Map) so deleted shims are not recreated. Editing
+outside the footprint is a stop condition (§8). If the lane touches the serving
+path, add the inference-path compatibility pointer (model_improvement_track.md
+§7.3) — reference it, don't restate it. -->
 
 ## 6. Stage plan
 

@@ -14,7 +14,7 @@ matches the calibrated full zero rate by construction. The test below
 exercises that identity directly rather than asserting a mean-gate
 threshold (which would conflate the inflation component with the
 marginal under-fit framing in
-docs/OVERCONFIDENCE_INVESTIGATION.md section 2).
+docs/archive/nba_overconfidence_investigation.md section 2).
 
 Also asserts the determinism contract: two HurdleZINB.fit calls with the
 same DETERMINISTIC_SEED produce bit-identical predicted parameters.
@@ -151,7 +151,7 @@ def test_hurdle_zinb_live_path_is_deterministic():
     Mirrors the SkewNormal determinism guard in test_determinism_gate.py.
     Without this, the A/B compression_eval verdict for hurdle vs joint
     cannot be trusted — repeats the lesson from
-    docs/CENTERED_TARGET_NEGATIVE_RESULT.md.
+    docs/archive/nba_overconfidence_investigation.md.
     """
     parquet = pkg_resources.files(data) / "training_data/NBA_FG3M.parquet"
     if not parquet.is_file():

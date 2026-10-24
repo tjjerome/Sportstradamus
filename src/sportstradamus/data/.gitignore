@@ -11,3 +11,4 @@ leagues/*/teamlog.parquet
 leagues/*/players.json
 leagues/*/players.parquet
 runtime/
+assets/headshots/
