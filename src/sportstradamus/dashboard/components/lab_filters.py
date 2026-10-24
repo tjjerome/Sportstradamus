@@ -52,7 +52,10 @@ def _render_full(meta: pd.DataFrame) -> dict[str, list[str]]:
     for col, axis in zip(cols, FILTER_AXES, strict=True):
         options = sorted(meta[axis].dropna().unique()) if axis in meta.columns else []
         with col:
-            sel[axis] = st.multiselect(_AXIS_LABELS[axis], options, key=_widget_key(axis))
+            # Straight in a column, chips default to one scrolling row that hides selections.
+            sel[axis] = st.multiselect(
+                _AXIS_LABELS[axis], options, key=_widget_key(axis), wrap=True
+            )
     return sel
 
 

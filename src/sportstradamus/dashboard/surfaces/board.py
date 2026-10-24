@@ -58,14 +58,20 @@ if signal_cols:
     signal = offers[signal_cols].fillna(0)
     offers = offers.loc[(signal != 0).any(axis=1)]
 
+# wrap=True on the widgets placed straight in a column below: Streamlit otherwise keeps
+# them on one scrolling row, which hides lenses on a phone and filter chips on a desktop.
 lens_col, side_col = st.columns([3, 1])
 with lens_col:
     lens = (
-        st.segmented_control("Prophecy lens", list(LENSES), default="Tonight", key="board_lens")
+        st.segmented_control(
+            "Prophecy lens", list(LENSES), default="Tonight", key="board_lens", wrap=True
+        )
         or "Tonight"
     )
 with side_col:
-    side = st.segmented_control("Side", ["All", "Over", "Under"], default="All", key="board_side")
+    side = st.segmented_control(
+        "Side", ["All", "Over", "Under"], default="All", key="board_side", wrap=True
+    )
 
 # Phone: the widget-heavy filters collapse into one expander; lens/side stay above.
 filter_host = st.expander("Filters") if mobile else st.container()
@@ -73,10 +79,10 @@ with filter_host:
     col1, col2, col3 = st.columns(3)
     with col1:
         leagues = sorted(offers["League"].dropna().unique())
-        selected_leagues = st.multiselect("League", leagues, default=leagues)
+        selected_leagues = st.multiselect("League", leagues, default=leagues, wrap=True)
     with col2:
         platforms = sorted(offers["Platform"].dropna().unique()) if "Platform" in offers else []
-        selected_platforms = st.multiselect("Platform", platforms, default=platforms)
+        selected_platforms = st.multiselect("Platform", platforms, default=platforms, wrap=True)
     with col3:
         markets = sorted(offers["Market"].dropna().unique())
         # Chips show the prose market name; the stored value stays the slug the filter keys off.
@@ -86,7 +92,11 @@ with filter_host:
             if pd.notna(m)
         }
         selected_markets = st.multiselect(
-            "Market", markets, default=markets, format_func=lambda s: market_labels.get(s, s)
+            "Market",
+            markets,
+            default=markets,
+            format_func=lambda s: market_labels.get(s, s),
+            wrap=True,
         )
 
     player_query = st.text_input("Player search", placeholder="e.g. Jokic")
