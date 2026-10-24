@@ -5,6 +5,11 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ## [Unreleased]
 
+### Security
+- Dependabot fixes: Pillow 13.0, certifi 2026.10.23, Brotli 1.2.1, urllib3 2.8, setuptools 84.2;
+  dev virtualenv 21.14, filelock 4.2, tornado 6.6, Mako 1.4.3. streamlit 1.62 → 1.66.1, its
+  first release that allows Pillow 13.
+
 ### Changed
 - A withheld cell's props that a sportsbook quotes serve the book consensus instead of leaving
   the board (`prediction/scoring.py::match_offers`).
