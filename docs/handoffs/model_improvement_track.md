@@ -227,6 +227,14 @@ rows were purged and the missing history re-bought from the Odds API (2.39M cred
 — [`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md) §10), so their g1 verdicts also
 grade against an honest book.
 
+**Two defects the I6d brief found (2026-10-27).** The honest book above holds for natively
+written rows only. The WS1 shape-free migration (`377972ce`, 06-28) decoded every older row's
+stored `ev` under the 06-28 family, cv and gate, and its round-trip check passes for any shape, so
+every 00:00 row and the 06-02 NFL backfill's 01:00 rows carry a wrong `under_prob` (the right value
+is still recoverable from `ev`; NBA's current matrices hold no native row). Separately, the prop
+writer priced a book's doubled same-side quote at exactly .5 (williamhill_us MLB home runs,
+betrivers NHL goals). The repair is a training-time re-read, not an archive edit (§8.2 #0f).
+
 ### 3.3 Diagnosis — two-sided: offline shape and live alignment
 
 Diagnose from both ends now. The offline board says where predictive **shape** is still wrong;
@@ -316,6 +324,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Pooling-half blend rebuild (BLP + decoupled location/shape) | **Refuted (this cohort)** — decoupled (A) ill-posed, BLP (B) a wash (OOS ΔKS≈0); at `w≈0.90` nothing for the wrapper to repair; over-wide cells are family/shape-bound → §6.6. Re-probe per cohort; design in §6.5 | `[[pooling_half_blp_nogo]]`; refs |
 | Selection-aware trust layer (R1, `prediction/trust.py`, post-argmax `Trust Prob`) | **Dead — KILL 2026-10-04** — the pre-registered ablation fires: dropping served p costs no out-of-sample log-loss (logistic +0.00038 nats, p = .07; GBM p = .75), so the layer's honest probability is market-anchored, i.e. the model-free engine the owner ruled out; Tier B 0 of 12 after Holm. The selection fix routes to model information (I6, honest-receipts lane §6); the standing monitor is Receipts' "edge captured" column (λ_sel) | [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md) |
 | Train/serve skew and tail-calibration repairs as the selected-tail fix (R3) | **Dead as a gap lever (2026-10-04); alive as correctness** — post-fix recommended legs read 12.5 pp above their hit rate; calibration-chain and quote skews together are worth ≤ 0.7 pp, price-blind or distance-conditional recalibration ≤ 1.2 pp; 89 % is selection on model–market disagreement where the served mean carries little at-market information. The lever is model information: serve-time feature log + parity monitor, the version-age test, as-of training inputs, NFL information research ([honest-receipts.md](honest-receipts.md) §6, I6a–I6g). The instrument is the tail scorecard (`sportstradamus admin tail-scorecard`), a diagnostic and never a gate | [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md) |
+| Book-leg levelling (I6d step 1) | **Adopted for week 3 (owner 2026-10-27): a provenance-keyed re-read at training read time** — a producer class per archived book-row (same-observation ladder row, or the WS1 writer's deploy boundary), the ladder price for the .5 rows, and per-block re-decode, keep or demote of migrated rows under a frozen prices-only test (\|mean diff\| ≤ .01, MAD ≤ .03); the archive stays raw; re-inject and one retrain per league. **Killed with it:** a per-cell, per-era logit shift on the book leg (outcome-fitted, and it cannot undo a gate floor or a .5 point mass), the 23:00 close as the training book leg (post-decision), repairing archive rows in place (`merge_archives` keeps `MAX(under_prob)`), dropping the migrated era on its own (NBA keeps no authentic row), re-buying the quotes (~26k credits against ~1k). A per-cell book-CITL column ships report-only | [`archive/researcher_i6d_book_leg_levelling.md`](../archive/researcher_i6d_book_leg_levelling.md); §8.2 #0f |
 
 ## 4. Locked decisions
 
@@ -1269,7 +1278,8 @@ normal gates; the per-league activation detail stays in
 
 **Reality (re-derive counts from §3).** Both leagues are live and the league-activation guard is
 empty (§6), so their withheld cells walk the §6 operating loop like any other. Their book-honesty
-repair is done (§3.2), so a g1 failure there grades against a real book.
+repair is done (§3.2), so a g1 failure there grades against a real book, bar the .5-priced rows
+of §8.2 #0f.
 
 MLB/NHL are also not "efficient cells with nothing to learn" — they are starved of inputs (raw
 `stat_types`: MLB 13, NHL 14, vs NBA 138; ~100–120 matrix columns vs ~460–480). Closing that
@@ -1419,7 +1429,8 @@ snapshot.
   prices (`_event_player_props`; both live confer and close-lines route through it; the DFS
   clamp semantics stay pinned); the poisoned evs are NULLed in the archive (quotes kept) and
   the tds matrix purged pending regen; (d) count-cell book decode round-trips ev→odds through
-  drifting cv/zi — the matrix build should read the WS-1 `under_prob` column directly. Seed-row
+  drifting cv/zi — the matrix build should read the WS-1 `under_prob` column directly (true for
+  native rows only: a migrated row's `under_prob` carries the 06-28 decode, §8.2 #0f). Seed-row
   cleanup applied + matrices swapped from `staging_nfl_book_repair/` (`[[breadth75_campaign]]`).
 - **At-market information (R3, honest-receipts lane).** Within cell, the NFL models carry no
   information beyond the market: logistic encompassing b_model is .03 (.04) offline, ≈ 0 at every
@@ -1805,6 +1816,27 @@ justification to `.claude/.state/research_waiver`.
   information decaying with distance from the training cutoff. Build order and the not-to-build
   list: [honest-receipts.md](honest-receipts.md) §6. The selected-tail instrument landed 2026-10-18 as monitor columns, never a gate
   (honest-receipts §6 E: sidecar parquet, live half, `tail_state` against the 0.05 edge floor).
+
+- **#0f — The historical book leg (I6d step 1, 2026-10-27): two defects, one adopted repair.**
+  [`archive/researcher_i6d_book_leg_levelling.md`](../archive/researcher_i6d_book_leg_levelling.md):
+  live-gap-2's H3 level error is the WS1 migration's decode shape (§3.2) plus a writer bug that
+  priced a doubled same-side quote at .5 (fixed going forward). On the NFL count test sets all
+  offline skill sits on migrated rows (tds BSS +.168 migrated against −.037 native); the .5 rows
+  carry most of MLB home runs' (+.256 → about +.017) and NHL goals' (+.044 → about +.002). Expect
+  the re-read (§3.4) to move BSS on the affected cells toward −.05…+.05 and w toward the book,
+  with Gate 1 mostly still passing (non-inferiority lets a fused probability ride a level book),
+  so I6d's encompassing test and the tail scorecard, not Gate 1, decide what skill remains. Rules
+  adopted with it: the decode bars above are frozen before the harness runs and never retuned
+  after an outcome read; a quoted cell pushed under the 10-cluster blend floor is withheld rather
+  than passing a blank Gate 1 (book-less cells keep the blank pass). The deciding read, taken
+  once before any retrain: H3's L_off over the seven NFL count cells ≤ .03 with the
+  offline-minus-live CI covering 0, and \|book CITL\| ≤ .03 per served cell with named
+  exceptions reported, not failed. Open: decoding the live-poll epochs (NBA's 00:00 and
+  pre-cutover rows; March 2026 is mixed); why NFL interceptions and passing tds decode only
+  under a continuous family although configured ZINB; the NFL carries and rushing yards 00:00
+  rows no family recovers; the one-sided longshot devig residual (+.01 to +.04 on home runs,
+  stolen bases, anytime goal and TD); a genuine offset on NFL carries, attempts and completions
+  (book lean or population); book weights fit on stored `ev`, refit after the re-read.
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
