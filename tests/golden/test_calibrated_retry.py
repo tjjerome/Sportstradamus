@@ -84,7 +84,6 @@ def test_gate_passed_na_safe():
         # g4 passed — the ship failure is someone else's (here g5): not our lever.
         (_row(g4_pass=True, g5_pass=False), "loss", "joint", False),
         (_row(g2_pass=False), "loss", "joint", False),
-        (None, "loss", "joint", False),
         # Scorecard never ran: every gate NA reads as not-passing, so g2-g6 block.
         (_row(**{f"g{i}_pass": pd.NA for i in range(1, 7)}), "loss", "joint", False),
         # NA g1 with no measured CI (scorecard never wrote one): no band to be within, so blocks.

@@ -984,9 +984,7 @@ def _gate_passed(value) -> bool:
     return pd.notna(value) and bool(value)
 
 
-def _g4_only_retry_wanted(
-    row: pd.Series | None, cell_hpo_selection: str, cell_zinb_mode: str
-) -> bool:
+def _g4_only_retry_wanted(row: pd.Series, cell_hpo_selection: str, cell_zinb_mode: str) -> bool:
     """Whether a cell earns the one-shot calibrated-HPO retry.
 
     Fires only for cells trained under ``loss`` selection whose fresh
@@ -997,7 +995,7 @@ def _g4_only_retry_wanted(
     Hurdle-ZINB and Mixture are excluded: those paths have no calibrated
     trial-selection closure.
     """
-    if row is None or cell_hpo_selection != "loss":
+    if cell_hpo_selection != "loss":
         return False
     if row["distribution"] == "Mixture":
         return False
