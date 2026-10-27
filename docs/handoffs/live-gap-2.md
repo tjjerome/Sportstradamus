@@ -104,7 +104,7 @@ league; the live instruments (§6) read the fixed versions over a stable window;
 | H2 | The gate verdicts are optimistic: the first-to-pass walk and the same-period split inflate `ship` | E2 | Descriptive: the served booster re-gated with calibrators cross-fit over the validation half (and over the test half, for the symmetric read): `ship` flips by gate and league, the slack shift, the Gate-1 CI method, E1-A's forward gates. The blind confirm walk is adopted regardless (protocol); whether re-gated cells leave `devel` is the owner's call |
 | H3 | The count cells' training book leg is the defect: Gate 1 ties a broken opponent and the blend weight follows | E3 | On the NFL count cells (attempts, carries, completions, interceptions, passing tds, receptions, tds), L = Σ n_c \|CITL_c\| / Σ n_c with CITL = mean(P_book,over − y): L_off on the served split's priced held-out rows (both halves; matrix `Odds`), L_live on settled quoted main lines from 2026-09-21 (`Market Prob` by `Bet`; pushes void; each prop counted once). L_off > .05, L_live ≤ .02 and T1 rejects → the producer is the defect → I6d opens, scoped to book-leg levelling in every league; else the count cells route to H4 |
 | H4 | The gate population hides the disagreement band: offline Gate 1 scores rows where model and market agree | E4 | BSS of the served test-set P against the book on priced rows with \|P − P_book\| > .10 whose opponent is levelled (NFL priced cells' rows from 2026-09-01, plus receiving and rushing yards from every season; 356 band rows, counted blind). T2 rejects (BSS < 0) → propose the band read as a monitor column (never a gate; owner packet); else the live loss is a population shift and E3 carries the verdict. The literal Gate-1 band (90 % of it faces a mis-levelled book) is secondary |
-| H5 | Version age: a fresh version is more honest than an aged one | I6g | Already pre-registered in honest-receipts §6 (one-sided α = 0.05; ≥ 5 fresh and 10 aged game days; ≥ 300 recommended legs per arm): NHL about 10-29, NBA about 11-05 |
+| H5 | Version age: a fresh version is more honest than an aged one | I6g | Already pre-registered in honest-receipts §6 (one-sided α = 0.05; ≥ 5 fresh and 10 aged game days; ≥ 300 recommended legs per arm); read when the floors clear, dates in honest-receipts §6 item 2 |
 
 **Multiplicity and counting** (fixed before any confirmatory read). T1 (H3: D = L_off − L_live > 0, with
 offline and live dates resampled independently) and T2 (H4) form one Holm family: one-sided, family-wise
@@ -204,16 +204,19 @@ without the rebuild and goes out with `scripts/sync_to_prod.sh --league L` betwe
 restarts the cell's live clock, so live reads split by `Model Version`; the 30-day Gate-2 read of the
 10-18 versions (about 11-17) covers the cells no fix has replaced by then.
 
-- **Week 2 (10-29 → 11-05):** build in a worktree what week 1 left standing: the blind confirm walk
-  (nominees ranked on the cross-fit half, the test verdict read once for the chosen nominee) under Gate 1's
-  date-clustered CI; I6d's research brief, then the book-leg levelling it designs (H3; opening note in the
-  lane folder's `research/`); the NFL rows the FTN/PFR re-parse does not reach, since it covers the
-  current season only (on both boxes most 2025 team rows of weeks 2, 7 and 14–20 hold FTN and PFR zeros,
-  and the Rams' pressure columns are 0 in every season before 2026), and the Bengals' week-5 running
-  backs, which nflverse lists and neither box's gamelog holds; the 2026 PBP season aggregates of the NFL
-  comp profiles, empty on both boxes because `nfl_data_py` merges participation data nflverse does not
-  serve for 2026 (`stats/nfl_pbp_agg.py`; retry without it, never for past seasons); dev's NHL game-line
-  re-read and matrix patch. The H1 refit is out. I6g reads: NHL about 10-29, NBA about 11-05.
+- **Week 2 (10-27 → 11-05; status in the lane `REPORT.md`, section Week 2):** done on dev: the NHL
+  game-line re-read and matrix patch (72 team-games moved off the moneyline and total defaults), then the
+  NHL retrain; the NFL past-season FTN/PFR heal (860 team-weeks, 535 of them 2024's: the reopen of §8 ask 5
+  covers the current season only, and production keeps its past-season zeros, which reach no model since
+  production never trains) and the Bengals' running backs, which PFR labels `HB` and the snap-count filter
+  dropped (`stats/nfl.py`; production gains their 2026 rows at its next update). Running: the NFL rebuild
+  and retrain on the healed logs. Building: the blind confirm walk (every nominee ranked on the cross-fit
+  half at full HPO, the test verdict read once for the chosen nominee, whose booster `meditate
+  --params-from` pins); I6d's research brief, then the book-leg levelling it designs (H3; opening note in
+  the lane folder's `research/`). Held for a serve-path parity read: the 2026 PBP season aggregates of the
+  NFL quarterbacks' comp profiles (`stats/nfl_pbp_agg.py` retries the current season without the
+  participation file nflverse does not serve, never a past season). The H1 refit is out. I6g reads wait
+  for their floors (honest-receipts §6 item 2).
 - **Week 3 on:** each fix retrains and ships as it is proven; a version then holds four weeks for its live
   verdict.
 
@@ -224,7 +227,7 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
 | Pooled recommended gap per league, ±2.5 pt | about 4 weeks (NFL ~370 legs a week post-send, NBA ~250, NHL ~100) | 4 weeks after the versions stabilise |
 | Per-cell recommended gap (NFL receptions ~80 legs a week) | ±5.5 pt at 4 weeks, ±2.5 pt over a season | season |
 | Gate-2 30-day read per version | 200 settled offers in the window | 30 days after each send (10-18 versions: 11-17) |
-| I6g version age | ≥ 5 fresh and 10 aged game days, ≥ 300 recommended legs per arm | NHL 10-29, NBA 11-05 |
+| I6g version age | ≥ 5 fresh and 10 aged game days, ≥ 300 recommended legs per arm | when the floors clear (honest-receipts §6 item 2) |
 | Weekly tail scorecard (`admin tail-scorecard --parquet`) | Mondays into the lane folder; Spearman ρ offline vs live per-cell gaps | from 10-26; promotion after four agreeing weeks |
 
 Mechanisms are tested now on the data in hand (§4); live data grades the fixes.

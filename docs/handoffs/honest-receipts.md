@@ -12,7 +12,7 @@ the training box (§6, I6f). On production: the rebuilt MLB models and the NFL s
 (decisions 48, 49), the NBA's same-player correlation file (65), the 13 MLB games the gamelog lacked
 (51), MLB's two retrained cells (67), the WNBA gamelog repair (68), and the NHL's, the NFL's and
 the WNBA's rebuilt and retrained models with their game-line copies (69, 70, 72). The handoff of
-2026-10-08 is done. What stays open is in §6: the I6g version-age test (late October) and the two
+2026-10-08 is done. What stays open is in §6: the I6g version-age test (read when its floors clear, §6 item 2) and the two
 reads I6 marks still open. §8 holds the owner's own two items.
 
 ## 1. Mission & money logic
@@ -513,9 +513,13 @@ inside its group; §8 restates each open one as a plain question.
      on NBA and NHL from late October; secondary: within-market b_model and the paired same-leg
      difference between versions. Decision rule (fixed 2026-10-17, before the first read): the
      primary test is one-sided at α = 0.05 (fresh overstates less than aged), read only with at
-     least 5 fresh and 10 aged game days and 300 recommended legs per arm; NHL about 10-29 (the
-     10-18 retrain, on prod since 10-18 14:41 CDT, against the 10-15 prior copies), NBA about 11-05 (its first
-     version change since 08-29; opener 10-20). Confirmed → a 3–4-day retrain cadence lane. A
+     least 5 fresh and 10 aged game days and 300 recommended legs per arm. One version supplies at
+     most four fresh game days, so a read pools versions and waits for the floors, which stand as
+     fixed (dates amended 2026-10-27, before any read; the first ones, NHL 10-29 and NBA 11-05, could
+     not clear them): NHL pools its versions since 10-15 and reads on the first day both arms clear,
+     projected 11-03 to 11-05 after the next NHL send adds four fresh days; NBA has one version since
+     its 10-20 opener and reads once a second has served a game day and the aged arm holds 10 game
+     days. Confirmed → a 3–4-day retrain cadence lane. A
      null paired same-leg difference → KILL: the MLB pattern was calendar or regression to the
      mean. No cadence change before the read.
   3. **I6f as-of alignment of training's archive inputs.** The pre-game cutoff for game lines is
