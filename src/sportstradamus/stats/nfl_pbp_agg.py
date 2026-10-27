@@ -12,6 +12,7 @@ import os
 from importlib import resources as pkg_resources
 
 import nfl_data_py as nfl
+import nflreadpy as nflr
 import pandas as pd
 
 from sportstradamus import data
@@ -88,9 +89,26 @@ def compute_pbp_season_aggregates(year: int) -> pd.DataFrame:
 
 
 def _safe_import_pbp(year: int) -> pd.DataFrame | None:
-    """Return the PBP frame for ``year``, or None if the import fails."""
+    """Return the PBP frame for ``year``, or None if the import fails.
+
+    The current season retries without participation: nflverse publishes
+    ``pbp_participation_{year}`` only after the season, and ``nfl_data_py``'s
+    handler for that 404 raises ``NameError``, which would lose the whole year.
+    ``pbp_epa_under_pressure`` falls back to ``qb_hit`` without it.
+    """
     try:
         return nfl.import_pbp_data([year])
+    except Exception as exc:
+        if year < nflr.get_current_season():
+            logger.warning("import_pbp_data(%s) failed: %s", year, exc)
+            return None
+        logger.warning(
+            "import_pbp_data(%s): participation file unavailable (%s); retrying without it",
+            year,
+            exc,
+        )
+    try:
+        return nfl.import_pbp_data([year], include_participation=False)
     except Exception as exc:
         logger.warning("import_pbp_data(%s) failed: %s", year, exc)
         return None
