@@ -223,7 +223,8 @@ selected cell; the `auto` default honors what the cell has persisted:
 **Debug / eval:**
 
 - `--deterministic` — pinned RNGs and fixed fast hyperparameters for bit-identical eval runs; never publish a model trained with it.
-- `--holdout-blind` — drop the ship-gate rows and score on player-disjoint cross-fit folds (requires `--deterministic`).
+- `--holdout-blind` — drop the ship-gate rows and score on player-disjoint cross-fit folds (requires `--deterministic`, or `--artifact-output` for a full-HPO sandbox run).
+- `--params-from` — refit one cell (`--league` plus one `--market`, not `--deterministic`) with a model pickle's LightGBM params, round count, `cv` and shape ceiling instead of searching, so a canonical run ships the booster a blind sandbox run ranked; a pickle of another distribution family is refused.
 
 **Sandbox matrix and artifact plumbing:**
 
