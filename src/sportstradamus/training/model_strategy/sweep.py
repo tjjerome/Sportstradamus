@@ -301,7 +301,7 @@ _DIVERGED_DISPERSION_CAL: float = 0.1005
 # cells are noise, so the discounts and the calibrated-expectations table stay inert.
 _MIN_LEDGER_ROWS: int = 8
 
-# brief R2: 8 pairs from one cell measure that cell's draw variance, not the board→confirm shift;
+# brief R2: 8 pairs from one cell measure that cell's draw variance, not the board→blind shift;
 # the discounts also need pairs from at least this many distinct cells before they price anything.
 _MIN_LEDGER_CELLS: int = 3
 
@@ -1158,8 +1158,8 @@ def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscou
     validation half the board does, so a pair measures the HPO shift and never a change of half.
     The test-half verdicts, legacy rows included, are left out, so the discounts stay inert until
     the floors below fill with blind pairs. Non-diverged blind rows are paired with their
-    board-side gate values — the ledger's own ``board_*`` echo columns when a confirm-side change
-    has added them, else an identity join against the board CSV at ``out`` — and each gate's
+    board-side gate values — the ledger's own ``board_*`` echo columns when it has them, else an
+    identity join against the board CSV at ``out`` — and each gate's
     shift distribution is summarized twice: the :data:`_RANK_DISCOUNT_QUANTILE` scalars price
     ``discounted_slack`` (the ordering), the :data:`_VETO_DISCOUNT_QUANTILE` scalars price
     ``veto_slack`` (the nomination bar). A flat per-gate quantile beat the deleted per-(family, n)
@@ -1279,7 +1279,7 @@ def _cell_timeout_seconds(out: str | None, league: str, market: str) -> int:
 
 
 def _discounted_slack(row: dict[str, object], discounts: _GateDiscounts) -> float:
-    """``slack`` recomputed with each gate scalar shifted by its measured confirm inflation.
+    """``slack`` recomputed with each gate scalar adjusted by its measured blind-minus-board shift.
 
     Equal to ``slack`` when the discounts are inert, and a failed corner stays ``-inf``. Capped at
     the raw ``slack``: the board row carries no g6 legs, so an uncapped recompute would float a
@@ -1361,7 +1361,7 @@ def _rank_cell_board(
 ) -> pd.DataFrame:
     """One cell's scored corners as board rows, best empirically discounted slack first.
 
-    ``discounted_slack`` re-prices each row's raw slack under the ledger's confirm-vs-board gate
+    ``discounted_slack`` re-prices each row's raw slack under the ledger's blind-minus-board gate
     shifts and is the sort key; ``veto_slack`` prices the same rows under the milder median shifts
     — the bar confirm's nomination veto reads; ``confirm_risk`` flags the corner shapes that
     measured worst on confirm. All fall back to the raw ranking / stay blank on a thin ledger.
@@ -1875,8 +1875,8 @@ def _swept_class(*names: object) -> str | None:
 
 
 def _ledger_board_slack(ledger: pd.DataFrame) -> pd.Series:
-    """Each ledger row's board-side slack: the ``board_slack`` echo when a confirm-side change has
-    added it, else parsed off the ``source`` label (seed/incumbent rows have none).
+    """Each ledger row's board-side slack: the ``board_slack`` echo when the ledger has one, else
+    parsed off the ``source`` label (seed/incumbent rows have none).
     """
     if "board_slack" in ledger.columns:
         return pd.to_numeric(ledger["board_slack"], errors="coerce")
