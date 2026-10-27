@@ -301,8 +301,8 @@ def test_backfill_rebuilds_one_team_row_per_season_of_a_shared_week(monkeypatch)
     # team alone, the first season's rebuilt row stood in for every later one.
     s = StatsNFL()
     s.gamelog = pd.DataFrame(
-        {"season": [2024, 2025], "week": [5, 5], "team": [TEAM, TEAM]}
-        | {"gameday": ["2024-10-06", "2025-10-05"], "read thrown": [np.nan, np.nan]}
+        {"season": [2024, 2025], "week": 5, "team": TEAM, "gameday": ["2024-10-06", "2025-10-05"]}
+        | dict.fromkeys(nfl_module._LATE_SOURCE_PLAYER_COLUMNS, np.nan)
     )
     s.teamlog = pd.DataFrame(columns=["season", "week", "team"])
     monkeypatch.setattr(s, "_backfill_schedule_fields", lambda i, row, sched: None)

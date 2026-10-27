@@ -950,20 +950,18 @@ class StatsNFL(Stats):
         return ftn, pfr
 
     def _backfill_missing_rows(self, sched):
-        teamDataList = []
+        missing_rows = self.gamelog.loc[self.gamelog.isna().any(axis=1)]
+        team_rows = {}
         for i, row in tqdm(
-            self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(),
-            desc="Updating NFL data",
-            unit="game",
-            total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)]),
+            missing_rows.iterrows(), desc="Updating NFL data", unit="game", total=len(missing_rows)
         ):
             self._backfill_schedule_fields(i, row, sched)
             self._backfill_player_pbp(i, row)
-            if row["team"] not in self.teamlog.loc[
+            team_week = (row["season"], row["week"], row["team"])
+            logged_teams = self.teamlog.loc[
                 (self.teamlog.season == row.season) & (self.teamlog.week == row.week), "team"
-            ].to_list() and (row["season"], row["week"], row["team"]) not in [
-                (t["season"], t["week"], t["team"]) for t in teamDataList
-            ]:
+            ].to_list()
+            if row["team"] not in logged_teams and team_week not in team_rows:
                 teamData = {
                     "season": row.season,
                     "week": row.week,
@@ -974,8 +972,8 @@ class StatsNFL(Stats):
 
                 if type(team_pbp) is not int:
                     teamData.update(team_pbp)
-                teamDataList.append(teamData)
-        return teamDataList
+                team_rows[team_week] = teamData
+        return list(team_rows.values())
 
     def _backfill_schedule_fields(self, i, row, sched):
         if row["opponent"] != row["opponent"]:
