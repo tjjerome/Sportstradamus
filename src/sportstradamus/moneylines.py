@@ -794,9 +794,7 @@ def _resolve_prop_lines(lines):
     if len({line["point"] for line in lines}) > 1:
         trueline = min(lines, key=lambda line: (abs(line["price"] - 2), line["name"]))["point"]
         lines = [line for line in lines if line["point"] == trueline]
-    by_side = {}
-    for line in lines:
-        by_side[line["name"]] = line
+    by_side = {line["name"]: line for line in lines}
     lines = [by_side[side] for side in ("Over", "Under") if side in by_side]
     if len(lines) == 1 and lines[0]["name"] == "Under":
         lines[0]["name"] = "Over"
