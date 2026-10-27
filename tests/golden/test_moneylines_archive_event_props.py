@@ -226,3 +226,31 @@ def test_write_event_totals_writes_both_sides_when_a_team_name_has_a_digit(
         (league, "", "2026-06-04", home_abbr, {"draftkings": 110.25}, None),
         (league, "", "2026-06-04", away_abbr, {"draftkings": 110.25}, None),
     ]
+
+
+def test_a_side_listed_twice_prices_one_sided_not_as_a_pair(monkeypatch) -> None:
+    """Two Over rows at one point are one Over: ``no_vig_odds(p, p)`` would read 0.5.
+
+    williamhill_us MLB home runs and betrivers NHL goals arrive this way; the stored quote
+    must match the one-sided de-vig the same fetch's ladder rung already takes.
+    """
+    monkeypatch.setitem(moneylines.stat_cv.setdefault("MLB", {}), "home runs", 1.0)
+    monkeypatch.setattr(moneylines, "book_gate", lambda *args: None)
+    monkeypatch.setattr(moneylines, "get_ev", lambda *args, **kwargs: 0.2)
+    over = {"description": "Slugger", "name": "Over", "price": 5.5, "point": 0.5}
+    odds = {}
+
+    moneylines._event_player_props(
+        {"key": "williamhill_us"},
+        {"key": "batter_home_runs", "outcomes": [over, dict(over)]},
+        "MLB",
+        {"MLB": {"batter_home_runs": "home runs"}},
+        odds,
+    )
+
+    entry = odds["home runs"]["Slugger"]
+    [(rung_line, rung_over)] = entry["Ladder"]["williamhill_us"]
+    line, under = entry["Quotes"]["williamhill_us"]
+    assert line == rung_line == 0.5
+    assert under == pytest.approx(1 - rung_over)
+    assert under > 0.8
