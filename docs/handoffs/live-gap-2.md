@@ -53,7 +53,8 @@ league; the live instruments (§6) read the fixed versions over a stable window;
    shipped); the Gate-4 near-miss retry, the supersede comparisons and the manual ship flips read the
    same rows. No walk-forward or forward-in-time holdout exists anywhere. `--holdout-blind` (sweep only)
    requires `--deterministic`, so it trains the fixed deterministic booster and cross-fits only its
-   calibrators over the validation half; it cannot re-gate a served model. Gate 1 is a non-inferiority
+   calibrators over the validation half; it cannot re-gate a served model. (Week 2 changed both: the
+   walk ranks every nominee blind at full HPO and reads the test half once, §5.) Gate 1 is a non-inferiority
    test (`scorecard._GATE1_NONINF_MARGIN` lets the ensemble be 0.005 Brier worse than the book) with a
    95 % bootstrap CI (iid when this was verified; game-date resampling since §8 ask 4). 31 of the 70 served cells have no computable Gate 1 and pass it blank; NFL
    yards' rests on 19 rows from 18 players over 4 dates (iid upper bound −.001, date-clustered +.022).
