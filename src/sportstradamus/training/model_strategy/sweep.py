@@ -1173,7 +1173,7 @@ def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscou
     ledger = _crossfit_ledger(pd.read_csv(NOMINEE_LEDGER_PATH))
     diverged = pd.to_numeric(ledger["dispersion_cal"], errors="coerce") <= _DIVERGED_DISPERSION_CAL
     ledger = ledger[~diverged]
-    # A pair measures the board→confirm gap under the scoring code that produced it. A registry
+    # A pair measures the board→blind gap under the scoring code that produced it. A registry
     # change (new axis value, stage reorder) rotates strategy signatures, and pairs recorded under
     # the old code would price corners the new code scores differently — so stale-signature rows
     # are dropped, the same admissibility rule resume and nomination already apply. The existing
@@ -1201,13 +1201,13 @@ def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscou
             suffixes=("", "_board"),
         )
         board_columns = [f"{gate}_board" for gate in _DISCOUNTED_GATES]
-    confirm_values = paired[list(_DISCOUNTED_GATES)].apply(pd.to_numeric, errors="coerce")
+    blind_values = paired[list(_DISCOUNTED_GATES)].apply(pd.to_numeric, errors="coerce")
     board_values = (
         paired[board_columns]
         .set_axis(list(_DISCOUNTED_GATES), axis="columns")
         .apply(pd.to_numeric, errors="coerce")
     )
-    shifts = confirm_values - board_values
+    shifts = blind_values - board_values
     shifts = shifts[shifts.notna().any(axis="columns")]
     cells = paired.loc[shifts.index, ["league", "market"]].drop_duplicates()
     if len(shifts) < _MIN_LEDGER_ROWS or len(cells) < _MIN_LEDGER_CELLS:
