@@ -179,9 +179,9 @@ _FTN_HELD = [
 _PFR_HELD = ["2026_01_NE_SEA", "2026_03_SEA_LAR", "2026_05_SEA_TB", "2026_06_MIA_SEA"]
 
 
-def _reopen_stats(monkeypatch) -> StatsNFL:
-    """2026 SEA team-weeks per ``_WEEKS`` plus a 2025 one parsed before either source."""
-    held_last_season = "2025_01_SEA_DEN"
+def _reopen_stats(monkeypatch, past_season: int = 2025) -> StatsNFL:
+    """2026 SEA team-weeks per ``_WEEKS`` plus a ``past_season`` one parsed before both sources."""
+    held_last_season = f"{past_season}_01_SEA_DEN"
     monkeypatch.setattr(
         nfl_module.nfl,
         "import_ftn_data",
@@ -192,7 +192,7 @@ def _reopen_stats(monkeypatch) -> StatsNFL:
         "import_weekly_pfr",
         lambda kind, years: pd.DataFrame({"game_id": [*_PFR_HELD, held_last_season]}),
     )
-    weeks = [(2026, *w) for w in _WEEKS] + [(2025, 1, held_last_season, True, True)]
+    weeks = [(2026, *w) for w in _WEEKS] + [(past_season, 1, held_last_season, True, True)]
     team = pd.DataFrame(
         [
             {"season": season, "week": week, "team": TEAM}
@@ -267,6 +267,33 @@ def test_reopen_waits_on_an_unpublished_season(monkeypatch):
 
     pd.testing.assert_frame_equal(s.teamlog, teamlog)
     assert not s.gamelog.isna().any().any()
+
+
+def test_reopen_heals_a_named_past_season_and_leaves_this_one(monkeypatch):
+    s = _reopen_stats(monkeypatch)
+    this_season = s.teamlog.loc[s.teamlog.season == 2026].copy()
+
+    s._reopen_late_source_weeks(seasons=[2025])
+
+    flagged = s.gamelog[nfl_module._LATE_SOURCE_PLAYER_COLUMNS].isna().all(axis=1)
+    assert set(zip(s.gamelog.season[flagged], s.gamelog.week[flagged], strict=True)) == {(2025, 1)}
+    assert not s.gamelog.loc[~flagged].isna().any().any()
+    pd.testing.assert_frame_equal(s.teamlog, this_season)
+
+
+def test_reopen_reads_no_ftn_before_it_charted(monkeypatch):
+    s = _reopen_stats(monkeypatch, past_season=2021)
+
+    def no_ftn(years):
+        raise AssertionError("nfl_data_py has no FTN charting before 2022")
+
+    monkeypatch.setattr(nfl_module.nfl, "import_ftn_data", no_ftn)
+
+    s._reopen_late_source_weeks(seasons=[2021])
+
+    flagged = s.gamelog[nfl_module._LATE_SOURCE_PLAYER_COLUMNS].isna().all(axis=1)
+    assert set(zip(s.gamelog.season[flagged], s.gamelog.week[flagged], strict=True)) == {(2021, 1)}
+    assert (s.teamlog.season == 2026).all()
 
 
 def test_pfr_spells_the_rams_like_the_logs(monkeypatch):

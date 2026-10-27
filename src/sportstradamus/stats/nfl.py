@@ -177,6 +177,9 @@ _PFR_WEEKLY_COLUMNS: list[str] = [
     "passing_drop_pct",
 ]
 
+# nflverse's FTN charting starts with 2022; import_ftn_data raises on any earlier season.
+_FTN_FIRST_SEASON: int = 2022
+
 # Team-week columns fed only by FTN charting (read_thrown, n_blitzers) and only by weekly
 # PFR (times_pressured). A charted game always has first-read passes and blitzes, and a
 # PFR-covered one pressures, so all zero means the team-week was parsed before its game
@@ -757,7 +760,8 @@ class StatsNFL(Stats):
         )[["team", "week", "gameday"]]
         nfl_data = nfl_data.merge(sched_long, on=["team", "week"], how="left")
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(["QB", "WR", "RB", "TE"])]
-        snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
+        # PFR labels the Bengals' backs HB; the snap merge below would drop their every game.
+        snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "HB", "TE"])]
         snaps["player_display_name"] = snaps["player"].map(remove_accents)
         snaps["snap_pct"] = snaps["offense_pct"]
         snaps = snaps[["player_display_name", "season", "week", "snap_pct"]]
@@ -890,7 +894,7 @@ class StatsNFL(Stats):
         self.players.index = self.players["name"]
         self.players = self.players[["age", "height", "weight", "team", "position"]]
 
-    def _reopen_late_source_weeks(self):
+    def _reopen_late_source_weeks(self, seasons=None):
         """Send this season's team-weeks parsed before FTN or PFR held their game back to parse.
 
         Both sources trail the pbp by days and the backfill parses a team-week once, so a
@@ -899,39 +903,44 @@ class StatsNFL(Stats):
         columns from one source are all zero while that source now holds the game loses
         its team row and gets NaN in its players' source-fed columns, which puts both
         back through :meth:`_backfill_missing_rows`. Nothing is fetched while no team-week
-        reads zero.
+        reads zero. ``seasons`` names past seasons for a dev-side one-off heal; the update
+        leaves it unset, since FTN reads zero on every pre-2022 team-week and a past season
+        would fetch every run.
         """
-        season = self.season_start.year
         team_week = ["season", "week", "team"]
-        team = self.teamlog.loc[self.teamlog.season == season].assign(
-            ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
-            pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
-        )
-        if not (team.ftn_zero | team.pfr_zero).any():
-            return
-        games = self.gamelog[[*team_week, "game id"]].drop_duplicates(team_week)
-        team = team.merge(games, on=team_week)
-        ftn_games, pfr_games = self._late_source_games(season)
-        stale = team.loc[
-            (team.ftn_zero & team["game id"].isin(ftn_games))
-            | (team.pfr_zero & team["game id"].isin(pfr_games)),
-            team_week,
-        ]
-        if stale.empty:
-            return
-        logger.info("Re-parsing %d NFL team-weeks that FTN or PFR published late", len(stale))
-        flagged = self.gamelog.merge(stale, how="left", indicator=True)["_merge"].eq("both")
-        self.gamelog.loc[flagged.to_numpy(), _LATE_SOURCE_PLAYER_COLUMNS] = np.nan
-        kept = self.teamlog.merge(stale, how="left", indicator=True)
-        self.teamlog = kept.loc[kept["_merge"].eq("left_only")].drop(columns="_merge")
+        for season in seasons or (self.season_start.year,):
+            team = self.teamlog.loc[self.teamlog.season == season].assign(
+                ftn_zero=lambda t: t[_FTN_TEAM_COLUMNS].eq(0).all(axis=1),
+                pfr_zero=lambda t: t[_PFR_TEAM_COLUMNS].eq(0).all(axis=1),
+            )
+            if not (team.ftn_zero | team.pfr_zero).any():
+                continue
+            games = self.gamelog[[*team_week, "game id"]].drop_duplicates(team_week)
+            team = team.merge(games, on=team_week)
+            ftn_games, pfr_games = self._late_source_games(season)
+            stale = team.loc[
+                (team.ftn_zero & team["game id"].isin(ftn_games))
+                | (team.pfr_zero & team["game id"].isin(pfr_games)),
+                team_week,
+            ]
+            if stale.empty:
+                continue
+            logger.info(
+                "Re-parsing %d NFL %d team-weeks that FTN or PFR published late", len(stale), season
+            )
+            flagged = self.gamelog.merge(stale, how="left", indicator=True)["_merge"].eq("both")
+            self.gamelog.loc[flagged.to_numpy(), _LATE_SOURCE_PLAYER_COLUMNS] = np.nan
+            kept = self.teamlog.merge(stale, how="left", indicator=True)
+            self.teamlog = kept.loc[kept["_merge"].eq("left_only")].drop(columns="_merge")
 
     def _late_source_games(self, season: int) -> tuple[set[str], set[str]]:
         """Game ids the season's FTN charting and weekly PFR files hold; empty while unpublished."""
-        try:
-            ftn = set(nfl.import_ftn_data([season])["nflverse_game_id"])
-        except HTTPError as exc:
-            self._raise_unless_unpublished(exc)
-            ftn = set()
+        ftn: set[str] = set()
+        if season >= _FTN_FIRST_SEASON:
+            try:
+                ftn = set(nfl.import_ftn_data([season])["nflverse_game_id"])
+            except HTTPError as exc:
+                self._raise_unless_unpublished(exc)
         try:
             # The rush and rec files publish with this one, and every game has a passer.
             pfr = set(nfl.import_weekly_pfr("pass", [season])["game_id"])
@@ -1068,7 +1077,7 @@ class StatsNFL(Stats):
                 self.pbp["play_type"].isin(["run", "pass"]) | (self.pbp["desc"] == "END GAME")
             ]
             ftn = None
-            if self.season_start.year > 2021:
+            if self.season_start.year >= _FTN_FIRST_SEASON:
                 try:
                     ftn = nfl.import_ftn_data([self.season_start.year])
                 except HTTPError as exc:
