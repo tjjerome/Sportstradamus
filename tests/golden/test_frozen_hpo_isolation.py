@@ -17,11 +17,23 @@ class _CountStats:
     )
 
 
-def _count_splits() -> dict:
-    return {
+def _select_isolated_count_distribution(dist_override: str, pinned: dict | None = None) -> dict:
+    splits = {
         "X_train": pd.DataFrame({"MeanYr": [1.0, 2.0, 1.5, 2.5]}),
         "y_train_labels": np.array([0.0, 1.0, 2.0, 1.0]),
     }
+    return pipe._step_select_distribution(
+        splits,
+        _CountStats(),
+        "passing tds",
+        "NFL",
+        "none",
+        "joint",
+        deterministic=False,
+        isolated=True,
+        dist_override=dist_override,
+        pinned=pinned,
+    )
 
 
 def test_isolated_distribution_fit_does_not_write_calibration_config(monkeypatch):
@@ -30,17 +42,7 @@ def test_isolated_distribution_fit_does_not_write_calibration_config(monkeypatch
     monkeypatch.setattr(pipe, "save_zi_config", save_zi)
     monkeypatch.setattr(pipe, "save_cv_std_config", save_cv)
 
-    pipe._step_select_distribution(
-        _count_splits(),
-        _CountStats(),
-        "passing tds",
-        "NFL",
-        "none",
-        "joint",
-        deterministic=False,
-        isolated=True,
-        dist_override="DPO",
-    )
+    _select_isolated_count_distribution("DPO")
 
     save_zi.assert_not_called()
     save_cv.assert_not_called()
@@ -92,18 +94,7 @@ def test_pinned_pickle_supplies_cv_and_shape_ceiling(monkeypatch):
     monkeypatch.setattr(pipe, "stat_zi", {"NFL": {}})
     pinned = {"distribution": "NegBin", "cv": 0.123, "shape_ceiling": 4.5}
 
-    dist_info = pipe._step_select_distribution(
-        _count_splits(),
-        _CountStats(),
-        "passing tds",
-        "NFL",
-        "none",
-        "joint",
-        deterministic=False,
-        isolated=True,
-        dist_override="NegBin",
-        pinned=pinned,
-    )
+    dist_info = _select_isolated_count_distribution("NegBin", pinned=pinned)
 
     assert (dist_info["cv"], dist_info["shape_ceiling"]) == (0.123, 4.5)
     assert pipe.stat_cv["NFL"]["passing tds"] == 0.123
@@ -111,17 +102,7 @@ def test_pinned_pickle_supplies_cv_and_shape_ceiling(monkeypatch):
 
 def test_pinned_pickle_from_another_family_is_refused(monkeypatch):
     monkeypatch.setattr(pipe, "stat_zi", {"NFL": {}})
+    pinned = {"distribution": "SkewNormal", "cv": 0.1, "shape_ceiling": None}
 
     with pytest.raises(ValueError, match="another family"):
-        pipe._step_select_distribution(
-            _count_splits(),
-            _CountStats(),
-            "passing tds",
-            "NFL",
-            "none",
-            "joint",
-            deterministic=False,
-            isolated=True,
-            dist_override="NegBin",
-            pinned={"distribution": "SkewNormal", "cv": 0.1, "shape_ceiling": None},
-        )
+        _select_isolated_count_distribution("NegBin", pinned=pinned)

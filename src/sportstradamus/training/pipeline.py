@@ -1578,6 +1578,7 @@ def _step_select_hyperparams(
     if dist in ("Gamma", "ZAGamma", "SkewNormal", "Mixture") and "MeanYr" in col_list:
         monotone[col_list.index("MeanYr")] = 1
     if pinned is not None:
+        # The pickle's vector is sized to its own columns; LightGBM aborts on a length mismatch.
         return {**pinned["params"], "monotone_constraints": monotone}, monotone
 
     hp_search_space = {
