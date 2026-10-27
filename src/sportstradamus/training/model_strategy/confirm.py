@@ -105,6 +105,7 @@ from sportstradamus.training.model_strategy.sweep import (
     NOMINEE_LEDGER_PATH,
     _cell_context,
     _crossfit_ledger,
+    _failed_gates,
     _failure_reason,
     _incumbent_corner,
     _run_meditate_with_lock_retry,
@@ -1110,7 +1111,7 @@ def _run_blind(candidate: dict, hpo_selection: str) -> _BlindRun:
         },
     }
     diverged = _record_ledger_row(candidate, row, EVAL_SPLIT_CROSSFIT)
-    failed = [gate for gate in _GATES if not row[f"{gate}_pass"]]
+    failed = _failed_gates(row)
     click.echo(
         f"  blind {' '.join(failed) or 'pass'}: slack {row['slack']:+.3f}, "
         f"w={row['model_weight']:.3f}"
@@ -1199,7 +1200,7 @@ def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
     return []
 
 
-def _under_floor(weight: float, min_model_weight: float | None) -> list[str]:
+def _floor_failures(weight: float, min_model_weight: float | None) -> list[str]:
     """The blend-weight floor as a failure reason; empty if the weight clears it or none is set."""
     if min_model_weight is None or weight >= min_model_weight:
         return []
@@ -1232,7 +1233,7 @@ def _confirm_one(
         failed = _confirm_meditate(lg, mkt, cand)
         if not failed:
             weight = _served_weight(model_pickle_path(lg, mkt))
-            failed = _under_floor(weight, min_model_weight)
+            failed = _floor_failures(weight, min_model_weight)
             if not failed:
                 keep = True
                 click.secho(f"  SHIPPED (devel) {lg} {mkt} w={weight:.3f}", fg="green")
@@ -1264,7 +1265,7 @@ def _supersede_failures(
     headline whether or not the floor is set.
     """
     click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
-    floor = _under_floor(w_out, min_model_weight)
+    floor = _floor_failures(w_out, min_model_weight)
     if floor:
         return floor
     if min_model_weight is not None and verdict["s1_pass"] and min_model_weight > w_in:
@@ -1276,19 +1277,18 @@ def _supersede_failures(
 def _supersede_one(
     meta: dict, cand: dict, *, auto_promote: bool = False, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
-    """Supersession-test the walk's pick on one live cell: snapshot, refit it canonically in place,
-    require its exact artifact identity and official six-gate ``model_stats`` ship, then run
-    S1/S2/S3 against the served incumbent's test set and promote it (on a passing verdict +
-    operator yes) or restore the incumbent byte-identical.
+    """Supersession-test the walk's pick on one live cell; promote it or restore the incumbent.
 
-    A live-cell swap needs the test to pass AND an explicit promote confirmation; every other exit —
-    HOLD, decline, refit error, or an exception — hits the ``finally`` restore, which copies the
-    snapshot back and never prunes, so the incumbent keeps serving. ``auto_promote`` answers that
-    confirmation yes so an unattended run can swap live cells: the S1/S2/S3 verdict and the six
-    gates still decide, only the human veto is gone. Every swap is still local and uncommitted, so
-    the review of the ``stat_meta.json`` diff is where a promotion is actually accepted. The weight
-    floor and its waiver are :func:`_supersede_failures`, read against the incumbent's pickle in
-    the snapshot.
+    Snapshots the incumbent, refits the pick canonically in place, requires its exact artifact
+    identity and official six-gate ``model_stats`` ship, then runs S1/S2/S3 against the served
+    incumbent's test set. A swap needs the test to pass AND an explicit promote confirmation; every
+    other exit — HOLD, decline, refit error, or an exception — hits the ``finally`` restore, which
+    copies the snapshot back byte-identical and never prunes, so the incumbent keeps serving.
+    ``auto_promote`` answers that confirmation yes so an unattended run can swap live cells: the
+    S1/S2/S3 verdict and the six gates still decide, only the human veto is gone. Every swap is
+    still local and uncommitted, so the review of the ``stat_meta.json`` diff is where a promotion
+    is actually accepted. The weight floor and its waiver are :func:`_supersede_failures`, read
+    against the incumbent's pickle in the snapshot.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -1437,7 +1437,7 @@ def _blind_failures(
         return run.failed
     weight = float(run.row["model_weight"])
     if reference is None:
-        return _under_floor(weight, min_model_weight)
+        return _floor_failures(weight, min_model_weight)
     verdict = supersede_verdict(
         load_test_set(reference.dump, _SHIP_PRED_COL),
         load_test_set(run.dump, _SHIP_PRED_COL),
