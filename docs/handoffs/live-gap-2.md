@@ -213,13 +213,14 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
   (`stats/nfl.py`; production gains their 2026 rows at its next update); the 2026 PBP season aggregates of
   the NFL quarterbacks' comp profiles (`stats/nfl_pbp_agg.py` retries the current season without the
   participation file nflverse does not serve, never a past season; a dev replay of week 7 moved served P
-  by at most .0027 RMS in any cell). Running: the NFL rebuild and retrain on the healed logs. Building: the
-  blind confirm walk (every nominee ranked on the cross-fit half at full HPO, the test verdict read once
-  for the chosen nominee, whose booster `meditate --params-from` pins). I6d (H3): the brief found two
-  defects in the historical book leg, the WS1 migration's decode shape and a live writer bug that prices
-  a doubled same-side quote at exactly .5; the owner adopted its provenance-keyed re-read for week 3, and
-  the writer fix ships first. The H1 refit is out. I6g reads wait for their floors (honest-receipts §6
-  item 2).
+  by at most .0027 RMS in any cell); the blind confirm walk (every nominee ranked on the cross-fit half at
+  full HPO, the test verdict read once for the chosen nominee, whose booster `meditate --params-from`
+  pins; it runs in week 3). Running: the NFL rebuild and retrain on the healed logs. I6d (H3): the brief
+  found two defects in the historical book leg, the WS1 migration's decode shape and a live writer bug
+  that priced a doubled same-side quote at exactly .5 (fixed going forward:
+  `moneylines._resolve_prop_lines` keys prop rows by side); the owner adopted its provenance-keyed
+  re-read for week 3 ([model_improvement_track.md](model_improvement_track.md) §8.2 #0f). The H1 refit
+  is out. I6g reads wait for their floors (honest-receipts §6 item 2).
 - **Week 3 on:** each fix retrains and ships as it is proven; a version then holds four weeks for its live
   verdict.
 
@@ -242,8 +243,8 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | Instrumentation (§4.2) | do now | no model change, no clock reset |
 | Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's FTN/PFR data gap is fixed (§8 ask 5), its timing gaps are I6f |
 | Train fraction / refit on all (H1) | not a lever | E1: no cell's forward Brier moved (0 of 5) |
-| Blind confirm walk (H2) | ship when proven | protocol; changes no served probability by itself |
-| Book-leg levelling (H3, I6d) | brief first, week 2 | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the design is not obvious |
+| Blind confirm walk (H2) | built in week 2; runs in week 3 | protocol; changes no served probability by itself |
+| Book-leg levelling (H3, I6d) | re-read adopted; built and retrained in week 3 | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the brief traced it to two defects (§5) |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
 
