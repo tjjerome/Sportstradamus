@@ -14,8 +14,9 @@ deterministic trials — it never ships. This module turns a ranked board into s
    verdict from ``model_stats.parquet``.
 3. A pass keeps the cell on devel and ends its walk; a failure **auto-reverts** — restore the
    original stat_meta entry *and* :func:`prune_model_pickle` — and the next nominee is tried. The
-   pickle prune is mandatory: inference loads pickles by path and never consults ``shipped``, so
-   reverting stat_meta alone would leave a failed cell serving.
+   prune keeps a failed cell's pickle from riding a later send; serving reads ``shipped`` (a
+   withheld cell's quoted offers serve the book consensus, its unquoted props leave the board),
+   so the stat_meta restore alone already stops its model probabilities.
 
 The walk also owns the g4-only calibrated fallback: a nominee failing ship on a near-miss Gate 4
 alone is retrained once under ``hpo_selection: "calibrated"``, and a shipping retry persists that
@@ -1196,8 +1197,9 @@ def _split_shippable(
     """Partition *cells* by current release surface: withheld (fresh) vs already-shipped (live).
 
     Withheld cells auto-ship on a clean 6/6 (a fresh cell has no live pickle, so a failed confirm's
-    revert+prune restores its dark state). Live cells route to the supersession test, which restores
-    the incumbent byte-identical on a loss rather than pruning it. ``fresh_only`` drops the live
+    revert+prune leaves it withheld, serving the book consensus). Live cells route to the
+    supersession test, which restores the incumbent byte-identical on a loss rather than pruning
+    it. ``fresh_only`` drops the live
     lane entirely: supersession promotions always prompt per cell, so an unattended run would burn
     each live cell's retrains into guaranteed HELDs.
     """

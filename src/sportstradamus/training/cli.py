@@ -77,10 +77,11 @@ def _warn_ship_gate(
     ``report()`` writes each cell's fresh gates during training, so this post-loop pass surfaces
     every served cell (``ship_config`` value other than ``WITHHELD``, leagues actually loaded this
     run) whose ``model_stats`` row came back ``ship == False``. It never prunes — the cell keeps
-    serving its fresh pickle until the operator demotes it (flip ``shipped: "withheld"`` and the
-    next meditate prunes, or ``sportstradamus ship config --branch devel --prune`` for an immediate
-    dark-out). An empty ``ship_config`` (``--deterministic`` or the integration smoke test) serves
-    nothing, so this no-ops.
+    serving its fresh pickle until the operator demotes it (flip ``shipped: "withheld"``: from the
+    next board its quoted offers serve the book consensus and its unquoted props leave the board;
+    the next meditate prunes the pickle, or ``sportstradamus ship config --branch devel --prune``
+    prunes it now). An empty ``ship_config`` (``--deterministic`` or the integration smoke test)
+    serves nothing, so this no-ops.
     """
     if not MODEL_STATS_PATH.is_file():
         return
@@ -131,8 +132,9 @@ def _warn_ship_gate(
         )
     )
     click.echo(
-        'To cull: set "shipped": "withheld" in stat_meta.json (the next meditate prunes the '
-        "pickle), or sportstradamus ship config --branch devel --prune for an immediate dark-out."
+        'To cull: set "shipped": "withheld" in stat_meta.json (quoted offers then serve the book '
+        "consensus, unquoted props leave the board; the next meditate prunes the pickle, or "
+        "sportstradamus ship config --branch devel --prune prunes it now)."
     )
 
 

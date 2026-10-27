@@ -184,8 +184,9 @@ at 6/6. A book-less cell, at the 1.0 fallback, is unaffected.
 
 Consequence for this lane: **a served cell that fails the gates is best recovered through the
 fresh lane**, which means flipping it to `shipped: "withheld"` first. That is a `stat_meta`
-edit and therefore the owner's (section 6, decision 1). It also darkens the cell on the next
-`meditate` until it ships again — which is what serve-iff-ship says should happen anyway.
+edit and therefore the owner's (section 6, decision 1). From the next board the cell's quoted
+offers serve the book consensus and its unquoted props leave the board, until it ships again —
+which is what serve-iff-ship says should happen anyway.
 
 **Automatic g4 rescue.** When a nominee fails ship on Gate 4 alone and sits within 0.010 of its
 cap (`_G4_RETRY_MAX_EXCESS`), the walk pins `hpo_selection: "calibrated"` and reruns the

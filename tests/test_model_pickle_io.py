@@ -1,8 +1,9 @@
 """Unit tests for the model-pickle path/prune helpers in ``helpers/io.py``.
 
-The production pickle path (``data/models/{league}_{market}.mdl``) is the single
-live-gate at inference: ``model_prob`` loads it or skips the market.
-``prune_model_pickle`` deletes it so a withheld cell goes dark, and
+The production pickle path (``data/models/{league}_{market}.mdl``) is what
+``model_prob`` loads for a served cell (a withheld cell's quoted offers serve the
+book consensus and its unquoted props leave the board). ``prune_model_pickle``
+deletes a withheld cell's pickle so none rides a later send, and
 ``model_pickle_path`` is the shared builder both training and prediction use to
 agree on the filename.
 """

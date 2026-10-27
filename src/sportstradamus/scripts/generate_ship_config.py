@@ -127,8 +127,9 @@ def promote_for_main(
     "--prune/--no-prune",
     default=False,
     help=(
-        "Delete every withheld cell's model pickle (immediate dark-out on "
-        "this machine). Honors the resolved branch policy."
+        "Delete every withheld cell's model pickle on this machine (housekeeping: "
+        "a withheld cell already serves the book consensus on its quoted offers and "
+        "drops its unquoted props). Honors the resolved branch policy."
     ),
 )
 @click.option(
@@ -194,7 +195,8 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
                 )
             click.secho(
                 f"# {len(failing)} served cell(s) fail the ship gate — cull by flipping "
-                "shipped=withheld in stat_meta.json (add --prune for immediate dark-out)",
+                "shipped=withheld in stat_meta.json (quoted offers then serve the book consensus, "
+                "unquoted props leave the board; add --prune to drop the pickle now)",
                 fg="yellow",
             )
 

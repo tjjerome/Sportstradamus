@@ -1470,7 +1470,7 @@ def test_walk_nominees_reverts_a_loser_before_the_next_nominee_persists(monkeypa
     result = mc._walk_nominees(meta, nominated, mc._confirm_one)
 
     assert result == ("WNBA", "AST", "SHIPPED", [], "2/2 seed/incumbent")
-    assert pruned == [("WNBA", "AST")]  # only the loser was darkened
+    assert pruned == [("WNBA", "AST")]  # only the loser's pickle was pruned
     assert meta["WNBA"]["AST"]["shipped"] == "devel"
     assert meta["WNBA"]["AST"]["target_normalization"] == "centered_additive_mean10"
     assert "sn_param" not in meta["WNBA"]["AST"]  # the loser's edits are gone

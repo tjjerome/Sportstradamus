@@ -8,9 +8,10 @@ Options:
                          (shipped:main→devel) in stat_meta.json. 'devel'
                          validates the current stat_meta + prints a summary; the
                          human curates devel promotions by hand.  [required]
-  --prune / --no-prune   Delete every withheld cell's model pickle (immediate
-                         dark-out on this machine). Honors the resolved branch
-                         policy.
+  --prune / --no-prune   Delete every withheld cell's model pickle on this
+                         machine (housekeeping: a withheld cell already serves
+                         the book consensus on its quoted offers and drops its
+                         unquoted props). Honors the resolved branch policy.
   --meta PATH            stat_meta.json path (defaults to
                          data/config/stat_meta.json).
   --model-stats PATH     Gate 1 parquet path (defaults to
