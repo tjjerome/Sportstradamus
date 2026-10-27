@@ -296,6 +296,27 @@ def test_reopen_reads_no_ftn_before_it_charted(monkeypatch):
     assert (s.teamlog.season == 2026).all()
 
 
+def test_backfill_rebuilds_one_team_row_per_season_of_a_shared_week(monkeypatch):
+    # A heal over several seasons reopens the same (week, team) in each; keyed on week and
+    # team alone, the first season's rebuilt row stood in for every later one.
+    s = StatsNFL()
+    s.gamelog = pd.DataFrame(
+        {"season": [2024, 2025], "week": [5, 5], "team": [TEAM, TEAM]}
+        | {"gameday": ["2024-10-06", "2025-10-05"], "read thrown": [np.nan, np.nan]}
+    )
+    s.teamlog = pd.DataFrame(columns=["season", "week", "team"])
+    monkeypatch.setattr(s, "_backfill_schedule_fields", lambda i, row, sched: None)
+    monkeypatch.setattr(s, "_backfill_player_pbp", lambda i, row: None)
+    monkeypatch.setattr(s, "parse_pbp", lambda week, team, year: {"blitz_rate": 0.3})
+
+    rebuilt = s._backfill_missing_rows(sched=None)
+
+    assert [(t["season"], t["week"], t["team"]) for t in rebuilt] == [
+        (2024, 5, TEAM),
+        (2025, 5, TEAM),
+    ]
+
+
 def test_pfr_spells_the_rams_like_the_logs(monkeypatch):
     s = _stats(monkeypatch, _ftn)
     pfr = pd.DataFrame(

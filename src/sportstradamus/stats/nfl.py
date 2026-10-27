@@ -961,8 +961,8 @@ class StatsNFL(Stats):
             self._backfill_player_pbp(i, row)
             if row["team"] not in self.teamlog.loc[
                 (self.teamlog.season == row.season) & (self.teamlog.week == row.week), "team"
-            ].to_list() and (row["week"], row["team"]) not in [
-                (t["week"], t["team"]) for t in teamDataList
+            ].to_list() and (row["season"], row["week"], row["team"]) not in [
+                (t["season"], t["week"], t["team"]) for t in teamDataList
             ]:
                 teamData = {
                     "season": row.season,
