@@ -204,19 +204,22 @@ without the rebuild and goes out with `scripts/sync_to_prod.sh --league L` betwe
 restarts the cell's live clock, so live reads split by `Model Version`; the 30-day Gate-2 read of the
 10-18 versions (about 11-17) covers the cells no fix has replaced by then.
 
-- **Week 2 (10-27 → 11-05; status in the lane `REPORT.md`, section Week 2):** done on dev: the NHL
-  game-line re-read and matrix patch (72 team-games moved off the moneyline and total defaults), then the
-  NHL retrain; the NFL past-season FTN/PFR heal (860 team-weeks, 535 of them 2024's: the reopen of §8 ask 5
-  covers the current season only, and production keeps its past-season zeros, which reach no model since
-  production never trains) and the Bengals' running backs, which PFR labels `HB` and the snap-count filter
-  dropped (`stats/nfl.py`; production gains their 2026 rows at its next update). Running: the NFL rebuild
-  and retrain on the healed logs. Building: the blind confirm walk (every nominee ranked on the cross-fit
-  half at full HPO, the test verdict read once for the chosen nominee, whose booster `meditate
-  --params-from` pins); I6d's research brief, then the book-leg levelling it designs (H3; opening note in
-  the lane folder's `research/`). Held for a serve-path parity read: the 2026 PBP season aggregates of the
-  NFL quarterbacks' comp profiles (`stats/nfl_pbp_agg.py` retries the current season without the
-  participation file nflverse does not serve, never a past season). The H1 refit is out. I6g reads wait
-  for their floors (honest-receipts §6 item 2).
+- **Week 2 (10-27 → 11-05; status in the lane `REPORT.md`, section Week 2):** done: the NHL game-line
+  re-read and matrix patch on dev (72 team-games moved off the moneyline and total defaults), then the NHL
+  retrain, sent to production 10-27 (all 11 served cells pass their fresh gates); the NFL past-season
+  FTN/PFR heal on dev (860 team-weeks, 535 of them 2024's: the reopen of §8 ask 5 covers the current
+  season only, and production keeps its past-season zeros, which reach no model since production never
+  trains) and the Bengals' running backs, which PFR labels `HB` and the snap-count filter dropped
+  (`stats/nfl.py`; production gains their 2026 rows at its next update); the 2026 PBP season aggregates of
+  the NFL quarterbacks' comp profiles (`stats/nfl_pbp_agg.py` retries the current season without the
+  participation file nflverse does not serve, never a past season; a dev replay of week 7 moved served P
+  by at most .0027 RMS in any cell). Running: the NFL rebuild and retrain on the healed logs. Building: the
+  blind confirm walk (every nominee ranked on the cross-fit half at full HPO, the test verdict read once
+  for the chosen nominee, whose booster `meditate --params-from` pins). I6d (H3): the brief found two
+  defects in the historical book leg, the WS1 migration's decode shape and a live writer bug that prices
+  a doubled same-side quote at exactly .5; the owner adopted its provenance-keyed re-read for week 3, and
+  the writer fix ships first. The H1 refit is out. I6g reads wait for their floors (honest-receipts §6
+  item 2).
 - **Week 3 on:** each fix retrains and ships as it is proven; a version then holds four weeks for its live
   verdict.
 
