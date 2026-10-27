@@ -894,7 +894,7 @@ class StatsNFL(Stats):
         self.players.index = self.players["name"]
         self.players = self.players[["age", "height", "weight", "team", "position"]]
 
-    def _reopen_late_source_weeks(self, seasons=None):
+    def _reopen_late_source_weeks(self, seasons: list[int] | None = None):
         """Send this season's team-weeks parsed before FTN or PFR held their game back to parse.
 
         Both sources trail the pbp by days and the backfill parses a team-week once, so a
