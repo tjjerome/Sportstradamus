@@ -790,9 +790,8 @@ def _resolve_prop_lines(lines):
         line.setdefault("point", 0.5)
         line["name"] = _PROP_SIDE_RENAME.get(line["name"], line["name"])
 
-    lines = sorted(lines, key=itemgetter("name"))
     if len({line["point"] for line in lines}) > 1:
-        trueline = sorted(lines, key=(lambda x: np.abs(x["price"] - 2)))[0]["point"]
+        trueline = min(lines, key=lambda line: (abs(line["price"] - 2), line["name"]))["point"]
         lines = [line for line in lines if line["point"] == trueline]
     by_side = {}
     for line in lines:
