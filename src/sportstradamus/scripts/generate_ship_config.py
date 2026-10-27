@@ -127,9 +127,10 @@ def promote_for_main(
     "--prune/--no-prune",
     default=False,
     help=(
-        "Delete every withheld cell's model pickle on this machine (housekeeping: "
-        "a withheld cell already serves the book consensus on its quoted offers and "
-        "drops its unquoted props). Honors the resolved branch policy."
+        "Delete every withheld cell's model pickle on this machine. Honors the resolved branch "
+        "policy, so --branch main also prunes devel cells. For a shipped=withheld cell this is "
+        "housekeeping: it already serves the book consensus on its quoted offers and drops its "
+        "unquoted props."
     ),
 )
 @click.option(

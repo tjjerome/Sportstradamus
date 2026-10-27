@@ -1199,9 +1199,8 @@ def _split_shippable(
     Withheld cells auto-ship on a clean 6/6 (a fresh cell has no live pickle, so a failed confirm's
     revert+prune leaves it withheld, serving the book consensus). Live cells route to the
     supersession test, which restores the incumbent byte-identical on a loss rather than pruning
-    it. ``fresh_only`` drops the live
-    lane entirely: supersession promotions always prompt per cell, so an unattended run would burn
-    each live cell's retrains into guaranteed HELDs.
+    it. ``fresh_only`` drops the live lane entirely: supersession promotions always prompt per
+    cell, so an unattended run would burn each live cell's retrains into guaranteed HELDs.
     """
     fresh, shipped = [], []
     for nominated in ready:
