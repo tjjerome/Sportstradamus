@@ -780,10 +780,11 @@ def _resolve_prop_lines(lines):
 
     Defaults a missing point to 0.5, renames ``Yes``/``No`` to ``Over``/
     ``Under``, collapses a multi-point quote to the line whose price is closest
-    to even, keeps the first row of each side, and flips a lone ``Under`` to an
-    ``Over`` with the inverted price. Keying by side matters: a book that lists
-    one side twice would otherwise be priced as a pair, and ``no_vig_odds(p, p)``
-    is exactly 0.5 whatever the price.
+    to even, keeps the last row of each side (as :func:`_devig_ladder` does, so
+    the stored quote is the same fetch's ladder rung), and flips a lone ``Under``
+    to an ``Over`` with the inverted price. Keying by side matters: a book that
+    lists one side twice would otherwise be priced as a pair, and
+    ``no_vig_odds(p, p)`` is exactly 0.5 whatever the price.
     """
     lines = list(lines)
     for line in lines:
@@ -795,7 +796,7 @@ def _resolve_prop_lines(lines):
         lines = [line for line in lines if line["point"] == trueline]
     by_side = {}
     for line in lines:
-        by_side.setdefault(line["name"], line)
+        by_side[line["name"]] = line
     lines = [by_side[side] for side in ("Over", "Under") if side in by_side]
     if len(lines) == 1 and lines[0]["name"] == "Under":
         lines[0]["name"] = "Over"

@@ -232,7 +232,8 @@ def test_a_side_listed_twice_prices_one_sided_not_as_a_pair(monkeypatch) -> None
     """Two Over rows at one point are one Over: ``no_vig_odds(p, p)`` would read 0.5.
 
     williamhill_us MLB home runs and betrivers NHL goals arrive this way; the stored quote
-    must match the one-sided de-vig the same fetch's ladder rung already takes.
+    must match the one-sided de-vig the same fetch's ladder rung already takes. The two
+    rows differ in price so that keeping a different row than the ladder keeps fails.
     """
     monkeypatch.setitem(moneylines.stat_cv.setdefault("MLB", {}), "home runs", 1.0)
     monkeypatch.setattr(moneylines, "book_gate", lambda *args: None)
@@ -242,7 +243,7 @@ def test_a_side_listed_twice_prices_one_sided_not_as_a_pair(monkeypatch) -> None
 
     moneylines._event_player_props(
         {"key": "williamhill_us"},
-        {"key": "batter_home_runs", "outcomes": [over, dict(over)]},
+        {"key": "batter_home_runs", "outcomes": [over, {**over, "price": 5.6}]},
         "MLB",
         {"MLB": {"batter_home_runs": "home runs"}},
         odds,
