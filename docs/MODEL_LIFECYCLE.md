@@ -215,8 +215,9 @@ selected cell; the `auto` default honors what the cell has persisted:
 - `--blending-loss-fn` — loss minimized when fitting the model↔book blend weight.
 - `--stabilization` — per-parameter gradient damping (`MAD`/`L2`) on the scale head.
 - `--hpo-selection` — Optuna trial-selection rule: lowest CV loss vs PIT-KS-aware `calibrated`.
-  The confirm walk retries a nominee failing ship on Gate 4 alone once under `calibrated` and
-  persists the winning knob per-cell; the weekly `meditate` just trains with the persisted value.
+  The confirm walk reruns a nominee whose blind run misses on Gate 4 alone once under
+  `calibrated`, still blind, and persists the knob only if that retry is the cell's pick; the
+  weekly `meditate` just trains with the persisted value.
 - `--count-dispersion-objective` — objective for the count-branch dispersion fit (`crps` vs `pit_ks`).
 - `--sn-param` — SkewNormal parametrization: `direct` vs `centered` boosting heads.
 

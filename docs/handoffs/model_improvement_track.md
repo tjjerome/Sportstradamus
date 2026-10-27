@@ -294,7 +294,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 
 | Lever | Verdict | Evidence |
 |---|---|---|
-| Strategy sweep + confirm engine (`model_strategy/sweep.py` + `model_strategy/confirm.py`) | **Alive, registry-driven, identity-bound** — `sportstradamus ship sweep --confirm` ranks exact signed base corners by min-gate slack under a budgeted conditional-TPE study, scored holdout-blind; confirm walks each cell's nominees (top-K + seeds + incumbent) at full HPO, exact-checks model/CSV/model_stats, and keeps the first all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
+| Strategy sweep + confirm engine (`model_strategy/sweep.py` + `model_strategy/confirm.py`) | **Alive, registry-driven, identity-bound** — `sportstradamus ship sweep --confirm` ranks exact signed base corners by min-gate slack under a budgeted conditional-TPE study, scored holdout-blind; confirm runs each cell's nominees (top-K + seeds + incumbent) blind at full HPO on the board's cross-fit half, refits only the top passer canonically with its ranked booster (`meditate --params-from`), exact-checks model/CSV/model_stats and reads the test half once; a failure restores the prior cell and ends its walk. Deterministic ranks the board, blind full HPO ranks the nominees, the test half decides once (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
 | Forceable distribution family (`dist` via `stat_meta.json`) | **Alive** — `_resolve_dist` reads the cell's `dist` as authoritative input (SkewNormal / ZINB / NegBin); makes family a one-line sweep axis, no code edit per cell. The data-driven mean≥2 / zero-rate rule is now only the fallback | `[[dist_selection_forceable_via_stat_meta]]` |
 | Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
 | Calibrated HP-selection search-gate (Lever-1, `--hpo-selection calibrated`) | **Alive, rebuilt as v3** — raw CV loss objective + OOF PIT-KS as a TPE feasibility constraint, 1-SE final pick (§6.1 Lever 1); ship-deciding knobs persist per-cell so cron re-fits reproduce them | `[[calibration_hp_selection_lever]]` |
@@ -423,12 +423,22 @@ A served predictive is built in four independently-swappable stages,
   two-part and rushing-yards affine corners.
 - `--confirm` requires the selected spec to expose `confirm`, `full_hpo`, `score`, and `serve`; a
   research-only family such as Mixture cannot slip through. It rejects noncanonical controls or
-  stale corner/matrix/split identity, persists the exact controls (a structural method persists
-  as its `posthoc` slug), and launches full HPO on that persisted recipe, forwarding any control
-  that does not persist. It then exact-compares the pickle, test
-  CSV, and `model_stats.parquet` identities before accepting the official scorecard verdict. An
-  all-six-gate pass keeps `withheld → devel`; any failure auto-reverts the cell's config and
-  artifacts. `--yes` runs it unattended.
+  stale corner/matrix/split identity. Each undecided nominee then trains at full HPO in a research
+  sandbox (`meditate --holdout-blind --artifact-output`, every control as a flag, `stat_meta.json`
+  untouched) and is scored by the board's own scorer on the cross-fit validation half; a g4-only
+  miss earns one blind rerun under `hpo_selection: calibrated`, which ranks in its place. A
+  withheld cell's pick is the blind six-gate passer with the most slack; on a live cell a
+  contender must also pass S1–S3 against the incumbent recipe's own blind run. Only the pick is
+  persisted (a structural method persists as its `posthoc` slug) and refit canonically with
+  `--params-from <its sandbox pickle>`, so the booster that ships is the one that ranked; the
+  pickle, test CSV, and `model_stats.parquet` identities are exact-compared before the official
+  scorecard verdict, read once. An all-six-gate pass keeps `withheld → devel` (a live cell also
+  needs S1–S3 on the test half and the promote prompt); any failure auto-reverts the cell's
+  config and artifacts and ends its walk, so no second nominee is read on the test half. Each
+  blind row and the one test row land in the nominee ledger with their `eval_split`
+  (`crossfit_validation` / `test`); the board's discounts, P(ship) table and timing estimate read
+  the blind rows only. Known limits are in `confirm.py`'s module docstring. `--yes` runs it
+  unattended.
 
 **Registered-corner reproducibility rule.** Every swept control, including
 `dist_training_loss`, either persists in `stat_meta.json` or is forwarded explicitly to full HPO.
@@ -499,7 +509,7 @@ machinery exists (`blending_loss_fn` carried `crps` before `fit_model_weight_crp
 
 ### The operating loop — three manual residues on top of the engine
 
-`--confirm` automates the persist → full-HPO → keep-on-all-six-gates / auto-revert loop. Three judgment
+`--confirm` automates the blind full-HPO ranking → persist and refit the pick → keep-on-all-six-gates / auto-revert loop. Three judgment
 calls the automation cannot fully encode still need an operator:
 
 1. **Near-miss walks.** Confirm the reproducible top-K (2–3), including corners that *fail* the
@@ -524,9 +534,10 @@ calls the automation cannot fully encode still need an operator:
    re-confirm: PR shipped *only* under calibrated, g4 0.0516 → 0.0423, and carries the persisted
    field; PA was a calibrated no-op — fallback fired, g4 ≈ 0.058 either way — and DREB a 0.0508
    near-miss, both held.) The loss→calibrated direction is now automated in the walk: a nominee
-   failing ship on a g4-only near-miss is retried once under `calibrated` and a shipping retry
-   persists the pin (`confirm._retrain_with_calibrated_retry`); the calibrated-*first* doctrine
-   above stays manual — automating it would double every SkewNormal nominee's cost. The weekly
+   whose blind run misses on g4 alone is rerun blind once under `calibrated`, the retry ranks in
+   its place, and a chosen retry persists the pin with its recipe (`confirm._measure_blind`); the
+   calibrated-*first* doctrine above stays manual — automating it would double every SkewNormal
+   nominee's cost. The weekly
    `meditate` never retries; it trains each cell once with the persisted knob. **The Experiment-2
    sunset path is dead:** the calibrated-everywhere default flip was killed by its pre-registered
    criteria (§6.1 Lever 1 — 1/4 failing cells improved, MLB g1 breach), so the retry machinery

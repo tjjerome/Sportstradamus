@@ -164,13 +164,16 @@ corners; `-j` parallelizes cells, never corners). A corner that outruns the per-
 **`--confirm`** turns a board into shipped cells. Two lanes, decided by the cell's current
 `shipped` value:
 
-- *Fresh lane* (`shipped: "withheld"`): nominees walk in slack order; each is persisted to
-  `stat_meta.json`, retrained with **full HPO**, and read back from `model_stats.parquet`.
-  A clean 6/6 ships the cell (`shipped: "devel"`); a failure auto-reverts stat_meta and pickle.
+- *Fresh lane* (`shipped: "withheld"`): every nominee trains with **full HPO** in a sandbox and
+  is scored blind on the cross-fit validation half; the blind 6/6 passer with the most slack is
+  persisted to `stat_meta.json`, refit from its sandbox pickle (`--params-from`), and read back
+  from `model_stats.parquet` once. A clean 6/6 ships the cell (`shipped: "devel"`); a failure
+  auto-reverts stat_meta and pickle and ends the cell's walk.
   Nominee policy: only positive-slack corners nominate; 7/7 shipped at ≥ +0.07 slack, 0/5 at
   ≤ +0.05 on the first campaign (memory `confirm_board_confident_nominee_policy`).
 - *Live lane* (`shipped: "devel"`, needs `--include-shipped`): supersession test against the
-  incumbent — S1 (candidate passes all six) **and** S2 (paired Brier CI excludes 0 in the
+  incumbent, first blind against the incumbent recipe's own sandbox run to pick the nominee, then
+  once on the test half for that nominee's refit — S1 (candidate passes all six) **and** S2 (paired Brier CI excludes 0 in the
   candidate's favour) **and** S3 (paired Sharpe z above the bar). Against an incumbent that
   itself fails the gates this is nearly unpassable on purpose: S2/S3 measure "better than", not
   "good enough". The one waiver is `--min-model-weight T`: a candidate at or above `T` may
@@ -179,8 +182,8 @@ corners; `-j` parallelizes cells, never corners). A corner that outruns the per-
 
 `--min-model-weight T` also binds the fresh lane, and this lane runs every walk at 0.2 (section 6,
 decision 5): a board corner whose fitted weight is below `T` never nominates (when none is left
-the seeds and the incumbent still walk), and a confirmed retrain that lands below it reverts even
-at 6/6. A book-less cell, at the 1.0 fallback, is unaffected.
+the seeds and the incumbent still walk), a nominee whose blind run lands below it never ranks as
+a pass, and a canonical refit that lands below it reverts even at 6/6. A book-less cell, at the 1.0 fallback, is unaffected.
 
 Consequence for this lane: **a served cell that fails the gates is best recovered through the
 fresh lane**, which means flipping it to `shipped: "withheld"` first. That is a `stat_meta`

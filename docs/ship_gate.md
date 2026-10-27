@@ -248,16 +248,22 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 | # | Gate | Rule |
 |---|------|------|
 | S1 | **Pass all 6** | The challenger clears every set-baseline gate above. |
-| S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). |
-| S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
+| S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). The CI is a row bootstrap, not date-clustered, so it is narrower than Gate 1's. |
+| S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; the Memmel z of `sharpe_new − sharpe_current` must exceed 1.645 (one-sided 5%). |
 
 Under `ship sweep --confirm --min-model-weight T` the blend weight is a ship criterion as well:
 a board corner whose fitted `model_weight` is below `T` ranks but never nominates (exactly `1.0`
-= no sportsbook-priced quotes, exempt), a confirmed retrain landing below `T` is reverted, and a
-challenger at or above `T` may replace an incumbent below `T` on **S1 alone** — two legs that
+= no sportsbook-priced quotes, exempt), a nominee whose blind full-HPO run lands below `T` never
+ranks as a pass, a canonical refit landing below `T` is reverted, and a challenger at or above `T`
+may replace an incumbent below `T` on **S1 alone** — two legs that
 both sit on the book at the line give S2/S3 a paired difference of zero, so they cannot separate
 them. Any other supersession keeps S1 + S2 + S3. See
 [handoffs/low_weight_models.md](handoffs/low_weight_models.md).
+
+The confirm walk applies the same rule twice. Blind, it ranks a live cell's nominees against the
+incumbent recipe's own full-HPO run on the cross-fit validation half; the chosen nominee's
+canonical refit then meets the served incumbent's test set once, and that verdict decides the
+swap.
 
 ---
 
