@@ -48,6 +48,9 @@ def _mode_flags(**overrides) -> dict:
         "dependency_namespace": None,
         "dependency_root": None,
         "bypass_withholding": False,
+        "params_from": None,
+        "league": "All",
+        "market": None,
     }
     flags.update(overrides)
     return flags
@@ -87,6 +90,39 @@ def test_frozen_matrix_research_isolation_contract_unchanged():
 def test_frozen_matrix_dir_refuses_rebuild_and_debug_modes(overrides):
     with pytest.raises(UsageError, match="--frozen-matrix-dir"):
         _validate_mode_flags(**_mode_flags(frozen_matrix_dir=Path("/frozen"), **overrides))
+
+
+def test_holdout_blind_full_hpo_runs_only_into_a_sandbox():
+    _validate_mode_flags(
+        **_mode_flags(
+            holdout_blind=True,
+            frozen_matrix_dir=Path("/frozen"),
+            artifact_output=Path("/artifacts"),
+            dependency_namespace="stage5-fresh-v1",
+            bypass_withholding=True,
+        )
+    )
+
+    for canonical in (_mode_flags(), _mode_flags(frozen_matrix_dir=Path("/frozen"))):
+        with pytest.raises(UsageError, match="--holdout-blind"):
+            _validate_mode_flags(**{**canonical, "holdout_blind": True})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"deterministic": True}, "--deterministic"),
+        ({"market": None}, "exactly one --market"),
+        ({"market": "PTS,REB"}, "exactly one --market"),
+        ({"league": "All"}, "--league"),
+    ],
+)
+def test_params_from_pins_exactly_one_full_hpo_cell(overrides, message):
+    pinned = _mode_flags(params_from=Path("/NBA_PTS.mdl"), league="NBA", market="PTS")
+    _validate_mode_flags(**pinned)
+
+    with pytest.raises(UsageError, match=message):
+        _validate_mode_flags(**{**pinned, **overrides})
 
 
 def _matrix() -> pd.DataFrame:

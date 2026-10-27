@@ -161,16 +161,29 @@ def _validate_mode_flags(
     dependency_namespace: str | None,
     dependency_root: Path | None,
     bypass_withholding: bool,
+    params_from: Path | None,
+    league: str,
+    market: str | None,
 ) -> None:
     """Reject flag combinations that name two different run modes at once."""
     # style: allow-complexity — a flat list of independent boundary checks, no nesting;
     # splitting it would only scatter the mode contract across several helpers.
     if full_rebuild and deterministic:
         raise click.UsageError("--full-rebuild and --deterministic are different modes")
-    # A full-HPO confirm has to score the real holdout; a holdout-blind production run
-    # would ship a model whose gates never saw half their evaluation data.
-    if holdout_blind and not deterministic:
-        raise click.UsageError("--holdout-blind is a search mode; pass --deterministic")
+    # A holdout-blind canonical run would ship a model whose gates never saw half their
+    # evaluation data; an --artifact-output sandbox writes nothing canonical, so full HPO
+    # may run blind there.
+    if holdout_blind and not deterministic and artifact_output is None:
+        raise click.UsageError(
+            "--holdout-blind is a search mode; pass --deterministic or --artifact-output"
+        )
+    if params_from is not None and deterministic:
+        raise click.UsageError("--params-from and --deterministic are different modes")
+    # A pickle holds one cell's params; any other cell would train a different model on them.
+    if params_from is not None and (league == "All" or market is None or "," in market):
+        raise click.UsageError(
+            "--params-from pins one cell; pass --league and exactly one --market"
+        )
     if full_rebuild and (not matrix_only or matrix_output is None):
         raise click.UsageError("--full-rebuild requires --matrix-only and --matrix-output")
     if frozen_matrix_dir is not None and (full_rebuild or deterministic or matrix_only):
@@ -265,7 +278,8 @@ def _lock_production_artifacts(
     help=(
         "SEARCH ONLY: drop the held-out rows from the run entirely and score on "
         "player-disjoint cross-fit folds of validation, so a recipe search never sees "
-        "the frame its ship gate is scored on. Requires --deterministic."
+        "the frame its ship gate is scored on. Requires --deterministic, or --artifact-output "
+        "for a full-HPO sandbox run."
     ),
 )
 @click.option(
@@ -486,6 +500,16 @@ def _lock_production_artifacts(
         "from --dependency-root during a full rebuild."
     ),
 )
+@click.option(
+    "--params-from",
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    hidden=True,
+    help=(
+        "CONFIRM ONLY: refit with the LightGBM params, cv and shape ceiling of this model pickle "
+        "(.mdl) instead of searching, so a canonical run ships the booster a holdout-blind "
+        "--artifact-output run ranked. Requires --league and one --market; not --deterministic."
+    ),
+)
 def meditate(
     force,
     league,
@@ -513,6 +537,7 @@ def meditate(
     frozen_matrix_dir,
     artifact_output,
     dependency_namespace,
+    params_from,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # style: allow-complexity — meditate entrypoint: a flat training pipeline
@@ -532,6 +557,9 @@ def meditate(
         dependency_namespace=dependency_namespace,
         dependency_root=dependency_root,
         bypass_withholding=bypass_withholding,
+        params_from=params_from,
+        league=league,
+        market=market,
     )
     _lock_production_artifacts(
         league,
@@ -774,6 +802,7 @@ def meditate(
                 "artifact_output": artifact_output,
                 "dependency_namespace": dependency_namespace,
                 "holdout_blind": holdout_blind,
+                "params_from": params_from,
             }
             train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
 

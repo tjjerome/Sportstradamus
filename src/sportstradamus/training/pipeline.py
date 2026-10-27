@@ -1546,8 +1546,9 @@ def _step_select_hyperparams(
     deterministic: bool,
     calibration_penalty=None,
     penalty_threshold=None,
+    pinned: dict | None = None,
 ) -> tuple[dict | list[dict], list[int]]:
-    """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
+    """Pick Optuna-tuned params, warm-start, the deterministic fixed set, or a pinned pickle's.
 
     When ``calibration_penalty`` is given (Lever 1, calibrated HP selection) the Optuna
     sampler is feasibility-constrained on the out-of-fold PIT-KS and the paths return every
@@ -1566,6 +1567,7 @@ def _step_select_hyperparams(
             ``calibration_penalty``; ``None`` when penalty is None.
         opt_params_in: Warm-start params from the existing pickle, if any.
         dtrain: ``lgb.Dataset`` for the LSS Optuna path.
+        pinned: A model pickle (``meditate --params-from``) whose params return with no search.
 
     Returns:
         ``(opt_params, monotone)`` — hyperparam dict (or list of dicts when
@@ -1575,6 +1577,8 @@ def _step_select_hyperparams(
     monotone = [0] * len(col_list)
     if dist in ("Gamma", "ZAGamma", "SkewNormal", "Mixture") and "MeanYr" in col_list:
         monotone[col_list.index("MeanYr")] = 1
+    if pinned is not None:
+        return {**pinned["params"], "monotone_constraints": monotone}, monotone
 
     hp_search_space = {
         "feature_pre_filter": ["none", [False]],
@@ -4030,6 +4034,7 @@ def _step_select_distribution(
     stabilization: str = "None",
     dist_override: str = LOSS_AUTO,
     sn_param: str = "direct",
+    pinned: dict | None = None,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
@@ -4059,6 +4064,8 @@ def _step_select_distribution(
         sn_param: ``"direct"`` or ``"centered"`` — SkewNormal head
             parametrization (see :func:`_skewnormal_dist_obj`); ignored by the
             count families.
+        pinned: A model pickle (``meditate --params-from``). Its ``distribution`` must be the
+            family this run resolves; its ``cv`` and ``shape_ceiling`` replace the derived ones.
 
     Returns:
         Dict with: ``dist``, ``dist_obj`` (None on hurdle path until built),
@@ -4103,6 +4110,11 @@ def _step_select_distribution(
         else load_distribution_config().get(league, {}).get(market)
     )
     dist = _resolve_dist(configured, _data_driven_dist(global_mean, hist_gate), league, market)
+    if pinned is not None and pinned["distribution"] != dist:
+        raise ValueError(
+            f"{league} {market}: --params-from holds a {pinned['distribution']} model but this "
+            f"run trains {dist}; a booster from another family is a different model"
+        )
     if dist in ("SkewNormal", "Mixture"):
         strategy = baselines.get_target_normalization(target_normalization)
         cv = (
@@ -4182,6 +4194,11 @@ def _step_select_distribution(
             shape_ceiling = None
             marginal_shape = float("nan")
 
+    if pinned is not None:
+        # Both derive from the gamelog, which is not frozen with the matrix; a refit that
+        # re-derived them would not reproduce the run that wrote the pickle.
+        cv = pinned["cv"]
+        shape_ceiling = pinned["shape_ceiling"]
     stat_cv[league][market] = cv
     if not deterministic and not isolated:
         save_cv_std_config({league: {market: cv}}, {})
@@ -4641,6 +4658,7 @@ def train_market(
     artifact_output: Path | None = None,
     dependency_namespace: str | None = None,
     holdout_blind: bool = False,
+    params_from: Path | None = None,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -4694,6 +4712,9 @@ def train_market(
             zero serving delta). Arrives resolved: the CLI maps ``"auto"`` to the
             cell's stat_meta before calling. Consulted only on the SkewNormal
             branch and in start-value seeding; persisted in the pickle.
+        params_from: A model pickle whose LightGBM params, ``cv`` and ``shape_ceiling`` this
+            run reuses instead of searching and re-deriving them, so a canonical run refits the
+            booster a holdout-blind sandbox run ranked.
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
@@ -4710,6 +4731,7 @@ def train_market(
 
     dist_override = dist
     isolated_run = matrix_input is not None or artifact_output is not None
+    pinned = pickle.loads(params_from.read_bytes()) if params_from is not None else None
     init = _step_init_market(
         league,
         market,
@@ -4819,6 +4841,7 @@ def train_market(
         stabilization=stabilization,
         dist_override=dist_override,
         sn_param=sn_param,
+        pinned=pinned,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -4914,13 +4937,15 @@ def train_market(
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
     penalty = penalty_threshold = None
-    if hpo_selection == "calibrated" and not use_hurdle and dist != "Mixture":
+    # Pinned params already carry the pick of the run that wrote them; there is nothing to rank.
+    calibrated_search = hpo_selection == "calibrated" and pinned is None
+    if calibrated_search and not use_hurdle and dist != "Mixture":
         # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to
         # select. Mixture has no per-trial served-KS closure (its params frame doesn't fit
         # either _calibration_penalty branch); calibrated falls back to loss selection.
         penalty = _calibration_penalty(splits, dist_info, blending=blending)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
-    elif hpo_selection == "calibrated":
+    elif calibrated_search:
         logger.warning(
             "%s %s: hpo_selection 'calibrated' is inert on the %s path — no HP search "
             "consults it; drop the stat_meta pin or route the cell off this path",
@@ -4938,6 +4963,7 @@ def train_market(
         deterministic=deterministic,
         calibration_penalty=penalty,
         penalty_threshold=penalty_threshold,
+        pinned=pinned,
     )
     if isinstance(opt_params, list):
         picked = _pick_calibrated_candidate(
