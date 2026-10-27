@@ -1,4 +1,4 @@
-"""Operation Ship 75 confirm-and-ship loop: persist a swept winner, retrain at full HPO, keep or revert.
+"""Operation Ship 75 confirm-and-ship loop: rank swept nominees blind at full HPO, ship the top one.
 
 The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
@@ -8,20 +8,34 @@ deterministic trials — it never ships. This module turns a ranked board into s
    together — then its seed corners and its incumbent. Every swept axis has a ``stat_meta.json``
    field, and each nominee's own family's ``persist`` map builds the edits (so a NegBin corner
    outranking ZINB persists ``dist=NegBin`` and flips the cell's family).
-2. Prompt, then per nominee in order: write its persist fields + ``shipped="devel"`` to
-   ``stat_meta.json`` (so the confirm ``meditate`` reads the exact config being shipped), run a
-   **full-HPO** ``meditate`` on the walk's pinned training matrix, and read the official ``ship``
-   verdict from ``model_stats.parquet``.
-3. A pass keeps the cell on devel and ends its walk; a failure **auto-reverts** — restore the
-   original stat_meta entry *and* :func:`prune_model_pickle` — and the next nominee is tried. The
-   prune keeps a failed cell's pickle from riding a later send; serving reads ``shipped`` (a
-   withheld cell's quoted offers serve the book consensus, its unquoted props leave the board),
-   so the stat_meta restore alone already stops its model probabilities.
+2. Prompt, then per cell: pin the training matrix and run **every** nominee at full HPO in a
+   research sandbox (``meditate --holdout-blind --artifact-output``, each control a flag, so
+   stat_meta.json is never written for it). The board's own scorer reads each sandbox dump on the
+   cross-fit validation half, the half the board ranks on; the ship holdout stays unread.
+3. Rank the blind rows: a nominee passes on a blind 6/6 above the blend-weight floor — on a live
+   cell, on S1/S2/S3 against the incumbent's own blind run — and passers sort by blind slack. A
+   cell with no passer is held, its ship holdout never read.
+4. Persist the top passer alone (its edits, plus ``shipped="devel"`` on a withheld cell) and refit
+   it canonically with ``--params-from`` its sandbox pickle, so the booster that ships is the
+   booster that ranked. Its ship-holdout verdict is read **once**: a pass keeps the cell on devel
+   (a live cell promotes on S1/S2/S3 against the served incumbent), and a failure ends the cell —
+   no second nominee is read on the test half. A failure **auto-reverts**: restore the original
+   stat_meta entry *and* :func:`prune_model_pickle`. The prune keeps a failed cell's pickle from
+   riding a later send; serving reads ``shipped`` (a withheld cell's quoted offers serve the book
+   consensus, its unquoted props leave the board), so the stat_meta restore alone already stops
+   its model probabilities.
 
-The walk also owns the g4-only calibrated fallback: a nominee failing ship on a near-miss Gate 4
-alone is retrained once under ``hpo_selection: "calibrated"``, and a shipping retry persists that
-pin with the cell's other edits. The weekly ``meditate`` never explores — it trains each cell once
-with whatever this walk persisted.
+The walk also owns the g4-only calibrated fallback: a nominee whose blind run fails ship on a
+near-miss Gate 4 alone runs blind once more under ``hpo_selection: "calibrated"``; the retry's row
+is the one that ranks, and a retry that wins persists that pin with the cell's other edits. The
+weekly ``meditate`` never explores — it trains each cell once with whatever this walk persisted.
+
+Known limits: a calibrated-HPO nominee ranks optimistically, because its trial pick reads the same
+validation half its blind row is scored on. A nominee whose blind row reached the ledger is decided
+on that matrix, so an interrupted walk's blind-run nominees do not re-rank on a rerun, and a live
+cell walks once per matrix (its incumbent's baseline run decides it too). A SkewNormal nominee on a
+live count cell fails its blind run: meditate keeps a live cell's ``target_normalization: none``
+over the flag. The compute is every nominee at full HPO plus one pinned refit per cell.
 
 Everything is local and uncommitted — the human reviews the ``shipped: devel`` diff and commits it.
 A whole-file ``stat_meta.json`` backup is taken before any write as the crash/abort safety net.
@@ -35,6 +49,7 @@ import shutil
 import subprocess
 import time
 from copy import deepcopy
+from typing import NamedTuple
 
 import click
 import pandas as pd
@@ -46,6 +61,7 @@ from sportstradamus.helpers.io import (
     model_pickle_path,
     prune_model_pickle,
 )
+from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training.lineage import (
     MATRIX_BUILDER_VERSION,
     MATRIX_SCHEMA_VERSION,
@@ -74,6 +90,7 @@ from sportstradamus.training.model_strategy.registry import (
     meditate_command,
     parse_controls,
     strategies_for_cell,
+    strategy_cli_args,
     strategy_controls,
     strategy_full_hpo_cli_args,
     strategy_persistence_edits,
@@ -84,14 +101,19 @@ from sportstradamus.training.model_strategy.sweep import (
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
     EVAL_SPLIT_CROSSFIT,
+    EVAL_SPLIT_TEST,
     NOMINEE_LEDGER_PATH,
     _cell_context,
+    _crossfit_ledger,
     _failure_reason,
+    _incumbent_corner,
     _run_meditate_with_lock_retry,
+    _score_corner,
     _seed_corners,
     _training_matrix_path,
 )
 from sportstradamus.training.posthoc import PROB_STAGE
+from sportstradamus.training.report import _IDENTITY_COLUMNS
 from sportstradamus.training.scorecard import (
     _GATE1_NONINF_MARGIN,
     _supersede_headline,
@@ -124,8 +146,9 @@ _BOARD_ECHO_FIELDS: tuple[str, ...] = (
 # same PR that ships its first cells. Empty since the MLB+NHL GO (2026-07-09,
 # docs/archive/mlb-nhl-activation.md); machinery stays for the next league onboarding.
 _ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
-# A full-HPO meditate confirm is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung
-# run from blocking the loop forever. A timeout is treated as a failure (the cell auto-reverts).
+# A full-HPO blind run is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung run
+# from blocking the loop forever. A timeout is a failure: the nominee fails blind, or a canonical
+# refit auto-reverts.
 _CONFIRM_TIMEOUT_S = 4 * 3600
 # Confirm outcomes that leave a shippable cell on devel (vs REVERTED / HELD, which change nothing).
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
@@ -174,17 +197,15 @@ _GATE_COLS: tuple[str, ...] = tuple(f"{g}_pass" for g in _GATES)
 _G4_RETRY_MAX_EXCESS: float = 0.010
 # brief R3: noise band on the g1 non-inferiority CI bound.
 _G1_RETRY_NOISE_BAND: float = 0.002
-# The model_stats columns the calibrated-retry predicate reads.
-_RETRY_COLUMNS = [
-    "league",
-    "market",
-    "distribution",
-    "ship",
-    "g4_pit_ks",
-    "g4_pit_ks_max",
-    "g1_brier_diff_ci_hi",
-    *_GATE_COLS,
-]
+# The blind scorer speaks the board's column names, the ledger model_stats'. These fields have a
+# model_stats twin; the scorer's other fields keep their names, and its controls are dropped for the
+# ``strategy_controls_json`` the identity columns carry.
+_LEDGER_NAMES: dict[str, str] = {
+    "ships": "ship",
+    "n": "n_validation",
+    "matrix_hash": "strategy_matrix_hash",
+    "split_fingerprint": "strategy_split_fingerprint",
+}
 
 
 def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
@@ -302,7 +323,10 @@ def _veto_admissible(
 
 
 def _decided_pairs() -> set[tuple[str, str]]:
-    """Every ``(corner_fingerprint, matrix_hash)`` the ledger holds a full-HPO verdict for."""
+    """Every ``(corner_fingerprint, matrix_hash)`` the ledger holds a full-HPO row for.
+
+    Blind and test-half rows alike: either run decided the corner on that matrix.
+    """
     if not NOMINEE_LEDGER_PATH.exists():
         return set()
     ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
@@ -619,7 +643,7 @@ def _backup_stat_meta() -> pathlib.Path:
 
 
 def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
-    """Every serve-read artifact a full-HPO ``meditate`` rewrites for one cell — the restore set.
+    """Every serve-read artifact a canonical refit rewrites for one cell — the restore set.
 
     Restoring these puts the incumbent back exactly as it served: the model pickle (which carries all
     calibrators), the test-set CSV (also the snapshotted S2/S3 baseline), ``model_stats`` (parquet +
@@ -718,23 +742,21 @@ def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity)
     return _split_matches(row["strategy_split_fingerprint"], expected.split_fingerprint)
 
 
-def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
-    """Record the just-retrained nominee's whole model_stats row in the research ledger.
+def _record_ledger_row(candidate: dict, gates: dict, eval_split: str) -> bool:
+    """Append one nominee's gate row to the research ledger, tagged with the half it was scored on.
 
-    This is the only moment that row exists. A losing nominee gets its pickle pruned, and
-    ``report()`` rebuilds model_stats from the pickles on disk, so by the time the walk reports
-    its verdict the gate values behind it are gone — leaving no way to compare a cell's board
-    numbers against its own confirm. A board nominee's row also carries its board-side gate values
+    Each blind run writes an :data:`EVAL_SPLIT_CROSSFIT` row from the blind scorer, and a cell's one
+    canonical refit writes its :data:`EVAL_SPLIT_TEST` row from model_stats. That model_stats row
+    is the only record of the refit's gates: a losing refit's pickle is pruned, and ``report()``
+    rebuilds model_stats from the pickles on disk, so by the time the walk reports its verdict the
+    gate values behind it are gone. A board nominee's row also carries its board-side gate values
     (``board_*``, from ``_board_candidate_row``); seed/incumbent rows leave them NaN. Ledger only;
     nothing production reads it.
 
     Returns whether the fit diverged — ``dispersion_cal`` on its floor
     (:data:`_DIVERGED_DISPERSION_CAL`) — which is also recorded as the ``diverged`` column.
     """
-    row = _cell_row(league, market, None)
-    if row is None:
-        return False
-    dispersion = row.get("dispersion_cal")
+    dispersion = gates.get("dispersion_cal")
     diverged = bool(pd.notna(dispersion) and float(dispersion) <= _DIVERGED_DISPERSION_CAL)
     ledger = pd.DataFrame(
         [
@@ -745,7 +767,8 @@ def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
                 "source": candidate["source"],
                 "diverged": diverged,
                 **candidate.get("board_gates", {}),
-                **row.to_dict(),
+                **gates,
+                "eval_split": eval_split,
             }
         ]
     )
@@ -774,15 +797,15 @@ def _frozen_matrix_dir(league: str, market: str) -> pathlib.Path:
 def _pin_cell_matrix(league: str, market: str) -> pathlib.Path:
     """Copy the cell's cached training matrix + lineage manifest into the walk's frozen dir.
 
-    Every nominee of the walk then retrains via ``--frozen-matrix-dir`` on this one frame — an
-    unpinned ``--force`` rewrote the matrix between nominees, so they scored different frames
-    (n_validation drifted 373/363/358 within one walk). Two side effects of meditate's frozen-input
-    mode are deliberate: the run cold-starts its HPO (warm pickle params are ignored, so every
-    nominee gets the same full search budget) and it skips the per-market book-weight refits (the
-    same isolation as the board's deterministic runs, keeping board and confirm aligned). A swept
-    cell always has a cached parquet — the sweep requires one — so a missing source fails loud
-    here. The snapshot stays on disk after the walk (research/ is gitignored), matching the
-    ``incumbent_backup`` pattern.
+    Every blind run of the walk, and the cell's canonical refit, then trains via
+    ``--frozen-matrix-dir`` on this one frame — an unpinned ``--force`` rewrote the matrix between
+    nominees, so they scored different frames (n_validation drifted 373/363/358 within one walk).
+    Two side effects of meditate's frozen-input mode are deliberate: a blind run cold-starts its
+    HPO (warm pickle params are ignored, so every nominee gets the same full search budget) and it
+    skips the per-market book-weight refits (the same isolation as the board's deterministic runs,
+    keeping board and confirm aligned). A swept cell always has a cached parquet — the sweep
+    requires one — so a missing source fails loud here. The snapshot stays on disk after the walk
+    (research/ is gitignored), matching the ``incumbent_backup`` pattern.
     """
     source = _training_matrix_path(league, market)
     frozen_dir = _frozen_matrix_dir(league, market)
@@ -803,71 +826,70 @@ def _pin_cell_matrix(league: str, market: str) -> pathlib.Path:
     return frozen_dir
 
 
-def _run_meditate(league: str, market: str, candidate: dict) -> str:
-    """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; "" iff meditate exits clean.
+def _run_meditate(
+    candidate: dict,
+    args: list[str],
+    *,
+    log_path: pathlib.Path,
+    label: str,
+    expected: float | None = None,
+) -> str:
+    """One ``meditate`` of a nominee on the walk's pinned matrix; "" iff the subprocess exits clean.
 
-    Trains on the walk's pinned matrix (``--frozen-matrix-dir``, see :func:`_pin_cell_matrix`) so
-    every nominee of a cell scores the same frame. ``--force`` is still required: a frozen-input
-    run appends no new rows, and without it a cell whose pickle already exists skips silently and
-    never rewrites its outputs. A failure returns its :func:`_failure_reason` rather than a bare
-    flag — a native abort inside the fit and an ordinary non-zero exit call for completely
-    different triage, and reporting both as one "retrain error" is what sent the last investigation
-    looking for a Python exception that never existed. The caller must not trust a possibly-stale
-    model_stats row either way; a transient archive-lock clash is retried first
-    (:func:`_run_meditate_with_lock_retry`).
+    Every run of a walk — each blind run and the cell's canonical refit — trains on the frame
+    :func:`_pin_cell_matrix` froze (``--frozen-matrix-dir``), so they all score the same rows.
+    ``--force`` is still required: a frozen-input run appends no new rows, and without it a cell
+    whose pickle already exists skips silently and never rewrites its outputs. A failure returns its
+    :func:`_failure_reason` rather than a bare flag — a native abort inside the fit and an ordinary
+    non-zero exit call for completely different triage, and reporting both as one "retrain error"
+    is what sent the last investigation looking for a Python exception that never existed. The
+    caller must not trust a possibly-stale artifact either way; a transient archive-lock clash is
+    retried first (:func:`_run_meditate_with_lock_retry`).
     """
-    spec = get_strategy(candidate["strategy_slug"])
-    context = _cell_context(league, market)
+    lg, mkt = candidate["league"], candidate["market"]
     cmd = meditate_command(
-        league,
-        market,
-        "--force",
-        "--frozen-matrix-dir",
-        str(_frozen_matrix_dir(league, market)),
-        *strategy_full_hpo_cli_args(context, spec, candidate["controls"]),
+        lg, mkt, "--force", "--frozen-matrix-dir", str(_frozen_matrix_dir(lg, mkt)), *args
     )
-    log_path = _CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log"
-    expected = _confirm_median_seconds(league, market)
-    click.echo(f"  retraining {league} {market} — full HPO, {_expectation(expected)} …")
+    click.echo(f"  {label} {lg} {mkt} — {_expectation(expected)} …")
     started = time.monotonic()
     try:
-        with elapsed_ticker(f"  {league} {market} full-HPO retrain", expected):
+        with elapsed_ticker(f"  {lg} {mkt} {label}", expected):
             _run_meditate_with_lock_retry(cmd, log_path, timeout=_CONFIRM_TIMEOUT_S)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         return _failure_reason(exc)
     finally:
         # Carried on the candidate rather than a module global: the same dict already threads the
-        # walk, and _record_nominee_gates is the next thing to read it.
+        # walk, and _record_ledger_row is the next thing to read it.
         candidate["elapsed_s"] = round(time.monotonic() - started, 1)
-    click.echo(f"  retrained {league} {market} in {human_seconds(candidate['elapsed_s'])}")
+    click.echo(f"  {label} {lg} {mkt} done in {human_seconds(candidate['elapsed_s'])}")
     return ""
 
 
 def _expectation(expected: float | None) -> str:
-    """How long this cell's retrain should take, and the wall-clock time that lands at.
+    """How long this run should take, and the wall-clock time that lands at.
 
-    A redirected run gets no ticker, so the finish time is what makes a stalled retrain obvious in a
+    A redirected run gets no ticker, so the finish time is what makes a stalled run obvious in a
     log — an elapsed count would need the reader to know when the line was written.
     """
     if expected is None:
-        return "no timing history for this cell"
+        return "no timing estimate"
     finish = time.strftime("%H:%M", time.localtime(time.time() + expected))
     return f"~{human_seconds(expected)}, expect ~{finish}"
 
 
 def _confirm_median_seconds(league: str | None = None, market: str | None = None) -> float | None:
-    """Median full-HPO retrain seconds for one cell from the nominee ledger, else across all cells.
+    """Median blind-run seconds for one cell from the nominee ledger, else across all cells.
 
     Naming no cell asks for the all-cells median, which is what sizes the up-front confirm prompt.
 
-    Each ledger row now times exactly one meditate subprocess (a calibrated retry records its own
-    row), but a retrain that errored never reaches the ledger, so the estimate is blind to the
-    slowest failures — hence it is always shown as approximate. Median guards the estimate against
-    that skew.
+    Only blind rows count: each times one full-HPO search (a calibrated retry records its own
+    row), while a canonical refit reuses its blind run's parameters and takes minutes. A run that
+    errored never reaches the ledger, so the estimate is blind to the slowest failures — hence it is
+    always shown as approximate. Median guards the estimate against that skew.
     """
     if not NOMINEE_LEDGER_PATH.exists():
         return None
-    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    ledger = _crossfit_ledger(pd.read_csv(NOMINEE_LEDGER_PATH))
     if "elapsed_s" not in ledger.columns:
         return None
     ledger = ledger.assign(elapsed_s=pd.to_numeric(ledger["elapsed_s"], errors="coerce")).dropna(
@@ -967,7 +989,7 @@ def _g4_only_retry_wanted(
     """Whether a cell earns the one-shot calibrated-HPO retry.
 
     Fires only for cells trained under ``loss`` selection whose fresh
-    model_stats row failed ship on a near-miss Gate 4, alone or with a
+    gate row failed ship on a near-miss Gate 4, alone or with a
     within-band Gate 1 — the dispersion-calibration failures calibrated trial
     selection targets. Any other failing gate blocks the retry, g6 explicitly
     included (deferred pending the Experiment C measurement, brief R3).
@@ -995,67 +1017,166 @@ def _cofailures_within_band(row: pd.Series) -> bool:
     return not others_failing
 
 
-def _retry_calibrated_wanted(candidate: dict, cell: dict) -> bool:
-    """Whether the just-retrained nominee earns the walk's calibrated-HPO fallback.
+def _retry_calibrated_wanted(candidate: dict, row: dict[str, object], cell: dict) -> bool:
+    """Whether a nominee's blind run earns the walk's calibrated-HPO fallback.
 
-    ``cell`` is the nominee's stat_meta entry *after* its edits — exactly what the meditate
-    subprocess resolved its knobs from. Structural corners never retry (their spec pins
-    ``hpo_selection``, and the structural stage has no calibrated trial-selection closure).
+    ``row`` is that run's blind gate row and ``cell`` the nominee's stat_meta entry with its edits
+    applied — the knobs a canonical refit of it would resolve. Structural corners never retry
+    (their spec pins ``hpo_selection``, and the structural stage has no calibrated trial-selection
+    closure).
     """
     if get_strategy(candidate["strategy_slug"]).is_structural:
         return False
-    try:
-        row = _cell_row(candidate["league"], candidate["market"], _RETRY_COLUMNS)
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
     return _g4_only_retry_wanted(
-        row, cell.get("hpo_selection", "loss"), cell.get("zinb_mode", "joint")
+        pd.Series(row), cell.get("hpo_selection", "loss"), cell.get("zinb_mode", "joint")
     )
 
 
-def _pin_calibrated(meta: dict, candidate: dict) -> None:
-    """Pin ``hpo_selection: "calibrated"`` for the retry — in stat_meta (the rerun subprocess
-    reads it back per-cell, the same path the weekly cron uses) and in the nominee's edits (so
-    the persisted diff, the supersede promote prompt, and the report tell the truth).
+class _BlindRun(NamedTuple):
+    """One nominee's full-HPO sandbox run, scored on the cross-fit validation half."""
+
+    # The nominee as run: a calibrated retry carries its hpo_selection pin in its edits.
+    candidate: dict
+    dump: pathlib.Path
+    # The sandbox pickle a canonical refit takes its parameters from (``--params-from``).
+    model: pathlib.Path
+    # Why the run fails on its own (meditate, identity, gates); empty on a blind 6/6.
+    failed: list[str]
+    # The ledger-named gate row; None when the run never scored.
+    row: dict[str, object] | None
+
+
+def _run_blind(candidate: dict, hpo_selection: str) -> _BlindRun:
+    """Train one nominee at full HPO in its own sandbox and score it on the cross-fit half.
+
+    ``--holdout-blind`` drops the ship holdout from the run and cross-fits calibration over the
+    validation frame, the half the board scores. ``--artifact-output`` writes the dump and pickle
+    to a research sandbox keyed by cell, corner fingerprint and trial-selection rule, and the run
+    skips ``report()``, so neither the canonical artifact set nor model_stats moves. Nothing is
+    read from a persisted edit: every control rides as its flag, and so does ``hpo_selection``
+    unless the corner pins it, so stat_meta.json is never written for a blind run. The namespace is
+    the one a canonical run reads (:data:`DEPENDENCY_NAMESPACE`), and ``--bypass-withholding`` lets
+    a withheld cell train. The board's own scorer (:func:`_score_corner`) reads the dump, and its
+    row lands in the ledger as a cross-fit row.
     """
     lg, mkt = candidate["league"], candidate["market"]
-    click.echo(f"  {lg} {mkt}: g4-only ship fail — retrying with hpo_selection=calibrated")
-    meta[lg][mkt]["hpo_selection"] = "calibrated"
-    candidate["edits"]["hpo_selection"] = "calibrated"
-    _atomic_write_meta(meta)
+    spec = get_strategy(candidate["strategy_slug"])
+    slug = market_file_slug(lg, mkt)
+    sandbox = (
+        _CONFIRM_LOG_ROOT / "blind" / slug / f"{candidate['corner_fingerprint']}__{hpo_selection}"
+    )
+    # A dump left by an earlier walk carries this corner's identity, so a run that exits clean
+    # without writing one would be scored on it.
+    shutil.rmtree(sandbox, ignore_errors=True)
+    selection = (
+        [] if "hpo_selection" in candidate["controls"] else ["--hpo-selection", hpo_selection]
+    )
+    error = _run_meditate(
+        candidate,
+        [
+            "--holdout-blind",
+            "--artifact-output",
+            str(sandbox),
+            "--dependency-namespace",
+            DEPENDENCY_NAMESPACE,
+            "--bypass-withholding",
+            *strategy_cli_args(_cell_context(lg, mkt), spec, candidate["controls"]),
+            *selection,
+        ],
+        log_path=sandbox / "meditate.log",
+        label="blind full-HPO run",
+        expected=_confirm_median_seconds(lg, mkt),
+    )
+    run = _BlindRun(
+        candidate, sandbox / "test_sets" / f"{slug}.csv", sandbox / f"{slug}.mdl", [], None
+    )
+    if error:
+        return run._replace(failed=[f"retrain {error}"])
+    try:
+        scored = _score_corner(lg, mkt, candidate["controls"], spec, run.dump, run.model)
+    except (OSError, ValueError, KeyError, TypeError):
+        return run._replace(failed=["artifact identity"])
+    identity = _candidate_identity(candidate, scored["matrix_hash"])
+    row = {
+        "league": lg,
+        "market": mkt,
+        "distribution": candidate["family"],
+        "hpo_selection": hpo_selection,
+        **{column: getattr(identity, attr) for column, attr in _IDENTITY_COLUMNS.items()},
+        **{
+            _LEDGER_NAMES.get(name, name): value
+            for name, value in scored.items()
+            if name not in candidate["controls"]
+        },
+    }
+    diverged = _record_ledger_row(candidate, row, EVAL_SPLIT_CROSSFIT)
+    failed = [gate for gate in _GATES if not row[f"{gate}_pass"]]
+    click.echo(
+        f"  blind {' '.join(failed) or 'pass'}: slack {row['slack']:+.3f}, "
+        f"w={row['model_weight']:.3f}"
+    )
+    if diverged and failed:
+        # Named ahead of whatever it fails: the gates already reject a diverged fit, but
+        # "diverged g1 g4" sends triage to the fit rather than the anonymous gate list.
+        failed.insert(0, "diverged")
+    return run._replace(failed=failed, row=row)
 
 
-def _retrain_with_calibrated_retry(
-    league: str, market: str, candidate: dict, meta: dict
-) -> tuple[str, bool]:
-    """Retrain a nominee, with the walk's one-shot calibrated fallback on a g4-only near-miss.
+def _measure_blind(meta: dict, candidate: dict) -> list[_BlindRun]:
+    """A nominee's blind runs: the first, then a calibrated retry when a g4-only miss earns one.
 
-    Runs the nominee's meditate and records its ledger row; when the fresh model_stats row earns
-    the retry (:func:`_retry_calibrated_wanted`), pins the knob and reruns the identical command,
-    recording the retry as its own ledger row. Returns ``(error, diverged)`` for the run whose
-    model_stats row stands; a failed retry leaves the pin for the caller's revert to strip.
+    The last run is the one that ranks. A live cell's incumbent keeps its first run as the
+    baseline every contender meets, because that run measures the recipe the cell serves.
     """
-    error = _run_meditate(league, market, candidate)
+    lg, mkt = candidate["league"], candidate["market"]
+    cell = {**meta[lg][mkt], **candidate["edits"]}
+    first = _run_blind(candidate, cell.get("hpo_selection", "loss"))
+    if first.row is None or not _retry_calibrated_wanted(candidate, first.row, cell):
+        return [first]
+    click.echo(f"  {lg} {mkt}: g4-only blind fail — retrying with hpo_selection=calibrated")
+    retry = {
+        **candidate,
+        "source": f"{candidate['source']} +calibrated-retry",
+        "edits": {**candidate["edits"], "hpo_selection": "calibrated"},
+    }
+    return [first, _run_blind(retry, "calibrated")]
+
+
+def _run_canonical(league: str, market: str, candidate: dict) -> tuple[str, bool]:
+    """Refit the walk's pick canonically and record the cell's one test-half ledger row.
+
+    The pick's edits are already persisted, so the run reads its strategy from stat_meta as the
+    weekly cron does, with only the unpersisted controls as flags. ``--params-from`` reuses the
+    blind run's LightGBM params, cv and shape ceiling instead of searching, so the booster that
+    ships is the one the walk ranked. Returns ``(error, diverged)``; a run that wrote no
+    model_stats row records nothing, and the caller reports it.
+    """
+    spec = get_strategy(candidate["strategy_slug"])
+    error = _run_meditate(
+        candidate,
+        [
+            "--params-from",
+            str(candidate["params_from"]),
+            *strategy_full_hpo_cli_args(_cell_context(league, market), spec, candidate["controls"]),
+        ],
+        log_path=_CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log",
+        label="canonical refit",
+    )
     if error:
         return error, False
-    diverged = _record_nominee_gates(league, market, candidate)
-    if not _retry_calibrated_wanted(candidate, meta[league][market]):
-        return "", diverged
-    _pin_calibrated(meta, candidate)
-    retry = {**candidate, "source": f"{candidate['source']} +calibrated-retry"}
-    error = _run_meditate(league, market, retry)
-    if error:
-        return error, diverged
-    return "", _record_nominee_gates(league, market, retry)
+    row = _cell_row(league, market, None)
+    if row is None:
+        return "", False
+    return "", _record_ledger_row(candidate, row.to_dict(), EVAL_SPLIT_TEST)
 
 
-def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> list[str]:
-    """Withheld-path confirm: retrain, then the reasons the cell did not ship (empty means it did).
+def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
+    """Withheld-path confirm: refit canonically, then why the cell did not ship (empty: it did).
 
     Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
     bare False reads on the report as a gate failure with no gate named.
     """
-    error, diverged = _retrain_with_calibrated_retry(league, market, candidate, meta)
+    error, diverged = _run_canonical(league, market, candidate)
     if error:
         return [f"retrain {error}"]
     # A diverged fit is named ahead of whatever it fails: the gates already reject it, but
@@ -1078,20 +1199,27 @@ def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> 
     return []
 
 
+def _under_floor(weight: float, min_model_weight: float | None) -> list[str]:
+    """The blend-weight floor as a failure reason; empty if the weight clears it or none is set."""
+    if min_model_weight is None or weight >= min_model_weight:
+        return []
+    return [f"w={weight:.3f}<{min_model_weight}"]
+
+
 def _confirm_one(
     meta: dict, cand: dict, *, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
-    """Persist a candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
+    """Persist and refit the walk's pick, then keep it (devel) or revert it (stat_meta + pickle).
 
     The pickle prune on failure keeps the artifact set honest: serving already prices a
     withheld cell at the book consensus, and a volume denominator (``VOLUME_STATS``) keeps
     its pickle.
 
-    ``min_model_weight`` is the campaign's blend-weight floor, checked here rather than on the
-    board: the board's ``model_weight`` is a fixed-HP proxy that this retrain refits, so only the
-    served pickle says what the cell would actually blend. A cell under the floor reverts like any
-    other loser; the ledger row written before this check keeps its 6/6 verdict, so the corner is
-    decided on this matrix and walks again only once the matrix hash moves.
+    ``min_model_weight`` is the campaign's blend-weight floor. The walk already held the pick to it
+    on its blind pickle, but this refit fits its own blend, so only the served pickle says what the
+    cell would actually blend. A cell under the floor reverts like any other loser; the ledger row
+    written before this check keeps its 6/6 verdict, so the corner is decided on this matrix and
+    walks again only once the matrix hash moves.
     """
     lg, mkt = cand["league"], cand["market"]
     original = deepcopy(meta[lg][mkt])
@@ -1101,14 +1229,14 @@ def _confirm_one(
         meta[lg][mkt].update(cand["edits"])
         meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
         _atomic_write_meta(meta)
-        failed = _confirm_meditate(lg, mkt, cand, meta)
+        failed = _confirm_meditate(lg, mkt, cand)
         if not failed:
             weight = _served_weight(model_pickle_path(lg, mkt))
-            if min_model_weight is None or weight >= min_model_weight:
+            failed = _under_floor(weight, min_model_weight)
+            if not failed:
                 keep = True
                 click.secho(f"  SHIPPED (devel) {lg} {mkt} w={weight:.3f}", fg="green")
                 return (lg, mkt, "SHIPPED", [])
-            failed = [f"w={weight:.3f}<{min_model_weight}"]
         click.secho(f"  REVERTED {lg} {mkt} — failed {' '.join(failed)}", fg="red")
         return (lg, mkt, "REVERTED", failed)
     finally:
@@ -1122,27 +1250,45 @@ def _failed_legs(verdict: dict) -> list[str]:
     return [leg for leg in ("S1", "S2", "S3") if not verdict[f"{leg.lower()}_pass"]]
 
 
+def _supersede_failures(
+    verdict: dict, w_in: float, w_out: float, min_model_weight: float | None
+) -> list[str]:
+    """Why an S1/S2/S3 verdict holds the incumbent; empty means the candidate may replace it.
+
+    The walk's blind ranking and the canonical refit's test-half read apply this one rule.
+    ``min_model_weight`` cuts both ways. A candidate under the floor is held whatever the verdict
+    says. Above it, a book-riding incumbent waives S2/S3 for that pair: both models sit on the book
+    at the line, so their paired Brier difference is ~0 by construction and neither test can ever
+    fire — S1 plus the weight separation is the whole evidence available for the swap. An
+    incumbent already above the floor keeps the full S1+S2+S3 bar. Both weights print on the
+    headline whether or not the floor is set.
+    """
+    click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
+    floor = _under_floor(w_out, min_model_weight)
+    if floor:
+        return floor
+    if min_model_weight is not None and verdict["s1_pass"] and min_model_weight > w_in:
+        click.echo("  [S2/S3 waived: incumbent rides the book]")
+        return []
+    return _failed_legs(verdict)
+
+
 def _supersede_one(
     meta: dict, cand: dict, *, auto_promote: bool = False, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
-    """Supersession-test one live cell: snapshot, retrain the candidate in place, require its exact
-    artifact identity and official six-gate ``model_stats`` ship, then run S1/S2/S3 and promote it
-    (on a passing verdict + operator yes) or restore the incumbent byte-identical.
+    """Supersession-test the walk's pick on one live cell: snapshot, refit it canonically in place,
+    require its exact artifact identity and official six-gate ``model_stats`` ship, then run
+    S1/S2/S3 against the served incumbent's test set and promote it (on a passing verdict +
+    operator yes) or restore the incumbent byte-identical.
 
     A live-cell swap needs the test to pass AND an explicit promote confirmation; every other exit —
-    HOLD, decline, retrain error, or an exception — hits the ``finally`` restore, which copies the
+    HOLD, decline, refit error, or an exception — hits the ``finally`` restore, which copies the
     snapshot back and never prunes, so the incumbent keeps serving. ``auto_promote`` answers that
     confirmation yes so an unattended run can swap live cells: the S1/S2/S3 verdict and the six
     gates still decide, only the human veto is gone. Every swap is still local and uncommitted, so
-    the review of the ``stat_meta.json`` diff is where a promotion is actually accepted.
-
-    ``min_model_weight`` cuts both ways on this lane. A candidate under the floor is held whatever
-    the verdict says. Above it, a book-riding incumbent waives S2/S3 for that pair: both models sit
-    on the book at the line, so their paired Brier difference is ~0 by construction and neither
-    test can ever fire — S1 plus the weight separation is the whole evidence available for the swap.
-    An incumbent already above the floor keeps the full S1+S2+S3 bar. Both weights print on the
-    headline whether or not the floor is set, so the live lane reads the incumbent's pickle from
-    its snapshot on every walk.
+    the review of the ``stat_meta.json`` diff is where a promotion is actually accepted. The weight
+    floor and its waiver are :func:`_supersede_failures`, read against the incumbent's pickle in
+    the snapshot.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -1152,7 +1298,7 @@ def _supersede_one(
     try:
         meta[lg][mkt].update(cand["edits"])  # shipped left as-is; the cell stays live
         _atomic_write_meta(meta)
-        error, diverged = _retrain_with_calibrated_retry(lg, mkt, cand, meta)
+        error, diverged = _run_canonical(lg, mkt, cand)
         if error:
             return (lg, mkt, "HELD", [f"retrain {error}"])
         prefix = ["diverged"] if diverged else []
@@ -1164,21 +1310,21 @@ def _supersede_one(
             return (lg, mkt, "HELD", [*prefix, "artifact identity"])
         if not _ship_from_model_stats(lg, mkt, expected):
             return (lg, mkt, "HELD", [*prefix, "model_stats identity/ship"])
-        baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
-        candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
-        verdict = supersede_verdict(baseline, candidate, _SHIP_PRED_COL, league=lg, market=mkt)
-        w_in = _served_weight(backup / model_pickle_path(lg, mkt).name)
-        w_out = _served_weight(model_pickle_path(lg, mkt))
-        waived = (
-            min_model_weight is not None and verdict["s1_pass"] and w_out >= min_model_weight > w_in
+        verdict = supersede_verdict(
+            load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL),
+            load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL),
+            _SHIP_PRED_COL,
+            league=lg,
+            market=mkt,
         )
-        click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
-        if waived:
-            click.echo("  [S2/S3 waived: incumbent rides the book]")
-        if min_model_weight is not None and w_out < min_model_weight:
-            return (lg, mkt, "HELD", [*prefix, f"w={w_out:.3f}<{min_model_weight}"])
-        if not (verdict["ship"] or waived):
-            return (lg, mkt, "HELD", prefix + _failed_legs(verdict))
+        failed = _supersede_failures(
+            verdict,
+            _served_weight(backup / model_pickle_path(lg, mkt).name),
+            _served_weight(model_pickle_path(lg, mkt)),
+            min_model_weight,
+        )
+        if failed:
+            return (lg, mkt, "HELD", prefix + failed)
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
         if auto_promote:
             click.secho(f"  auto-promoting {lg} {mkt} to {edits}", fg="yellow")
@@ -1234,10 +1380,10 @@ def _drop_activation_gated(fresh: list[list[dict]]) -> list[list[dict]]:
 
 
 def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
-    """List the run's plan: each cell's nominees in the order they will be tried, with their source."""
+    """List the run's plan: each cell's nominees in the order they run blind, with their source."""
     for label, group, verb in (
-        ("withheld cell", fresh, "persist + confirm"),
-        ("live cell", shipped, "supersession-test (S1/S2/S3)"),
+        ("withheld cell", fresh, "rank blind, then confirm the top passer"),
+        ("live cell", shipped, "rank blind against the incumbent, then S1/S2/S3-test the top one"),
     ):
         if group:
             click.secho(f"\n{len(group)} {label}(s) to {verb}:", bold=True)
@@ -1249,50 +1395,130 @@ def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
                     click.echo(wrapped(f"{n}. [{cand['source']}] {edits}", "    ", "       "))
 
 
-def _walk_nominees(
-    meta: dict, nominated: list[dict], attempt
-) -> tuple[str, str, str, list[str], str]:
-    """Retrain each nominee in order until one wins; report the deciding attempt and how deep it went.
+def _undecided(nominated: list[dict]) -> list[tuple[str, dict]]:
+    """The cell's nominees the ledger has not decided on this matrix, each with its report label.
 
-    The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`), so every nominee
-    retrains and scores on the same frame. No new revert machinery is needed: ``_confirm_one``'s
-    ``finally`` already restores stat_meta and prunes the pickle on every non-win, and
-    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win.
-
-    Nomination already drops ledger-decided corners (brief L4), but a concurrent walk can append a
-    verdict between selection and this loop, so a decided nominee is still skipped here — without
-    letting a trailing skip overwrite the verdict of a corner that actually ran.
+    Nomination already drops ledger-decided board corners (brief L4), but it never filters seeds or
+    the incumbent, and a concurrent walk can append a verdict between selection and this walk.
     """
-    outcome = ("", "", "REVERTED", ["no nominee"], "-")
-    _pin_cell_matrix(nominated[0]["league"], nominated[0]["market"])
     decided = _decided_pairs()
-    walked = False
-    for n, cand in enumerate(nominated, start=1):
+    walkable = [
+        (f"{n}/{len(nominated)} {cand['source']}", cand)
+        for n, cand in enumerate(nominated, start=1)
+        if (str(cand["corner_fingerprint"]), str(cand["matrix_hash"])) not in decided
+    ]
+    if len(walkable) < len(nominated):
         click.secho(
-            f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",
-            bold=True,
+            f"  {len(nominated) - len(walkable)} nominee(s) already decided on this matrix — "
+            "skipping",
+            fg="yellow",
         )
-        attempt_label = f"{n}/{len(nominated)} {cand['source']}"
-        if decided and (str(cand["corner_fingerprint"]), str(cand["matrix_hash"])) in decided:
-            click.secho(
-                "    ledger already holds this corner's verdict on this matrix — skipping",
-                fg="yellow",
-            )
-            if not walked:
-                outcome = (
-                    cand["league"],
-                    cand["market"],
-                    "SKIPPED",
-                    ["prior verdict on this matrix"],
-                    attempt_label,
-                )
+    return walkable
+
+
+def _incumbent_fingerprint(league: str, market: str) -> str | None:
+    """Corner fingerprint of the recipe a live cell serves, or ``None`` once it left the grid."""
+    context = _cell_context(league, market)
+    incumbent = _incumbent_corner(context)
+    if incumbent is None:
+        return None
+    return corner_fingerprint(*incumbent, str(context.matrix_sha256))
+
+
+def _blind_failures(
+    run: _BlindRun, reference: _BlindRun | None, min_model_weight: float | None
+) -> list[str]:
+    """Why a blind run cannot be the cell's pick; empty means it passes.
+
+    ``reference`` is a live cell's incumbent baseline and ``None`` on a withheld cell. A run that
+    fails a gate already fails S1, so the gates name the failure on both lanes.
+    """
+    if run.failed:
+        return run.failed
+    weight = float(run.row["model_weight"])
+    if reference is None:
+        return _under_floor(weight, min_model_weight)
+    verdict = supersede_verdict(
+        load_test_set(reference.dump, _SHIP_PRED_COL),
+        load_test_set(run.dump, _SHIP_PRED_COL),
+        _SHIP_PRED_COL,
+        league=run.candidate["league"],
+        market=run.candidate["market"],
+    )
+    return _supersede_failures(
+        verdict, float(reference.row["model_weight"]), weight, min_model_weight
+    )
+
+
+def _top_blind_passer(
+    measured: list[tuple[str, list[_BlindRun]]],
+    reference: _BlindRun | None,
+    min_model_weight: float | None,
+) -> tuple[str, _BlindRun] | None:
+    """The cell's pick: the passing run with the most blind slack, or ``None`` when none passes.
+
+    Each nominee's last run ranks. Slack is the value the board ranks on, and a strict comparison
+    keeps nomination order on a tie. The live baseline is never its own contender; an incumbent
+    whose calibrated retry fired still contends through that retry.
+    """
+    best = None
+    for label, runs in measured:
+        run = runs[-1]
+        if run is reference:
             continue
-        walked = True
-        lg, mkt, verdict, failed = attempt(meta, cand)
-        outcome = (lg, mkt, verdict, failed, attempt_label)
-        if verdict in _WIN_OUTCOMES:
-            break
-    return outcome
+        failed = _blind_failures(run, reference, min_model_weight)
+        click.echo(f"  {label}: blind {'FAIL ' + ' '.join(failed) if failed else 'PASS'}")
+        if not failed and (best is None or run.row["slack"] > best[1].row["slack"]):
+            best = (label, run)
+    return best
+
+
+def _walk_nominees(
+    meta: dict,
+    nominated: list[dict],
+    attempt,
+    *,
+    live: bool = False,
+    min_model_weight: float | None = None,
+) -> tuple[str, str, str, list[str], str]:
+    """Rank a cell's nominees blind, then read the ship holdout once, for the top passer only.
+
+    The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`) and every undecided
+    nominee runs blind on it (:func:`_measure_blind`); none touches stat_meta.json. ``attempt`` —
+    :func:`_confirm_one` or :func:`_supersede_one` — then persists the pick and refits it from its
+    sandbox pickle, and that refit's ship-holdout verdict is the cell's: a failure is reverted by
+    ``attempt``'s own ``finally`` and ends the walk, because reading a second nominee on the test
+    half would be selection on the test half again. With no blind passer the cell is held and its
+    test half never read.
+
+    A live cell measures every nominee against its incumbent's blind run, so its incumbent's recipe
+    must be among the undecided nominees; without it (cut by ``--confirm-nominees``, or already
+    decided on this matrix) the cell is held before anything runs.
+    """
+    lg, mkt = nominated[0]["league"], nominated[0]["market"]
+    walkable = _undecided(nominated)
+    if not walkable:
+        return (lg, mkt, "SKIPPED", ["prior verdict on this matrix"], "-")
+    baseline = _incumbent_fingerprint(lg, mkt) if live else None
+    if live and baseline not in {cand["corner_fingerprint"] for _, cand in walkable}:
+        return (lg, mkt, "HELD", ["no incumbent baseline"], "-")
+    _pin_cell_matrix(lg, mkt)
+    measured = []
+    for label, cand in walkable:
+        click.secho(f"\n  nominee {label} {lg} {mkt}", bold=True)
+        measured.append((label, _measure_blind(meta, cand)))
+    reference = next(
+        (runs[0] for _, runs in measured if runs[0].candidate["corner_fingerprint"] == baseline),
+        None,
+    )
+    if reference is not None and reference.row is None:
+        return (lg, mkt, "HELD", ["incumbent baseline", *reference.failed], "-")
+    pick = _top_blind_passer(measured, reference, min_model_weight)
+    if pick is None:
+        return (lg, mkt, "HELD", ["no blind pass"], "-")
+    label, run = pick
+    click.secho(f"\n  canonical refit of {label} {lg} {mkt}", bold=True)
+    return (*attempt(meta, {**run.candidate, "params_from": run.model}), label)
 
 
 def _walk_lanes(
@@ -1316,13 +1542,17 @@ def _walk_lanes(
     )
     deadline = None if deadline_hours is None else time.monotonic() + deadline_hours * 3600
     results = []
-    for lane, attempt in ((fresh, confirm), (shipped, supersede)):
+    for lane, attempt, live in ((fresh, confirm, False), (shipped, supersede, True)):
         for nominated in lane:
             if deadline is not None and time.monotonic() > deadline:
                 lead = nominated[0]
                 results.append((lead["league"], lead["market"], "SKIPPED", ["deadline"], "-"))
                 continue
-            results.append(_walk_nominees(meta, nominated, attempt))
+            results.append(
+                _walk_nominees(
+                    meta, nominated, attempt, live=live, min_model_weight=min_model_weight
+                )
+            )
     return results
 
 
@@ -1336,19 +1566,22 @@ def run_confirm(
     auto_promote: bool = False,
     min_model_weight: float | None = None,
 ) -> None:
-    """Confirm the sweep's winners: auto-ship withheld cells on a clean 6/6, supersession-test live cells.
+    """Confirm the sweep's winners: rank each cell's nominees blind, then refit the top one.
 
     ``board`` is the in-memory sweep result (a row per corner). Each cell nominates its top corners
-    plus any seed and its incumbent; the nominees are retrained in order until one ships. Withheld
-    cells are persisted + retrained and kept on a clean 6/6 (else reverted+pruned). Already-shipped
-    cells (present when the sweep ran ``--include-shipped``) run the S1/S2/S3 test and swap the live
-    cell only on a passing verdict AND an operator yes; any loss restores the incumbent. ``yes``
-    skips only the upfront gate — live-cell promotions prompt individually unless ``auto_promote``
-    answers them. ``max_nominees`` caps each cell's walk at its first N nominees;
-    ``deadline_hours`` skips cells not yet started when the budget runs out; ``fresh_only`` drops
-    the live lane for unattended runs. ``min_model_weight`` sets the campaign's blend-weight floor:
-    book-riding corners drop out of every lane, a confirmed cell under the floor reverts, and a
-    book-riding incumbent waives S2/S3 against a candidate above it.
+    plus any seed and its incumbent. Every nominee runs at full HPO in a research sandbox, scored
+    on the cross-fit validation half, and only the cell's top passer is persisted and refit
+    canonically, its ship holdout read once (:func:`_walk_nominees`). A withheld cell keeps its pick
+    on a clean 6/6 (else reverted+pruned). An already-shipped cell (present when the sweep ran
+    ``--include-shipped``) ranks its nominees on S1/S2/S3 against its incumbent's blind run, and
+    swaps its pick in only on a passing test-half verdict AND an operator yes; any loss restores
+    the incumbent. ``yes`` skips only the upfront gate — live-cell promotions prompt individually
+    unless ``auto_promote`` answers them. ``max_nominees`` caps each cell's walk at its first N
+    nominees; ``deadline_hours`` skips cells not yet started when the budget runs out;
+    ``fresh_only`` drops the live lane for unattended runs. ``min_model_weight`` sets the
+    campaign's blend-weight floor: book-riding corners drop out of every lane, a blind run or
+    canonical refit under the floor fails, and a book-riding incumbent waives S2/S3 against a
+    candidate above it.
     """
     meta = load_stat_meta(_STAT_META)
     ready = _candidates(board, meta, max_nominees, min_model_weight=min_model_weight)
@@ -1362,13 +1595,13 @@ def run_confirm(
         click.echo("no confirmable candidates after the activation gate.")
         return
     _announce_plan(fresh, shipped)
-    retrains = sum(len(n) for n in fresh) + sum(len(n) for n in shipped)
+    runs = sum(len(n) for n in fresh) + sum(len(n) for n in shipped)
     each = _confirm_median_seconds()
-    budget = f" (~{human_seconds(each)} each, <={human_seconds(retrains * each)})" if each else ""
+    budget = f" (~{human_seconds(each)} each, ~{human_seconds(runs * each)} in all)" if each else ""
     prompt = (
-        f"\nConfirm {len(fresh)} withheld and supersession-test {len(shipped)} live cell(s) — up to "
-        f"{retrains} full-HPO retrains{budget}, stopping at each cell's first shipping nominee? "
-        "Withheld failures auto-revert; live promotions prompt"
+        f"\nRank {len(fresh)} withheld and {len(shipped)} live cell(s) blind — {runs} full-HPO "
+        f"sandbox runs{budget}, plus calibrated retries — then refit each cell's top passer and "
+        "read its ship holdout once? Withheld failures auto-revert; live promotions prompt"
     )
     if not yes and not click.confirm(prompt):
         click.echo("aborted; stat_meta.json unchanged.")
@@ -1384,7 +1617,7 @@ def run_confirm(
 def _print_confirm_report(
     results: list[tuple[str, str, str, list[str], str]], backup: pathlib.Path
 ) -> None:
-    """Final table (cell → nominee → outcome → failing gates) + tally, backup path, commit reminder."""
+    """Final table (cell → refit nominee → outcome → failing gates), tally, backup, reminder."""
     rows = [
         [f"{lg} {mkt}", nominee, outcome, " ".join(failed) or "-"]
         for lg, mkt, outcome, failed, nominee in results

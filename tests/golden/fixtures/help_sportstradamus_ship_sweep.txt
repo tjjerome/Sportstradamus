@@ -3,8 +3,9 @@ Usage: sportstradamus ship sweep [OPTIONS]
   Operation Ship 75 strategy sweep — one conditional-TPE study per cell over the
   strategy catalog, each corner scored on a holdout-blind cross-fit gate row.
   Naming ``--league`` and ``--market`` sweeps one cell; omitting ``--market``
-  sweeps the board (``--league`` narrows it). ``--confirm`` then full-HPO-
-  retrains each cell's nominees until one ships.
+  sweeps the board (``--league`` narrows it). ``--confirm`` then reruns each
+  cell's nominees at full HPO, ranks them on the same cross-fit rows, and refits
+  the top one canonically, reading its ship holdout once.
 
 Options:
   --league TEXT                   League code, e.g. WNBA. A single cell also
@@ -35,10 +36,15 @@ Options:
                                   the archive, so cells parallelize cleanly;
                                   corners within a cell do not. No effect with
                                   --market, which is one cell.  [x>=1]
-  --confirm                       After ranking, persist each cell's best
-                                  persistable corner to stat_meta.json and
-                                  confirm it with a full-HPO retrain; failures
-                                  auto-revert (stat_meta + pickle).
+  --confirm                       After ranking, run each cell's nominees at
+                                  full HPO in a research sandbox, scored on the
+                                  same cross-fit validation half (stat_meta.json
+                                  untouched), and rank them there. Only the top
+                                  passer is persisted to stat_meta.json and
+                                  refit with its ranked booster; its ship-
+                                  holdout verdict is read once, and a failure
+                                  auto-reverts (stat_meta + pickle) and ends the
+                                  cell.
   --yes                           Skip the --confirm prompt (unattended).
                                   Requires --confirm.
   --confirm-nominees INTEGER RANGE
@@ -65,12 +71,14 @@ Options:
   --min-model-weight FLOAT RANGE  Ship policy: a board corner whose fitted blend
                                   weight sits below this ranks but never
                                   nominates (book-less cells at w=1.0 are
-                                  exempt); a confirmed retrain landing below it
-                                  is reverted; in the live lane a candidate at
-                                  or above it may supersede an incumbent below
-                                  it on S1 alone — S2/S3 cannot separate two
-                                  book-riding legs. Unset keeps today's
-                                  behavior. Requires --confirm.  [0<=x<1]
+                                  exempt); a nominee whose full-HPO run lands
+                                  below it never passes, and a canonical refit
+                                  landing below it is reverted; in the live lane
+                                  a candidate at or above it may supersede an
+                                  incumbent below it on S1 alone — S2/S3 cannot
+                                  separate two book-riding legs. Unset keeps
+                                  today's behavior. Requires --confirm.
+                                  [0<=x<1]
   --resume                        Reopen each cell's Optuna journal and reuse
                                   every admissible prior board row — resume a
                                   crashed multi-hour run instead of retraining

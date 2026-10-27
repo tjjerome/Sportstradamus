@@ -92,6 +92,8 @@ def _dpo_controls(dispersion: str, blending: str, posthoc: str) -> dict[str, str
 
 # Stands in for the per-cell trial ceiling wherever a test is not about the ceiling itself.
 _TIMEOUT = sweep._MEDITATE_TRIAL_TIMEOUT_S
+# Any dump the scorer is pointed at; its loaders are stubbed, so the paths only travel.
+_DUMP = (pathlib.Path("dump.csv"), pathlib.Path("model.mdl"))
 # The role×position two-part strategy is gated by the per-(league, market) role registry; the
 # affine strategy needs only a ``Player position`` column. A structural spec enrolls — and now
 # also ranks — only for a cell whose real matrix carries its grouping columns. These fixtures
@@ -937,13 +939,16 @@ def test_score_corner_runs_production_gate_for_sn(monkeypatch):
         return _canned_row(ship=True, g4_pit_ks=0.03)
 
     model.update(dispersion_cal=1.27, skew_cal=2.3)
-    monkeypatch.setattr(sweep, "load_test_set", lambda path, col: frame)
-    monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: model)
+    read = []
+    monkeypatch.setattr(sweep, "load_test_set", lambda path, col: read.append(path) or frame)
+    monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: read.append(path) or model)
     monkeypatch.setattr(sweep, "gate_row", fake_gate_row)
     monkeypatch.setattr(sweep, "apply_thresholds", lambda row: row)
 
-    row = sweep._score_corner("WNBA", "AST", corner, spec)
+    row = sweep._score_corner("WNBA", "AST", corner, spec, *_DUMP)
 
+    # The caller names the dump: the sweep's deterministic one, or confirm's blind sandbox.
+    assert read == list(_DUMP)
     # The honest gate decodes under the trial's normalization — no test re-fit of calibration.
     assert captured["decode_strategy"] == "centered_additive_mean10"
     assert row["normalization"] == "centered_additive_mean10"
@@ -976,7 +981,7 @@ def test_score_corner_reads_n_authentic_validation_from_diagnostics(monkeypatch)
     model["diagnostics"] = {"n_authentic_validation": 42}
     monkeypatch.setattr(sweep, "load_test_set", lambda path, col: frame)
     monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: model)
-    assert sweep._score_corner("WNBA", "AST", corner, spec)["n_authentic_validation"] == 42
+    assert sweep._score_corner("WNBA", "AST", corner, spec, *_DUMP)["n_authentic_validation"] == 42
 
 
 def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
@@ -1004,7 +1009,7 @@ def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
     monkeypatch.setattr(sweep, "gate_row", fake_gate_row)
     monkeypatch.setattr(sweep, "apply_thresholds", lambda row: row)
 
-    row = sweep._score_corner("MLB", "pitcher strikeouts", corner, spec)
+    row = sweep._score_corner("MLB", "pitcher strikeouts", corner, spec, *_DUMP)
     assert captured["decode_strategy"] == "none"
     assert row["zinb_mode"] == "hurdle"
     assert row["skew_cal"] == 0.0
@@ -1023,12 +1028,12 @@ def test_score_corner_requires_matching_active_structural_artifacts(monkeypatch)
         lambda *args, **kwargs: _canned_row(ship=True, g4_pit_ks=0.02),
     )
     monkeypatch.setattr(sweep, "apply_thresholds", lambda row: row)
-    assert sweep._score_corner("NFL", "rushing yards", corner, spec)["ships"] is True
+    assert sweep._score_corner("NFL", "rushing yards", corner, spec, *_DUMP)["ships"] is True
 
     _, killed = _artifact(spec, "NFL", "rushing yards", corner, status="killed_fallback")
     monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: killed)
     with pytest.raises(InactiveStrategyArtifactError, match="inactive strategy artifact"):
-        sweep._score_corner("NFL", "rushing yards", corner, spec)
+        sweep._score_corner("NFL", "rushing yards", corner, spec, *_DUMP)
 
 
 def test_verdict_and_failed_gates_include_g6():
@@ -1042,8 +1047,9 @@ def test_run_and_score_tags_family_and_uses_honest_gate(monkeypatch):
     monkeypatch.setattr(sweep, "_run_deterministic_meditate", lambda *a, **k: None)
     captured = {}
 
-    def fake_score(league, market, corner, spec):
+    def fake_score(league, market, corner, spec, csv_path, mdl_path):
         captured["corner"] = corner
+        captured["dump"] = (csv_path, mdl_path)
         return {**corner, "slack": 0.1, "ships": True}
 
     monkeypatch.setattr(sweep, "_score_corner", fake_score)
@@ -1057,6 +1063,7 @@ def test_run_and_score_tags_family_and_uses_honest_gate(monkeypatch):
     }
     row = sweep._run_and_score("WNBA", "AST", "SkewNormal", corner)
     assert captured["corner"] == corner
+    assert captured["dump"] == sweep._dump_paths("WNBA", "AST", corner, get_strategy("SkewNormal"))
     assert row["family"] == "SkewNormal"
     assert row["slack"] == 0.1
 
@@ -1419,7 +1426,7 @@ def test_search_cell_survives_a_failing_corner(monkeypatch):
     monkeypatch.setattr(
         sweep,
         "_score_corner",
-        lambda lg, mkt, corner, spec: {**corner, "slack": 0.1, "ships": True},
+        lambda lg, mkt, corner, spec, csv_path, mdl_path: {**corner, "slack": 0.1, "ships": True},
     )
     board = sweep.search_cell("NHL", "blocked")
 
@@ -2317,9 +2324,10 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
 
 
 def _ledger_row(**overrides):
-    """One confirm-ledger row (the model_stats echo confirm.py records per nominee)."""
+    """One blind nominee-ledger row (confirm's cross-fit gate row, the half the board scores)."""
     row = {
         "recorded_at": "2026-07-28T00:00:00",
+        "eval_split": sweep.EVAL_SPLIT_CROSSFIT,
         "strategy_slug": "SkewNormal",
         # Discount pairs are signature-scoped: a row recorded under rotated-away code is
         # dropped, so the synthetic rows must carry the live signature to count as pairs.
@@ -2460,6 +2468,31 @@ def test_ledger_gate_discounts_are_flat_quantile_scalars_via_echo_columns():
     assert rank["g4_pit_ks"] >= veto["g4_pit_ks"]
     assert rank["g2_star_z"] == pytest.approx(1.5)
     assert veto["g2_star_z"] == pytest.approx(1.0)
+
+
+def test_ledger_readers_price_blind_rows_only(capsys):
+    """A test-half verdict never prices the board, and a ledger row that predates ``eval_split``
+    was one: only a blind row scores the half the board scores, so a pair measures the HPO shift
+    and never a change of half.
+    """
+    echo = {f"board_{gate}": 0.0 for gate in sweep._DISCOUNTED_GATES}
+    cells = [("MLB", "hits"), ("MLB", "runs"), ("NBA", "PTS"), ("NBA", "AST")]
+    blind = [
+        _ledger_row(league=league, market=market, g4_pit_ks=0.01 * (i + 1), **echo)
+        for i, (league, market) in enumerate(cells * 2)
+    ]
+    test_half = [{**row, "eval_split": sweep.EVAL_SPLIT_TEST, "g4_pit_ks": 1.0} for row in blind]
+
+    pd.DataFrame(blind + test_half).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    assert sweep._ledger_gate_discounts(None)[1]["g4_pit_ks"] == pytest.approx(0.045)
+    sweep._print_ledger_expectations()
+    assert "(8 ledger nominees)" in capsys.readouterr().out
+
+    for unpriced in (pd.DataFrame(test_half), pd.DataFrame(blind).drop(columns="eval_split")):
+        unpriced.to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+        assert sweep._ledger_gate_discounts(None) == ({}, {})
+        sweep._print_ledger_expectations()
+        assert "P(ship)" not in capsys.readouterr().out
 
 
 def _gate_scalars(g4, g4_max):

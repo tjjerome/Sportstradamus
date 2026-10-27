@@ -14,12 +14,14 @@ Canonical spec/control fingerprints make the board resumable per row rather than
 budgeted search never enumerates a whole cell — and the Optuna journal makes the study itself
 resumable.
 
-Deterministic trials rank only. ``--confirm`` walks each cell's nominees and requires a clean
-full-HPO 6/6 before a withheld model can ship. Because those confirms land systematically below
-their board scores, the board sorts on ``discounted_slack`` — raw slack re-priced under the
-confirm ledger's measured confirm-minus-board shifts at a conservative quantile — while the
-milder median pricing lands in ``veto_slack``, the admissibility bar confirm's nomination veto
-reads (:func:`_ledger_gate_discounts`).
+Deterministic trials rank only. ``--confirm`` reruns each cell's nominees at full HPO on the same
+cross-fit validation half (``meditate --holdout-blind --artifact-output``, a sandbox), ranks them
+there, and reads the ship holdout once, for the top-ranked nominee's canonical refit
+(:mod:`sportstradamus.training.model_strategy.confirm`). Because full-HPO runs land systematically
+below their board scores, the board sorts on ``discounted_slack`` — raw slack re-priced under the
+nominee ledger's measured blind-minus-board shifts at a conservative quantile — while the milder
+median pricing lands in ``veto_slack``, the admissibility bar confirm's nomination veto reads
+(:func:`_ledger_gate_discounts`).
 """
 
 import contextlib
@@ -187,6 +189,9 @@ _DIST_CLASS_ALL = "all"
 # columns, different frame — cannot be mistaken for it: they carry <NA> and are admitted neither to
 # the corner cache nor to confirm's nomination lane.
 EVAL_SPLIT_CROSSFIT: str = "crossfit_validation"
+# The nominee ledger's other half: a canonical run's verdict on the ship holdout, read once per
+# cell. A ledger row that predates the column was such a read, so a blank reads as this.
+EVAL_SPLIT_TEST: str = "test"
 
 
 # Common human-readable controls ride beside the canonical ``controls_json``. A future strategy can
@@ -273,8 +278,9 @@ STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
     str(pkg_resources.files(_data_pkg) / "research" / "strategy_research_board.csv")
 )
 
-# Where confirm's _record_nominee_gates appends each full-HPO nominee's model_stats row; the board
-# reads it back to price how confirm verdicts land relative to board scores.
+# Where the confirm walk appends each nominee's blind full-HPO gate row and each cell's one
+# test-half verdict (``eval_split`` tells them apart); the board reads the blind rows back to price
+# how full-HPO runs land relative to board scores.
 NOMINEE_LEDGER_PATH: pathlib.Path = _REPO_ROOT / "research" / "confirm_nominee_gates.csv"
 
 # The gate scalars with a board-side counterpart to discount. g6's legs are CI bounds against
@@ -582,7 +588,12 @@ def _run_deterministic_meditate(
 
 
 def _score_corner(
-    league: str, market: str, corner: dict[str, str], spec: StrategySpec
+    league: str,
+    market: str,
+    corner: dict[str, str],
+    spec: StrategySpec,
+    csv_path: pathlib.Path,
+    mdl_path: pathlib.Path,
 ) -> dict[str, object]:
     """Score a trained corner's dump through the honest production gate.
 
@@ -590,8 +601,11 @@ def _score_corner(
     triple), so one gate path scores both families; ``decode_strategy`` is the swept SN
     normalization or the canonical no-transform count value. ``dispersion_cal`` / ``skew_cal`` are read
     from the pickle for context only (a count cell dumps ``skew_cal`` absent → 0.0).
+
+    The paths are the caller's: the sweep's deterministic dump (:func:`_dump_paths`), or the
+    confirm walk's blind full-HPO sandbox. Both hold cross-fit validation rows, so one scorer ranks
+    both.
     """
-    csv_path, mdl_path = _dump_paths(league, market, corner, spec)
     df = load_test_set(csv_path, _SHIP_PRED_COL)
     filedict = pd.read_pickle(mdl_path)
     context = _cell_context(league, market)
@@ -700,7 +714,9 @@ def _run_and_score(
     start = time.monotonic()
     try:
         _run_deterministic_meditate(league, market, corner, spec, timeout_s)
-        row = _score_corner(league, market, corner, spec)
+        row = _score_corner(
+            league, market, corner, spec, *_dump_paths(league, market, corner, spec)
+        )
     except (
         InactiveStrategyArtifactError,
         subprocess.CalledProcessError,
@@ -1122,25 +1138,39 @@ def _prior_standings(evaluated: dict[str, dict[str, object]]) -> list[tuple[str,
     return [(str(row["family"]), float(row["slack"])) for row in evaluated.values()]
 
 
-def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscounts]:
-    """Per-gate confirm-minus-board shifts from the nominee ledger, priced at two quantiles.
+def _crossfit_ledger(ledger: pd.DataFrame) -> pd.DataFrame:
+    """The ledger's blind rows, scored on the cross-fit validation half the board also scores.
 
-    Full-HPO confirms land systematically worse than the holdout-blind board on the same corner
-    (g4_pit_ks +0.0115, g2_star_z +0.034 on the 37-row ledger), so raw board slack oversells its
-    nominees. Non-diverged ledger rows are paired with their board-side gate values — the ledger's
-    own ``board_*`` echo columns when a confirm-side change has added them, else an identity join
-    against the board CSV at ``out`` — and each gate's shift distribution is summarized twice:
-    the :data:`_RANK_DISCOUNT_QUANTILE` scalars price ``discounted_slack`` (the ordering), the
-    :data:`_VETO_DISCOUNT_QUANTILE` scalars price ``veto_slack`` (the nomination bar). A flat
-    per-gate quantile beat the deleted per-(family, n) OLS 2.6x on leave-one-cell-out error —
-    the ledger is too thin to support conditional structure (brief R1). ``({}, {})`` (inert) when
-    the ledger is absent, unpairable, or thinner than :data:`_MIN_LEDGER_ROWS` pairs drawn from
-    :data:`_MIN_LEDGER_CELLS` distinct cells.
+    A row with no ``eval_split`` predates the column and was a test-half confirm, so it is never
+    one of them.
+    """
+    if "eval_split" not in ledger.columns:
+        return ledger.iloc[:0]
+    return ledger[ledger["eval_split"].eq(EVAL_SPLIT_CROSSFIT)]
+
+
+def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscounts]:
+    """Per-gate blind-minus-board shifts from the nominee ledger, priced at two quantiles.
+
+    Full-HPO runs land systematically worse than the deterministic board on the same corner (the
+    37 test-half confirms measured g4_pit_ks +0.0115, g2_star_z +0.034), so raw board slack
+    oversells its nominees. Only the walk's blind rows price that: they score the same cross-fit
+    validation half the board does, so a pair measures the HPO shift and never a change of half.
+    The test-half verdicts, legacy rows included, are left out, so the discounts stay inert until
+    the floors below fill with blind pairs. Non-diverged blind rows are paired with their
+    board-side gate values — the ledger's own ``board_*`` echo columns when a confirm-side change
+    has added them, else an identity join against the board CSV at ``out`` — and each gate's
+    shift distribution is summarized twice: the :data:`_RANK_DISCOUNT_QUANTILE` scalars price
+    ``discounted_slack`` (the ordering), the :data:`_VETO_DISCOUNT_QUANTILE` scalars price
+    ``veto_slack`` (the nomination bar). A flat per-gate quantile beat the deleted per-(family, n)
+    OLS 2.6x on leave-one-cell-out error — the ledger is too thin to support conditional structure
+    (brief R1). ``({}, {})`` (inert) when the ledger is absent, unpairable, or thinner than
+    :data:`_MIN_LEDGER_ROWS` pairs drawn from :data:`_MIN_LEDGER_CELLS` distinct cells.
     """
     inert: tuple[_GateDiscounts, _GateDiscounts] = ({}, {})
     if not NOMINEE_LEDGER_PATH.exists():
         return inert
-    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    ledger = _crossfit_ledger(pd.read_csv(NOMINEE_LEDGER_PATH))
     diverged = pd.to_numeric(ledger["dispersion_cal"], errors="coerce") <= _DIVERGED_DISPERSION_CAL
     ledger = ledger[~diverged]
     # A pair measures the board→confirm gap under the scoring code that produced it. A registry
@@ -1855,15 +1885,17 @@ def _ledger_board_slack(ledger: pd.DataFrame) -> pd.Series:
 
 
 def _print_ledger_expectations() -> None:
-    """Calibrated confirm odds: P(ship) per board-slack band × family class, from the ledger.
+    """Calibrated blind odds: P(ship) per board-slack band × family class, from the ledger.
 
-    Raw board rank is anti-predictive at the top (slack >= +0.19 shipped 1/9), so the rollup shows
-    what nominees of each shape actually did on full-HPO confirm. Silent when the ledger is absent
-    or has fewer than :data:`_MIN_LEDGER_ROWS` usable rows.
+    Raw board rank is anti-predictive at the top (slack >= +0.19 shipped 1/9 on test-half
+    confirms), so the rollup shows what nominees of each shape actually did at full HPO. It reads
+    the blind rows only: every nominee has one, on the half the board scores, while a test-half
+    verdict exists only for the nominee a walk chose. Silent when the ledger is absent or has
+    fewer than :data:`_MIN_LEDGER_ROWS` usable rows.
     """
     if not NOMINEE_LEDGER_PATH.exists():
         return
-    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    ledger = _crossfit_ledger(pd.read_csv(NOMINEE_LEDGER_PATH))
     families = (
         ledger["distribution"] if "distribution" in ledger.columns else ledger["strategy_slug"]
     )
@@ -1897,7 +1929,7 @@ def _print_ledger_expectations() -> None:
                 cells.append("-")
         table.append(cells)
     click.echo(
-        f"\nconfirm P(ship) by board slack × family class ({len(nominees)} ledger nominees):"
+        f"\nblind full-HPO P(ship) by board slack × family class ({len(nominees)} ledger nominees):"
     )
     click.echo(tabulate.tabulate(table, headers=["board slack", *_DIST_CLASSES], tablefmt="github"))
 
@@ -2205,8 +2237,10 @@ def _note_board_only_flags(
     "--confirm",
     is_flag=True,
     default=False,
-    help="After ranking, persist each cell's best persistable corner to stat_meta.json and confirm "
-    "it with a full-HPO retrain; failures auto-revert (stat_meta + pickle).",
+    help="After ranking, run each cell's nominees at full HPO in a research sandbox, scored on the "
+    "same cross-fit validation half (stat_meta.json untouched), and rank them there. Only the top "
+    "passer is persisted to stat_meta.json and refit with its ranked booster; its ship-holdout "
+    "verdict is read once, and a failure auto-reverts (stat_meta + pickle) and ends the cell.",
 )
 @click.option(
     "--yes",
@@ -2249,10 +2283,10 @@ def _note_board_only_flags(
     type=click.FloatRange(min=0, max=1, max_open=True),
     default=None,
     help="Ship policy: a board corner whose fitted blend weight sits below this ranks but never "
-    "nominates (book-less cells at w=1.0 are exempt); a confirmed retrain landing below it is "
-    "reverted; in the live lane a candidate at or above it may supersede an incumbent below it on "
-    "S1 alone — S2/S3 cannot separate two book-riding legs. Unset keeps today's behavior. Requires "
-    "--confirm.",
+    "nominates (book-less cells at w=1.0 are exempt); a nominee whose full-HPO run lands below it "
+    "never passes, and a canonical refit landing below it is reverted; in the live lane a "
+    "candidate at or above it may supersede an incumbent below it on S1 alone — S2/S3 cannot "
+    "separate two book-riding legs. Unset keeps today's behavior. Requires --confirm.",
 )
 @click.option(
     "--resume",
@@ -2313,7 +2347,8 @@ def main(
     """Operation Ship 75 strategy sweep — one conditional-TPE study per cell over the strategy
     catalog, each corner scored on a holdout-blind cross-fit gate row. Naming ``--league`` and
     ``--market`` sweeps one cell; omitting ``--market`` sweeps the board (``--league`` narrows it).
-    ``--confirm`` then full-HPO-retrains each cell's nominees until one ships.
+    ``--confirm`` then reruns each cell's nominees at full HPO, ranks them on the same cross-fit
+    rows, and refits the top one canonically, reading its ship holdout once.
     """
     _reject_inert_flags(
         league,

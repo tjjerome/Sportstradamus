@@ -1,14 +1,13 @@
 """Golden pins for the g4-only calibrated-HPO retry owned by the confirm walk.
 
-The retry predicate decides when a nominee that failed ship under loss-selection
-gets its one-shot ``hpo_selection="calibrated"`` retrain, and the pin helper
-persists the knob (stat_meta + the nominee's edits) so the weekly meditate keeps
-the selection that shipped. Both are pure enough to pin exhaustively here; the
-count closure itself is covered by
-``tests/integration/test_calibrated_count_closure.py``.
+The retry predicate decides when a nominee whose blind run failed ship under
+loss-selection gets its one-shot ``hpo_selection="calibrated"`` blind rerun. A
+retry that ranks first carries the pin in its edits, and the canonical refit
+persists it so the weekly meditate keeps the selection that shipped. The
+predicate is pure enough to pin exhaustively here; the count closure itself is
+covered by ``tests/integration/test_calibrated_count_closure.py``.
 """
 
-import json
 from types import SimpleNamespace
 
 import pandas as pd
@@ -18,7 +17,6 @@ from sportstradamus.training.model_strategy import confirm
 from sportstradamus.training.model_strategy.confirm import (
     _g4_only_retry_wanted,
     _gate_passed,
-    _pin_calibrated,
     _retry_calibrated_wanted,
 )
 
@@ -103,48 +101,18 @@ def _candidate() -> dict:
     return {"league": "NBA", "market": "FTM", "strategy_slug": "zinb", "edits": {"dist": "ZINB"}}
 
 
-def test_pin_calibrated_meta_edits_and_disk(tmp_path, monkeypatch):
-    meta_path = tmp_path / "stat_meta.json"
-    meta = {"NBA": {"FTM": {"dist": "ZINB", "shipped": "devel"}}}
-    meta_path.write_text(json.dumps(meta, indent=4) + "\n")
-    monkeypatch.setattr(confirm, "_STAT_META", meta_path)
-    cand = _candidate()
-
-    _pin_calibrated(meta, cand)
-
-    assert meta["NBA"]["FTM"]["hpo_selection"] == "calibrated"
-    assert cand["edits"]["hpo_selection"] == "calibrated"
-    text = meta_path.read_text()
-    assert text.endswith("\n")
-    on_disk = json.loads(text)
-    assert on_disk["NBA"]["FTM"]["hpo_selection"] == "calibrated"
-    # Committed stat_meta format: 4-space indent, so the review diff stays one line.
-    assert '    "NBA"' in text
-
-
-def test_retry_wanted_structural_never_reads_model_stats(monkeypatch):
+def test_retry_wanted_structural_never_retries(monkeypatch):
     monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=True))
-    monkeypatch.setattr(
-        confirm, "_cell_row", lambda *a: pytest.fail("structural must short-circuit")
-    )
-    assert _retry_calibrated_wanted(_candidate(), {}) is False
-
-
-def test_retry_wanted_unreadable_model_stats(monkeypatch):
-    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False))
-
-    def _raise(*args):
-        raise OSError("no parquet")
-
-    monkeypatch.setattr(confirm, "_cell_row", _raise)
-    assert _retry_calibrated_wanted(_candidate(), {}) is False
+    assert _retry_calibrated_wanted(_candidate(), _row().to_dict(), {}) is False
 
 
 def test_retry_wanted_delegates_to_predicate(monkeypatch):
     monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False))
-    monkeypatch.setattr(confirm, "_cell_row", lambda *a: _row())
-    assert _retry_calibrated_wanted(_candidate(), {}) is True
-    # The cell's own persisted knobs decide, exactly as the subprocess resolved them.
-    assert _retry_calibrated_wanted(_candidate(), {"hpo_selection": "calibrated"}) is False
-    monkeypatch.setattr(confirm, "_cell_row", lambda *a: _row(distribution="ZINB"))
-    assert _retry_calibrated_wanted(_candidate(), {"zinb_mode": "hurdle"}) is False
+    assert _retry_calibrated_wanted(_candidate(), _row().to_dict(), {}) is True
+    # The nominee's knobs with its edits applied decide, exactly as its canonical refit resolves.
+    assert (
+        _retry_calibrated_wanted(_candidate(), _row().to_dict(), {"hpo_selection": "calibrated"})
+        is False
+    )
+    zinb = _row(distribution="ZINB").to_dict()
+    assert _retry_calibrated_wanted(_candidate(), zinb, {"zinb_mode": "hurdle"}) is False
