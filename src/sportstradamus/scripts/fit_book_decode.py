@@ -4,7 +4,7 @@ The protocol is frozen in docs/handoffs/i6d-decode-preregistration.md (cited as 
 script implements it and may not change a rule without a new pre-registration. It reads prices
 only, never an outcome. It opens the archive read-only and writes
 ``data/config/book_decode.json``, which ``helpers/book_levelling.py`` applies at the training
-read:
+read. Run it as:
 
     SPORTSTRADAMUS_ARCHIVE_READ_ONLY=1 poetry run python -m sportstradamus.scripts.fit_book_decode
 """
@@ -18,7 +18,7 @@ import math
 import os
 import subprocess
 from collections.abc import Sequence
-from functools import cache, partial
+from functools import partial
 from operator import itemgetter
 from pathlib import Path
 
@@ -84,10 +84,10 @@ _DIST_CONFIG_PATHS = (
 )
 # §7: a backfill block reads the config of the day before ladder capture began (92f918ab).
 _BACKFILL_CONFIG_DATE = datetime.date(2026, 6, 17)
-# §5: the native layers a block is referenced against, in the order it tries them.
-_REFERENCE_LAYERS = ("01:00", "23:00")
 # §4: close rows fall after the training read's cutoff, so they are never levelled.
 _CLOSE_LAYER = "23:00"
+# §5: the native layers a block is referenced against, in the order it tries them.
+_REFERENCE_LAYERS = ("01:00", _CLOSE_LAYER)
 # §5: a migrated row matches a reference row on these, the line exactly equal.
 _KEY = ["game_date", "entity", "book", "line"]
 
@@ -98,7 +98,8 @@ _DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB") or str(
 )
 _TABLE_PATH = Path(str(pkg_resources.files(data) / "config" / "book_decode.json"))
 
-# §1: every sportsbook row with its same-observation, same-line rung, joined as the read path does.
+# §1: every sportsbook row with its same-observation, same-line rung, joined as the training
+# read's ``Archive.get_training_quote_inputs`` joins it.
 _ROWS_SQL = """
 SELECT o.game_date, o.entity, o.book, o.line, o.ev, o.under_prob, o.observed_at, l.p_over
 FROM odds o
@@ -185,13 +186,13 @@ def family_on(history: DistHistory, league: str, market: str, on: datetime.date)
     return _DECODE_FAMILY.get(configs[-1].get(league, {}).get(market, _UNCONFIGURED_FAMILY))
 
 
-@cache
 def _dist_history() -> DistHistory:
     """Every commit of the distribution config (§7), oldest first, read from git."""
     git = partial(subprocess.run, cwd=_REPO_ROOT, capture_output=True, text=True, check=True)
     log = git(["git", "log", "--reverse", "--format=%H %cs", "--", *_DIST_CONFIG_PATHS]).stdout
     history = []
-    for sha, committed in (line.split() for line in log.splitlines()):
+    for line in log.splitlines():
+        sha, committed = line.split()
         present = git(["git", "ls-tree", "--name-only", sha, "--", *_DIST_CONFIG_PATHS]).stdout
         path = next(newest for newest in _DIST_CONFIG_PATHS if newest in present.split())
         config = json.loads(git(["git", "show", f"{sha}:{path}"]).stdout)
