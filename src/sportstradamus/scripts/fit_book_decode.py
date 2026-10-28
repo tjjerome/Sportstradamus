@@ -44,8 +44,8 @@ from sportstradamus.helpers.book_levelling import (
 from sportstradamus.helpers.training_quotes import (
     DFS_PLATFORM_BOOKS,
     ArchivedBookQuote,
-    _positive,
     archive_ev_is_usable,
+    is_positive,
 )
 
 # §9 (owner, 2026-10-27): a decode is level when its validation half sits this close to the
@@ -210,7 +210,7 @@ def _usable(name: str, rows: pd.DataFrame) -> pd.DataFrame:
     if name == STORED:
         return rows[rows["under_prob"].gt(0) & rows["under_prob"].lt(1)]
     decodable = [
-        _positive(line) and archive_ev_is_usable(ev, line)
+        is_positive(line) and archive_ev_is_usable(ev, line)
         for ev, line in zip(rows["ev"], rows["line"], strict=True)
     ]
     return rows[np.array(decodable, dtype=bool)]
