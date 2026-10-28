@@ -141,8 +141,8 @@ def _nominees(
         cand = _corner_candidate(context, spec, lg, mkt, controls, slack=math.nan, split=None)
         if cand is not None:
             nominated.append({**cand, "source": "seed/incumbent"})
-    # First nominee per corner wins, so a seed repeating a board corner retrains once, as its row.
-    by_fingerprint = {}
+    # A seed or incumbent repeating a board corner is dropped: the board row nominates first.
+    by_fingerprint: dict[str, dict] = {}
     for cand in nominated:
         by_fingerprint.setdefault(cand["corner_fingerprint"], {**cand, "board_rank": board_rank})
     return list(by_fingerprint.values())
