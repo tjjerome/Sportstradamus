@@ -224,12 +224,26 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
   that priced a doubled same-side quote at exactly .5 (fixed going forward:
   `moneylines._resolve_prop_lines` keys prop rows by side); the owner adopted its provenance-keyed
   re-read and moved its build into week 2: the levelled training read, the decode harness, the
-  book-thin Gate 1 rule and the decode table are built (2,259 blocks; most migrated rows demote, having
-  no native rows to test against); the matrix re-inject, the one deciding read and the
-  per-league retrains follow ([model_improvement_track.md](model_improvement_track.md) §8.2 #0f). The H1 refit
+  book-thin Gate 1 rule and the decode table (2,259 blocks; most migrated rows demote, having no native
+  rows to test against) are on `devel` as push 9
+  ([model_improvement_track.md](model_improvement_track.md) §8.2 #0f). The H1 refit
   is out. I6g reads wait for their floors (honest-receipts §6 item 2).
-- **Week 3 on:** each fix retrains and ships as it is proven; a version then holds four weeks for its live
-  verdict.
+- **Next (owner 2026-10-28: now, in a fresh session; plan and progress in the lane folder's
+  `research/I6D_PLAN.md` and `REPORT.md`):**
+  1. I6d Phase B: re-inject the cached matrices (backed up in the lane folder's
+     `i6d/training_data.pre-inject`), take the one deciding read M1 (the frozen `i6d/m1_*.py`), then
+     retrain NFL, NBA and NHL one at a time (MLB and WNBA trail), each send on the owner's go. An NHL
+     send before its I6g read (§6) pushes that read out: ask.
+  2. The blind confirm walk on the levelled matrices (Phase C), which reverts its own failures; the
+     fresh sweep board it needs is compute-heavy, so scope it with the owner.
+  3. I6f, the NHL comps look-ahead: the owner's high-priority fix
+     ([honest-receipts.md](honest-receipts.md) §6 item 3). Check every league's comp sources for the
+     same class; retrain after.
+  4. I6f, NFL offers scored days ahead: research ways to make the predictions robust to moving lines,
+     starting with whether early picks win less (untested).
+  5. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
+     the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
+     ships as it is proven; a version then holds four weeks for its live verdict.
 
 ## 6. Live reads: what each verdict needs
 

@@ -549,7 +549,17 @@ inside its group; §8 restates each open one as a plain question.
      the 96 hold their line; the other six are the 49ers' games (§7). On the live player and
      schedule frames for weeks 1 to 4 the old join gave a player row its own game day on 89 of
      1,410 rows and the new one on all 1,410, with no other column changed.
-     Still open: the other training reads that take the newest quote for a past date (the
+     Still open, two gaps from live-gap-2's parity read (E5): NHL comps look ahead. A training row
+     reads the season summary (`players.json`) as of the matrix build day, so a 10-05 row sees the
+     games played up to the build day, while serving reads the file as it stands that hour; this
+     explains 48–86 % of the train-serve gap in six NHL cells and flatters their offline gates. The
+     owner ranked it a high-priority fix on 2026-10-28: season summaries kept as of each date, so
+     training reads only what was known before each game (the Savant affinity below is the same
+     class for MLB). NFL offers scored days ahead read game lines that keep moving until kickoff:
+     a touchdowns P served 3 or more days early sits .027 RMS from training's value for that game,
+     .011 on game day. That is how the problem is posed, not a bug; whether early picks win less
+     is untested, and the owner asked (10-28) for ways to make the predictions robust to moving
+     lines. Also open: the other training reads that take the newest quote for a past date (the
      MLB plate-appearance multiplier and starter-win leg, the NHL goalie legs, the Moneyline and
      Totals book-weight fit); the book-leg cutoff aligned to decision time where ladder polls exist
      (`TRAINING_LOOKBACK_HOURS`); archiving the daily Savant affinity CSVs, so MLB comps can be
