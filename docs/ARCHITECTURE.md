@@ -121,7 +121,7 @@ Sportstradamus/
 | `prior_models.py` | `keep_prior_model` — before a retrain overwrites a served pickle and its test set, copies the pickle to `data/models/prior/{LEAGUE}_{market}__{version}.mdl` and gzips the test set to `data/test_sets/prior/{LEAGUE}_{market}__{version}.csv.gz`, both named for the `Model Version` that model stamped in history, so an offline pass (`sportstradamus admin feature-parity --versions`, or a re-read of a version's offline gates) can use the previous model and the test set it was graded on. The same call deletes prior files of either kind superseded more than `PRIOR_MODEL_RETENTION_DAYS` (400) ago. Nothing serves from either `prior/`, and `sync_to_prod.sh` sends neither |
 | `component_cells.py` / `component_sum.py` | A combo cell priced as the weighted sum of its component cells' served predictives, read from their test sets: evidence for the ship scorecard, not a serving path |
 | `lineage.py` / `matrix_audit.py` | Deterministic matrix manifests for quarantined rebuilds; read-only cache integrity audit |
-| `model_strategy/` | Per-cell strategy sweep/confirm harness (registry, sweep, confirm, TPE search) |
+| `model_strategy/` | Per-cell strategy sweep/confirm harness: registry, sweep, TPE search, and the confirm walk (`confirm` walks the cells, `confirm_nominees` picks each cell's nominees, `confirm_runs` runs and scores them) |
 | `role_specs.py`, `structural_context.py`, `structural_strategies.py` | Role/position group columns and shared context for the structural calibration methods |
 | `__init__.py` | Re-exports the public API |
 
