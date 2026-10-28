@@ -13,8 +13,8 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from sportstradamus.training.model_strategy import confirm
-from sportstradamus.training.model_strategy.confirm import (
+from sportstradamus.training.model_strategy import confirm_runs
+from sportstradamus.training.model_strategy.confirm_runs import (
     _g4_only_retry_wanted,
     _gate_passed,
     _retry_calibrated_wanted,
@@ -101,12 +101,16 @@ def _candidate() -> dict:
 
 
 def test_retry_wanted_structural_never_retries(monkeypatch):
-    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=True))
+    monkeypatch.setattr(
+        confirm_runs, "get_strategy", lambda slug: SimpleNamespace(is_structural=True)
+    )
     assert _retry_calibrated_wanted(_candidate(), _row().to_dict(), {}) is False
 
 
 def test_retry_wanted_delegates_to_predicate(monkeypatch):
-    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False))
+    monkeypatch.setattr(
+        confirm_runs, "get_strategy", lambda slug: SimpleNamespace(is_structural=False)
+    )
     assert _retry_calibrated_wanted(_candidate(), _row().to_dict(), {}) is True
     # The nominee's knobs with its edits applied decide, exactly as its canonical refit resolves.
     assert (

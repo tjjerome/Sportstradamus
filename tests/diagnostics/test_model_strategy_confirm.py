@@ -25,8 +25,11 @@ from sportstradamus.training.model_strategy import (
     distribution_class,
     get_strategy,
     registered_strategies,
+    sweep,
 )
 from sportstradamus.training.model_strategy import confirm as mc
+from sportstradamus.training.model_strategy import confirm_nominees as mcn
+from sportstradamus.training.model_strategy import confirm_runs as mcr
 from sportstradamus.training.model_strategy.sweep import EVAL_SPLIT_CROSSFIT, EVAL_SPLIT_TEST
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_PART_STRATEGY
@@ -40,8 +43,8 @@ _MATRIX_COLUMNS = frozenset(
     for column in spec.applicability.required_data_columns
 )
 # The real functions, captured before the autouse stubs below replace the module attributes.
-_REAL_PIN_CELL_MATRIX = mc._pin_cell_matrix
-_REAL_RETRY_WANTED = mc._retry_calibrated_wanted
+_REAL_PIN_CELL_MATRIX = mcr.pin_cell_matrix
+_REAL_RETRY_WANTED = mcr._retry_calibrated_wanted
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +64,7 @@ def _fixed_cell_context(monkeypatch):
             _MATRIX_SHA,
         )
 
-    monkeypatch.setattr(mc, "_cell_context", context)
+    monkeypatch.setattr(sweep, "_cell_context", context)
 
 
 @pytest.fixture(autouse=True)
@@ -69,9 +72,9 @@ def _sandbox_writes(monkeypatch, tmp_path):
     """Keep every file the walk writes — stat_meta.json, the ledger, blind sandboxes and logs — off
     the repo's own copies, even on a path a test left unstubbed.
     """
-    monkeypatch.setattr(mc, "_STAT_META", tmp_path / "stat_meta.json")
-    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "confirm")
+    monkeypatch.setattr(mcr, "STAT_META", tmp_path / "stat_meta.json")
+    monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path / "confirm")
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +84,7 @@ def _stub_matrix_pin(monkeypatch):
     The pin tests below call the captured real function (``_REAL_PIN_CELL_MATRIX``) against tmp
     paths instead.
     """
-    monkeypatch.setattr(mc, "_pin_cell_matrix", lambda league, market: None)
+    monkeypatch.setattr(mcr, "pin_cell_matrix", lambda league, market: None)
 
 
 @pytest.fixture(autouse=True)
@@ -91,13 +94,13 @@ def _no_seed_corners(monkeypatch):
     The real ``_seed_corners`` reads the repo's committed stat_meta.json; the seed-lane tests
     below patch explicit corners back in.
     """
-    monkeypatch.setattr(mc, "_seed_corners", lambda context: [])
+    monkeypatch.setattr(mcn, "_seed_corners", lambda context: [])
 
 
 @pytest.fixture(autouse=True)
 def _no_calibrated_retry(monkeypatch):
     """Keep the walk's calibrated fallback out of unrelated tests; a retry test restores it."""
-    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda candidate, row, cell: False)
+    monkeypatch.setattr(mcr, "_retry_calibrated_wanted", lambda candidate, row, cell: False)
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +109,7 @@ def _no_real_meditate(monkeypatch):
     a real full-HPO meditate; it fails the test instead.
     """
     monkeypatch.setattr(
-        mc,
+        mcr,
         "_run_meditate_with_lock_retry",
         lambda *args, **kwargs: pytest.fail("a test reached the real meditate subprocess"),
     )
@@ -119,17 +122,17 @@ def _no_incumbent(monkeypatch):
 
 
 def _fake_meta_disk(monkeypatch, tmp_path):
-    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file and return the write-call list.
+    """Route ``atomic_write_meta`` to a tmp ``STAT_META`` file and return the write-call list.
 
     Keeps every persist — a walk writes only its pick's edits and their revert — off the repo's
     committed stat_meta.json.
     """
     meta_file = tmp_path / "stat_meta.json"
-    monkeypatch.setattr(mc, "_STAT_META", meta_file)
+    monkeypatch.setattr(mcr, "STAT_META", meta_file)
     writes = []
     monkeypatch.setattr(
-        mc,
-        "_atomic_write_meta",
+        mcr,
+        "atomic_write_meta",
         lambda m: writes.append("w") or meta_file.write_text(json.dumps(m)),
     )
     return writes
@@ -267,7 +270,7 @@ def _structural_row(slug, market, ships=True, slack=0.4):
 
 def _nominate(*rows, live=False, **kw):
     """Every nominee for the single-cell board made of ``rows``, in the order confirm will try them."""
-    return mc._nominees(pd.DataFrame(list(rows)), live=live, **kw)
+    return mcn._nominees(pd.DataFrame(list(rows)), live=live, **kw)
 
 
 def _weighted_row(norm, slack, weight):
@@ -285,7 +288,7 @@ def _withheld_meta(board):
 
 def _seed_corners(monkeypatch, *controls):
     monkeypatch.setattr(
-        mc,
+        mcn,
         "_seed_corners",
         lambda context: [(get_strategy(c["dist"]), c) for c in controls],
     )
@@ -340,7 +343,7 @@ def test_nominees_cap_the_board_lane_at_top_k():
         _sn_row("ratio_projvol", "crps", "crps", False, 0.20),
     ]
     nominated = _nominate(*board)
-    assert len(nominated) == mc.CONFIRM_TOP_K
+    assert len(nominated) == mcn.CONFIRM_TOP_K
     assert [n["slack"] for n in nominated] == [0.40, 0.30, 0.20]
 
 
@@ -486,7 +489,7 @@ def _integer_target_context(monkeypatch):
             target_is_integer=True,
         )
 
-    monkeypatch.setattr(mc, "_cell_context", context)
+    monkeypatch.setattr(sweep, "_cell_context", context)
 
 
 def _all_sn_top(*, count_slack=None):
@@ -532,7 +535,7 @@ def test_nominees_interleave_noop_when_count_already_in_top_slots(monkeypatch):
 def test_nominees_interleave_noop_without_a_count_board_row(monkeypatch):
     _integer_target_context(monkeypatch)
     nominated = _nominate(*_all_sn_top())
-    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn.CONFIRM_TOP_K
 
 
 def test_nominees_interleave_noop_on_non_integer_target():
@@ -543,7 +546,7 @@ def test_nominees_interleave_noop_on_non_integer_target():
     reaches slot 2 on its own — the backup's job here is only the extra insert it declines to make.
     """
     nominated = _nominate(*_all_sn_top(count_slack=0.05))
-    assert len(nominated) == mc.CONFIRM_TOP_K
+    assert len(nominated) == mcn.CONFIRM_TOP_K
     assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal"]
 
 
@@ -551,7 +554,7 @@ def test_nominees_interleave_never_borrows_a_non_positive_count_corner(monkeypat
     """The count-class backup honors the same board-confidence bar as the lane it patches."""
     _integer_target_context(monkeypatch)
     nominated = _nominate(*_all_sn_top(count_slack=-0.05))
-    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn.CONFIRM_TOP_K
 
 
 def test_nominees_sort_by_discounted_slack_when_present_else_slack():
@@ -685,11 +688,11 @@ def test_nominees_drop_ledger_decided_corners_at_selection():
                 "strategy_matrix_hash": "old-matrix",
             },
         ]
-    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
+    ).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
 
     nominated = _nominate(decided, stale, *fresh)
     board = [n for n in nominated if n["source"].startswith("board")]
-    assert len(board) == mc.CONFIRM_TOP_K
+    assert len(board) == mcn.CONFIRM_TOP_K
     slacks = [n["slack"] for n in board]
     assert decided["corner_fingerprint"] not in {n["corner_fingerprint"] for n in nominated}
     assert slacks[0] == 0.35  # the stale-matrix corner leads — its verdict no longer binds
@@ -715,20 +718,20 @@ def test_next_slot_promotes_a_shaping_corner_at_an_exact_tie_only():
     plain = cand("ratio_meanyr", "nll", "nll", "none", 0.06)
     shaped = cand("ratio_meanyr", "nll", "crps", "cdf_recal_isotonic", 0.06)
     pool, ranks = [platt, plain, shaped], [0.06, 0.06, 0.06]
-    lane_state = ({"SkewNormal"}, {mc._gate4_mechanism(platt)})
+    lane_state = ({"SkewNormal"}, {mcn._gate4_mechanism(platt)})
 
     # Exact tie, no reshaper in the lane: the reshaper wins the slot over the plain corner.
-    pick = mc._next_slot(pool, ranks, [1, 2], *lane_state)
+    pick = mcn._next_slot(pool, ranks, [1, 2], *lane_state)
     assert pick == 2
 
     # The reshaper ranks strictly lower: the plain rule stands.
-    pick = mc._next_slot(pool, [0.06, 0.06, 0.05], [1, 2], *lane_state)
+    pick = mcn._next_slot(pool, [0.06, 0.06, 0.05], [1, 2], *lane_state)
     assert pick == 1
 
     # The lane already carries a reshaper: no preference fires even over a tied reshaper.
-    seen = ({"SkewNormal"}, {mc._gate4_mechanism(platt), mc._gate4_mechanism(shaped)})
+    seen = ({"SkewNormal"}, {mcn._gate4_mechanism(platt), mcn._gate4_mechanism(shaped)})
     shaped_crps = cand("ratio_meanyr", "crps", "nll", "cdf_recal_isotonic", 0.06)
-    pick = mc._next_slot([platt, plain, shaped_crps], [0.06, 0.06, 0.06], [1, 2], *seen)
+    pick = mcn._next_slot([platt, plain, shaped_crps], [0.06, 0.06, 0.06], [1, 2], *seen)
     assert pick == 1
 
 
@@ -736,7 +739,7 @@ def test_walk_nominees_skips_ledger_decided_nominees_before_any_blind_run(monkey
     """brief L4 backstop: a nominee the ledger already decided on this matrix never runs blind, the
     cell's verdict comes from the nominees that did, and an all-decided cell reads SKIPPED.
     """
-    monkeypatch.setattr(mc, "_decided_pairs", lambda: {("fp-2", _MATRIX_SHA)})
+    monkeypatch.setattr(mcn, "decided_pairs", lambda: {("fp-2", _MATRIX_SHA)})
     nominated = _walk_stubs("board slack +0.300", "board slack +0.200")
     measured = _stub_blind(monkeypatch, {})
     attempt, _ = _attempt_spy("REVERTED", ["g4"])
@@ -852,7 +855,7 @@ def test_a_board_swept_before_margins_existed_keeps_the_old_live_ranking():
     )
     meta = {"WNBA": {"AST": {"shipped": "devel"}}}
 
-    grouped = mc._candidates(legacy, meta)
+    grouped = mcn.candidates(legacy, meta)
 
     assert [n[0]["slack"] for n in grouped] == [0.30]
 
@@ -870,7 +873,7 @@ def test_a_live_cell_with_no_measured_baseline_nominates_nobody():
 
 
 def test_candidates_are_one_nominee_list_per_cell():
-    """``_candidates`` groups the board by cell; a cell whose every corner is unconfirmable drops out
+    """``candidates`` groups the board by cell; a cell whose every corner is unconfirmable drops out
     rather than contributing an empty walk.
     """
     board = pd.DataFrame(
@@ -880,7 +883,7 @@ def test_candidates_are_one_nominee_list_per_cell():
             _mixture_row("NBA", "PTS", 0.90),
         ]
     )
-    grouped = mc._candidates(board, _withheld_meta(board))
+    grouped = mcn.candidates(board, _withheld_meta(board))
     assert [(n[0]["league"], n[0]["market"]) for n in grouped] == [
         ("WNBA", "AST"),
         ("MLB", "pitcher strikeouts"),
@@ -896,7 +899,7 @@ def test_candidates_walk_the_strongest_cells_first():
             _zinb_row("hurdle", "pit_ks", "crps", False, 0.50),
         ]
     )
-    grouped = mc._candidates(board, _withheld_meta(board))
+    grouped = mcn.candidates(board, _withheld_meta(board))
     assert [(n[0]["league"], n[0]["market"]) for n in grouped] == [
         ("MLB", "pitcher strikeouts"),
         ("WNBA", "AST"),
@@ -926,21 +929,21 @@ def test_run_meditate_reports_why_the_subprocess_failed(monkeypatch, tmp_path):
     cand = {"league": "NBA", "market": "PTS"}
 
     def run():
-        return mc._run_meditate(cand, [], log_path=tmp_path / "meditate.log", label="run")
+        return mcr._run_meditate(cand, [], log_path=tmp_path / "meditate.log", label="run")
 
-    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
+    monkeypatch.setattr(mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
     assert run() == ""
 
     def boom(*a, **k):
-        raise mc.subprocess.CalledProcessError(1, "meditate")
+        raise mcr.subprocess.CalledProcessError(1, "meditate")
 
-    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", boom)
+    monkeypatch.setattr(mcr, "_run_meditate_with_lock_retry", boom)
     assert run() == "exit 1"
 
     def abort(*a, **k):
-        raise mc.subprocess.CalledProcessError(-signal.SIGABRT, "meditate")
+        raise mcr.subprocess.CalledProcessError(-signal.SIGABRT, "meditate")
 
-    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", abort)
+    monkeypatch.setattr(mcr, "_run_meditate_with_lock_retry", abort)
     assert run() == "native abort (SIGABRT)"
     assert cand["elapsed_s"] >= 0  # timed even when the run fails
 
@@ -949,20 +952,22 @@ def test_run_blind_forwards_every_control_and_never_writes_stat_meta(monkeypatch
     """A blind run reads nothing from a persisted edit: every control rides as its flag, beside the
     flags ``--artifact-output`` requires, and stat_meta.json is never written for it.
     """
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path)
     monkeypatch.setattr(
-        mc, "_atomic_write_meta", lambda meta: pytest.fail("a blind run wrote stat_meta")
+        mcr, "atomic_write_meta", lambda meta: pytest.fail("a blind run wrote stat_meta")
     )
     commands, scored = [], []
     monkeypatch.setattr(
-        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
+        mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
     )
     score = _scorer()
-    monkeypatch.setattr(mc, "_score_corner", lambda *args: scored.append(args[-2:]) or score(*args))
+    monkeypatch.setattr(
+        mcr, "_score_corner", lambda *args: scored.append(args[-2:]) or score(*args)
+    )
     controls = _sn_controls("ratio_meanyr", "crps", "nll", posthoc="prob_recal_platt")
     ordinary = _nominate(_signed_row("NBA", "PTS", "SkewNormal", controls, True, 0.2))[0]
 
-    run = mc._run_blind(ordinary, "loss")
+    run = mcr._run_blind(ordinary, "loss")
 
     command = commands[0]
     slug = mc.market_file_slug("NBA", "PTS")
@@ -981,7 +986,7 @@ def test_run_blind_forwards_every_control_and_never_writes_stat_meta(monkeypatch
     assert run.failed == []
 
     structural = _nominate(_structural_row(AFFINE_STRATEGY, "rushing yards"))[0]
-    mc._run_blind(structural, "loss")
+    mcr._run_blind(structural, "loss")
     command = commands[-1]
     # A structural spec pins hpo_selection among its controls, so it rides once, as a control.
     assert command.count("--hpo-selection") == 1
@@ -993,8 +998,8 @@ def test_run_blind_never_scores_a_dump_an_earlier_walk_left(monkeypatch, tmp_pat
     """A sandbox is keyed by corner, so an earlier walk's dump sits where this run writes; a run that
     exits clean without writing one must fail rather than be scored on the stale file.
     """
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
-    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path)
+    monkeypatch.setattr(mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
     score = _scorer()
 
     def score_if_written(league, market, corner, spec, csv_path, mdl_path):
@@ -1002,13 +1007,13 @@ def test_run_blind_never_scores_a_dump_an_earlier_walk_left(monkeypatch, tmp_pat
             raise FileNotFoundError(csv_path)
         return score(league, market, corner, spec, csv_path, mdl_path)
 
-    monkeypatch.setattr(mc, "_score_corner", score_if_written)
+    monkeypatch.setattr(mcr, "_score_corner", score_if_written)
     cand = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    stale = mc._run_blind(cand, "loss").dump
+    stale = mcr._run_blind(cand, "loss").dump
     stale.parent.mkdir(parents=True)
     stale.write_text("an earlier walk's dump")
 
-    assert mc._run_blind(cand, "loss").failed == ["artifact identity"]
+    assert mcr._run_blind(cand, "loss").failed == ["artifact identity"]
 
 
 def test_run_canonical_refits_from_the_blind_pickle_and_reads_persisted_controls(
@@ -1019,14 +1024,14 @@ def test_run_canonical_refits_from_the_blind_pickle_and_reads_persisted_controls
     """
     commands = []
     monkeypatch.setattr(
-        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
+        mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
     )
-    monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: None)
+    monkeypatch.setattr(mcr, "_cell_row", lambda league, market, columns: None)
     controls = _sn_controls("ratio_meanyr", "crps", "nll", posthoc="prob_recal_platt")
     ordinary = _nominate(_signed_row("NBA", "PTS", "SkewNormal", controls, True, 0.2))[0]
     pickle = tmp_path / "blind" / "NBA_PTS.mdl"
 
-    assert mc._run_canonical("NBA", "PTS", {**ordinary, "params_from": pickle}) == ("", False)
+    assert mcr.run_canonical("NBA", "PTS", {**ordinary, "params_from": pickle}) == ("", False)
     command = commands[0]
     assert command[command.index("--params-from") + 1] == str(pickle)
     assert "--force" in command and "--frozen-matrix-dir" in command
@@ -1035,7 +1040,7 @@ def test_run_canonical_refits_from_the_blind_pickle_and_reads_persisted_controls
     assert "--posthoc" not in command and "--target-normalization" not in command
 
     structural = _nominate(_structural_row(AFFINE_STRATEGY, "rushing yards"))[0]
-    mc._run_canonical("NFL", "rushing yards", {**structural, "params_from": pickle})
+    mcr.run_canonical("NFL", "rushing yards", {**structural, "params_from": pickle})
     command = commands[-1]
     assert "--structural-strategy" not in command
     assert command[command.index("--stabilization") + 1] == "None"
@@ -1047,10 +1052,10 @@ def test_pin_cell_matrix_freezes_the_frame_every_nominee_trains_on(monkeypatch, 
     """The walk copies the cached matrix + a manifest the production validator accepts, and every
     blind run of the cell, and its canonical refit, trains on that same frozen dir.
     """
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "confirm")
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path / "confirm")
     source = tmp_path / "WNBA_AST.parquet"
     pd.DataFrame({"Result": [3.0, 5.0], "MeanYr": [4.1, 4.4]}).to_parquet(source)
-    monkeypatch.setattr(mc, "_training_matrix_path", lambda league, market: source)
+    monkeypatch.setattr(mcr, "_training_matrix_path", lambda league, market: source)
 
     frozen_dir = _REAL_PIN_CELL_MATRIX("WNBA", "AST")
 
@@ -1068,10 +1073,10 @@ def test_pin_cell_matrix_freezes_the_frame_every_nominee_trains_on(monkeypatch, 
 
     commands = []
     monkeypatch.setattr(
-        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
+        mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
     )
-    monkeypatch.setattr(mc, "_score_corner", _scorer())
-    monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: None)
+    monkeypatch.setattr(mcr, "_score_corner", _scorer())
+    monkeypatch.setattr(mcr, "_cell_row", lambda league, market, columns: None)
     first, second = (
         _nominate(row)[0]
         for row in (
@@ -1079,9 +1084,9 @@ def test_pin_cell_matrix_freezes_the_frame_every_nominee_trains_on(monkeypatch, 
             _sn_row("centered_additive_mean10", "crps", "crps", True, 0.1),
         )
     )
-    mc._run_blind(first, "loss")
-    mc._run_blind(second, "loss")
-    mc._run_canonical("WNBA", "AST", {**second, "params_from": tmp_path / "blind.mdl"})
+    mcr._run_blind(first, "loss")
+    mcr._run_blind(second, "loss")
+    mcr.run_canonical("WNBA", "AST", {**second, "params_from": tmp_path / "blind.mdl"})
     dirs = [cmd[cmd.index("--frozen-matrix-dir") + 1] for cmd in commands]
     assert dirs == [str(frozen_dir)] * 3
     assert all("--force" in cmd for cmd in commands)  # frozen input still needs the skip override
@@ -1089,9 +1094,9 @@ def test_pin_cell_matrix_freezes_the_frame_every_nominee_trains_on(monkeypatch, 
 
 def test_pin_cell_matrix_fails_loud_without_a_cached_matrix(monkeypatch, tmp_path):
     """A swept cell always has a cached parquet; a missing one is a broken invariant, not a skip."""
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path)
     monkeypatch.setattr(
-        mc, "_training_matrix_path", lambda league, market: tmp_path / "absent.parquet"
+        mcr, "_training_matrix_path", lambda league, market: tmp_path / "absent.parquet"
     )
     with pytest.raises(FileNotFoundError):
         _REAL_PIN_CELL_MATRIX("WNBA", "AST")
@@ -1100,7 +1105,7 @@ def test_pin_cell_matrix_fails_loud_without_a_cached_matrix(monkeypatch, tmp_pat
 def test_walk_nominees_pins_the_matrix_once_per_cell(monkeypatch):
     pinned = []
     monkeypatch.setattr(
-        mc, "_pin_cell_matrix", lambda league, market: pinned.append((league, market))
+        mcr, "pin_cell_matrix", lambda league, market: pinned.append((league, market))
     )
     _stub_blind(monkeypatch, {})
     nominated = _walk_stubs("board slack +0.300", "board slack +0.200")
@@ -1134,11 +1139,11 @@ def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
             "ship": [True],
         }
     )
-    monkeypatch.setattr(mc.pd, "read_parquet", lambda *args, **kwargs: stats)
+    monkeypatch.setattr(mcr.pd, "read_parquet", lambda *args, **kwargs: stats)
 
-    assert mc._ship_from_model_stats("NFL", "rushing yards", expected) is True
+    assert mcr.ship_from_model_stats("NFL", "rushing yards", expected) is True
     stats.loc[0, "strategy_controls_json"] = "{}"
-    assert mc._ship_from_model_stats("NFL", "rushing yards", expected) is False
+    assert mcr.ship_from_model_stats("NFL", "rushing yards", expected) is False
     stats.loc[0, "strategy_controls_json"] = expected.controls_json
     wrong = build_artifact_identity(
         "SkewNormal",
@@ -1147,7 +1152,7 @@ def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
         _sn_controls("ratio_meanyr", "crps", "nll"),
         matrix_hash=_MATRIX_SHA,
     )
-    assert mc._ship_from_model_stats("NFL", "rushing yards", wrong) is False
+    assert mcr.ship_from_model_stats("NFL", "rushing yards", wrong) is False
 
 
 def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch):
@@ -1157,16 +1162,16 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
     the real NBA FGA confirm did exactly that.
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    monkeypatch.setattr(mc, "_run_canonical", lambda lg, mkt, cand: ("", False))
-    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", False))
+    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g4"])
     monkeypatch.setattr(
-        mc,
-        "_produced_artifacts_match",
+        mcr,
+        "produced_artifacts_match",
         lambda *args: pytest.fail("a gate miss must not be diagnosed through the pruned pickle"),
     )
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["g4"]
+    assert mcr.confirm_meditate("WNBA", "AST", candidate) == ["g4"]
 
 
 def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
@@ -1175,16 +1180,16 @@ def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
     alone never blocks a ship (the gates already decide).
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    monkeypatch.setattr(mc, "_run_canonical", lambda lg, mkt, cand: ("", True))
-    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", True))
+    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
+    assert mcr.confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
 
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
-    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
-    monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == []
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mcr, "ship_from_model_stats", lambda *args: True)
+    assert mcr.confirm_meditate("WNBA", "AST", candidate) == []
 
 
 def test_record_ledger_row_marks_dispersion_floor_as_diverged(monkeypatch, tmp_path):
@@ -1192,11 +1197,11 @@ def test_record_ledger_row_marks_dispersion_floor_as_diverged(monkeypatch, tmp_p
     caller and recorded as the ledger's ``diverged`` column.
     """
     ledger = tmp_path / "ledger.csv"
-    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
+    monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", ledger)
     candidate = {"strategy_slug": "SkewNormal", "source": "board slack +0.300"}
 
     flags = [
-        mc._record_ledger_row(
+        mcr._record_ledger_row(
             candidate, {"league": "WNBA", "market": "AST", "dispersion_cal": cal}, EVAL_SPLIT_TEST
         )
         for cal in (0.1, 0.1005, 0.2)
@@ -1242,9 +1247,9 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
             "ship": [True],
         }
     )
-    monkeypatch.setattr(mc.pd, "read_parquet", lambda *args, **kwargs: stats)
-    monkeypatch.setattr(mc, "_run_canonical", lambda lg, mkt, cand: ("", False))
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr.pd, "read_parquet", lambda *args, **kwargs: stats)
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", False))
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
 
     seen = {}
 
@@ -1252,25 +1257,25 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
         seen["matrix_hash"] = expected.matrix_hash
         return True
 
-    monkeypatch.setattr(mc, "_produced_artifacts_match", artifacts_match)
+    monkeypatch.setattr(mcr, "produced_artifacts_match", artifacts_match)
 
-    assert mc._confirm_meditate(candidate["league"], candidate["market"], candidate) == []
+    assert mcr.confirm_meditate(candidate["league"], candidate["market"], candidate) == []
     # The pickle leg is held to the retrain's matrix too, so a stale artifact still fails there.
     assert seen["matrix_hash"] == retrained_hash
 
 
 def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_match(monkeypatch):
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    monkeypatch.setattr(mc, "_run_canonical", lambda lg, mkt, cand: ("", False))
-    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
-    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", False))
+    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: False)
     monkeypatch.setattr(
-        mc,
-        "_ship_from_model_stats",
+        mcr,
+        "ship_from_model_stats",
         lambda *args: pytest.fail("unverified artifacts must never reach the ship verdict"),
     )
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["artifact identity"]
+    assert mcr.confirm_meditate("WNBA", "AST", candidate) == ["artifact identity"]
 
 
 # --- persist / confirm / revert --------------------------------------------------------------
@@ -1279,9 +1284,9 @@ def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_
 def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
     meta = {"WNBA": {"AST": _sn_original()}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: [])
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, candidate: [])
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
 
@@ -1311,19 +1316,19 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
     """
     original = _sn_original()
     meta = {"WNBA": {"AST": dict(original)}}
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/snapshot"))
+    monkeypatch.setattr(mcr, "atomic_write_meta", lambda m: None)
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/snapshot"))
     restored = []
 
     def restore(lg, mkt, backup, current_meta, prior):
         restored.append((lg, mkt, backup))
         current_meta[lg][mkt] = prior
 
-    monkeypatch.setattr(mc, "_restore_cell", restore)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: ["g4"])
+    monkeypatch.setattr(mcr, "restore_cell", restore)
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, candidate: ["g4"])
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
-    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g4"])
 
     cand = {
         "league": "WNBA",
@@ -1343,20 +1348,20 @@ def test_confirm_one_exception_restores_once_after_single_candidate_transition(
     meta = {"WNBA": {"AST": dict(original)}}
     states = []
     monkeypatch.setattr(
-        mc,
-        "_atomic_write_meta",
+        mcr,
+        "atomic_write_meta",
         lambda current: states.append(json.loads(json.dumps(current))),
     )
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
 
     def restore(lg, mkt, backup, current_meta, prior):
         current_meta[lg][mkt] = prior
-        mc._atomic_write_meta(current_meta)
+        mcr.atomic_write_meta(current_meta)
 
-    monkeypatch.setattr(mc, "_restore_cell", restore)
+    monkeypatch.setattr(mcr, "restore_cell", restore)
     monkeypatch.setattr(
-        mc,
-        "_confirm_meditate",
+        mcr,
+        "confirm_meditate",
         lambda lg, mkt, candidate: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     pruned = []
@@ -1381,19 +1386,21 @@ def test_blind_retry_runs_calibrated_and_both_rows_reach_the_ledger(monkeypatch,
     """A g4-only near miss reruns blind under calibrated selection. The pin rides the retry's own
     edits and its own sandbox, never stat_meta, and both runs land in the ledger.
     """
-    monkeypatch.setattr(mc, "_retry_calibrated_wanted", _REAL_RETRY_WANTED)
+    monkeypatch.setattr(mcr, "_retry_calibrated_wanted", _REAL_RETRY_WANTED)
     monkeypatch.setattr(
-        mc, "_atomic_write_meta", lambda meta: pytest.fail("a blind run wrote stat_meta")
+        mcr, "atomic_write_meta", lambda meta: pytest.fail("a blind run wrote stat_meta")
     )
     commands = []
     monkeypatch.setattr(
-        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
+        mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
     )
-    monkeypatch.setattr(mc, "_score_corner", _in_turn(_scorer(failed=("g4",)), _scorer(slack=0.02)))
+    monkeypatch.setattr(
+        mcr, "_score_corner", _in_turn(_scorer(failed=("g4",)), _scorer(slack=0.02))
+    )
     cand = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     meta = {"WNBA": {"AST": _sn_original()}}
 
-    first, retry = mc._measure_blind(meta, cand)
+    first, retry = mcr.measure_blind(meta, cand)
 
     assert [cmd[cmd.index("--hpo-selection") + 1] for cmd in commands] == ["loss", "calibrated"]
     assert first.failed == ["g4"] and retry.failed == []
@@ -1402,7 +1409,7 @@ def test_blind_retry_runs_calibrated_and_both_rows_reach_the_ledger(monkeypatch,
     assert retry.model != first.model
     assert "hpo_selection" not in cand["edits"]  # the nominee itself is untouched
     assert meta == {"WNBA": {"AST": _sn_original()}}
-    ledger = pd.read_csv(mc.NOMINEE_LEDGER_PATH)
+    ledger = pd.read_csv(sweep.NOMINEE_LEDGER_PATH)
     assert ledger["hpo_selection"].tolist() == ["loss", "calibrated"]
     assert ledger["eval_split"].tolist() == [EVAL_SPLIT_CROSSFIT] * 2
 
@@ -1413,15 +1420,15 @@ def test_a_ranked_retry_ships_and_persists_its_pin(monkeypatch, tmp_path):
     """
     meta = {"WNBA": {"AST": _sn_original()}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     cand = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     retry = _calibrated(cand)
     monkeypatch.setattr(
-        mc, "_measure_blind", lambda m, c: [_blind_run(c, failed=["g4"]), _blind_run(retry)]
+        mcr, "measure_blind", lambda m, c: [_blind_run(c, failed=["g4"]), _blind_run(retry)]
     )
     refits = []
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, c: refits.append(c) or [])
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, c: refits.append(c) or [])
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
     monkeypatch.setattr(
         mc, "prune_model_pickle", lambda lg, mkt: pytest.fail("a shipped retry must not prune")
     )
@@ -1443,15 +1450,15 @@ def test_a_ranked_retry_whose_refit_fails_reverts_its_pin(monkeypatch, tmp_path)
     original = _sn_original()
     meta = {"WNBA": {"AST": dict(original)}}
     _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: [])
     cand = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(
-        mc,
-        "_measure_blind",
+        mcr,
+        "measure_blind",
         lambda m, c: [_blind_run(c, failed=["g4"]), _blind_run(_calibrated(c))],
     )
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, c: ["g4"])
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, c: ["g4"])
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
 
@@ -1470,10 +1477,10 @@ def test_confirm_one_reverts_a_gate_passing_cell_below_min_model_weight(monkeypa
     original = _sn_original()
     meta = {"WNBA": {"AST": dict(original)}}
     _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, cand: [])
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.1)
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, cand: [])
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.1)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
 
@@ -1511,7 +1518,7 @@ def _blind_run(cand, *, slack=0.1, weight=0.5, failed=()):
     selection = cand.get("edits", {}).get("hpo_selection", "loss")
     sandbox = mc.pathlib.Path("/sandbox") / f"{cand['corner_fingerprint']}__{selection}"
     row = {"slack": slack, "model_weight": weight}
-    return mc._BlindRun(cand, sandbox / "dump.csv", sandbox / "model.mdl", list(failed), row)
+    return mcr.BlindRun(cand, sandbox / "dump.csv", sandbox / "model.mdl", list(failed), row)
 
 
 def _calibrated(cand):
@@ -1530,7 +1537,7 @@ def _stub_blind(monkeypatch, runs):
         measured.append(cand["source"])
         return [_blind_run(cand, **runs.get(cand["source"], {}))]
 
-    monkeypatch.setattr(mc, "_measure_blind", measure)
+    monkeypatch.setattr(mcr, "measure_blind", measure)
     return measured
 
 
@@ -1566,7 +1573,7 @@ def _scorer(*, failed=(), slack=0.1, weight=0.5):
             **corner,
             "slack": slack,
             "ships": not failed,
-            **{f"{gate}_pass": gate not in failed for gate in mc._GATES},
+            **{f"{gate}_pass": gate not in failed for gate in sweep._GATES},
             "g1_brier_diff_ci_hi": 0.003,
             "g4_pit_ks": 0.055 if "g4" in failed else 0.04,
             "g4_pit_ks_max": 0.05,
@@ -1708,7 +1715,7 @@ def test_live_walk_lets_the_incumbents_calibrated_retry_contend(monkeypatch):
             _blind_run(_calibrated({**incumbent, "edits": {}})),
         ],
     }
-    monkeypatch.setattr(mc, "_measure_blind", lambda meta, cand: runs[cand["source"]])
+    monkeypatch.setattr(mcr, "measure_blind", lambda meta, cand: runs[cand["source"]])
     compared = _live_verdicts(monkeypatch, {"fp-2__calibrated"})
     attempt, attempted = _attempt_spy("SUPERSEDED")
 
@@ -1725,7 +1732,7 @@ def test_live_walk_holds_a_cell_without_a_scored_incumbent_baseline(monkeypatch)
     """
     nominated = _walk_stubs("board slack +0.300", "seed/incumbent")
     monkeypatch.setattr(mc, "_incumbent_fingerprint", lambda league, market: "fp-gone")
-    monkeypatch.setattr(mc, "_measure_blind", lambda meta, cand: pytest.fail("nothing may run"))
+    monkeypatch.setattr(mcr, "measure_blind", lambda meta, cand: pytest.fail("nothing may run"))
     assert mc._walk_nominees({}, nominated, _never_read, live=True) == (
         "WNBA",
         "AST",
@@ -1735,10 +1742,10 @@ def test_live_walk_holds_a_cell_without_a_scored_incumbent_baseline(monkeypatch)
     )
 
     monkeypatch.setattr(mc, "_incumbent_fingerprint", lambda league, market: "fp-2")
-    unscored = mc._BlindRun(nominated[1], None, None, ["retrain exit 1"], None)
+    unscored = mcr.BlindRun(nominated[1], None, None, ["retrain exit 1"], None)
     monkeypatch.setattr(
-        mc,
-        "_measure_blind",
+        mcr,
+        "measure_blind",
         lambda meta, cand: [unscored if cand is nominated[1] else _blind_run(cand, slack=0.3)],
     )
     assert mc._walk_nominees({}, nominated, _never_read, live=True) == (
@@ -1757,14 +1764,14 @@ def test_walk_persists_only_its_pick_and_no_blind_run_writes_stat_meta(monkeypat
     original = _sn_original()
     meta = {"WNBA": {"AST": dict(original)}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     runs = []
     monkeypatch.setattr(
-        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: runs.append(len(writes))
+        mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: runs.append(len(writes))
     )
-    monkeypatch.setattr(mc, "_score_corner", _in_turn(_scorer(slack=0.05), _scorer(slack=0.25)))
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, cand: [])
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mcr, "_score_corner", _in_turn(_scorer(slack=0.05), _scorer(slack=0.25)))
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, cand: [])
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
     nominated = _nominate(
         _sn_row("ratio_meanyr", "crps", "nll", True, 0.3),
         _sn_row("centered_additive_mean10", "crps", "crps", True, 0.2),
@@ -1791,17 +1798,17 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     )
     meta = {"WNBA": {"AST": _sn_original()}}
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     measured = _stub_blind(monkeypatch, {})
     confirmed = []
     monkeypatch.setattr(
-        mc,
-        "_confirm_meditate",
+        mcr,
+        "confirm_meditate",
         lambda lg, mkt, cand: confirmed.append(cand["source"]) or [],
     )
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: False)
 
     mc.run_confirm(board, yes=True)
@@ -1835,7 +1842,7 @@ def test_run_confirm_prompt_quotes_every_blind_run(monkeypatch, capsys):
     meta = {"WNBA": {"AST": _sn_original()}, "NBA": {"PTS": {"shipped": "devel"}}}
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(
-        mc, "_backup_stat_meta", lambda: pytest.fail("an aborted run must not back up stat_meta")
+        mcr, "backup_stat_meta", lambda: pytest.fail("an aborted run must not back up stat_meta")
     )
     prompts = []
     monkeypatch.setattr(mc.click, "confirm", lambda text: prompts.append(text) or False)
@@ -1884,7 +1891,7 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
         },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _walk_first(monkeypatch)
     calls = {"confirm": [], "supersede": []}
     monkeypatch.setattr(
@@ -1928,7 +1935,7 @@ def test_run_confirm_fresh_only_skips_the_live_lane(monkeypatch, capsys):
         "NBA": {"PTS": {"dist": "SkewNormal", "shipped": "devel"}},
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _walk_first(monkeypatch)
     confirmed = []
     monkeypatch.setattr(
@@ -1967,7 +1974,7 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
         },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _walk_first(monkeypatch)
     confirmed = []
     monkeypatch.setattr(
@@ -2009,13 +2016,13 @@ def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch):
                 "strategy_matrix_hash": "old-matrix",
             },
         ]
-    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
+    ).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
     meta = {"WNBA": {"AST": _sn_original()}}
     measured = _stub_blind(monkeypatch, {})
     attempt, attempted = _attempt_spy("REVERTED", ["g4"])
 
     result = mc._walk_nominees(
-        meta, mc._candidates(pd.DataFrame([decided, fresh, stale]), meta)[0], attempt
+        meta, mcn.candidates(pd.DataFrame([decided, fresh, stale]), meta)[0], attempt
     )
     # The decided leader never nominates; the stale-matrix row runs blind beside the fresh one.
     assert measured == ["board slack +0.250", "board slack +0.200"]
@@ -2028,11 +2035,11 @@ def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable
 ):
     """Nothing confirmable ⇒ stat_meta is read to assign lanes but never backed up or written."""
     monkeypatch.setattr(
-        mc, "_backup_stat_meta", lambda: pytest.fail("an empty board must not touch stat_meta")
+        mcr, "backup_stat_meta", lambda: pytest.fail("an empty board must not touch stat_meta")
     )
     monkeypatch.setattr(
-        mc,
-        "_atomic_write_meta",
+        mcr,
+        "atomic_write_meta",
         lambda meta: pytest.fail("an empty board must not write stat_meta"),
     )
     mc.run_confirm(pd.DataFrame([_mixture_row("WNBA", "AST", 0.9)]), yes=True)
@@ -2072,7 +2079,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
         },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _walk_first(monkeypatch)
     confirmed = []
     monkeypatch.setattr(
@@ -2102,7 +2109,7 @@ def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
     meta = {"NHL": {"saves": {"dist": "SkewNormal", "shipped": "withheld"}}}
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     touched = []
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: touched.append("backup"))
+    monkeypatch.setattr(mcr, "backup_stat_meta", lambda: touched.append("backup"))
 
     mc.run_confirm(board, yes=True)
     assert touched == []
@@ -2121,32 +2128,32 @@ def test_snapshot_restore_round_trips_all_artifacts(monkeypatch, tmp_path):
     arts = [tmp_path / name for name in ("NBA_PTS.mdl", "NBA_PTS.csv", "model_stats.parquet")]
     for a in arts:
         a.write_text("incumbent")
-    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: arts)
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "logs")
+    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: arts)
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path / "logs")
 
-    backup = mc._snapshot_cell("NBA", "PTS")
+    backup = mcr.snapshot_cell("NBA", "PTS")
     assert (backup / "NBA_PTS.csv").read_text() == "incumbent"  # the S2/S3 baseline copy
 
     for a in arts:  # a candidate meditate overwrites every artifact in place
         a.write_text("CANDIDATE")
     meta = {"NBA": {"PTS": {"target_normalization": "candidate"}}}
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
+    monkeypatch.setattr(mcr, "atomic_write_meta", lambda m: None)
 
-    mc._restore_cell("NBA", "PTS", backup, meta, {"target_normalization": "ratio_meanyr"})
+    mcr.restore_cell("NBA", "PTS", backup, meta, {"target_normalization": "ratio_meanyr"})
     assert all(a.read_text() == "incumbent" for a in arts)
     assert meta["NBA"]["PTS"] == {"target_normalization": "ratio_meanyr"}
 
 
 def test_restore_removes_candidate_artifact_absent_from_snapshot(monkeypatch, tmp_path):
     artifact = tmp_path / "NFL_receiving-yards.mdl"
-    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [artifact])
-    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "logs")
-    backup = mc._snapshot_cell("NFL", "receiving yards")
+    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: [artifact])
+    monkeypatch.setattr(mcr, "_CONFIRM_LOG_ROOT", tmp_path / "logs")
+    backup = mcr.snapshot_cell("NFL", "receiving yards")
     artifact.write_text("candidate")
     meta = {"NFL": {"receiving yards": {"shipped": "devel"}}}
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda current: None)
+    monkeypatch.setattr(mcr, "atomic_write_meta", lambda current: None)
 
-    mc._restore_cell("NFL", "receiving yards", backup, meta, {"shipped": "withheld"})
+    mcr.restore_cell("NFL", "receiving yards", backup, meta, {"shipped": "withheld"})
 
     assert not artifact.exists()
     assert meta["NFL"]["receiving yards"] == {"shipped": "withheld"}
@@ -2157,7 +2164,7 @@ def test_cell_artifacts_covers_serve_read_files():
     calibrators), stat_calibration, and book_weights — else a HOLD could leave the incumbent serving
     the candidate's config. The test-set CSV (the S2/S3 baseline) is here too.
     """
-    names = {p.name for p in mc._cell_artifacts("NBA", "PTS")}
+    names = {p.name for p in mcr._cell_artifacts("NBA", "PTS")}
     assert {"NBA_PTS.mdl", "NBA_PTS.csv", "stat_calibration.json", "book_weights.json"} <= names
 
 
@@ -2208,24 +2215,24 @@ def _verdict(*, ship, s1=True, s2=True, s3=True):
 
 def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_ok=True):
     """Patch the heavy IO of _supersede_one; return (restored, pruned) spy lists."""
-    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/bk"))
-    monkeypatch.setattr(mc, "_served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/bk"))
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
     monkeypatch.setattr(
-        mc, "_run_canonical", lambda lg, mkt, cand: ("" if meditate_ok else "exit 1", False)
+        mcr, "run_canonical", lambda lg, mkt, cand: ("" if meditate_ok else "exit 1", False)
     )
-    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
-    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(
-        mc,
-        "_ship_from_model_stats",
+        mcr,
+        "ship_from_model_stats",
         lambda lg, mkt, expected: model_stats_ok,
     )
     monkeypatch.setattr(mc, "load_test_set", lambda path, col: pd.DataFrame())
     monkeypatch.setattr(mc, "supersede_verdict", lambda *a, **k: verdict)
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
+    monkeypatch.setattr(mcr, "atomic_write_meta", lambda m: None)
     restored, pruned = [], []
     monkeypatch.setattr(
-        mc, "_restore_cell", lambda lg, mkt, bk, m, orig: restored.append((lg, mkt, orig))
+        mcr, "restore_cell", lambda lg, mkt, bk, m, orig: restored.append((lg, mkt, orig))
     )
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
     return restored, pruned
@@ -2246,7 +2253,7 @@ def test_supersede_hold_restores_incumbent_and_never_prunes(monkeypatch, capsys)
 def test_supersede_prepends_diverged_on_a_held_verdict(monkeypatch):
     meta = _shipped_meta()
     _patch_supersede_io(monkeypatch, verdict=_verdict(ship=False, s3=False))
-    monkeypatch.setattr(mc, "_run_canonical", lambda lg, mkt, cand: ("", True))
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", True))
     result = mc._supersede_one(meta, _supersede_cand())
     assert result[:3] == ("NBA", "PTS", "HELD")
     assert result[3] == ["diverged", "S3"]
@@ -2277,7 +2284,7 @@ def test_live_walk_promotes_a_ranked_retry_with_its_pin(monkeypatch):
         cand["source"]: [_blind_run(cand, failed=["g4"]), _blind_run(_calibrated(cand))],
         "seed/incumbent": [_blind_run(incumbent)],
     }
-    monkeypatch.setattr(mc, "_measure_blind", lambda m, c: runs[c["source"]])
+    monkeypatch.setattr(mcr, "measure_blind", lambda m, c: runs[c["source"]])
 
     result = mc._walk_nominees(meta, [cand, incumbent], mc._supersede_one, live=True)
 
@@ -2342,9 +2349,9 @@ def test_walk_lanes_threads_the_run_flags_into_both_lanes(monkeypatch):
 
 
 def _patch_weights(monkeypatch, *, incumbent, candidate):
-    """``_served_weight`` for the supersession pair — the snapshot dir holds the incumbent's pickle."""
+    """``served_weight`` for the supersession pair — the snapshot dir holds the incumbent's pickle."""
     monkeypatch.setattr(
-        mc, "_served_weight", lambda path: incumbent if "bk" in path.parts else candidate
+        mcr, "served_weight", lambda path: incumbent if "bk" in path.parts else candidate
     )
 
 
@@ -2432,7 +2439,7 @@ def test_supersede_meditate_error_restores_incumbent(monkeypatch):
 def test_supersede_artifact_identity_failure_restores_incumbent(monkeypatch):
     meta = _shipped_meta()
     restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
-    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
+    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: False)
     result = mc._supersede_one(meta, _supersede_cand())
     assert result == ("NBA", "PTS", "HELD", ["artifact identity"])
     assert restored[0][:2] == ("NBA", "PTS")
@@ -2451,8 +2458,8 @@ def test_supersede_model_stats_identity_or_ship_failure_restores_before_verdict_
     )
     checked = []
     monkeypatch.setattr(
-        mc,
-        "_ship_from_model_stats",
+        mcr,
+        "ship_from_model_stats",
         lambda lg, mkt, expected: checked.append((lg, mkt, expected)) or False,
     )
     monkeypatch.setattr(
@@ -2474,7 +2481,7 @@ def test_supersede_model_stats_identity_or_ship_failure_restores_before_verdict_
     result = mc._supersede_one(meta, cand)
 
     assert result == ("NBA", "PTS", "HELD", ["model_stats identity/ship"])
-    assert checked == [("NBA", "PTS", mc._candidate_identity(cand))]
+    assert checked == [("NBA", "PTS", mcr.candidate_identity(cand))]
     assert restored[0][:2] == ("NBA", "PTS")
     assert pruned == []
 
@@ -2496,13 +2503,13 @@ def test_supersede_restores_on_verdict_exception(monkeypatch):
 def test_nominee_ledger_stays_parseable_when_model_stats_widens(monkeypatch, tmp_path):
     """A later, wider gate row must not strand the ledger behind a narrower header."""
     ledger = tmp_path / "confirm_nominee_gates.csv"
-    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
+    monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", ledger)
     candidate = {"strategy_slug": "sn-centered", "source": "board"}
 
-    mc._record_ledger_row(
+    mcr._record_ledger_row(
         candidate, {"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.91}, EVAL_SPLIT_CROSSFIT
     )
-    mc._record_ledger_row(
+    mcr._record_ledger_row(
         candidate,
         {"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.88, "g7_new_gate": 1.0},
         EVAL_SPLIT_TEST,
@@ -2521,16 +2528,16 @@ def test_ledger_tags_blind_rows_crossfit_and_the_canonical_refit_test(monkeypatc
     expect, controls folded into ``strategy_controls_json``; the cell's one canonical refit lands
     its model_stats row as the test-half read.
     """
-    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
-    monkeypatch.setattr(mc, "_score_corner", _scorer(slack=0.15))
+    monkeypatch.setattr(mcr, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: None)
+    monkeypatch.setattr(mcr, "_score_corner", _scorer(slack=0.15))
     cand = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    run = mc._run_blind(cand, "loss")
+    run = mcr._run_blind(cand, "loss")
     stats_row = pd.Series({"league": "WNBA", "market": "AST", "ship": True, "dispersion_cal": 1.0})
-    monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: stats_row)
+    monkeypatch.setattr(mcr, "_cell_row", lambda league, market, columns: stats_row)
 
-    assert mc._run_canonical("WNBA", "AST", {**cand, "params_from": run.model}) == ("", False)
+    assert mcr.run_canonical("WNBA", "AST", {**cand, "params_from": run.model}) == ("", False)
 
-    ledger = pd.read_csv(mc.NOMINEE_LEDGER_PATH)
+    ledger = pd.read_csv(sweep.NOMINEE_LEDGER_PATH)
     assert ledger["eval_split"].tolist() == [EVAL_SPLIT_CROSSFIT, EVAL_SPLIT_TEST]
     blind = ledger.iloc[0]
     assert blind["strategy_corner_fingerprint"] == cand["corner_fingerprint"]
@@ -2556,9 +2563,9 @@ def test_confirm_median_seconds_times_blind_runs_only():
             {"league": "WNBA", "market": "AST", "elapsed_s": 60.0, "eval_split": EVAL_SPLIT_TEST},
             {"league": "WNBA", "market": "AST", "elapsed_s": 50.0, "eval_split": None},
         ]
-    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
-    assert mc._confirm_median_seconds("WNBA", "AST") == 3600.0
-    assert mc._confirm_median_seconds() == 3600.0
+    ).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    assert mcr.confirm_median_seconds("WNBA", "AST") == 3600.0
+    assert mcr.confirm_median_seconds() == 3600.0
 
 
 def test_ledger_echoes_board_gates_for_board_nominees_only(monkeypatch, tmp_path):
@@ -2566,7 +2573,7 @@ def test_ledger_echoes_board_gates_for_board_nominees_only(monkeypatch, tmp_path
     board↔confirm comparisons read one row; seed/incumbent nominees leave them NaN.
     """
     ledger = tmp_path / "ledger.csv"
-    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
+    monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", ledger)
     row = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.25)
     row.update(
         {
@@ -2584,8 +2591,8 @@ def test_ledger_echoes_board_gates_for_board_nominees_only(monkeypatch, tmp_path
     board_cand, seed_cand = _nominate(row)
     gates = {"league": "WNBA", "market": "AST", "dispersion_cal": 1.0}
 
-    mc._record_ledger_row(board_cand, gates, EVAL_SPLIT_CROSSFIT)
-    mc._record_ledger_row(seed_cand, gates, EVAL_SPLIT_CROSSFIT)
+    mcr._record_ledger_row(board_cand, gates, EVAL_SPLIT_CROSSFIT)
+    mcr._record_ledger_row(seed_cand, gates, EVAL_SPLIT_CROSSFIT)
 
     recorded = pd.read_csv(ledger)
     board_row = recorded.iloc[0]
@@ -2614,8 +2621,8 @@ def test_confirm_nominee_cap_truncates_each_cell_after_dedup(monkeypatch):
         ]
     )
 
-    uncapped = mc._candidates(board, _withheld_meta(board))
-    capped = mc._candidates(board, _withheld_meta(board), 2)
+    uncapped = mcn.candidates(board, _withheld_meta(board))
+    capped = mcn.candidates(board, _withheld_meta(board), 2)
 
     assert [len(cell) for cell in uncapped] == [3]
     assert [len(cell) for cell in capped] == [2]
@@ -2654,16 +2661,16 @@ def test_nominees_treat_probability_only_recalibrators_as_the_leaders_gate4_mech
     rank order — and a mean-stage corrector, which does reshape what Gate 4 sees, outranks them.
     """
     leader = _sn_controls("ratio_meanyr", "crps", "nll")
-    assert mc._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) == (
-        mc._gate4_mechanism(
+    assert mcn._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) == (
+        mcn._gate4_mechanism(
             {
                 "strategy_slug": "SkewNormal",
                 "controls": {**leader, "posthoc": "prob_recal_platt"},
             }
         )
     )
-    assert mc._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) != (
-        mc._gate4_mechanism(
+    assert mcn._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) != (
+        mcn._gate4_mechanism(
             {"strategy_slug": "SkewNormal", "controls": {**leader, "posthoc": "roe_mean"}}
         )
     )
@@ -2701,14 +2708,14 @@ def test_structural_corners_confirm_only_through_a_board_row_carrying_a_split_fi
     A structural artifact's fingerprint only exists after the retrain, so nominating the recipe
     straight from the seed register would sign a candidate whose identity check must fail.
     """
-    context = mc._cell_context("NFL", "receiving yards")
+    context = sweep._cell_context("NFL", "receiving yards")
     spec = get_strategy(TWO_PART_STRATEGY)
     controls = dict(spec.fixed_controls)
 
-    synthesized = mc._corner_candidate(
+    synthesized = mcn._corner_candidate(
         context, spec, "NFL", "receiving yards", controls, slack=float("nan"), split=None
     )
-    from_board = mc._corner_candidate(
+    from_board = mcn._corner_candidate(
         context, spec, "NFL", "receiving yards", controls, slack=0.4, split="split-123"
     )
 

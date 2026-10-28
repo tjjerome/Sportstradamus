@@ -544,8 +544,8 @@ calls the automation cannot fully encode still need an operator:
    field; PA was a calibrated no-op — fallback fired, g4 ≈ 0.058 either way — and DREB a 0.0508
    near-miss, both held.) The loss→calibrated direction is now automated in the walk: a nominee
    whose blind run misses on g4 alone is rerun blind once under `calibrated`, the retry ranks in
-   its place, and a chosen retry persists the pin with its recipe (`confirm._measure_blind`); the
-   calibrated-*first* doctrine above stays manual — automating it would double every SkewNormal
+   its place, and a chosen retry persists the pin with its recipe (`confirm_runs.measure_blind`);
+   the calibrated-*first* doctrine above stays manual — automating it would double every SkewNormal
    nominee's cost. The weekly
    `meditate` never retries; it trains each cell once with the persisted knob. **The Experiment-2
    sunset path is dead:** the calibrated-everywhere default flip was killed by its pre-registered
