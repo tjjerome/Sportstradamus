@@ -438,7 +438,7 @@ same numbers are browseable from VSCode without a parquet viewer; the
 parquet is authoritative on disagreement and is the only file readers
 consult.
 
-**Column groups** (one row per cell, ~115 columns):
+**Column groups** (one row per cell, ~124 columns):
 
 | Group | Columns | Owner |
 |---|---|---|
