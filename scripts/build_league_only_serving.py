@@ -4,8 +4,8 @@
 every league, so sending them whole carries every league's values. This takes production's
 copies (fetched read-only into ``--prod-dir``) and replaces only one league's entries with the
 training box's. A ``model_stats`` column only the training box holds (a retrain's new report
-column) is carried, empty on the other leagues' rows; a column only production holds, or a shared
-column the two boxes type differently, stops the merge.
+column) is carried, empty on the other leagues' rows until their own send; a column only
+production holds, or a shared column the two boxes type differently, stops the merge.
 
 Pandas and json only; opens no archive. Writes into ``--out-dir`` and prints the proof: per
 league, how many entries differ from production's copy (only the named league may), and that
@@ -68,8 +68,6 @@ def _merge_stats(league_key: str, here_path: Path, prod_path: Path, out_dir: Pat
             " a shared column differently; not merged"
         )
         return False
-    # A retrain adds report columns before production's table has them; the other leagues'
-    # rows read NaN there until their own send.
     added = list(here.columns.difference(prod.columns, sort=False))
     if added:
         print(f"model_stats: the training box adds {added}; other leagues read NaN there")
