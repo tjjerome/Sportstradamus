@@ -68,7 +68,7 @@
         },
         "FTM": {
             "dist": "NegBin",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "prob_recal_platt",
             "count_dispersion_objective": "crps",
@@ -201,7 +201,7 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "none",
             "blending": "nll"
@@ -341,7 +341,7 @@
         },
         "yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "roe_mean",
             "dist_training_loss": "crps",
@@ -734,7 +734,7 @@
         },
         "runs allowed": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "nll",
