@@ -1,14 +1,19 @@
-"""A new NFL gamelog row reads its game lines under its own game day.
+"""How ``StatsNFL._update`` dates a new gamelog row.
 
-``StatsNFL._update`` writes ``moneyline`` / ``totals`` once, at ingestion, from the odds
-archive under ``(gameday, team)``. The schedule join that dates a new row had been running
-on the week alone, so every row was read under its week's first game day: of the 96
-team-games of 2026 weeks 1-3, 90 were stored at the no-quote default, 84 of them with
-their line in the archive.
+``_update`` writes ``moneyline`` / ``totals`` once, at ingestion, from the odds archive
+under ``(gameday, team)``. The schedule join that dates a new row had been running on the
+week alone, so every row was read under its week's first game day: of the 96 team-games
+of 2026 weeks 1-3, 90 were stored at the no-quote default, 84 of them with their line in
+the archive.
+
+A new row takes its opponent and game from the schedule, fetched once a run. Production's
+fetch failed on 2026-09-07 and 10-27 while new rows were arriving; the schedule lookup
+crashed the NFL update both times, and NFL sat out that board.
 """
 
 from datetime import date, timedelta
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pandas as pd
 
@@ -94,6 +99,10 @@ def _schedule(years) -> pd.DataFrame:
     )
 
 
+def _schedule_unreachable(years):
+    raise URLError("[Errno -3] Temporary failure in name resolution")
+
+
 class _LinePerDate:
     """Archive quoting every team on both days, so a stored line names the day it was read under."""
 
@@ -104,11 +113,15 @@ class _LinePerDate:
         return {(str(day), team): line[day] for day in line for team in GAMEDAY}
 
 
-def test_new_rows_take_the_line_of_their_own_gameday(monkeypatch):
+def _stubbed_stats(monkeypatch, player_stats) -> tuple[StatsNFL, dict]:
+    """A StatsNFL whose fetches return ``player_stats()`` and the fakes above.
+
+    Returns it with the dict each ``write_gamelog`` call stores its gamelog in.
+    """
     written = {}
     monkeypatch.setattr(base, "archive", _LinePerDate())
     monkeypatch.setattr(
-        nfl_module.nflr, "load_player_stats", lambda: SimpleNamespace(to_pandas=_player_stats)
+        nfl_module.nflr, "load_player_stats", lambda: SimpleNamespace(to_pandas=player_stats)
     )
     monkeypatch.setattr(
         nfl_module.nflr, "load_snap_counts", lambda: SimpleNamespace(to_pandas=_snap_counts)
@@ -124,13 +137,43 @@ def test_new_rows_take_the_line_of_their_own_gameday(monkeypatch):
     monkeypatch.setattr(stats, "_load_player_ids", lambda: None)
     # The week's play-by-play is not out yet.
     monkeypatch.setattr(stats, "parse_pbp", lambda *args: 0)
+    return stats, written
+
+
+def _stored_games(gamelog: pd.DataFrame) -> dict:
+    return {row.team: (row.gameday, row.moneyline, row.totals) for row in gamelog.itertuples()}
+
+
+def test_new_rows_take_the_line_of_their_own_gameday(monkeypatch):
+    stats, written = _stubbed_stats(monkeypatch, _player_stats)
 
     stats._update()
 
-    stored = {
-        row.team: (row.gameday, row.moneyline, row.totals)
-        for row in written["gamelog"].itertuples()
+    assert _stored_games(written["gamelog"]) == {
+        team: (str(day), MONEYLINE[day], TOTALS[day]) for team, day in GAMEDAY.items()
     }
-    assert stored == {
+
+
+def test_new_rows_wait_out_a_run_without_the_schedule(monkeypatch):
+    stats, written = _stubbed_stats(monkeypatch, lambda: _player_stats().iloc[:2])
+    stats._update()
+    # The stored Thursday team rows read zero, so the reopen asks FTN and PFR: neither
+    # holds a game yet.
+    monkeypatch.setattr(stats, "_late_source_games", lambda season: (set(), set()))
+    # The Sunday game's players arrive on a run whose schedule fetch fails.
+    monkeypatch.setattr(
+        nfl_module.nflr, "load_player_stats", lambda: SimpleNamespace(to_pandas=_player_stats)
+    )
+    monkeypatch.setattr(nfl_module.nfl, "import_schedules", _schedule_unreachable)
+
+    stats._update()
+
+    assert set(written["gamelog"]["team"]) == {"BUF", "DET"}
+
+    monkeypatch.setattr(nfl_module.nfl, "import_schedules", _schedule)
+
+    stats._update()
+
+    assert _stored_games(written["gamelog"]) == {
         team: (str(day), MONEYLINE[day], TOTALS[day]) for team, day in GAMEDAY.items()
     }

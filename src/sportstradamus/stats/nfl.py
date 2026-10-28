@@ -561,6 +561,10 @@ class StatsNFL(Stats):
         snaps = self._fetch_snap_counts()
         sched = self._fetch_schedule()
         self._compute_upcoming_games(sched)
+        if sched.empty:
+            # A new row takes its opponent and game from the schedule. Every run fetches the
+            # season's stat lines again, so the rows this one would add wait for the next.
+            nfl_data = nfl_data.iloc[:0]
         nfl_data = self._assemble_gamelog_frame(nfl_data, sched, snaps)
         if not nfl_data.empty:
             self._enrich_new_rows(nfl_data)
@@ -669,9 +673,11 @@ class StatsNFL(Stats):
             sched.loc[sched["home_team"] == "OAK", "home_team"] = "LV"
             sched.loc[sched["away_team"] == "WSH", "away_team"] = "WAS"
             sched.loc[sched["home_team"] == "WSH", "home_team"] = "WAS"
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "Failed to fetch NFL schedule data; upcoming games and game metadata will not be updated this run"
+                "Failed to fetch NFL schedule data (%s); upcoming games and new game rows "
+                "wait for the next run",
+                exc,
             )
             sched = pd.DataFrame(columns=["away_team", "home_team", "gameday", "week", "game_id"])
         return sched
