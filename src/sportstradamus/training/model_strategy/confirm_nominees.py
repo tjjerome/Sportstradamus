@@ -55,7 +55,7 @@ _CONFIRM_CAPABILITIES = frozenset({CAP_CONFIRM, CAP_FULL_HPO, CAP_SCORE, CAP_SER
 # ship the recipes that only pass under real HPO, so nominating the top few — rather than requiring
 # a deterministic `ships` — is what makes confirmation reachable at all for the popular NFL passing
 # markets, whose boards carry zero shipping rows.
-CONFIRM_TOP_K: int = 3
+_CONFIRM_TOP_K: int = 3
 # Controls that change the shape of the predictive distribution, and therefore the PIT Gate 4
 # scores. Two corners agreeing on all of them (and on their family) fail Gate 4 identically.
 _GATE4_MECHANISM_CONTROLS: tuple[str, ...] = (
@@ -161,9 +161,9 @@ def _veto_admissible(
     ledger has already decided on this matrix cannot usefully walk again — the walk would skip
     it — so it never spends a lane slot either.
 
-    ``min_model_weight`` drops book-riding corners from the lane (why: :func:`run_confirm`). It is
-    a lane filter, not a cell veto: a cell whose top corner rides the book still nominates its
-    remaining positive corners, and when none remain, its seeds and incumbent.
+    ``min_model_weight`` drops book-riding corners from the lane (why: :func:`confirm.run_confirm`).
+    It is a lane filter, not a cell veto: a cell whose top corner rides the book still nominates
+    its remaining positive corners, and when none remain, its seeds and incumbent.
     """
     veto = ranked[rank_column]
     if not live and "veto_slack" in ranked.columns:
@@ -247,7 +247,7 @@ def _board_lane(
     families: set[str] = set()
     mechanisms: set[tuple[str, ...]] = set()
     remaining = list(range(len(pool)))
-    while remaining and len(lane) < CONFIRM_TOP_K:
+    while remaining and len(lane) < _CONFIRM_TOP_K:
         pick = (
             _next_slot(pool, rank_values, remaining, families, mechanisms) if lane else remaining[0]
         )
@@ -468,7 +468,7 @@ def candidates(
     Cells sort by their best board rank descending (legacy seed-only cells last) so a deadline cut
     lands on the weakest tail, not on cells the board likes that happened to group late. The two
     lanes rank on different quantities, but a stable sort over the mixed list still leaves each
-    lane correctly ordered within itself, which is all :func:`_walk_lanes` walks.
+    lane correctly ordered within itself, which is all :func:`confirm._walk_lanes` walks.
 
     Whether a board carries incumbent margins is a property of the sweep that wrote it, so it is
     decided once here rather than per cell: on a board swept before margins existed every cell keeps

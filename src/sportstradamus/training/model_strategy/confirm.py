@@ -3,7 +3,7 @@
 The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
-1. For each cell, nominate the top :data:`confirm_nominees.CONFIRM_TOP_K` corners **across the
+1. For each cell, nominate the top :data:`confirm_nominees._CONFIRM_TOP_K` corners **across the
    cell's swept families** by ship slack — a count cell's slice carries ZINB, NegBin and DPO
    corners ranked together — then its seed corners and its incumbent. Every swept axis has a
    ``stat_meta.json`` field, and each nominee's own family's ``persist`` map builds the edits (so

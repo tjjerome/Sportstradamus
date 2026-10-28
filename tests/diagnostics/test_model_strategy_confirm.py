@@ -1,5 +1,8 @@
 """Unit tests for the Operation Ship 75 confirm-and-ship loop (``training.model_strategy.confirm``).
 
+Three modules sit under test: ``confirm`` (the walk, aliased ``mc``), ``confirm_nominees``
+(``mcn``) and ``confirm_runs`` (``mcr``).
+
 Each cell nominates its top swept corners plus its seeds and its incumbent, runs every nominee
 blind at full HPO in a research sandbox, and refits only the top-ranked passer canonically, reading
 its ship holdout once. No model trains and no real stat_meta is touched: the ``meditate``
@@ -343,7 +346,7 @@ def test_nominees_cap_the_board_lane_at_top_k():
         _sn_row("ratio_projvol", "crps", "crps", False, 0.20),
     ]
     nominated = _nominate(*board)
-    assert len(nominated) == mcn.CONFIRM_TOP_K
+    assert len(nominated) == mcn._CONFIRM_TOP_K
     assert [n["slack"] for n in nominated] == [0.40, 0.30, 0.20]
 
 
@@ -535,18 +538,18 @@ def test_nominees_interleave_noop_when_count_already_in_top_slots(monkeypatch):
 def test_nominees_interleave_noop_without_a_count_board_row(monkeypatch):
     _integer_target_context(monkeypatch)
     nominated = _nominate(*_all_sn_top())
-    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn.CONFIRM_TOP_K
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn._CONFIRM_TOP_K
 
 
 def test_nominees_interleave_noop_on_non_integer_target():
     """The count-class backup is integer-target gated; mechanism diversity is not.
 
     The default fixture context carries no integer-lattice fact, so the backup adds nothing and
-    the lane stays at ``CONFIRM_TOP_K``. Diversity still orders those slots, so the count corner
+    the lane stays at ``_CONFIRM_TOP_K``. Diversity still orders those slots, so the count corner
     reaches slot 2 on its own — the backup's job here is only the extra insert it declines to make.
     """
     nominated = _nominate(*_all_sn_top(count_slack=0.05))
-    assert len(nominated) == mcn.CONFIRM_TOP_K
+    assert len(nominated) == mcn._CONFIRM_TOP_K
     assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal"]
 
 
@@ -554,7 +557,7 @@ def test_nominees_interleave_never_borrows_a_non_positive_count_corner(monkeypat
     """The count-class backup honors the same board-confidence bar as the lane it patches."""
     _integer_target_context(monkeypatch)
     nominated = _nominate(*_all_sn_top(count_slack=-0.05))
-    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn.CONFIRM_TOP_K
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mcn._CONFIRM_TOP_K
 
 
 def test_nominees_sort_by_discounted_slack_when_present_else_slack():
@@ -692,7 +695,7 @@ def test_nominees_drop_ledger_decided_corners_at_selection():
 
     nominated = _nominate(decided, stale, *fresh)
     board = [n for n in nominated if n["source"].startswith("board")]
-    assert len(board) == mcn.CONFIRM_TOP_K
+    assert len(board) == mcn._CONFIRM_TOP_K
     slacks = [n["slack"] for n in board]
     assert decided["corner_fingerprint"] not in {n["corner_fingerprint"] for n in nominated}
     assert slacks[0] == 0.35  # the stale-matrix corner leads — its verdict no longer binds

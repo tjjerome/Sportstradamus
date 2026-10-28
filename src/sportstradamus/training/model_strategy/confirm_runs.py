@@ -224,7 +224,7 @@ def _record_ledger_row(candidate: dict, gates: dict, eval_split: str) -> bool:
     is the only record of the refit's gates: a losing refit's pickle is pruned, and ``report()``
     rebuilds model_stats from the pickles on disk, so by the time the walk reports its verdict the
     gate values behind it are gone. A board nominee's row also carries its board-side gate values
-    (``board_*``, from ``_board_candidate_row``); seed/incumbent rows leave them NaN. Ledger only;
+    (``board_*``, from its ``board_gates``); seed/incumbent rows leave them NaN. Ledger only;
     nothing production reads it.
 
     Returns whether the fit diverged — ``dispersion_cal`` on its floor
