@@ -230,10 +230,17 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
   is out. I6g reads wait for their floors (honest-receipts §6 item 2).
 - **Next (owner 2026-10-28: now, in a fresh session; plan and progress in the lane folder's
   `research/I6D_PLAN.md` and `REPORT.md`):**
-  1. I6d Phase B: re-inject the cached matrices (backed up in the lane folder's
-     `i6d/training_data.pre-inject`), take the one deciding read M1 (the frozen `i6d/m1_*.py`), then
-     retrain NFL, NBA and NHL one at a time (MLB and WNBA trail), each send on the owner's go. An NHL
-     send before its I6g read (§6) pushes that read out: ask.
+  1. I6d Phase B, held at the deciding read. The cached matrices are re-injected (2026-10-28; the
+     pre-inject copy is the lane folder's `i6d/training_data.pre-inject`) and M1 was read once:
+     (i) passes (NFL count L_off .018 against live .019, from .10), (iii) passes (the NHL band's
+     lower bound −.05; on the stored book +.26), and (ii) fails on NBA PR (+.041), NBA REB (−.034)
+     and MLB doubles (+.034), so nothing is retrained (pre-registration §13). The diagnosis (lane
+     `i6d/diag/`) finds no mis-levelling class: each cell's levelled price matches its reference
+     (ladder rung or native close), and the residual is the book against outcomes (doubles a
+     longshot over-lean in native quotes, live +.05; PR the closing book in the 2026 playoffs; REB
+     inside noise at 28 dates). The owner decides: retrain NFL and NHL (every read of theirs
+     passes), all three leagues, or none under a new pre-registered rule. Each send on the owner's
+     go; an NHL send before its I6g read (§6) pushes that read out.
   2. The blind confirm walk on the levelled matrices (Phase C), which reverts its own failures; the
      fresh sweep board it needs is compute-heavy, so scope it with the owner.
   3. I6f, the NHL comps look-ahead: the owner's high-priority fix
@@ -265,7 +272,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's FTN/PFR data gap is fixed (§8 ask 5), its timing gaps are I6f |
 | Train fraction / refit on all (H1) | not a lever | E1: no cell's forward Brier moved (0 of 5) |
 | Blind confirm walk (H2) | built in week 2; runs after the I6d retrains | protocol; changes no served probability by itself |
-| Book-leg levelling (H3, I6d) | re-read adopted, built and its decode table fit in week 2; the re-inject, the deciding read and the retrains next | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the brief traced it to two defects (§5) |
+| Book-leg levelling (H3, I6d) | re-read adopted, built, its decode table fit and the matrices re-injected in week 2; the deciding read failed on three cells the diagnosis traces to book level, so the retrains wait on the owner (§5) | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the brief traced it to two defects (§5) |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
 
