@@ -404,6 +404,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "Player",
         "Date",
         "QuoteAuthenticity",
+        "QuoteSource",
         "EV",
         "Blended_EV",
     } & set(df.columns)

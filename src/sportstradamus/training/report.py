@@ -13,7 +13,8 @@ score), the per-cell diagnostics (model_weight, EV vs line, shape
 calibration), and the trained hyperparameters. Columns owned by
 ``training.scorecard.compute_gates`` (``ece_*``, ``g1_*`` … ``g5_*``,
 ``ship``) populate as a side effect of ``training.scorecard`` running over
-the test-set CSV for the same cell; before that runs they hold NaN / pd.NA.
+the test-set CSV for the same cell, and the report-only ``book_*`` level
+columns are read off that CSV too; before then they hold NaN / pd.NA.
 """
 
 import importlib.resources as pkg_resources
@@ -39,12 +40,14 @@ from sportstradamus.training.config import (
     save_cv_std_config,
     save_zi_config,
 )
+from sportstradamus.training.labels import over_label
 from sportstradamus.training.model_strategy import (
     ArtifactIdentity,
     resolve_report_identity,
     validate_strategy_frame,
 )
 from sportstradamus.training.scorecard import (
+    ACTUAL_COL,
     compute_gates,
     load_test_set,
     recent_form_fired,
@@ -96,6 +99,18 @@ _IDENTITY_COLUMNS = {
     "strategy_matrix_hash": "matrix_hash",
     "strategy_split_fingerprint": "split_fingerprint",
 }
+
+# Report-only book level by I6d levelling class (column suffix -> QuoteSource); no gate reads them.
+_BOOK_LEVEL_CLASSES = {
+    "native": "book_direct",
+    "redecoded": "book_redecoded",
+    "ladder": "book_ladder_repaired",
+}
+_BOOK_LEVEL_COLUMNS = (
+    "book_citl_offline",
+    *(f"book_citl_{name}" for name in _BOOK_LEVEL_CLASSES),
+    *(f"book_share_{name}" for name in _BOOK_LEVEL_CLASSES),
+)
 
 
 def report() -> None:
@@ -257,6 +272,8 @@ def _wide_row(
         "model_weight": _diag("model_weight"),
         "n_authentic_validation": _diag("n_authentic_validation"),
         "n_blend_fit_clusters": _diag("n_blend_fit_clusters"),
+        # Book level — populated from the test-set CSV by _book_level_columns.
+        **dict.fromkeys(_BOOK_LEVEL_COLUMNS, float("nan")),
         # Shape
         "model_shape": float(mod_shape),
         "empirical_shape": float(emp_shape),
@@ -322,6 +339,33 @@ def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
     }
 
 
+def _book_level_columns(df: pd.DataFrame) -> dict[str, float]:
+    """Book calibration-in-the-large on the test half's sportsbook rows, by levelling class.
+
+    CITL = mean(book P(over) - y), y = 1 over, 0 under, 0.5 at a push; the test CSV's
+    ``Odds`` is the book under-probability. Shares are each class's fraction of the
+    authentic rows. ``docs/handoffs/i6d-decode-preregistration.md`` §13(iv) reads these;
+    no gate does.
+    """
+    out = dict.fromkeys(_BOOK_LEVEL_COLUMNS, float("nan"))
+    if not {"Odds", "Line", ACTUAL_COL, "QuoteAuthenticity"} <= set(df.columns):
+        return out
+    rows = df[df["QuoteAuthenticity"].eq("authentic")]
+    rows = rows[np.isfinite(rows[["Odds", "Line", ACTUAL_COL]]).all(axis=1)]
+    if rows.empty:
+        return out
+    gap = (1.0 - rows["Odds"].to_numpy(float)) - over_label(rows[ACTUAL_COL], rows["Line"])
+    out["book_citl_offline"] = float(gap.mean())
+    if "QuoteSource" not in rows.columns:
+        return out
+    for name, source in _BOOK_LEVEL_CLASSES.items():
+        mask = rows["QuoteSource"].eq(source).to_numpy()
+        out[f"book_share_{name}"] = float(mask.mean())
+        if mask.any():
+            out[f"book_citl_{name}"] = float(gap[mask].mean())
+    return out
+
+
 def _layer_gates_from_test_set(
     row: dict,
     expected_identity: ArtifactIdentity | None,
@@ -330,7 +374,7 @@ def _layer_gates_from_test_set(
     *,
     prior_g6_fired: bool | None = None,
 ) -> None:
-    """Overwrite the placeholder ship-gate columns on ``row`` if the test-set CSV is present.
+    """Overwrite the placeholder ship-gate and book-level columns on ``row`` from the test-set CSV.
 
     Gates layer only when the CSV's strategy identity matches the model's: generic
     identities must match exactly, and identity-absent legacy artifacts are accepted only
@@ -383,6 +427,7 @@ def _layer_gates_from_test_set(
         return
     if df.empty:
         return
+    row.update(_book_level_columns(df))
     row.update(
         compute_gates(
             df,

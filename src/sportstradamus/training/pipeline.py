@@ -1196,6 +1196,7 @@ def _step_build_splits(
     quote_authenticity_test = (
         M.loc[X_test.index, "QuoteAuthenticity"] if "QuoteAuthenticity" in M.columns else None
     )
+    quote_source_test = M.loc[X_test.index, "QuoteSource"] if "QuoteSource" in M.columns else None
     return {
         "X": X,
         "y": y,
@@ -1220,6 +1221,7 @@ def _step_build_splits(
         "odds_synthetic_test": odds_synthetic_test,
         "quote_authenticity_validation": quote_authenticity_validation,
         "quote_authenticity_test": quote_authenticity_test,
+        "quote_source_test": quote_source_test,
     }
 
 
@@ -2698,12 +2700,16 @@ def _step_persist_artifacts(
     # Pre-blend (model-only) over-probability — lets the offline scorecard report a
     # standalone Gate-1 CI alongside the fused one, attributing the pass to model vs book.
     X_test["P_standalone"] = y_proba_raw[:, 1]
-    quote_authenticity = splits.get("quote_authenticity_test")
-    if quote_authenticity is not None:
-        aligned_authenticity = pd.Series(quote_authenticity).reindex(X_test.index)
-        if aligned_authenticity.isna().any():
-            raise ValueError("test quote authenticity does not align to persisted rows")
-        X_test["QuoteAuthenticity"] = aligned_authenticity.to_numpy()
+    for split_key, column in (
+        ("quote_authenticity_test", "QuoteAuthenticity"),
+        ("quote_source_test", "QuoteSource"),
+    ):
+        provenance = splits.get(split_key)
+        if provenance is not None:
+            aligned = pd.Series(provenance).reindex(X_test.index)
+            if aligned.isna().any():
+                raise ValueError(f"test {column} does not align to persisted rows")
+            X_test[column] = aligned.to_numpy()
     _persist_player_metadata(X_test, splits)
     for column, value in artifact_identity_columns(filedict[MODEL_STRATEGY_MODEL_KEY]).items():
         X_test[column] = value

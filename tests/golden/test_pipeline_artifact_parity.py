@@ -112,6 +112,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     index = pd.Index(range(11, 11 + 2 * reps))
     book_over = np.tile([0.2, 0.65], reps)
     authenticity = ["authentic"] * (2 * reps - 1) + ["synthetic"]
+    sources = ["book_direct", "book_redecoded"] * (reps - 1) + ["book_direct", "neutral_fallback"]
     book_ev = np.tile(SERVED_MEAN, reps)
     served_mean = book_ev + 0.5
     preblend_r = np.tile(PREBLEND_R, reps)
@@ -125,6 +126,8 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         "players_test": None,
         "dates_test": [f"2026-01-{day:02d}" for day in range(1, 2 * reps + 1)],
         "quote_authenticity_test": pd.Series(authenticity, index=index),
+        # Reversed, so only a write aligned by index lands each source on its own row.
+        "quote_source_test": pd.Series(sources, index=index).iloc[::-1],
     }
     model_over = np.tile([0.4, 0.7], reps)
     matrix_hash = "b" * 64
@@ -183,6 +186,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     np.testing.assert_allclose(persisted["R_model"], preblend_r)
     assert not np.array_equal(persisted["R_model"], persisted["R"])
     assert persisted["QuoteAuthenticity"].tolist() == authenticity
+    assert persisted["QuoteSource"].tolist() == sources
     brier_inputs = _brier_inputs(persisted)
     assert brier_inputs is not None
     _, recovered_book_over, _, _ = brier_inputs
@@ -224,6 +228,7 @@ def test_split_metadata_stays_aligned_when_prediction_sorts_test_rows(monkeypatc
             "Line": np.arange(len(index), dtype=float) + 0.5,
             "Odds": np.full(len(index), 0.55),
             "EV": np.arange(len(index), dtype=float) + 1.0,
+            "QuoteSource": [f"source-{i}" for i in index],
         },
         index=index,
     )
@@ -246,9 +251,12 @@ def test_split_metadata_stays_aligned_when_prediction_sorts_test_rows(monkeypatc
 
     persisted = splits["X_test"].copy()
     pipe._persist_player_metadata(persisted, splits)
-    expected = matrix.loc[persisted.index, ["Player", "Date"]]
+    expected = matrix.loc[persisted.index, ["Player", "Date", "QuoteSource"]]
     pd.testing.assert_series_equal(persisted["Player"], expected["Player"])
     pd.testing.assert_series_equal(persisted["Date"], expected["Date"])
+    pd.testing.assert_series_equal(
+        splits["quote_source_test"].reindex(persisted.index), expected["QuoteSource"]
+    )
 
 
 def test_validation_assignment_is_stable_when_held_out_rows_are_added():
