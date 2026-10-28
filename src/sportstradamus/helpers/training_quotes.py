@@ -177,11 +177,13 @@ def _finite(value) -> bool:
         return False
 
 
-def _positive(value) -> bool:
+def is_positive(value) -> bool:
+    """Whether ``value`` is a finite number above zero; ``None`` is not."""
     return _finite(value) and float(value) > 0.0
 
 
-def _probability(value) -> bool:
+def is_probability(value) -> bool:
+    """Whether ``value`` is a finite number strictly between 0 and 1; ``None`` is not."""
     return _finite(value) and 0.0 < float(value) < 1.0
 
 
@@ -192,7 +194,7 @@ def archive_ev_is_runaway(value, line) -> bool:
     ev = float(value)
     if ev > BLOWN_ABS_CEILING:
         return True
-    if not _positive(line):
+    if not is_positive(line):
         return False
     line_ceiling = BLOWN_LINE_FACTOR * float(line)
     # ``get_ev`` may converge one ULP above its intentional 5x line ceiling.
@@ -203,12 +205,12 @@ def archive_ev_is_runaway(value, line) -> bool:
 
 def archive_ev_is_usable(value, line) -> bool:
     """Reject nonpositive/nonfinite and historically runaway archive EV values."""
-    return _positive(value) and not archive_ev_is_runaway(value, line)
+    return is_positive(value) and not archive_ev_is_runaway(value, line)
 
 
 def _weight(book: str, weights: Mapping[str, float]) -> float:
     value = weights.get(book, 1.0)
-    return float(value) if _positive(value) else 1.0
+    return float(value) if is_positive(value) else 1.0
 
 
 _R = TypeVar("_R")
@@ -272,7 +274,7 @@ def pickem_quote(
     if "fantasy points " not in market:
         return []
     platform = _PICKEM_PLATFORMS.get(market.rsplit(" ", 1)[-1])
-    if platform is None or not _positive(line) or observed_at is None:
+    if platform is None or not is_positive(line) or observed_at is None:
         return []
     return [ArchivedBookQuote(platform, None, _PICKEM_UNDER_PROBABILITY, line, observed_at)]
 
@@ -289,7 +291,7 @@ def _direct_line_cohort(
     book evidence.
     """
     direct = sportsbook_cohort(
-        [row for row in rows if _positive(row.line) and _probability(row.under_probability)]
+        [row for row in rows if is_positive(row.line) and is_probability(row.under_probability)]
     )
     if not direct:
         return None
@@ -381,7 +383,7 @@ def _ev_inversion_quote(
     if ev is None or ev <= 0:
         return None
     under = float(get_odds(line, ev, dist, cv=cv))
-    if not _probability(under):
+    if not is_probability(under):
         return None
     return TrainingQuote(
         line=line,
@@ -423,12 +425,12 @@ def resolve_training_quote(
     if direct is not None:
         return _authentic_quote(direct[1], direct[0], dist=dist, cv=cv, weights=weights)
 
-    line_is_observed = _positive(legacy_line)
+    line_is_observed = is_positive(legacy_line)
     line = (
         float(legacy_line)
         if line_is_observed
         else float(fallback_line)
-        if _positive(fallback_line)
+        if is_positive(fallback_line)
         else 0.5
     )
     ev_rows = sportsbook_cohort([row for row in ordered_rows if archive_ev_is_usable(row.ev, line)])

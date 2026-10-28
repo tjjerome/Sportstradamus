@@ -31,9 +31,9 @@ from sportstradamus.helpers.training_quotes import (
     LADDER_REPAIRED,
     REDECODED,
     ArchivedBookQuote,
-    _positive,
-    _probability,
     archive_ev_is_usable,
+    is_positive,
+    is_probability,
 )
 
 LIVE = "live"
@@ -120,7 +120,7 @@ def decode_table() -> dict[tuple[str, str, str, str], BlockVerdict]:
 def ladder_repaired(row: ArchivedBookQuote) -> ArchivedBookQuote:
     """The row priced at its same-observation rung where the two disagree (§11, Class II)."""
     rung = row.ladder_over_probability
-    if rung is None or not _probability(row.under_probability):
+    if rung is None or not is_probability(row.under_probability):
         return row
     if abs((1.0 - row.under_probability) - rung) <= LADDER_DISAGREEMENT:
         return row
@@ -133,11 +133,11 @@ def _redecoded(row: ArchivedBookQuote, verdict: BlockVerdict) -> ArchivedBookQuo
         return None
     if verdict.family == STORED:
         under = row.under_probability
-    elif _positive(row.line) and archive_ev_is_usable(row.ev, row.line):
+    elif is_positive(row.line) and archive_ev_is_usable(row.ev, row.line):
         under = float(decode_under(verdict.family, row.line, row.ev, verdict.cv))
     else:
         return None
-    if not _probability(under):
+    if not is_probability(under):
         return None
     return dataclasses.replace(row, under_probability=under, levelling=REDECODED)
 
@@ -145,7 +145,7 @@ def _redecoded(row: ArchivedBookQuote, verdict: BlockVerdict) -> ArchivedBookQuo
 def _reads_duplicate_side(row: ArchivedBookQuote, rows: Sequence[ArchivedBookQuote]) -> bool:
     """An exact even price the other books on its line put well under (§11, no rung)."""
     if (
-        not _probability(row.under_probability)
+        not is_probability(row.under_probability)
         or abs(row.under_probability - 0.5) >= EVEN_PRICE_TOLERANCE
     ):
         return False
@@ -155,7 +155,7 @@ def _reads_duplicate_side(row: ArchivedBookQuote, rows: Sequence[ArchivedBookQuo
         if other is not row
         and other.book not in DFS_PLATFORM_BOOKS
         and other.line == row.line
-        and _probability(other.under_probability)
+        and is_probability(other.under_probability)
     ]
     return bool(others) and float(np.median(others)) > _OTHER_BOOKS_UNDER_FLOOR
 
