@@ -61,6 +61,7 @@ from sportstradamus.training.model_strategy import (
     validate_strategy_frame,
     validate_strategy_selection,
 )
+from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 from sportstradamus.training.model_strategy.specs import (
     CONFIRM_EVIDENCE_CORNERS,
     INCUMBENT_CONTROL_DEFAULTS,
@@ -108,6 +109,15 @@ _STRUCTURAL_CELL_COLUMNS = {
 # A low-mean integer target — the shape that admits every registered base family, so a test that
 # doesn't care about admission gets all of them.
 _ADMITS_EVERY_FAMILY = (True, 5.0)
+# A valid SkewNormal corner for tests that need a registered recipe and not a particular one.
+_SN_CORNER = {
+    "dist": "SkewNormal",
+    "normalization": "ratio_meanyr",
+    "dist_training_loss": "crps",
+    "sn_param": "direct",
+    "blending_loss_fn": "nll",
+    "posthoc": "none",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -308,8 +318,6 @@ def _artifact(spec, league, market, controls, *, status="active"):
 
 def test_family_registry_grids_and_persist_maps():
     """Base families and both registered NFL-yards methods expose reproducible contracts."""
-    import math
-
     sn = get_strategy("SkewNormal")
     mix = get_strategy("Mixture")
     zinb = get_strategy("ZINB")
@@ -508,14 +516,6 @@ def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_speci
     )
     assert receiving in strategies_for_cell(with_schema)
 
-    sn_controls = {
-        "dist": "SkewNormal",
-        "normalization": "ratio_meanyr",
-        "dist_training_loss": "crps",
-        "sn_param": "direct",
-        "blending_loss_fn": "nll",
-        "posthoc": "none",
-    }
     mixture_controls = {
         "dist": "Mixture",
         "normalization": "ratio_meanyr",
@@ -523,7 +523,7 @@ def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_speci
         "blending_loss_fn": "nll",
         "posthoc": "none",
     }
-    sn = build_artifact_identity("SkewNormal", "WNBA", "AST", sn_controls, matrix_hash=_MATRIX_SHA)
+    sn = build_artifact_identity("SkewNormal", "WNBA", "AST", _SN_CORNER, matrix_hash=_MATRIX_SHA)
     mixture = build_artifact_identity(
         "Mixture", "WNBA", "AST", mixture_controls, matrix_hash=_MATRIX_SHA
     )
@@ -531,7 +531,7 @@ def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_speci
     assert sn.signature != mixture.signature
     assert sn.structural_strategy == mixture.structural_strategy == "none"
 
-    other_sn_controls = {**sn_controls, "blending_loss_fn": "crps"}
+    other_sn_controls = {**_SN_CORNER, "blending_loss_fn": "crps"}
     other_sn = build_artifact_identity(
         "SkewNormal", "WNBA", "AST", other_sn_controls, matrix_hash=_MATRIX_SHA
     )
@@ -539,7 +539,7 @@ def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_speci
     assert other_sn.controls_json != sn.controls_json
     assert other_sn.corner_fingerprint != sn.corner_fingerprint
 
-    frame, model = _artifact(get_strategy("SkewNormal"), "WNBA", "AST", sn_controls)
+    frame, model = _artifact(get_strategy("SkewNormal"), "WNBA", "AST", _SN_CORNER)
     with pytest.raises(ValueError, match="mismatched strategy artifact"):
         validate_strategy_artifacts(
             get_strategy("SkewNormal"),
@@ -650,15 +650,7 @@ def test_csv_identity_rejects_partial_adapter_and_nonintegral_contracts():
     assert validate_strategy_frame(pd.DataFrame({"PITRecalKnots": ["[]"]})) == (None, None)
 
     spec = get_strategy("SkewNormal")
-    controls = {
-        "dist": "SkewNormal",
-        "normalization": "ratio_meanyr",
-        "dist_training_loss": "crps",
-        "sn_param": "direct",
-        "blending_loss_fn": "nll",
-        "posthoc": "none",
-    }
-    frame, _ = _artifact(spec, "WNBA", "AST", controls)
+    frame, _ = _artifact(spec, "WNBA", "AST", _SN_CORNER)
     frame["StrategyImplementationVersion"] = 1.5
     with pytest.raises(ValueError, match="requires integral implementation_version"):
         validate_strategy_frame(frame, league="WNBA", market="AST")
@@ -1078,15 +1070,7 @@ def test_run_and_score_records_failed_corner_non_shipping(monkeypatch):
     monkeypatch.setattr(
         sweep, "_score_corner", lambda *a, **k: pytest.fail("a failed corner must not be scored")
     )
-    corner = {
-        "dist": "SkewNormal",
-        "normalization": "ratio_meanyr",
-        "dist_training_loss": "crps",
-        "sn_param": "direct",
-        "blending_loss_fn": "nll",
-        "posthoc": "none",
-    }
-    row = sweep._run_and_score("NHL", "blocked", "SkewNormal", corner)
+    row = sweep._run_and_score("NHL", "blocked", "SkewNormal", dict(_SN_CORNER))
     assert row["ships"] is False
     assert row["slack"] == sweep._FAILED_CORNER_SLACK
     assert row["family"] == "SkewNormal"
@@ -1746,16 +1730,6 @@ def _cell_frame(league, market, **kwargs):
     ).reindex(columns=sweep._BOARD_COLUMNS)
 
 
-_SN_CORNER = {
-    "dist": "SkewNormal",
-    "normalization": "ratio_meanyr",
-    "dist_training_loss": "crps",
-    "sn_param": "direct",
-    "blending_loss_fn": "nll",
-    "posthoc": "none",
-}
-
-
 def _board_row(league, market, slug, controls):
     """One board row for a scored corner, as ``search_cell`` would persist it."""
     return {
@@ -2041,8 +2015,6 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
     """Board-mode ``--dry-run`` (no --market) prints the scope and exits without sweeping a single
     cell; --dist-class threads through to the cell selection.
     """
-    from click.testing import CliRunner
-
     seen = {}
 
     def fake_select(lg, incl, dist_class):
@@ -2154,8 +2126,6 @@ def test_stat_meta_edit_is_family_aware():
 
 def test_cli_runs_a_single_cell_under_the_max_trials_budget(monkeypatch, tmp_path):
     """``--league``/``--market`` sweeps one cell; ``--max-trials`` overrides the per-cell budget."""
-    from click.testing import CliRunner
-
     monkeypatch.setattr(
         sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
     )
@@ -2176,10 +2146,6 @@ def test_cli_runs_a_single_cell_under_the_max_trials_budget(monkeypatch, tmp_pat
 
 def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     """``--confirm`` hands the ranked board to the confirm loop (which is mocked here)."""
-    from click.testing import CliRunner
-
-    from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
-
     monkeypatch.setattr(
         sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
     )
@@ -2233,10 +2199,6 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     """A ``--league``-scoped board hands ``--confirm`` its own cells only, while the CSV keeps the
     rows of every cell outside the scope.
     """
-    from click.testing import CliRunner
-
-    from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
-
     out = str(tmp_path / "board.csv")
     pd.DataFrame(
         {
@@ -2287,8 +2249,6 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
     """A single-cell run merges into the board file — replacing that cell's prior rows, keeping the
     others — so it refreshes the living board instead of clobbering it.
     """
-    from click.testing import CliRunner
-
     monkeypatch.setattr(
         sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
     )
@@ -2387,7 +2347,7 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
             )
         )
         board_rows.append({**_board_csv_row(controls), "league": league, "market": market})
-    # A diverged confirm (dispersion_cal on its 0.1 floor) and a seed row absent from the board.
+    # A diverged blind run (dispersion_cal on its 0.1 floor) and a seed row absent from the board.
     ledger_rows.append(
         _ledger_row(strategy_controls_json='{"corner":90}', dispersion_cal=0.1000001, g4_pit_ks=9.0)
     )
@@ -2404,12 +2364,12 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
     assert set(rank) == set(veto) == set(sweep._DISCOUNTED_GATES)
     # Rank discounts price the corner at the pessimistic q75 of the measured shifts; the veto
     # keeps the central q50, so a cell loses its nominations only when even the median
-    # confirm-vs-board gap sinks every corner.
+    # blind-minus-board gap sinks every corner.
     assert rank["g4_pit_ks"] == pytest.approx(0.03)
     assert veto["g4_pit_ks"] == pytest.approx(0.02)
     assert rank["g2_star_z"] == pytest.approx(0.6)
     assert veto["g2_star_z"] == pytest.approx(0.4)
-    assert rank["g3_bench_z"] == pytest.approx(-0.1)  # a gate confirm lands better on
+    assert rank["g3_bench_z"] == pytest.approx(-0.1)  # a gate the blind run lands better on
     assert veto["g3_bench_z"] == pytest.approx(-0.2)
     assert veto["g5_ece_debiased"] == pytest.approx(0.008)
     assert veto["g1_brier_diff_ci_hi"] == pytest.approx(0.004)
@@ -2420,7 +2380,7 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
     assert sweep._ledger_gate_discounts(str(out)) == ({}, {})
 
     # Nine pairs but only two distinct cells: row volume alone is not evidence — a per-cell
-    # quirk (one campaign's confirms) must not become every cell's discount.
+    # quirk (one campaign's blind runs) must not become every cell's discount.
     two_cell_rows = [
         {**row, "league": cells[i % 2][0], "market": cells[i % 2][1]}
         for i, row in enumerate(ledger_rows[:9])
