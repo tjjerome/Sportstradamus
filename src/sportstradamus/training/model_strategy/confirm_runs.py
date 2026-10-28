@@ -192,7 +192,7 @@ def _split_matches(actual: object, expected: str | None) -> bool:
     return actual == expected
 
 
-def ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity) -> bool:
+def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity) -> bool:
     """The official ship verdict bound to the exact reported strategy contract."""
     try:
         row = _cell_row(league, market, _SHIP_IDENTITY_COLUMNS)
@@ -376,7 +376,7 @@ def confirm_median_seconds(league: str | None = None, market: str | None = None)
     return float(scope["elapsed_s"].median())
 
 
-def candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
+def _candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
     """The nominated recipe as an identity, rebound to ``matrix_hash`` when a retrain moved the matrix.
 
     ``_run_meditate`` passes ``--force``, which updates the league gamelogs and appends gamedays, so a
@@ -384,7 +384,7 @@ def candidate_identity(candidate: dict, matrix_hash: str | None = None) -> Artif
     of the first overnight run did. What confirmation tests is the *recipe*; the board's pre-retrain
     matrix hash is stale by construction, and the corner fingerprint binds it, so comparing either
     against the retrain rejects recipes the six gates just passed. The same-retrain invariant that
-    actually matters — pickle and model_stats agreeing — is enforced in :func:`produced_artifacts_match`.
+    actually matters — pickle and model_stats agreeing — is enforced in :func:`_produced_artifacts_match`.
     """
     matrix = candidate["matrix_hash"] if matrix_hash is None else matrix_hash
     return ArtifactIdentity(
@@ -409,7 +409,7 @@ def candidate_identity(candidate: dict, matrix_hash: str | None = None) -> Artif
     )
 
 
-def retrained_matrix_hash(league: str, market: str) -> str | None:
+def _retrained_matrix_hash(league: str, market: str) -> str | None:
     """The matrix hash the just-finished retrain reported, or ``None`` when it wrote no row."""
     try:
         row = _cell_row(league, market, ["league", "market", "strategy_matrix_hash"])
@@ -425,7 +425,7 @@ def served_weight(path: pathlib.Path) -> float:
     return float(pd.read_pickle(path)["weight"])
 
 
-def produced_artifacts_match(
+def _produced_artifacts_match(
     league: str, market: str, candidate: dict, expected: ArtifactIdentity
 ) -> bool:
     """Fail closed unless the retrain produced the exact signed board strategy and cell.
@@ -568,7 +568,7 @@ def _run_blind(candidate: dict, hpo_selection: str) -> BlindRun:
         scored = _score_corner(lg, mkt, candidate["controls"], spec, run.dump, run.model)
     except (OSError, ValueError, KeyError, TypeError):
         return run._replace(failed=["artifact identity"])
-    identity = candidate_identity(candidate, scored["matrix_hash"])
+    identity = _candidate_identity(candidate, scored["matrix_hash"])
     row = {
         "league": lg,
         "market": mkt,
@@ -644,30 +644,36 @@ def run_canonical(league: str, market: str, candidate: dict) -> tuple[str, bool]
     return "", _record_ledger_row(candidate, row.to_dict(), EVAL_SPLIT_TEST)
 
 
-def confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
-    """Withheld-path confirm: refit canonically, then why the cell did not ship (empty: it did).
+def refit_failures(league: str, market: str, candidate: dict) -> list[str]:
+    """Why a canonical refit cannot ship, read back from model_stats and its pickle; empty: it can.
 
     Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
     bare False reads on the report as a gate failure with no gate named.
     """
+    matrix_hash = _retrained_matrix_hash(league, market)
+    if matrix_hash is None:
+        return ["no model_stats row"]
+    # Gates first: ``ship`` is the six gates' conjunction, so a plain Gate-4 miss also fails the
+    # model_stats leg, and checking identity ahead of the gates reports it with no gate named. The
+    # two identity legs still gate the ship — they just answer a later question.
+    failed = _failed_gates_after(league, market)
+    if failed:
+        return failed
+    expected = _candidate_identity(candidate, matrix_hash)
+    if not _produced_artifacts_match(league, market, candidate, expected):
+        return ["artifact identity"]
+    if not _ship_from_model_stats(league, market, expected):
+        return ["model_stats identity/ship"]
+    return []
+
+
+def confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
+    """Withheld-path confirm: refit canonically, then why the cell did not ship (empty: it did)."""
     error, diverged = run_canonical(league, market, candidate)
     if error:
         return [f"retrain {error}"]
     # A diverged fit is named ahead of whatever it fails: the gates already reject it, but
     # "diverged g1 g4" sends triage to the fit rather than the anonymous gate list.
     prefix = ["diverged"] if diverged else []
-    matrix_hash = retrained_matrix_hash(league, market)
-    if matrix_hash is None:
-        return [*prefix, "no model_stats row"]
-    # Gates first: serve-iff-ship leaves no pickle behind for a cell that failed one, so checking
-    # artifact identity ahead of them reports a missing serving artifact as the cause of a plain
-    # Gate-4 miss. The two identity legs still gate the ship — they just answer a later question.
-    failed = _failed_gates_after(league, market)
-    if failed:
-        return prefix + failed
-    expected = candidate_identity(candidate, matrix_hash)
-    if not produced_artifacts_match(league, market, candidate, expected):
-        return [*prefix, "artifact identity"]
-    if not ship_from_model_stats(league, market, expected):
-        return [*prefix, "model_stats identity/ship"]
-    return []
+    failed = refit_failures(league, market, candidate)
+    return prefix + failed if failed else []

@@ -1141,9 +1141,9 @@ def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
     )
     monkeypatch.setattr(mcr.pd, "read_parquet", lambda *args, **kwargs: stats)
 
-    assert mcr.ship_from_model_stats("NFL", "rushing yards", expected) is True
+    assert mcr._ship_from_model_stats("NFL", "rushing yards", expected) is True
     stats.loc[0, "strategy_controls_json"] = "{}"
-    assert mcr.ship_from_model_stats("NFL", "rushing yards", expected) is False
+    assert mcr._ship_from_model_stats("NFL", "rushing yards", expected) is False
     stats.loc[0, "strategy_controls_json"] = expected.controls_json
     wrong = build_artifact_identity(
         "SkewNormal",
@@ -1152,7 +1152,7 @@ def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
         _sn_controls("ratio_meanyr", "crps", "nll"),
         matrix_hash=_MATRIX_SHA,
     )
-    assert mcr.ship_from_model_stats("NFL", "rushing yards", wrong) is False
+    assert mcr._ship_from_model_stats("NFL", "rushing yards", wrong) is False
 
 
 def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch):
@@ -1163,11 +1163,11 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", False))
-    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g4"])
     monkeypatch.setattr(
         mcr,
-        "produced_artifacts_match",
+        "_produced_artifacts_match",
         lambda *args: pytest.fail("a gate miss must not be diagnosed through the pruned pickle"),
     )
 
@@ -1181,14 +1181,14 @@ def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", True))
-    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
 
     assert mcr.confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
 
     monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
-    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: True)
-    monkeypatch.setattr(mcr, "ship_from_model_stats", lambda *args: True)
+    monkeypatch.setattr(mcr, "_produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mcr, "_ship_from_model_stats", lambda *args: True)
     assert mcr.confirm_meditate("WNBA", "AST", candidate) == []
 
 
@@ -1257,7 +1257,7 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
         seen["matrix_hash"] = expected.matrix_hash
         return True
 
-    monkeypatch.setattr(mcr, "produced_artifacts_match", artifacts_match)
+    monkeypatch.setattr(mcr, "_produced_artifacts_match", artifacts_match)
 
     assert mcr.confirm_meditate(candidate["league"], candidate["market"], candidate) == []
     # The pickle leg is held to the retrain's matrix too, so a stale artifact still fails there.
@@ -1267,12 +1267,12 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
 def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_match(monkeypatch):
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", False))
-    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
-    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: False)
+    monkeypatch.setattr(mcr, "_produced_artifacts_match", lambda *args: False)
     monkeypatch.setattr(
         mcr,
-        "ship_from_model_stats",
+        "_ship_from_model_stats",
         lambda *args: pytest.fail("unverified artifacts must never reach the ship verdict"),
     )
     assert mcr.confirm_meditate("WNBA", "AST", candidate) == ["artifact identity"]
@@ -2220,11 +2220,12 @@ def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_o
     monkeypatch.setattr(
         mcr, "run_canonical", lambda lg, mkt, cand: ("" if meditate_ok else "exit 1", False)
     )
-    monkeypatch.setattr(mcr, "retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
-    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mcr, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "_produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(
         mcr,
-        "ship_from_model_stats",
+        "_ship_from_model_stats",
         lambda lg, mkt, expected: model_stats_ok,
     )
     monkeypatch.setattr(mc, "load_test_set", lambda path, col: pd.DataFrame())
@@ -2436,10 +2437,35 @@ def test_supersede_meditate_error_restores_incumbent(monkeypatch):
     assert pruned == []
 
 
+def test_supersede_names_the_gate_a_live_refit_fails(monkeypatch):
+    """A live refit that misses a gate is held under that gate's name, as on the withheld lane.
+
+    ``ship`` is the six gates' conjunction, so the refit's model_stats leg fails too; checking it
+    first reported a plain gate miss on a live cell as "model_stats identity/ship".
+    """
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(
+        monkeypatch, verdict=_verdict(ship=True), model_stats_ok=False
+    )
+    monkeypatch.setattr(mcr, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    monkeypatch.setattr(
+        mc,
+        "supersede_verdict",
+        lambda *a, **k: pytest.fail("a gate miss must stop before S1/S2/S3"),
+    )
+
+    assert mc._supersede_one(meta, _supersede_cand()) == ("NBA", "PTS", "HELD", ["g4"])
+    assert restored[0][:2] == ("NBA", "PTS")
+    assert pruned == []
+
+    monkeypatch.setattr(mcr, "run_canonical", lambda lg, mkt, cand: ("", True))
+    assert mc._supersede_one(meta, _supersede_cand())[3] == ["diverged", "g4"]
+
+
 def test_supersede_artifact_identity_failure_restores_incumbent(monkeypatch):
     meta = _shipped_meta()
     restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
-    monkeypatch.setattr(mcr, "produced_artifacts_match", lambda *args: False)
+    monkeypatch.setattr(mcr, "_produced_artifacts_match", lambda *args: False)
     result = mc._supersede_one(meta, _supersede_cand())
     assert result == ("NBA", "PTS", "HELD", ["artifact identity"])
     assert restored[0][:2] == ("NBA", "PTS")
@@ -2459,7 +2485,7 @@ def test_supersede_model_stats_identity_or_ship_failure_restores_before_verdict_
     checked = []
     monkeypatch.setattr(
         mcr,
-        "ship_from_model_stats",
+        "_ship_from_model_stats",
         lambda lg, mkt, expected: checked.append((lg, mkt, expected)) or False,
     )
     monkeypatch.setattr(
@@ -2481,7 +2507,7 @@ def test_supersede_model_stats_identity_or_ship_failure_restores_before_verdict_
     result = mc._supersede_one(meta, cand)
 
     assert result == ("NBA", "PTS", "HELD", ["model_stats identity/ship"])
-    assert checked == [("NBA", "PTS", mcr.candidate_identity(cand))]
+    assert checked == [("NBA", "PTS", mcr._candidate_identity(cand))]
     assert restored[0][:2] == ("NBA", "PTS")
     assert pruned == []
 

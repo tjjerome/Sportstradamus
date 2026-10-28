@@ -161,8 +161,9 @@ def _supersede_one(
 ) -> tuple[str, str, str, list[str]]:
     """Supersession-test the walk's pick on one live cell; promote it or restore the incumbent.
 
-    Snapshots the incumbent, refits the pick canonically in place, requires its exact artifact
-    identity and official six-gate ``model_stats`` ship, then runs S1/S2/S3 against the served
+    Snapshots the incumbent, refits the pick canonically in place, holds the refit to the withheld
+    lane's post-refit verdict (:func:`confirm_runs.refit_failures`: the six gates, then exact
+    artifact identity and the official ``model_stats`` ship), then runs S1/S2/S3 against the served
     incumbent's test set. A swap needs the test to pass AND an explicit promote confirmation; every
     other exit — HOLD, decline, refit error, or an exception — hits the ``finally`` restore, which
     copies the snapshot back byte-identical and never prunes, so the incumbent keeps serving.
@@ -184,14 +185,9 @@ def _supersede_one(
         if error:
             return (lg, mkt, "HELD", [f"retrain {error}"])
         prefix = ["diverged"] if diverged else []
-        matrix_hash = confirm_runs.retrained_matrix_hash(lg, mkt)
-        if matrix_hash is None:
-            return (lg, mkt, "HELD", [*prefix, "no model_stats row"])
-        expected = confirm_runs.candidate_identity(cand, matrix_hash)
-        if not confirm_runs.produced_artifacts_match(lg, mkt, cand, expected):
-            return (lg, mkt, "HELD", [*prefix, "artifact identity"])
-        if not confirm_runs.ship_from_model_stats(lg, mkt, expected):
-            return (lg, mkt, "HELD", [*prefix, "model_stats identity/ship"])
+        failed = confirm_runs.refit_failures(lg, mkt, cand)
+        if failed:
+            return (lg, mkt, "HELD", prefix + failed)
         verdict = supersede_verdict(
             load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL),
             load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL),
