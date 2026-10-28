@@ -216,7 +216,10 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
   participation file nflverse does not serve, never a past season; a dev replay of week 7 moved served P
   by at most .0027 RMS in any cell); the blind confirm walk (every nominee ranked on the cross-fit half at
   full HPO, the test verdict read once for the chosen nominee, whose booster `meditate --params-from`
-  pins; it runs in week 3). Running: the NFL rebuild and retrain on the healed logs. I6d (H3): the brief
+  pins; it runs in week 3); the NFL rebuild and retrain on the healed logs, sent to production 10-27
+  (16 cells; NFL yards, which fails Gate 1 again, and fantasy points PrizePicks stay pulled); an NFL
+  update whose schedule fetch fails keeps NFL on the board, its new rows waiting for the next run (the
+  fetch failed on 09-07 and 10-27 and NFL sat out both boards). I6d (H3): the brief
   found two defects in the historical book leg, the WS1 migration's decode shape and a live writer bug
   that priced a doubled same-side quote at exactly .5 (fixed going forward:
   `moneylines._resolve_prop_lines` keys prop rows by side); the owner adopted its provenance-keyed
@@ -268,7 +271,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    cell now serves the book consensus instead of leaving the board (`prediction/scoring.py::match_offers`);
    the four `withheld` flips in `stat_meta.json` are the owner's. No sportsbook prices NFL fantasy points,
    so its props, about 200 Sleeper rows a board, left the board with the pickle (`pull/after_pull_board.txt`):
-   keep it off, or restore that one pickle and leave it `devel`, is the owner's call).
+   it stays off, owner 10-27).
 4. Gate 1's ship CI: today a 95 % iid bootstrap whose upper bound must sit under .005. On E2's 33 cells
    with a computable Gate 1 (validation / test half), iid passes 32 / 33, date-clustered 32 / 31 and the
    two-way estimate (player + date − iid variance) 32 / 31; beyond iid only NFL yards and MLB runs allowed
