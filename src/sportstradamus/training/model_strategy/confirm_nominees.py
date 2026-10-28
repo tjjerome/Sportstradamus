@@ -141,12 +141,11 @@ def _nominees(
         cand = _corner_candidate(context, spec, lg, mkt, controls, slack=math.nan, split=None)
         if cand is not None:
             nominated.append({**cand, "source": "seed/incumbent"})
-    seen: set[str] = set()
-    return [
-        {**cand, "board_rank": board_rank}
-        for cand in nominated
-        if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
-    ]
+    # First nominee per corner wins, so a seed repeating a board corner retrains once, as its row.
+    by_fingerprint = {}
+    for cand in nominated:
+        by_fingerprint.setdefault(cand["corner_fingerprint"], {**cand, "board_rank": board_rank})
+    return list(by_fingerprint.values())
 
 
 def _veto_admissible(
@@ -476,16 +475,11 @@ def candidates(
     gets ``NaN`` — unknown — instead of silently falling back to the wrong quantity.
     """
     priced = "margin_vs_incumbent" in board and board["margin_vs_incumbent"].notna().any()
-    cells = [
-        nominated[:max_nominees]
-        for (league, market), sub in board.groupby(["league", "market"], sort=False)
-        if (
-            nominated := _nominees(
-                sub,
-                live=priced and meta[league][market].get("shipped") != WITHHELD,
-                min_model_weight=min_model_weight,
-            )
-        )
-    ]
+    cells = []
+    for (league, market), sub in board.groupby(["league", "market"], sort=False):
+        live = priced and meta[league][market].get("shipped") != WITHHELD
+        nominated = _nominees(sub, live=live, min_model_weight=min_model_weight)
+        if nominated:
+            cells.append(nominated[:max_nominees])
     cells.sort(key=lambda nominated: nominated[0]["board_rank"], reverse=True)
     return cells
