@@ -101,7 +101,7 @@ _LEDGER_NAMES: dict[str, str] = {
 
 
 def atomic_write_meta(meta: dict) -> None:
-    """Write stat_meta.json atomically at its native 4-space indent so the review diff stays minimal."""
+    """Write stat_meta.json atomically at its native 4-space indent for a minimal review diff."""
     tmp = STAT_META.with_suffix(".json.tmp")
     with tmp.open("w") as fh:
         json.dump(meta, fh, indent=4)
@@ -119,12 +119,13 @@ def backup_stat_meta() -> pathlib.Path:
 def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
     """Every serve-read artifact a canonical refit rewrites for one cell — the restore set.
 
-    Restoring these puts the incumbent back exactly as it served: the model pickle (which carries all
-    calibrators), the test-set CSV (also the snapshotted S2/S3 baseline), ``model_stats`` (parquet +
-    csv mirror), the two SHAP CSVs, and the two config files read at serve time — ``stat_calibration``
-    and ``book_weights`` (shared, its per-cell key reverted by the whole-file restore). The shared
-    files are safe to whole-file restore because a cell's snapshot→restore window is isolated (only
-    that cell's ``meditate`` runs between them, so the revert touches only that cell's row/key).
+    Restoring these puts the incumbent back exactly as it served: the model pickle (which carries
+    all calibrators), the test-set CSV (also the snapshotted S2/S3 baseline), ``model_stats``
+    (parquet + csv mirror), the two SHAP CSVs, and the two config files read at serve time —
+    ``stat_calibration`` and ``book_weights`` (shared, its per-cell key reverted by the whole-file
+    restore). The shared files are safe to whole-file restore because a cell's snapshot→restore
+    window is isolated (only that cell's ``meditate`` runs between them, so the revert touches only
+    that cell's row/key).
 
     Deliberately excluded: the per-cell training-matrix cache (``training_data/{slug}.parquet``) and
     the per-league caches (gamelog, correlation matrices). Those are training inputs,
@@ -147,7 +148,7 @@ def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
 
 
 def snapshot_cell(league: str, market: str) -> pathlib.Path:
-    """Copy the incumbent's artifacts to a per-cell backup dir and return it (the S2/S3 baseline lives there)."""
+    """Copy the incumbent's artifacts to a per-cell backup dir and return it."""
     backup = _CONFIRM_LOG_ROOT / "incumbent_backup" / market_file_slug(league, market)
     shutil.rmtree(backup, ignore_errors=True)
     backup.mkdir(parents=True, exist_ok=True)
@@ -162,8 +163,8 @@ def restore_cell(
 ) -> None:
     """Restore every snapshotted artifact byte-identical and put the original stat_meta entry back.
 
-    Copies files from ``backup`` over the canonical paths — it never prunes — so a live cell that loses
-    the supersession test keeps serving exactly what it served before.
+    Copies files from ``backup`` over the canonical paths — it never prunes — so a live cell that
+    loses the supersession test keeps serving exactly what it served before.
     """
     for art in _cell_artifacts(league, market):
         saved = backup / art.name
@@ -377,14 +378,15 @@ def confirm_median_seconds(league: str | None = None, market: str | None = None)
 
 
 def _candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
-    """The nominated recipe as an identity, rebound to ``matrix_hash`` when a retrain moved the matrix.
+    """The nominated recipe's identity, rebound to ``matrix_hash`` when a retrain moved the matrix.
 
-    ``_run_meditate`` passes ``--force``, which updates the league gamelogs and appends gamedays, so a
-    confirm retrain routinely lands on a different training matrix than the search scored — every cell
-    of the first overnight run did. What confirmation tests is the *recipe*; the board's pre-retrain
-    matrix hash is stale by construction, and the corner fingerprint binds it, so comparing either
-    against the retrain rejects recipes the six gates just passed. The same-retrain invariant that
-    actually matters — pickle and model_stats agreeing — is enforced in :func:`_produced_artifacts_match`.
+    ``_run_meditate`` passes ``--force``, which updates the league gamelogs and appends gamedays, so
+    a confirm retrain routinely lands on a different training matrix than the search scored — every
+    cell of the first overnight run did. What confirmation tests is the *recipe*; the board's
+    pre-retrain matrix hash is stale by construction, and the corner fingerprint binds it, so
+    comparing either against the retrain rejects recipes the six gates just passed. The same-retrain
+    invariant that actually matters — pickle and model_stats agreeing — is enforced in
+    :func:`_produced_artifacts_match`.
     """
     matrix = candidate["matrix_hash"] if matrix_hash is None else matrix_hash
     return ArtifactIdentity(
@@ -430,8 +432,8 @@ def _produced_artifacts_match(
 ) -> bool:
     """Fail closed unless the retrain produced the exact signed board strategy and cell.
 
-    ``expected`` carries the matrix hash model_stats reported, so a pickle written against a different
-    matrix — a stale artifact the retrain never replaced — fails here.
+    ``expected`` carries the matrix hash model_stats reported, so a pickle written against a
+    different matrix — a stale artifact the retrain never replaced — fails here.
     """
     spec = get_strategy(candidate["strategy_slug"])
     csv_path = _TEST_SETS_ROOT / f"{market_file_slug(league, market)}.csv"
@@ -647,8 +649,8 @@ def run_canonical(league: str, market: str, candidate: dict) -> tuple[str, bool]
 def refit_failures(league: str, market: str, candidate: dict) -> list[str]:
     """Why a canonical refit cannot ship, read back from model_stats and its pickle; empty: it can.
 
-    Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
-    bare False reads on the report as a gate failure with no gate named.
+    Reasons rather than a bool because the legs fail for very different operator-facing causes, and
+    a bare False reads on the report as a gate failure with no gate named.
     """
     matrix_hash = _retrained_matrix_hash(league, market)
     if matrix_hash is None:
