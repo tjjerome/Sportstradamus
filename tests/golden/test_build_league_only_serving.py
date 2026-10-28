@@ -100,12 +100,12 @@ def test_merge_stats_replaces_one_league_rows_and_keeps_production_for_the_rest(
 
 
 def test_merge_stats_takes_columns_the_training_box_added(boxes, tmp_path):
-    """A retrain adds report columns before production's table has them; the send carries them."""
+    """A retrain adds report columns before production's table has them."""
     here, prod = boxes
-    added = _HERE_STATS.copy()
-    added.insert(2, "book_citl_offline", [0.02, -0.01, None])
-    added["g1_book_thin"] = pd.array([False, True, True], dtype="boolean")
-    added.to_parquet(here / "training" / "model_stats.parquet", index=False)
+    retrained = _HERE_STATS.copy()
+    retrained.insert(2, "book_citl_offline", [0.02, -0.01, None])
+    retrained["g1_book_thin"] = pd.array([False, True, True], dtype="boolean")
+    retrained.to_parquet(here / "training" / "model_stats.parquet", index=False)
 
     proof_passed = merge._merge_stats(
         "NFL", here / "training" / "model_stats.parquet", prod / "model_stats.parquet", tmp_path
