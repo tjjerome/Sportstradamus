@@ -10,8 +10,10 @@ deterministic trials — it never ships. This module turns a ranked board into s
    a NegBin corner outranking ZINB persists ``dist=NegBin`` and flips the cell's family).
 2. Prompt, then per cell: pin the training matrix and run **every** nominee at full HPO in a
    research sandbox (``meditate --holdout-blind --artifact-output``, each control a flag, so
-   stat_meta.json is never written for it). The board's own scorer reads each sandbox dump on the
-   cross-fit validation half, the half the board ranks on; the ship holdout stays unread.
+   stat_meta.json is never written for it). A live cell's incumbent runs first: its run is the
+   baseline every contender meets, so one that never scores holds the cell before the rest train.
+   The board's own scorer reads each sandbox dump on the cross-fit validation half, the half the
+   board ranks on; the ship holdout stays unread.
 3. Rank the blind rows: a nominee passes on a blind 6/6 above the blend-weight floor — on a live
    cell, on S1/S2/S3 against the incumbent's own blind run — and passers sort by blind slack. A
    cell with no passer is held, its ship holdout never read.
@@ -258,7 +260,7 @@ def _drop_activation_gated(fresh: list[list[dict]]) -> list[list[dict]]:
 
 
 def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
-    """List the run's plan: each cell's nominees in the order they run blind, with their source."""
+    """List the run's plan: each cell's nominees in nomination order, with their source."""
     for label, group, verb in (
         ("withheld cell", fresh, "rank blind, then confirm the top passer"),
         ("live cell", shipped, "rank blind against the incumbent, then S1/S2/S3-test the top one"),
@@ -373,7 +375,9 @@ def _walk_nominees(
 
     A live cell measures every nominee against its incumbent's blind run, so its incumbent's recipe
     must be among the undecided nominees; without it (cut by ``--confirm-nominees``, or already
-    decided on this matrix) the cell is held before anything runs.
+    decided on this matrix) the cell is held before anything runs. The incumbent then trains first,
+    and a baseline that never scores holds the cell before any other nominee trains. Ranking still
+    reads the nominees in nomination order, so a slack tie goes to the earlier nominee.
     """
     lg, mkt = nominated[0]["league"], nominated[0]["market"]
     walkable = _undecided(nominated)
@@ -383,16 +387,23 @@ def _walk_nominees(
     if live and baseline not in {cand["corner_fingerprint"] for _, cand in walkable}:
         return (lg, mkt, "HELD", ["no incumbent baseline"], "-")
     confirm_runs.pin_cell_matrix(lg, mkt)
-    measured = []
-    for label, cand in walkable:
+    blind, reference = {}, None
+    # Stable, so only the live baseline moves up; a withheld cell has none and keeps its order.
+    order = sorted(walkable, key=lambda pair: pair[1]["corner_fingerprint"] != baseline)
+    for label, cand in order:
         click.secho(f"\n  nominee {label} {lg} {mkt}", bold=True)
-        measured.append((label, confirm_runs.measure_blind(meta, cand)))
-    reference = next(
-        (runs[0] for _, runs in measured if runs[0].candidate["corner_fingerprint"] == baseline),
-        None,
-    )
-    if reference is not None and reference.row is None:
-        return (lg, mkt, "HELD", ["incumbent baseline", *reference.failed], "-")
+        blind[label] = confirm_runs.measure_blind(meta, cand)
+        if cand["corner_fingerprint"] != baseline:
+            continue
+        reference = blind[label][0]
+        if reference.row is None:
+            click.secho(
+                f"  HELD {lg} {mkt} — incumbent baseline failed {' '.join(reference.failed)}; "
+                f"{len(walkable) - 1} other nominee(s) not run",
+                fg="red",
+            )
+            return (lg, mkt, "HELD", ["incumbent baseline", *reference.failed], "-")
+    measured = [(label, blind[label]) for label, _ in walkable]
     pick = _top_blind_passer(measured, reference, min_model_weight)
     if pick is None:
         return (lg, mkt, "HELD", ["no blind pass"], "-")

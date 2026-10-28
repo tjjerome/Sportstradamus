@@ -1757,6 +1757,65 @@ def test_live_walk_holds_a_cell_without_a_scored_incumbent_baseline(monkeypatch)
     )
 
 
+def test_live_walk_runs_the_incumbent_baseline_first_and_ranks_in_nomination_order(monkeypatch):
+    """The incumbent's blind run is the baseline every contender meets, so it trains first; ranking
+    still reads the nominees in nomination order, so a slack tie goes to the earlier nominee — here
+    the board corner, over the incumbent's calibrated retry that ran before it.
+    """
+    nominated = _walk_stubs("board slack +0.300", "seed/incumbent")
+    monkeypatch.setattr(mc, "_incumbent_fingerprint", lambda league, market: "fp-2")
+    incumbent = {**nominated[1], "edits": {}}
+    runs = {
+        "board slack +0.300": [_blind_run(nominated[0], slack=0.2)],
+        "seed/incumbent": [
+            _blind_run(incumbent, failed=["g4"]),
+            _blind_run(_calibrated(incumbent), slack=0.2),
+        ],
+    }
+    measured = []
+    monkeypatch.setattr(
+        mcr,
+        "measure_blind",
+        lambda meta, cand: measured.append(cand["source"]) or runs[cand["source"]],
+    )
+    compared = _live_verdicts(monkeypatch, {"fp-1__loss", "fp-2__calibrated"})
+    attempt, _ = _attempt_spy("SUPERSEDED")
+
+    result = mc._walk_nominees({}, nominated, attempt, live=True)
+
+    assert measured == ["seed/incumbent", "board slack +0.300"]
+    assert compared == [("fp-2__loss", "fp-1__loss"), ("fp-2__loss", "fp-2__calibrated")]
+    assert result == ("WNBA", "AST", "SUPERSEDED", [], "1/2 board slack +0.300")
+
+
+def test_a_broken_incumbent_baseline_holds_the_cell_before_its_other_nominees_train(
+    monkeypatch, capsys
+):
+    """Every contender is read against the incumbent's blind run, so a baseline that never scores
+    holds the cell at once: the nominees nominated ahead of it never start their full-HPO runs.
+    """
+    nominated = _walk_stubs("board slack +0.300", "board slack +0.200", "seed/incumbent")
+    monkeypatch.setattr(mc, "_incumbent_fingerprint", lambda league, market: "fp-3")
+    unscored = mcr.BlindRun(nominated[2], None, None, ["retrain exit 1"], None)
+    measured = []
+
+    def measure(meta, cand):
+        measured.append(cand["source"])
+        return [unscored] if cand["source"] == "seed/incumbent" else [_blind_run(cand)]
+
+    monkeypatch.setattr(mcr, "measure_blind", measure)
+
+    assert mc._walk_nominees({}, nominated, _never_read, live=True) == (
+        "WNBA",
+        "AST",
+        "HELD",
+        ["incumbent baseline", "retrain exit 1"],
+        "-",
+    )
+    assert measured == ["seed/incumbent"]
+    assert "2 other nominee(s) not run" in capsys.readouterr().out
+
+
 def test_walk_persists_only_its_pick_and_no_blind_run_writes_stat_meta(monkeypatch, tmp_path):
     """Every nominee trains blind before anything touches stat_meta.json; the one write is the
     pick's persist, so a loser's edits never reach the file at all.
