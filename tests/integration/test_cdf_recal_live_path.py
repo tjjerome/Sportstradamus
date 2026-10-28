@@ -52,7 +52,7 @@ _BOOK_EV = 6.0
 class _StubArchive:
     default_totals = {_LEAGUE: 220.0}
 
-    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         row = ArchivedBookQuote(
             book="fanduel", ev=_BOOK_EV, under_probability=0.55, line=5.5, observed_at=None
         )

@@ -64,7 +64,7 @@ class _StubArchive:
     def __init__(self, inputs):
         self._inputs = inputs  # {market: {player: (rows, legacy_line)}}
 
-    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         per_market = self._inputs.get(market, {})
         return {e: per_market.get(e, ([], None)) for e in entities}
 

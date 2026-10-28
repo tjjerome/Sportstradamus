@@ -42,6 +42,7 @@ from sportstradamus.helpers.training_quotes import (
     COMBO_SUM_SOURCE,
     DERIVED,
     DFS_PLATFORM_BOOKS,
+    DIRECT_SOURCES,
     PROVENANCE_COLUMNS,
     TrainingQuote,
     archive_ev_is_runaway,
@@ -2346,6 +2347,7 @@ class Stats:
             date,
             list(stats.index),
             at=target_at,
+            levelled=True,
         )
         # dist/cv/weights price the (league, market) cell and never change per
         # player; only the line inputs do, so the two live in separate dicts.
@@ -2364,7 +2366,9 @@ class Stats:
             if quote.source in ("neutral_fallback", "model_fallback"):
                 unpriced.append(player)
 
-        combo_quotes = self.combo_quote(market, unpriced, date, target_at) if unpriced else {}
+        combo_quotes = (
+            self.combo_quote(market, unpriced, date, target_at, levelled=True) if unpriced else {}
+        )
         for player in unpriced:
             # The legacy scalar is the lower rung, so a kernel quote makes it dead weight —
             # and it costs a per-player archive read on the leagues that implement it.
@@ -2639,19 +2643,21 @@ class Stats:
             cv=cv,
             weights=book_weights.get(self.league, {}).get(market, {}),
         )
-        if quote.source != "book_direct":
+        if quote.source not in DIRECT_SOURCES:
             return 0.0
         book_mean = quote_pricing_params(quote, self.league, market, dist, cv).mean
         return 0.5 * (book_mean - combo.mean)
 
-    def combo_quote(self, market, players, date, at, lines=None) -> dict[str, TrainingQuote]:
+    def combo_quote(
+        self, market, players, date, at, lines=None, *, levelled=False
+    ) -> dict[str, TrainingQuote]:
         """Price a combo market as an honest weighted component sum, per player.
 
         Resolves each spec component's own modal-line book quote — one batched
         ``archive.get_training_quote_inputs`` call per distinct submarket — and
         prices the weighted sum through the NORTA kernel
         (``helpers.combined_markets``). Admission is strict: every marginal and
-        sampled component must resolve ``source == "book_direct"`` off at least
+        sampled component must resolve a direct source (``DIRECT_SOURCES``) off at least
         one real sportsbook, and every Bernoulli p must be a finite open-interval
         probability, else the player is omitted entirely — never a mix of real
         and fabricated components. A spec may name components as ``assumable``,
@@ -2675,6 +2681,7 @@ class Stats:
         convention is ungated end to end (see ``_authentic_quote``), and a
         population zero-gate on top of an ungated inversion would break
         ``decode(invert(p)) == p`` at the component's own quote line.
+        ``levelled`` is the training read; serving prices the live board as stored.
         """
         # style: allow-complexity — one strict-admission-and-pricing pass per player;
         # extracting the admission loop from the quote build would scatter one policy.
@@ -2703,13 +2710,17 @@ class Stats:
             for sub in submarkets
         }
         inputs = {
-            sub: archive.get_training_quote_inputs(self.league, sub, date, players, at=at)
+            sub: archive.get_training_quote_inputs(
+                self.league, sub, date, players, at=at, levelled=levelled
+            )
             for sub in sub_cfg
         }
         combo_inputs = (
             {}
             if simple and lines is not None
-            else archive.get_training_quote_inputs(self.league, market, date, players, at=at)
+            else archive.get_training_quote_inputs(
+                self.league, market, date, players, at=at, levelled=levelled
+            )
         )
         lines_are_archived = lines is None
         if lines_are_archived:
@@ -2742,7 +2753,7 @@ class Stats:
                 # the sportsbooks quote 0.86 and the market settles under 0.90. The sum
                 # weights that mean by 4, so one platform-only component moves the combo
                 # further than every honest one together.
-                if quote.source != "book_direct" or not any(
+                if quote.source not in DIRECT_SOURCES or not any(
                     book not in DFS_PLATFORM_BOOKS for book in quote.books
                 ):
                     if sub not in spec.assumable:

@@ -279,7 +279,7 @@ class _StubArchive:
 
     default_totals = {_LEAGUE: 220.0}
 
-    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         rows = [
             ArchivedBookQuote(book, None, _BOOK_UNDER, _LINE, _OBSERVED_AT)
             for book in ("fanduel", "draftkings")

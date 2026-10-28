@@ -31,6 +31,11 @@ AUTHENTICITY_VALUES = (AUTHENTIC, PICKEM, DERIVED, SYNTHETIC)
 # Component-sum kernel quotes carry this source with ``authenticity=DERIVED``:
 # the probability is derived from real component-book quotes, not fabricated.
 COMBO_SUM_SOURCE = "combo_sum"
+# How the I6d training read levelled a book-row (helpers/book_levelling.py); None is as stored.
+REDECODED = "redecoded"
+LADDER_REPAIRED = "ladder_repaired"
+# The quote sources that priced a line directly: as stored, or levelled at the I6d training read.
+DIRECT_SOURCES = ("book_direct", "book_redecoded", "book_ladder_repaired")
 BLOWN_ABS_CEILING = 2000.0
 BLOWN_LINE_FACTOR = 5.0
 
@@ -70,6 +75,9 @@ class ArchivedBookQuote:
     under_probability: float | None
     line: float | None
     observed_at: datetime.datetime | None
+    # The same-observation ladder rung on this row's line; only the levelled training read fills it.
+    ladder_over_probability: float | None = None
+    levelling: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -324,15 +332,27 @@ def _authentic_quote(
     ceiling. Neither inversion reproduces such a book, so the book leg of ``fused_loc`` is
     unsound for gated cells either way, a distribution-family question rather than a clamp
     choice.
+
+    A cohort holding a row the I6d read re-decoded
+    (docs/handoffs/i6d-decode-preregistration.md §11) is labelled ``book_redecoded``, one
+    holding a ladder-repaired row ``book_ladder_repaired``; both stay ``authentic``.
     """
     under = _weighted_value(cohort, "under_probability", weights)
     if under is None:  # Defensive; the cohort predicate guarantees this.
         raise ValueError("direct quote cohort has no probability")
+    levellings = {row.levelling for row in cohort}
+    source = (
+        "book_redecoded"
+        if REDECODED in levellings
+        else "book_ladder_repaired"
+        if LADDER_REPAIRED in levellings
+        else "book_direct"
+    )
     return TrainingQuote(
         line=line,
         over_probability=float(np.clip(1.0 - under, 0.0, 1.0)),
         ev=float(get_ev(line, under, cv=cv, dist=dist)),
-        source="book_direct",
+        source=source,
         authenticity=PICKEM if all(row.book in DFS_PLATFORM_BOOKS for row in cohort) else AUTHENTIC,
         synthetic_reason=None,
         observed_at=_latest_observation(cohort),

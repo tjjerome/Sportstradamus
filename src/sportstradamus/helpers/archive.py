@@ -44,6 +44,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers.book_levelling import level_book_rows
 from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist, stat_map
 from sportstradamus.helpers.distributions import (
     SN_MAX_MEAN_FACTOR,
@@ -561,43 +562,69 @@ class Archive:
         entities: list[str],
         *,
         at: datetime.datetime | None = None,
+        levelled: bool = False,
     ) -> dict[str, tuple[list[ArchivedBookQuote], float]]:
-        """Batch coherent book rows and reference lines for an entire training slate."""
+        """Batch coherent book rows and reference lines for an entire training slate.
+
+        ``levelled`` is the training read: each book-row is levelled against its
+        same-observation ladder rung and the committed decode table
+        (``book_levelling.level_book_rows``), and a row that is not a price drops out.
+        Serving reads the live board's native rows as stored.
+        """
         d = _safe_date(date)
         ordered_entities = sorted(set(entities))
         if d is None or not ordered_entities:
             return {}
         placeholders = ",".join("?" for _ in ordered_entities)
         odds_params: list = [league, market, d, *ordered_entities]
-        odds_sql = (
-            "SELECT entity, book, ev, under_prob, line, observed_at FROM ("
-            "  SELECT entity, book, ev, under_prob, line, observed_at, "
-            "         ROW_NUMBER() OVER ("
-            "             PARTITION BY entity, book "
-            "             ORDER BY observed_at DESC, line DESC NULLS LAST, "
-            "                      under_prob DESC NULLS LAST, ev DESC NULLS LAST"
-            "         ) AS rn "
-            "  FROM odds "
-            f"  WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+        latest = (
+            "SELECT entity, book, ev, under_prob, line, observed_at, "
+            "       ROW_NUMBER() OVER ("
+            "           PARTITION BY entity, book "
+            "           ORDER BY observed_at DESC, line DESC NULLS LAST, "
+            "                    under_prob DESC NULLS LAST, ev DESC NULLS LAST"
+            "       ) AS rn "
+            "FROM odds "
+            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
         )
         if at is not None:
-            odds_sql += " AND observed_at <= ?"
+            latest += " AND observed_at <= ?"
             odds_params.append(at)
-        odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
+        rung, rung_join = "NULL", ""
+        if levelled:
+            rung = "l.p_over"
+            rung_join = (
+                " LEFT JOIN ("
+                "  SELECT entity, book, line, observed_at, AVG(p_over) AS p_over FROM ladder"
+                f"  WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+                "  GROUP BY ALL"
+                ") l ON l.entity = o.entity AND l.book = o.book AND l.line = o.line"
+                " AND l.observed_at = o.observed_at"
+            )
+            odds_params += [league, market, d, *ordered_entities]
+        odds_sql = (
+            f"SELECT o.entity, o.book, o.ev, o.under_prob, o.line, o.observed_at, {rung} AS p_over "
+            f"FROM ({latest}) o{rung_join} WHERE o.rn = 1 ORDER BY o.entity, o.book"
+        )
 
         grouped: dict[str, list[ArchivedBookQuote]] = {entity: [] for entity in ordered_entities}
-        for entity, book, ev, under_prob, line, observed_at in self._connection.execute(
+        for entity, book, ev, under_prob, line, observed_at, p_over in self._connection.execute(
             odds_sql, odds_params
         ).fetchall():
-            grouped[entity].append(ArchivedBookQuote(book, ev, under_prob, line, observed_at))
+            grouped[entity].append(
+                ArchivedBookQuote(book, ev, under_prob, line, observed_at, p_over)
+            )
 
         observed_lines = self._observed_lines(league, market, d, ordered_entities, at)
         inputs = {}
         for entity in ordered_entities:
             values, seen_at = observed_lines.get(entity, ([], None))
             line_of_record = _consensus_line(values)
-            rows = grouped[entity] or pickem_quote(market, line_of_record, seen_at)
-            line = _sportsbook_line((row.book, row.line) for row in grouped[entity])
+            raw = grouped[entity]
+            priced = level_book_rows(league, market, d, raw) if levelled else raw
+            rows = priced or pickem_quote(market, line_of_record, seen_at)
+            # Levelling moves prices, not lines: a row dropped as no price still votes on the line.
+            line = _sportsbook_line((row.book, row.line) for row in raw)
             inputs[entity] = (rows, line or line_of_record)
         return inputs
 

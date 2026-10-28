@@ -71,7 +71,7 @@ class _StubArchive:
             for book in ("fanduel", "draftkings")
         ]
 
-    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         return {e: (list(self._rows), _LINE) for e in entities}
 
 

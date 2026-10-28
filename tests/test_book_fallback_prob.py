@@ -48,7 +48,7 @@ class _StubArchive:
     def __init__(self, rows_by_player):
         self._rows = rows_by_player
 
-    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         return {e: (self._rows.get(e, []), None) for e in entities}
 
 
@@ -162,7 +162,9 @@ def test_a_two_date_players_book_leg_is_read_for_his_earlier_game(monkeypatch):
     asked = []
 
     class _RecordingArchive(_StubArchive):
-        def get_training_quote_inputs(self, league, market, date, entities, at=None):
+        def get_training_quote_inputs(
+            self, league, market, date, entities, at=None, levelled=False
+        ):
             asked.append(date)
             return super().get_training_quote_inputs(league, market, date, entities, at)
 
