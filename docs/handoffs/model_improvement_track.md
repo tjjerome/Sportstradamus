@@ -1840,7 +1840,8 @@ justification to `.claude/.state/research_waiver`.
   2026-10-28: `helpers/book_levelling.py` levels the training read, `scripts/fit_book_decode.py`
   writes `data/config/book_decode.json` under the frozen
   [`i6d-decode-preregistration.md`](i6d-decode-preregistration.md), and Gate 1 fails a book-thin
-  cell (`g1_book_thin`); the table, the matrix re-inject, the deciding read and the retrains follow.
+  cell (`g1_book_thin`); the table is fit (2,259 blocks; the M0 checks pass), and the matrix
+  re-inject, the deciding read and the retrains follow.
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
