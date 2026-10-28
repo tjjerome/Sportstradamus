@@ -69,6 +69,8 @@ def test_gate_passed_na_safe():
         ),
         # A g1 miss past the 0.002 noise band blocks even with g4 near.
         (_row(g1_pass=False, g1_brier_diff_ci_hi=0.0246), "loss", "joint", False),
+        # A book-thin g1 fails with no CI bound (the blind scorer's None): no band, so blocks.
+        (_row(g1_pass=False, g1_brier_diff_ci_hi=None), "loss", "joint", False),
         # g6 is explicitly excluded — deferred pending the Experiment C measurement (brief R3).
         (_row(g6_pass=False), "loss", "joint", False),
         (_row(g5_pass=False), "loss", "joint", False),

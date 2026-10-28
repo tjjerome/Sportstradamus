@@ -145,6 +145,8 @@ def test_writes_one_row_per_cell(patched_paths):
     assert math.isnan(row["g1_brier_diff_mean"])
     assert math.isnan(row["g5_ece_debiased"])
     assert pd.isna(row["g1_pass"])
+    assert pd.isna(row["g1_book_thin"])
+    assert df["g1_book_thin"].dtype == "boolean"
     assert pd.isna(row["ship"])
 
     # CSV mirror is rewritten alongside the parquet.

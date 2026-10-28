@@ -94,12 +94,13 @@ from sportstradamus.training.structural_strategies import (
 #     diagnostic), Gate 5 equal-mass ECE, Gate 6 the anti-shrinkage OR of three legs.
 #     The per-cell metrics (plus an "oracle" bound) land on the wide
 #     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
-#     wires the strict starter pass/fail. Cells with no book Odds, or with sportsbook
-#     (authentic) quotes below the cluster floor — a pick'em-only cell has none — leave
-#     Gate 1 blank; the ship convention is that a blank Gate 1 auto-passes — no book to
-#     beat, model wins by default. Gate 5 (model-only calibration) does NOT use Odds, so
-#     it still computes for those cells; Gate 5 blank means "couldn't compute" (no P or
-#     no Line), not auto-pass.
+#     wires the strict starter pass/fail. Cells with no book Odds, or with no sportsbook
+#     (authentic) quote — a pick'em-only cell has none — leave Gate 1 blank; the ship
+#     convention is that a blank Gate 1 auto-passes — no book to beat, model wins by
+#     default. Sportsbook quotes below the cluster floor also leave it blank, but that cell
+#     is book-thin (``g1_book_thin``) and fails Gate 1 (I6d's w guard). Gate 5 (model-only
+#     calibration) does NOT use Odds, so it still computes for those cells; Gate 5 blank
+#     means "couldn't compute" (no P or no Line), not auto-pass.
 #   * research -> devel, supersede: pass all six + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
@@ -541,6 +542,26 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     return p_model, y
 
 
+def _sportsbook_rows(df: pd.DataFrame) -> pd.DataFrame | None:
+    """Finite priced rows; on a provenance-bearing dump, explicit ``authentic`` quotes only."""
+    if not {"P", "Odds", "Line"}.issubset(df.columns):
+        return None
+    columns = ["P", "Odds", "Line", ACTUAL_COL]
+    if "QuoteAuthenticity" in df.columns:
+        columns.append("QuoteAuthenticity")
+    sub = df[columns].replace([np.inf, -np.inf], np.nan).dropna()
+    if "QuoteAuthenticity" in sub.columns:
+        if not sub["QuoteAuthenticity"].isin(AUTHENTICITY_VALUES).all():
+            raise ValueError("scorecard received invalid quote authenticity")
+        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
+    return sub if len(sub) else None
+
+
+def _below_cluster_floor(df: pd.DataFrame, sub: pd.DataFrame) -> bool:
+    key = "Player" if "Player" in df.columns else "Date"
+    return df.loc[sub.index, key].nunique() < _ONE_SE_MIN_CLUSTERS
+
+
 def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
     """Rows usable for the priced Brier gates: sportsbook-priced, finite book evidence.
 
@@ -552,25 +573,28 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
     historical finite-price behavior. A one-row book is no book: below
     :data:`~sportstradamus.training.calibration._ONE_SE_MIN_CLUSTERS` distinct
     players (dates when the dump has no ``Player``, as team markets cluster), the
-    authentic set is too thin to call Gate 1 book-beaten rather than book-less —
-    the same floor the blend-weight fit applies to its priced rows.
+    authentic set is too thin to score Gate 1 against — the same floor the blend-weight
+    fit applies to its priced rows — and :func:`_book_thin` fails the gate instead.
     """
-    if "Odds" not in df.columns:
+    sub = _sportsbook_rows(df)
+    if sub is None or ("QuoteAuthenticity" in df.columns and _below_cluster_floor(df, sub)):
         return None
-    if not {"P", "Odds", "Line"}.issubset(df.columns):
-        return None
-    columns = ["P", "Odds", "Line", ACTUAL_COL]
-    if "QuoteAuthenticity" in df.columns:
-        columns.append("QuoteAuthenticity")
-    sub = df[columns].replace([np.inf, -np.inf], np.nan).dropna()
-    if "QuoteAuthenticity" in sub.columns:
-        if not sub["QuoteAuthenticity"].isin(AUTHENTICITY_VALUES).all():
-            raise ValueError("scorecard received invalid quote authenticity")
-        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
-        key = "Player" if "Player" in df.columns else "Date"
-        if df.loc[sub.index, key].nunique() < _ONE_SE_MIN_CLUSTERS:
-            return None
-    return sub if len(sub) else None
+    return sub
+
+
+def _book_thin(df: pd.DataFrame) -> bool:
+    """Sportsbook rows priced the cell, but too few clusters to score Gate 1 against them.
+
+    I6d's w guard (owner, 2026-10-27): such a cell fails Gate 1 instead of passing as
+    book-less, because levelling can thin a quoted cell's book below the floor and a blank
+    Gate 1 would then grant it full trust (the blend weight falls to 1.0 on the same floor).
+    A cell with no authentic row at all, such as a pick'em-only fantasy cell, keeps the blank
+    pass.
+    """
+    if "QuoteAuthenticity" not in df.columns:
+        return False
+    sub = _sportsbook_rows(df)
+    return sub is not None and _below_cluster_floor(df, sub)
 
 
 def _brier_inputs(
@@ -1902,10 +1926,11 @@ def gate_row(
     ``ece = 0``. The σ / IQR_true denominators equal the model row, so the oracle
     columns size each gate's natural threshold. Measurement-only — no pass/fail. Gate
     1 is **blank when ``Odds`` is missing or the priced rows fall below the cluster
-    floor** (no book, or too thin a book, to beat); the ship convention is that a
-    blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
-    ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
-    blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
+    floor**; the ship convention is that a blank Gate 1 **auto-passes** when there is
+    no book to beat, but ``g1_book_thin`` flags sportsbook rows below the floor, whose
+    blank fails. Gate 5 needs only ``P`` + ``Line`` (not ``Odds``), so it still
+    computes for book-unpriced cells; a blank Gate 5 means "couldn't compute" (no P or
+    no Line), NOT auto-pass.
     """
     # style: allow-complexity — identity check, then one blank-input branch per gate block
     identity, _ = validate_strategy_frame(df)
@@ -1954,9 +1979,9 @@ def gate_row(
     _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
 
     # Gate 1 — paired Brier vs book (the wider of the row and game-date bootstraps). Needs
-    # Odds, plus Date once priced; blank ⇒ "no book to beat, model wins by default" (the
-    # auto-pass convention is doc'd at the module-header and applied at verdict-wiring time).
-    # Oracle p_model = y (the label itself, 0.5 at a tie).
+    # Odds, plus Date once priced; blank ⇒ "no book to beat, model wins by default" unless the
+    # book is thin (the convention is doc'd at the module header and applied at
+    # verdict-wiring time). Oracle p_model = y (the label itself, 0.5 at a tie).
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
@@ -2020,6 +2045,7 @@ def gate_row(
         "g1_clustered_ci_hi": r(g1_clustered_hi),
         "g1_brier_diff_ci_hi_standalone": r(g1_standalone_hi),
         "g1_brier_skill_score": r(bss),
+        "g1_book_thin": _book_thin(df),
         "g2_star_pred_mean": r(g2_pred),
         "g2_star_true_mean": r(g2_true),
         "g2_star_abs_diff": r(g2_abs),
@@ -2057,8 +2083,8 @@ def _g1_within_tie_margin(hi: float | None) -> bool:
     the statistical-tie margin :data:`_GATE1_NONINF_MARGIN` — i.e. we are 95%
     confident the fused ensemble's Brier is at most ``δ`` worse than the book's. A
     tight tie or a win passes; a wildly-worse or underpowered (wide-CI) cell fails. A
-    blank bound (no ``Odds``, or priced rows below the cluster floor) auto-passes —
-    there is no book to beat.
+    blank bound (no ``Odds``, or no sportsbook row) auto-passes — there is no book to
+    beat.
     """
     return hi is None or hi < _GATE1_NONINF_MARGIN
 
@@ -2071,8 +2097,8 @@ def _below_zero_ci_bound(hi: float | None) -> bool:
     ``hi`` is stored rounded to 4 dp and round() keeps the sign bit, so a
     genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 — lands on
     -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero still beat the
-    book, so treat it as below the bound. A blank bound (no ``Odds``, or priced rows
-    below the cluster floor) is True — no book to beat.
+    book, so treat it as below the bound. A blank bound (no ``Odds``, or no sportsbook
+    row) is True — no book to beat.
     """
     if hi is None:
         return True
@@ -2112,9 +2138,10 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     reports the stricter provable-superiority result without gating on it. Blank-cell
     semantics — distinct because the gates fail for different structural reasons:
 
-    * Gate 1 blank (no ``Odds``, or priced rows below the cluster floor):
+    * Gate 1 blank on a book-less cell (no ``Odds``, or no sportsbook row):
       **auto-pass** — no book to beat, model wins by default. The only "no book
-      data" auto-pass.
+      data" auto-pass. A book-thin cell (``g1_book_thin``: sportsbook rows below the
+      cluster floor) **fails** Gate 1 and ``g1_has_edge`` instead.
     * Gate 2/3/5 blank: **fail** — the cell couldn't compute the gate (e.g. missing
       ``P`` / ``Line``), and we don't credit the model for absence of evidence.
     * Gate 4 blank (no per-row distribution params ⇒ no ``g4_pit_ks``): **fail** — the
@@ -2122,7 +2149,8 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
       credit the model for absence of evidence.
     """
     out = dict(row)
-    g1_pass = _g1_within_tie_margin(out.get("g1_brier_diff_ci_hi"))
+    book_thin = out.get("g1_book_thin", False)
+    g1_pass = not book_thin and _g1_within_tie_margin(out.get("g1_brier_diff_ci_hi"))
     g2 = out.get("g2_star_z")
     g2_pass = g2 is not None and g2 < _GATE2_STAR_Z_MAX
     g3 = out.get("g3_bench_z")
@@ -2138,7 +2166,7 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     # "not applicable" auto-pass, the opposite of the g2-g5 blank-is-fail convention.
     g6_pass = _gate6_passes(out)
     out["g1_pass"] = g1_pass
-    out["g1_has_edge"] = _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
+    out["g1_has_edge"] = not book_thin and _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
     out["g2_pass"] = g2_pass
     out["g3_pass"] = g3_pass
     out["g4_pass"] = g4_pass
@@ -2164,7 +2192,8 @@ def min_gate_slack(row: dict[str, object]) -> float:
     The combination search maximizes this over ``(normalization, loss, calibration-mode)``: it is
     a *ranking* signal only — the authoritative ship decision is :func:`apply_thresholds` on the
     real-HPO scorecard. A blank Gate 1 (no book) or Gate 6 (off-cohort / untestable) auto-passes
-    and so does not bind; blank Gate 2/3/4/5 are hard fails (``-inf``).
+    and so does not bind; a book-thin Gate 1 (``g1_book_thin``) and blank Gate 2/3/4/5 are hard
+    fails (``-inf``).
     """
     hi = row.get("g1_brier_diff_ci_hi")
     g4, g4_max = row.get("g4_pit_ks"), row.get("g4_pit_ks_max")
@@ -2174,7 +2203,11 @@ def min_gate_slack(row: dict[str, object]) -> float:
     citl_hi = row.get("g6_citl_ci_hi")
     over_lo = row.get("g6_over_ci_lo")
     return min(
-        np.inf if hi is None else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
+        -np.inf
+        if row.get("g1_book_thin")
+        else np.inf
+        if hi is None
+        else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
         _normalized_gate_slack(row.get("g2_star_z"), _GATE2_STAR_Z_MAX),
         _normalized_gate_slack(row.get("g3_bench_z"), _GATE3_BENCH_Z_MAX),
         -np.inf if g4 is None or g4_max is None else (g4_max - g4) / g4_max,
@@ -2302,9 +2335,10 @@ def _print_ship_summary(rows: list[dict[str, object]]) -> None:
 def _gate_headline(row: dict[str, object]) -> str:
     """One-line per-cell gate summary for stdout, with SHIP / KILL verdict.
 
-    Cells with no book ``Odds`` get a ``(no Odds; G1 auto-pass)`` note. When the row
-    has been augmented by :func:`apply_thresholds`, the line ends with ``[SHIP]``
-    or ``[KILL: g3 g4 ...]`` naming the failing gates.
+    Cells with no book ``Odds`` get a ``(no Odds; G1 auto-pass)`` note, book-thin cells
+    (``g1_book_thin``) a ``(book-thin ...; G1 fails)`` one. When the row has been
+    augmented by :func:`apply_thresholds`, the line ends with ``[SHIP]`` or
+    ``[KILL: g3 g4 ...]`` naming the failing gates.
     """
 
     def f(key: str, fmt: str = "+.4f") -> str:
@@ -2320,7 +2354,9 @@ def _gate_headline(row: dict[str, object]) -> str:
     )
     if row.get("g6_star_ci_hi") is not None:
         head += f"  G6 star_hi {f('g6_star_ci_hi', '.3f')} / ref {f('g6_star_ref', '.3f')}"
-    if row.get("g1_brier_diff_mean") is None:
+    if row.get("g1_book_thin"):
+        head += "  (book-thin: sportsbook rows below the cluster floor; G1 fails)"
+    elif row.get("g1_brier_diff_mean") is None:
         head += "  (no Odds; G1 auto-pass)"
     if "ship" in row:
         if row["ship"]:

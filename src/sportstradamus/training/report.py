@@ -64,6 +64,7 @@ _SHIP_PRED_COL = "Blended_EV"
 _GATE_PASS_COLS = (
     "g1_pass",
     "g1_has_edge",
+    "g1_book_thin",
     "g2_pass",
     "g3_pass",
     "g4_pass",
@@ -287,6 +288,7 @@ def _wide_row(
         "g5_ece_debiased": float("nan"),
         "g1_pass": pd.NA,
         "g1_has_edge": pd.NA,
+        "g1_book_thin": pd.NA,
         "g2_pass": pd.NA,
         "g3_pass": pd.NA,
         "g4_pass": pd.NA,

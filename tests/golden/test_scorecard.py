@@ -1154,6 +1154,7 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g1_clustered_ci_hi",
         "g1_brier_diff_ci_hi_standalone",
         "g1_brier_skill_score",
+        "g1_book_thin",
         "g2_star_pred_mean",
         "g2_star_true_mean",
         "g2_star_abs_diff",
@@ -1279,22 +1280,36 @@ def _authenticity_frame(n: int, n_players: int, *, seed: int = 21) -> pd.DataFra
     return df
 
 
-def test_priced_rows_below_cluster_floor_reads_as_book_less():
-    """A one-row (or few-player) authentic book is no book: below
-    ``calibration._ONE_SE_MIN_CLUSTERS`` distinct players the priced set is too thin to
-    call Gate 1 book-beaten rather than book-less — the same floor the blend-weight fit
-    applies to its priced rows. 12 authentic rows over only 2 players must fold to the
-    blank/auto-pass convention, not a one-row "win".
+def test_sportsbook_rows_below_cluster_floor_fail_gate1():
+    """Below ``calibration._ONE_SE_MIN_CLUSTERS`` distinct players an authentic book is too
+    thin to score Gate 1 against, but the cell is not book-less: I6d's w guard fails Gate 1
+    rather than auto-passing it, because the blend weight falls to 1.0 on the same floor and
+    a blank pass would grant full trust with no book evidence. 12 authentic rows, 2 players.
     """
     from sportstradamus.training.scorecard import _priced_rows
 
     df = _authenticity_frame(n=12, n_players=2)
     assert _priced_rows(df) is None
 
-    row = apply_thresholds(gate_row(df, "EV", league="NBA", market="PTS", strategy="t"))
-    assert row["g1_brier_diff_ci_lo"] is None
+    row = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
     assert row["g1_brier_diff_ci_hi"] is None
-    assert row["g1_pass"] is True  # blank Gate 1 auto-passes — no book to beat
+    assert row["g1_book_thin"] is True
+    out = apply_thresholds(row)
+    assert out["g1_pass"] is False
+    assert out["g1_has_edge"] is False
+    assert out["ship"] is False
+
+
+def test_pickem_only_cell_keeps_the_blank_gate1_pass():
+    """The same thin shape priced only by pick'em has no sportsbook row at all: book-less,
+    not book-thin, so Gate 1 stays blank and auto-passes."""
+    df = _authenticity_frame(n=12, n_players=2)
+    df["QuoteAuthenticity"] = "pickem"
+
+    row = apply_thresholds(gate_row(df, "EV", league="NBA", market="PTS", strategy="t"))
+    assert row["g1_brier_diff_ci_hi"] is None
+    assert row["g1_book_thin"] is False
+    assert row["g1_pass"] is True
 
 
 def test_priced_rows_at_cluster_floor_returns_rows():
@@ -1311,13 +1326,14 @@ def test_priced_rows_at_cluster_floor_returns_rows():
 def test_priced_rows_legacy_without_authenticity_column_ignores_floor():
     """Frames predating the provenance column keep the historical finite-price
     behavior: the cluster floor only applies inside the provenance-bearing branch, so
-    3 rows survive even though that is far below it."""
-    from sportstradamus.training.scorecard import _priced_rows
+    3 rows survive even though that is far below it, and the cell is not book-thin."""
+    from sportstradamus.training.scorecard import _book_thin, _priced_rows
 
     df = _priced_frame(n=3, seed=3)
     sub = _priced_rows(df)
     assert sub is not None
     assert len(sub) == 3
+    assert _book_thin(df) is False
 
 
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
@@ -1428,6 +1444,25 @@ def test_apply_thresholds_g1_no_odds_auto_passes():
     )
     assert out["g1_pass"]
     assert out["ship"]
+
+
+def test_gate_headline_names_a_book_thin_gate1_fail():
+    """A book-thin cell's Gate 1 is blank like a book-less one's, but its headline must not
+    claim the auto-pass."""
+    from sportstradamus.training.scorecard import _gate_headline
+
+    row = apply_thresholds(
+        _clean_row(
+            g1_brier_diff_mean=None,
+            g1_brier_diff_ci_lo=None,
+            g1_brier_diff_ci_hi=None,
+            g1_book_thin=True,
+        )
+    )
+    head = _gate_headline(row)
+    assert "book-thin" in head
+    assert "auto-pass" not in head
+    assert head.endswith("[KILL: g1]")
 
 
 def test_apply_thresholds_g4_blank_pit_fails():
@@ -2781,6 +2816,20 @@ def test_min_gate_slack_g1_blank_does_not_bind():
         "g5_ece_debiased": 0.03,
     }
     assert min_gate_slack(row) == pytest.approx(0.2)
+
+
+def test_min_gate_slack_binds_on_a_book_thin_gate1():
+    """A book-thin Gate 1 is just as blank but fails, so it binds the minimum at -inf."""
+    row = {
+        "g1_brier_diff_ci_hi": None,
+        "g1_book_thin": True,
+        "g2_star_z": 0.0,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": 0.04,
+        "g4_pit_ks_max": 0.05,
+        "g5_ece_debiased": 0.03,
+    }
+    assert min_gate_slack(row) == -np.inf
 
 
 def test_eb_gate_decode_reconstructs_served_loc_with_dumped_global_mean():

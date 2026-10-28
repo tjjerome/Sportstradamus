@@ -487,7 +487,9 @@ def _cofailures_within_band(row: pd.Series) -> bool:
     """Non-g4 gate failures are admissible only as exactly {g1} inside its noise band."""
     others_failing = [c for c in _GATE_COLS if c != "g4_pass" and not _gate_passed(row[c])]
     if others_failing == ["g1_pass"]:
-        return bool(row["g1_brier_diff_ci_hi"] - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
+        hi = row["g1_brier_diff_ci_hi"]
+        # A book-thin Gate 1 (scorecard._book_thin) fails with no bound, so it has no band.
+        return hi is not None and bool(hi - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
     return not others_failing
 
 
