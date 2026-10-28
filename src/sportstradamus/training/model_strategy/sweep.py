@@ -896,6 +896,20 @@ def _record_scored(
         _upsert_cell(_rank_cell_board(league, market, scored, discounts, veto_discounts), out)
 
 
+def _echo_scored(
+    progress: SearchProgress, corner: dict[str, str], row: dict[str, object], *, trained: bool
+) -> None:
+    """Hand a scored board row to the bar as scalars, so ``progress`` never learns the row shape."""
+    progress.scored(
+        corner,
+        verdict=_verdict(row),
+        slack=float(row["slack"]),
+        elapsed_s=row.get("elapsed_s"),
+        trained=trained,
+        failure=_board_text(row, "failure"),
+    )
+
+
 def _scored_incumbent(
     context: CellContext,
     families: tuple[str, ...],
@@ -929,14 +943,7 @@ def _scored_incumbent(
         return {}
     progress.starting(corner)
     row = _run_and_score(context.league, context.market, spec.slug, corner, timeout_s)
-    progress.scored(
-        corner,
-        verdict=_verdict(row),
-        slack=float(row["slack"]),
-        elapsed_s=row.get("elapsed_s"),
-        trained=True,
-        failure=_board_text(row, "failure"),
-    )
+    _echo_scored(progress, corner, row, trained=True)
     return {fingerprint: row}
 
 
@@ -970,14 +977,7 @@ def _shaping_probes(
             continue
         progress.starting(probe)
         probed = _run_and_score(context.league, context.market, slug, probe, timeout_s)
-        progress.scored(
-            probe,
-            verdict=_verdict(probed),
-            slack=float(probed["slack"]),
-            elapsed_s=probed.get("elapsed_s"),
-            trained=True,
-            failure=_board_text(probed, "failure"),
-        )
+        _echo_scored(progress, probe, probed, trained=True)
         probes[fingerprint] = probed
     return probes
 
@@ -1096,14 +1096,7 @@ def search_cell(
                 sampled=fingerprint not in enqueued_fingerprints,
             )
         trial.set_user_attr(TRAINED_TRIAL_ATTR, retrained)
-        progress.scored(
-            corner,
-            verdict=_verdict(row),
-            slack=float(row["slack"]),
-            elapsed_s=row.get("elapsed_s"),
-            trained=retrained,
-            failure=_board_text(row, "failure"),
-        )
+        _echo_scored(progress, corner, row, trained=retrained)
         scored[fingerprint] = row
         _record_scored(league, market, scored, discounts, veto_discounts, out)
         # The objective must stay RAW slack: pricing the ledger discounts into it would let the
@@ -1761,10 +1754,9 @@ def _echo_board_countdown(
     echo_above_bar(line)
 
 
-def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
+def _upsert_cell(cell_board: pd.DataFrame, out: str) -> None:
     """Merge one cell's rows into the board CSV at ``out`` — replacing any prior rows for that
-    cell — so a single-cell run refreshes the living board instead of clobbering it. Returns the
-    rows written for this cell (what the CLI summarizes).
+    cell — so a single-cell run refreshes the living board instead of clobbering it.
 
     Read-modify-write over the whole file, so it takes :data:`_BOARD_WRITE_LOCK`: cells run
     concurrently and each of them rewrites the board after every scored corner. The lock lives here
@@ -1790,7 +1782,6 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
             _atomic_write_csv(merged.reindex(columns=_BOARD_COLUMNS), path)
         else:
             _atomic_write_csv(cell_board, path)
-    return cell_board
 
 
 def _stat_meta_edit(row: object) -> str:
@@ -2023,7 +2014,7 @@ def _run_board_mode(
             cells, families_by_cell, budgets, means, fallback, out, resume, confirm
         )
         return pd.DataFrame(columns=_BOARD_COLUMNS)
-    result = run_board(
+    board = run_board(
         cells,
         out=out,
         resume=resume,
@@ -2032,8 +2023,8 @@ def _run_board_mode(
         verbosity=verbosity,
         jobs=jobs,
     )
-    _print_board_rollup(result)
-    return result
+    _print_board_rollup(board)
+    return board
 
 
 def _print_dry_run_scope(
@@ -2099,7 +2090,7 @@ def _run_single_cell(
             confirm,
         )
         return pd.DataFrame(columns=_BOARD_COLUMNS)
-    result = search_cell(
+    cell_board = search_cell(
         league,
         market,
         max_trials=max_trials,
@@ -2111,9 +2102,9 @@ def _run_single_cell(
         verbosity=verbosity,
         seed_seconds=means.get((league, market), fallback),
     )
-    _upsert_cell(result, out)
-    _print_cell_summary(result, verbosity=verbosity)
-    return result
+    _upsert_cell(cell_board, out)
+    _print_cell_summary(cell_board, verbosity=verbosity)
+    return cell_board
 
 
 def _reject_inert_flags(
@@ -2371,7 +2362,7 @@ def main(
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     if market is None:
-        result = _run_board_mode(
+        board = _run_board_mode(
             league,
             include_shipped,
             dist_class,
@@ -2384,7 +2375,7 @@ def main(
             jobs if jobs is not None else _default_jobs(),
         )
     else:
-        result = _run_single_cell(
+        board = _run_single_cell(
             league,
             market,
             include_shipped,
@@ -2402,6 +2393,7 @@ def main(
     click.echo(f"\nswept in {human_seconds(time.monotonic() - started)} · board: {out}")
 
     if confirm:
+        # Deferred: confirm imports this module at load, so a top-level import here is circular.
         from sportstradamus.training.model_strategy.confirm import run_confirm
 
         # The walk snapshots and restores each cell's production artifacts around its retrain,
@@ -2414,7 +2406,7 @@ def main(
             contention_hint="Wait for it to finish, or kill it, before starting another.",
         ):
             run_confirm(
-                result,
+                board,
                 yes=yes,
                 max_nominees=confirm_nominees,
                 deadline_hours=confirm_hours,
