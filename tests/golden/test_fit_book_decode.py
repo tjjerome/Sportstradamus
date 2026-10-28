@@ -27,8 +27,6 @@ from sportstradamus.scripts.fit_book_decode import (
     main,
 )
 
-_KEY = ["game_date", "entity", "book", "line"]
-
 
 def _dated(dates: list[str], per_date: list[int]) -> pd.DataFrame:
     """Matched rows, latest game date first, so a split that skips the sort fails."""
@@ -86,7 +84,11 @@ def test_the_references_drop_a_disagreeing_rung_and_an_even_price():
     assert references["23:00"][tuple(key.values())] == pytest.approx(0.20)
 
 
-def _block(stored_shift: float, cv: float = 0.6) -> tuple[pd.DataFrame, dict[str, pd.Series]]:
+# The cv the fixture block's native prices were decoded with: a NegBin fit must recover it.
+_BLOCK_CV = 0.6
+
+
+def _block(stored_shift: float) -> tuple[pd.DataFrame, dict[str, pd.Series]]:
     """Migrated rows on six game dates, and the native 01:00 twins a NegBin decode prices."""
     rng = np.random.default_rng(1729)
     n = 120
@@ -99,7 +101,7 @@ def _block(stored_shift: float, cv: float = 0.6) -> tuple[pd.DataFrame, dict[str
             "ev": rng.uniform(0.8, 3.0, n),
         }
     )
-    reference = decode_under("NegBin", keys["line"].to_numpy(), keys["ev"].to_numpy(), cv)
+    reference = decode_under("NegBin", keys["line"].to_numpy(), keys["ev"].to_numpy(), _BLOCK_CV)
     native = keys.assign(under_prob=reference, p_over=1 - reference, layer="01:00", native=True)
     return keys.assign(under_prob=reference + stored_shift), _references(native)
 
@@ -118,7 +120,7 @@ def test_an_off_level_block_is_accepted_at_its_code_history_family():
     assert list(record["candidates"]) == ["stored", "NegBin"]
     assert record["candidates"]["stored"] is None or not record["candidates"]["stored"]["passes"]
     assert (record["verdict"], record["family"]) == ("accept", "NegBin")
-    assert record["cv"] == pytest.approx(0.6, abs=1e-3)
+    assert record["cv"] == pytest.approx(_BLOCK_CV, abs=1e-3)
     assert record["candidates"]["NegBin"]["interior"] is True
 
 
