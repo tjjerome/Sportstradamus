@@ -450,8 +450,9 @@ consult.
 | Over rates | `predicted_over_rate`, `empirical_over_rate`, `over_pct_ev_gt` (↑), `over_pct_ev_lt` (↓) | `meditate` |
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight`, `n_authentic_validation` (sportsbook-priced validation rows; `pickem` DFS-only rows excluded), `n_blend_fit_clusters` (rows and distinct clusters behind the weight fit; below the cluster floor `model_weight` is 1.0 and the skill / Kelly columns are NaN) | `meditate` |
+| Book level (report-only) | `book_citl_offline` (mean book P(over) − outcome on the test half's sportsbook rows), `book_citl_native` / `_redecoded` / `_ladder` and `book_share_*` (the same, split by the quote's I6d levelling class) | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
-| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_pit_ks`/`g4_pit_ks_max` (↓; `g4_iqr_ratio` reported), `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`, `g6_citl_ci_hi`, `g6_over_ci_lo` (all cells), `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
+| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_pit_ks`/`g4_pit_ks_max` (↓; `g4_iqr_ratio` reported), `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`, `g6_citl_ci_hi`, `g6_over_ci_lo` (all cells), `g1_book_thin`, `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
 | HP | `hp_rounds`, `hp_leaves`, `hp_lr`, `hp_min_child`, `hp_l1`, `hp_l2` | `meditate` |
 | Calibration | `cv`, `std` | `meditate` (from `stat_calibration.json`) |
 
@@ -467,6 +468,8 @@ consult.
 - `model_weight` near 0 ⇒ bookmaker dominates; near 1 ⇒ model dominates.
 - `ship == True` ⇔ all six offline gates pass on the most recent
   test-set CSV; see `docs/ship_gate.md` for the threshold rationale.
+- `g1_book_thin == True` ⇒ the cell's sportsbook rows span fewer than 10 players
+  (dates for team markets), so Gate 1 fails instead of passing as book-less.
 - A push is half an Over in training's label (`training/labels.over_label`):
   the Brier, ECE, `empirical_over_rate` and Gate 1 / Gate 5 columns score it as
   ½, while `log_loss_*`, `roc_auc`, `accuracy` and `precision_*` use settled
@@ -495,6 +498,7 @@ production data.
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi, book_shape}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
+| `config/book_decode.json` | **Committed.** The I6d decode table: per migrated archive block (league, market, layer, block) whether the training read re-decodes, keeps or drops its book rows. Written by `scripts/fit_book_decode.py` under `docs/handoffs/i6d-decode-preregistration.md`; applied by `helpers/book_levelling.py` |
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |

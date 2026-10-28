@@ -183,17 +183,25 @@ as the reported `g4_iqr_ratio`.
   cells *on merit* rather than loosening a gate.
 - `g4_iqr_ratio` (+ `_oracle`) — the retired `IQR(EV)/IQR(Result)` compression proxy,
   kept for back-comparison only; superseded as the Gate-4 statistic by `pit_ks`.
+- `book_citl_offline`, `book_citl_native` / `_redecoded` / `_ladder`, `book_share_*` — the
+  book's calibration-in-the-large on the test half's sportsbook rows (mean book P(over) −
+  outcome, a push as ½), pooled and split by the quote's I6d levelling class (`QuoteSource`
+  `book_direct`, `book_redecoded`, `book_ladder_repaired`). A book off the outcome level
+  inflates the offline skill measured against it (live-gap-2 H3).
 
 **Auto-pass / fail conventions for blank metrics:**
 
-- **Gate 1 blank** (no book `Odds` in the dump): **auto-pass** — no book to beat,
-  model wins by default. Also blank when the sportsbook-priced rows (`QuoteAuthenticity ==
-  "authentic"`) span fewer than `calibration._ONE_SE_MIN_CLUSTERS` distinct players (dates for
-  team markets) — a one-row book is no book, the same floor the blend-weight fit applies to
-  its rows. A pick'em-only cohort (`"pickem"`: Underdog/PrizePicks/Sleeper/… with no
-  sportsbook on the line) is a real line priced at the platform's even payout, not book
-  evidence: such rows never enter Gate 1 or the blend fit, so a DFS-only cell is book-less
-  and ships on gates 2–6 at weight 1.0 (owner decision 2026-09-29).
+- **Gate 1 blank** (no book `Odds` in the dump, or no sportsbook-priced row): **auto-pass**
+  — no book to beat, model wins by default. A pick'em-only cohort (`"pickem"`:
+  Underdog/PrizePicks/Sleeper/… with no sportsbook on the line) is a real line priced at the
+  platform's even payout, not book evidence: such rows never enter Gate 1 or the blend fit,
+  so a DFS-only cell is book-less and ships on gates 2–6 at weight 1.0 (owner decision
+  2026-09-29).
+- **Gate 1 book-thin** (`g1_book_thin`: sportsbook-priced rows, `QuoteAuthenticity ==
+  "authentic"`, spanning fewer than `calibration._ONE_SE_MIN_CLUSTERS` distinct players, dates
+  for team markets): **fail**. So thin a book cannot score Gate 1, and the blend-weight fit
+  falls to weight 1.0 on the same floor, so a pass would grant full trust with no book
+  evidence. I6d's levelling can thin a quoted cell's book that way (owner, 2026-10-27).
 - **Gate 5 blank** (no `P` or no `Line`): **fail** — the cell couldn't compute
   calibration; that's a model artifact, not a free pass. Gate 5 only needs `P` +
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.

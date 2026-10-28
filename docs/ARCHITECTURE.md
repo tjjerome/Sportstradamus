@@ -78,6 +78,7 @@ Sportstradamus/
 | `parlay_modifiers.py` | Expected-vs-actual quote reconciliation for pick'em correlation modifiers |
 | `provenance.py` | Code-version stamps for training artifacts |
 | `training_quotes.py` | Training-quote resolution with explicit provenance |
+| `book_levelling.py` | The I6d training read's levelling of archived sportsbook rows: ladder repair of native rows, re-decode or drop of migrated rows by `data/config/book_decode.json` |
 | `cli_options.py` | `LOG_LEVEL_OPTION`, the `--log-level` option the pipeline CLIs share |
 | `text.py` | Name normalization (`remove_accents`), `ABBR_MAP` (the team-abbreviation corrections both DFS scrapers and MLB's schedule map apply) and the MLB schedule readers (`get_mlb_pitchers`, `mlb_game_is_over`, the finished-state sets) |
 | `__init__.py` | Re-exports the public API — `from sportstradamus.helpers import X` is the canonical import |
@@ -276,6 +277,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Run a `Stats.update()` in the offseason | `SPORTSTRADAMUS_FORCE_UPDATE=1` — bypasses the season window (`helpers/odds_budget.py:update_window_open`) |
 | Refresh the per-cell SHAP diagnostic CSVs | `training/shap.py:see_features` — diagnostics only; training uses the full unfiltered candidate feature set |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |
+| Refit how the training read levels historical book prices | `scripts/fit_book_decode.py` writes `data/config/book_decode.json` under the frozen protocol in `docs/handoffs/i6d-decode-preregistration.md`; then re-inject the cached matrices (`scripts/inject_backfilled_odds.py`) and retrain |
 | Find why a comp feature has a certain weight | `data/config/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | See how a cell's recommended legs would have done on held-out rows | `sportstradamus admin tail-scorecard` (`scripts/tail_scorecard.py`; re-serve in `tail_pricing.py`, information test in `tail_information.py`) — the live rule replayed at the archived DFS rungs; a diagnostic, never a gate |
 | Check that serving feeds a model the features it trained on | `sportstradamus admin feature-parity` (`scripts/feature_parity.py`) — re-scores the serve-time feature log through the model file each row names (the served pickle or its `data/models/prior/` copy), compares each logged row with its training-matrix row feature by feature and by the model's own probability, flags a cell whose difference has a root mean square above one percentage point at the lower end of its player-clustered 95% interval, ranks cells by that RMS as served times their settled live legs, and lists settled cells and dates the log missed; `--fixed-file` scores every logged row through the served pickle instead, and `--versions` adds the paired same-leg difference between model versions. Dev-side and read-only; a diagnostic, never a gate |
