@@ -34,6 +34,7 @@ from sportstradamus.helpers.io import (
     _atomic_write_parquet,
     market_file_slug,
 )
+from sportstradamus.helpers.training_quotes import AUTHENTIC
 from sportstradamus.training.config import (
     load_shipped_config,
     load_zi_config,
@@ -350,7 +351,7 @@ def _book_level_columns(df: pd.DataFrame) -> dict[str, float]:
     out = dict.fromkeys(_BOOK_LEVEL_COLUMNS, float("nan"))
     if not {"Odds", "Line", ACTUAL_COL, "QuoteAuthenticity"} <= set(df.columns):
         return out
-    rows = df[df["QuoteAuthenticity"].eq("authentic")]
+    rows = df[df["QuoteAuthenticity"].eq(AUTHENTIC)]
     rows = rows[np.isfinite(rows[["Odds", "Line", ACTUAL_COL]]).all(axis=1)]
     if rows.empty:
         return out

@@ -60,7 +60,7 @@ from sportstradamus.helpers.integer_distribution import (
 )
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
-from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
+from sportstradamus.helpers.training_quotes import AUTHENTIC, AUTHENTICITY_VALUES
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.calibration import _ONE_SE_MIN_CLUSTERS
 from sportstradamus.training.group_conditional_cdf import (
@@ -554,7 +554,7 @@ def _sportsbook_rows(df: pd.DataFrame) -> pd.DataFrame | None:
     if "QuoteAuthenticity" in sub.columns:
         if not sub["QuoteAuthenticity"].isin(AUTHENTICITY_VALUES).all():
             raise ValueError("scorecard received invalid quote authenticity")
-        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
+        sub = sub.loc[sub["QuoteAuthenticity"].eq(AUTHENTIC)].drop(columns="QuoteAuthenticity")
     return sub if len(sub) else None
 
 
