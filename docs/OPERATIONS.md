@@ -283,7 +283,12 @@ Quick checks when collection or serving looks wrong:
   that run out (`stats.load_live_leagues`): its lines are archived, the other
   leagues are scored, and the run exits 1 once its snapshots are written. It is not
   scored on the cached gamelog, because the day's schedule arrives only with an
-  update. `bet pickem` drops the league the same way and only logs it.
+  update. `bet pickem` drops the league the same way and only logs it. An NFL
+  schedule fetch that fails is the exception: the update does not raise, keeps the
+  stored gamelog and leaves that run's new rows to the next run (log line
+  `Failed to fetch NFL schedule data`), and NFL is scored that hour without the
+  day's schedule: every player away, no weekday (under 1 % of any NFL model's
+  |SHAP|).
 - **Whole league unfit to serve** (retrain in flight, schema break): prefix the
   cron line with `SPORTSTRADAMUS_HOLD_LEAGUES=NFL` (comma-separated for several).
   `league_is_live` then reports the league idle, so `prophecize` and
