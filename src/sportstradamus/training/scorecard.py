@@ -2197,6 +2197,12 @@ def min_gate_slack(row: dict[str, object]) -> float:
     fails (``-inf``).
     """
     hi = row.get("g1_brier_diff_ci_hi")
+    if row.get("g1_book_thin"):
+        g1_slack = -np.inf
+    elif hi is None:
+        g1_slack = np.inf
+    else:
+        g1_slack = (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN
     g4, g4_max = row.get("g4_pit_ks"), row.get("g4_pit_ks_max")
     # Gate 6 auto-pass (blank leg) never binds (+inf). recent-form / CITL are lower-bounded (the
     # value must clear a floor, so headroom is value − floor); over is upper-bounded.
@@ -2204,11 +2210,7 @@ def min_gate_slack(row: dict[str, object]) -> float:
     citl_hi = row.get("g6_citl_ci_hi")
     over_lo = row.get("g6_over_ci_lo")
     return min(
-        -np.inf
-        if row.get("g1_book_thin")
-        else np.inf
-        if hi is None
-        else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
+        g1_slack,
         _normalized_gate_slack(row.get("g2_star_z"), _GATE2_STAR_Z_MAX),
         _normalized_gate_slack(row.get("g3_bench_z"), _GATE3_BENCH_Z_MAX),
         -np.inf if g4 is None or g4_max is None else (g4_max - g4) / g4_max,
