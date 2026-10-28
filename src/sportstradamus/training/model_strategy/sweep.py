@@ -48,7 +48,7 @@ import pyarrow.parquet as pq
 import tabulate
 
 from sportstradamus import data as _data_pkg
-from sportstradamus.helpers.io import market_file_slug
+from sportstradamus.helpers.io import _atomic_write_csv, market_file_slug
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
     TRAINING_ARTIFACTS_LOCK_FILE,
@@ -1768,7 +1768,9 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
 
     Read-modify-write over the whole file, so it takes :data:`_BOARD_WRITE_LOCK`: cells run
     concurrently and each of them rewrites the board after every scored corner. The lock lives here
-    rather than at the call sites because there are two of them, per-corner and per-cell.
+    rather than at the call sites because there are two of them, per-corner and per-cell. The new
+    board replaces the old rather than overwriting it: cells also read the board without the lock,
+    and a read between an in-place write's truncate and its rows parsed an empty file.
 
     ``keep``'s all-NA columns are dropped before the concat and restored by the reindex after it.
     :func:`_read_board` backfills any column a board predates as a ``pd.NA`` scalar, which lands as
@@ -1785,9 +1787,9 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
             merged = pd.concat(
                 [keep.dropna(axis="columns", how="all"), cell_board], ignore_index=True
             )
-            merged.reindex(columns=_BOARD_COLUMNS).to_csv(path, index=False)
+            _atomic_write_csv(merged.reindex(columns=_BOARD_COLUMNS), path)
         else:
-            cell_board.to_csv(path, index=False)
+            _atomic_write_csv(cell_board, path)
     return cell_board
 
 

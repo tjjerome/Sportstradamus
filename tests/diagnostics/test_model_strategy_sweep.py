@@ -3019,6 +3019,31 @@ def test_concurrent_upserts_keep_every_cell(monkeypatch, tmp_path):
     assert set(zip(board["league"], board["market"], strict=True)) == set(cells)
 
 
+def test_a_board_read_mid_write_sees_the_prior_board(monkeypatch, tmp_path):
+    """Cells read the board unlocked (prior corners, the timeout ceiling) while another cell rewrites
+    it after every scored corner.
+
+    Rewritten in place, a read that landed between the writer's truncating open and its rows parsed
+    an empty file, the reading cell raised, and ``_drain`` dropped it from the board ``--confirm``
+    walks: the intermittent loss of NFL rushing yards in the scoped-board CLI test.
+    """
+    out = tmp_path / "board.csv"
+    sweep._upsert_cell(_cell_frame("WNBA", "AST"), str(out))
+    to_csv = pd.DataFrame.to_csv
+    seen = []
+
+    def read_between_open_and_rows(frame, path_or_buf, *args, **kwargs):
+        pathlib.Path(path_or_buf).write_text("")  # what the writer's open does to its target
+        seen.append(set(sweep._read_board(out)["market"]))
+        return to_csv(frame, path_or_buf, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", read_between_open_and_rows)
+    sweep._upsert_cell(_cell_frame("WNBA", "PTS"), str(out))
+
+    assert seen == [{"AST"}]
+    assert set(sweep._read_board(out)["market"]) == {"AST", "PTS"}
+
+
 def test_one_cell_crashing_does_not_cost_the_other_cells(monkeypatch, tmp_path, capsys):
     """Before the pool a cell dying outside the per-corner catch ended the whole board run."""
     cells = [("WNBA", "AST"), ("WNBA", "PTS"), ("WNBA", "REB")]
