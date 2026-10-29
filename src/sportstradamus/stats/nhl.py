@@ -104,7 +104,7 @@ PLAYER_BIO_FIELDS = (
 def _game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
     """(gameId, playerId) row key; the stored playerId is object-typed, so both sides cast."""
     return pd.MultiIndex.from_arrays(
-        [frame["gameId"].astype(int), pd.to_numeric(frame["playerId"], errors="coerce")]
+        [frame["gameId"].astype(int), pd.to_numeric(frame["playerId"])]
     )
 
 
