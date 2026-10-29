@@ -234,14 +234,16 @@ class StatsNHL(Stats):
         One row per player id over the regular-season games of ``season``, with the formulas
         of :meth:`_fetch_skater_summary` and :meth:`_fetch_goalie_summary` applied once to the
         gamelog's per-game sums. Skater rows carry the skater rates, goalie rows the goalie rates.
+        Counting stats are per 60 minutes of ice time; ``timePerGame`` is in minutes and
+        ``timePerShift`` in seconds.
 
         Raises:
             RuntimeError: a row of the slice lacks the ``SEASON_SUM_COLUMNS``.
         """
-        game = self.gamelog["gameId"]
+        game_id = self.gamelog["gameId"]
         rows = self.gamelog.loc[
-            (game // 1_000_000 == season)
-            & (game // 10_000 % 100 == _REGULAR_SEASON_GAME_TYPE)
+            (game_id // 1_000_000 == season)
+            & (game_id // 10_000 % 100 == _REGULAR_SEASON_GAME_TYPE)
             & (self._gamelog_dates() < pd.Timestamp(target_game_date))
         ]
         if rows.reindex(columns=list(SEASON_SUM_COLUMNS)).isna().to_numpy().any():
@@ -301,8 +303,8 @@ class StatsNHL(Stats):
                 / sums["shotsAgainst"],
             }
         )
-        goalie = by_player["position"].first() == "G"
-        return pd.concat([skaters[~goalie], goalies[goalie]])
+        is_goalie = by_player["position"].first() == "G"
+        return pd.concat([skaters[~is_goalie], goalies[is_goalie]])
 
     def _player_seasons_through(self, target_game_date: date) -> dict:
         """The comp pool at ``target_game_date`` as ``{player_id: stats_dict}``.
@@ -722,7 +724,11 @@ class StatsNHL(Stats):
     def backfill_season_sums(self, seasons: set[int] | None = None) -> int:
         """Fill the SEASON_SUM_COLUMNS on gamelog rows that lack them by re-parsing their games.
 
-        Returns the number of games re-fetched. Rows whose game could not be parsed keep NaN.
+        Args:
+            seasons: Season start years to restrict to, e.g. ``{2025}``; ``None`` is every season.
+
+        Returns:
+            The number of games re-fetched. Rows whose game could not be parsed keep NaN.
         """
         columns = list(SEASON_SUM_COLUMNS)
         log = self.gamelog.reindex(columns=self.gamelog.columns.union(columns, sort=False))
@@ -736,17 +742,17 @@ class StatsNHL(Stats):
             games.itertuples(index=False), total=len(games), desc="Backfilling NHL season sums"
         ):
             rows, _ = self.parse_game(gameId, gameDate)
-            if type(rows) is list:
-                parsed.extend(rows)
+            parsed.extend(rows)
         if parsed:
-            new = (
+            key = ["gameId", "playerName"]
+            fresh = (
                 pd.DataFrame(parsed)
-                .drop_duplicates(subset=["gameId", "playerName"], keep="last")
-                .set_index(["gameId", "playerName"])[columns]
+                .drop_duplicates(subset=key, keep="last")
+                .set_index(key)[columns]
             )
-            keyed = log.set_index(["gameId", "playerName"])[columns]
-            keyed.update(new)
-            log[columns] = keyed.to_numpy()
+            stored = log.set_index(key)[columns]
+            stored.update(fresh)
+            log[columns] = stored.to_numpy()
         self.gamelog = log
         return len(games)
 
