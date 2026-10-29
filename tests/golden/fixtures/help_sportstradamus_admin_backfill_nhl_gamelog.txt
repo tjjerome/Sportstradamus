@@ -1,0 +1,7 @@
+Usage: sportstradamus admin backfill-nhl-gamelog [OPTIONS]
+
+  Re-fetch the NHL games whose gamelog rows lack the season-sum columns.
+
+Options:
+  --season INTEGER  Restrict to these season start years, e.g. 2025.
+  --help            Show this message and exit.

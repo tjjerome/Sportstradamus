@@ -56,6 +56,31 @@ NHL_GOALIE_UNDERDOG_BERNOULLI = (("win", 6),)
 # Keeps the goalie win probability off the exact 0/1 poles so it always clears
 # combo_quote's strict open-interval admission check.
 _GOALIE_WIN_P_CLIP: float = 0.01
+# The per-game sums behind the moneypuck season-summary rates (_fetch_skater_summary,
+# _fetch_goalie_summary), kept per gamelog row so a comp profile can stop at a game date.
+SEASON_SUM_COLUMNS = {
+    "shifts": "I_F_shifts",
+    "shotAttempts": "I_F_shotAttempts",
+    "xGoals": "I_F_flurryScoreVenueAdjustedxGoals",
+    "shotRebounds": "I_F_rebounds",
+    "shotFreezes": "I_F_freeze",
+    "oZoneStarts": "I_F_oZoneShiftStarts",
+    "dZoneStarts": "I_F_dZoneShiftStarts",
+    "flyStarts": "I_F_flyShiftStarts",
+    "takeaways": "I_F_takeaways",
+    "giveaways": "I_F_giveaways",
+    "penaltyMinutes": "I_F_penalityMinutes",
+    "penaltyMinutesDrawn": "I_A_penalityMinutes",
+    "onIceFenwickFor": "OnIce_F_unblockedShotAttempts",
+    "onIceFenwickAgainst": "OnIce_A_unblockedShotAttempts",
+    "offIceFenwickFor": "OffIce_F_unblockedShotAttempts",
+    "offIceFenwickAgainst": "OffIce_A_unblockedShotAttempts",
+    "xGoalsAgainst": "OnIce_A_flurryAdjustedxGoals",
+    "freezesAgainst": "OnIce_A_freeze",
+    "xFreezesAgainst": "OnIce_A_xFreeze",
+    "reboundsAgainst": "OnIce_A_rebounds",
+    "xReboundsAgainst": "OnIce_A_xRebounds",
+}
 
 
 class StatsNHL(Stats):
@@ -482,6 +507,7 @@ class StatsNHL(Stats):
                 else 0,
             }
         )
+        stats.update({name: float(player[src]) for name, src in SEASON_SUM_COLUMNS.items()})
         return n | stats
 
     def _update(self):
@@ -493,6 +519,9 @@ class StatsNHL(Stats):
         ids = self._collect_game_ids(latest_date, today)
         nhl_gamelog, nhl_teamlog = self._parse_new_games(ids, today)
         self._merge_new_gamelogs(nhl_gamelog, nhl_teamlog)
+        # Rows stored before these sums were logged hold NaN; the first update after the
+        # deploy re-parses the running season's games so its comp profile can be rebuilt.
+        self.backfill_season_sums(seasons={self.season_start.year})
         self._fetch_upcoming_games_nhl(today)
 
         player_df = self._fetch_player_bios_nhl()
@@ -585,6 +614,37 @@ class StatsNHL(Stats):
         self.teamlog = (
             pd.concat([nhl_teamlog_df, self.teamlog]).sort_values("gameDate").reset_index(drop=True)
         )
+
+    def backfill_season_sums(self, seasons: set[int] | None = None) -> int:
+        """Fill the SEASON_SUM_COLUMNS on gamelog rows that lack them by re-parsing their games.
+
+        Returns the number of games re-fetched. Rows whose game could not be parsed keep NaN.
+        """
+        columns = list(SEASON_SUM_COLUMNS)
+        log = self.gamelog.reindex(columns=self.gamelog.columns.union(columns, sort=False))
+        lacking = log[columns].isna().any(axis=1)
+        if seasons is not None:
+            # An NHL game id leads with its season's start year: 2025020001 -> 2025.
+            lacking &= (log["gameId"] // 1_000_000).isin(seasons)
+        games = log.loc[lacking, ["gameId", "gameDate"]].drop_duplicates()
+        parsed = []
+        for gameId, gameDate in tqdm(
+            games.itertuples(index=False), total=len(games), desc="Backfilling NHL season sums"
+        ):
+            rows, _ = self.parse_game(gameId, gameDate)
+            if type(rows) is list:
+                parsed.extend(rows)
+        if parsed:
+            new = (
+                pd.DataFrame(parsed)
+                .drop_duplicates(subset=["gameId", "playerName"], keep="last")
+                .set_index(["gameId", "playerName"])[columns]
+            )
+            keyed = log.set_index(["gameId", "playerName"])[columns]
+            keyed.update(new)
+            log[columns] = keyed.to_numpy()
+        self.gamelog = log
+        return len(games)
 
     def _fetch_upcoming_games_nhl(self, today):
         """Populate self.upcoming_games with opponent + predicted goalie from dobbersports."""
