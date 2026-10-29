@@ -268,13 +268,17 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      worth building; the fault is the level of w at every lead, which the I6d retrain targets. What
      stays: a report-only λ* read beside I6d's M3 (§6), and the owner's call on carrying each line's
      first-scoring probabilities in history (~1 dev-day).
-  5. Profitability (owner's question 10-29; plan Part 5): on fixed-payout pick'em legs the model's
-     disagreement with the line and the sportsbook's near-even price lean at a shared line are both noise
-     ([honest-receipts.md](honest-receipts.md) §7 record of 10-29). The recommended cohort cannot be made
-     profitable by the sportsbook-anchored gates this lane tunes; the levers (a per-cell live pick'em
-     record gate, a λ_DFS calibration brief, a lock-line column for DFS closing-line value, the entry
-     correlation read) wait on ask 11; the correlation read (10-29) found no entry-level edge.
-  5. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
+  5. Profitability (owner's question 10-29; plan Part 5): the losses on fixed-payout pick'em legs are
+     this lane's gap read on the recommendation tail. The same rule on the served cells' offline test
+     sets is calibrated (legs claimed .60–.65 hit .63 in every league); the live 1.83 legs in that bin
+     hit .47 / .53 / .55 (NBA / NFL / NHL), and NHL, the one league whose live book BSS matches offline,
+     is the one at break-even ([honest-receipts.md](honest-receipts.md) §7 record of 10-29; lane
+     `research/offline_vs_live_tail.*`). At a shared line the sportsbook's near-even price lean is noise
+     and the book's line is only a hint where the two lines differ, so the gap, not the rule or the DFS
+     line, is the fault. The profit levers (a per-cell live pick'em record gate, a λ_DFS calibration
+     brief, a lock-line column for DFS closing-line value) wait on ask 11 and on four settled weeks of
+     the retrained versions; the entry correlation read (10-29) found no entry-level edge.
+  6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
 
