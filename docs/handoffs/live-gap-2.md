@@ -272,16 +272,20 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      worth building; the fault is the level of w at every lead, which the I6d retrain targets. What
      stays: a report-only λ* read beside I6d's M3 (§6), and the owner's call on carrying each line's
      first-scoring probabilities in history (~1 dev-day).
-  5. Profitability (owner's question 10-29; plan Part 5): the losses on fixed-payout pick'em legs are
-     this lane's gap read on the recommendation tail. The same rule on the served cells' offline test
-     sets is calibrated (legs claimed .60–.65 hit .63 in every league); the live 1.83 legs in that bin
-     hit .47 / .53 / .55 (NBA / NFL / NHL), and NHL, the one league whose live book BSS matches offline,
-     is the one at break-even ([honest-receipts.md](honest-receipts.md) §7 record of 10-29; lane
-     `research/offline_vs_live_tail.*`). At a shared line the sportsbook's near-even price lean is noise
-     and the book's line is only a hint where the two lines differ, so the gap, not the rule or the DFS
-     line, is the fault. The profit levers (a per-cell live pick'em record gate, a λ_DFS calibration
-     brief, a lock-line column for DFS closing-line value) wait on ask 11 and on four settled weeks of
-     the retrained versions; the entry correlation read (10-29) found no entry-level edge.
+  5. Why live misses the offline evaluation on the recommendation set (owner's priority 10-29; lane
+     REPORT.md "Root cause", `research/nba_matched_legs.*`, `*_population_split.*`): not serving (NBA
+     parity exact, RMS .009 on 9,232 matched legs at Underdog's line; the pickles that served, scored
+     offline on the same 1,433 NBA 1.83 legs, give claimed .666 / hit .504 = live) and not the season gap
+     alone (−.04 on all October book rows). It is the population: at the sportsbook's noon line the model's
+     tail reads −.04 on player-games the DFS platforms did not post and −.10 (NBA) / −.14 (NFL) on those
+     posted at an even-money main line; stars unposted ±.00, stars posted −.10 / −.13; the noon book
+     line's side of Underdog's line hits .528, the model against it .468. The model's edge exists only
+     where the market is thin; on the liquid regulars a DFS platform posts at even money the market centre
+     is sharp and the model's disagreement is error, and every offline gate pools the whole quoted
+     population where that subset is a minority. Plan from here: gates on the posted-main-line subset,
+     a market-centre anchor on posted legs (brief first), the NFL volume cells off pick'em; the walk
+     stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`), Part 5 levers 5.2/5.3 and the I6g /
+     tail-scorecard reads deferred. The owner pulled the seven held cells off production at 12:44 CDT.
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.

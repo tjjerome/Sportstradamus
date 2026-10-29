@@ -1221,6 +1221,15 @@ side-rule read, each with a tagged `REPORT.md`, in `~/backups/sportstradamus/202
   games with no Over-led story on either platform (10 / 7 / 3), a platform lacking the Over-led story
   in a game given to Over (4 / 1 / 4 menus) and a Tonight card quoting an Under-led story in such a
   game (3 / 1 / 0).
+- The live gap on the recommendation set is a population effect, not serving (2026-10-29 13:00, live-gap-2 lane
+  `research/nba_matched_legs.*`, `nba_population_split.*`, `nfl_population_split.*`): NBA serving parity is exact
+  (RMS .009 on 9,232 live legs matched to their matrix rows at Underdog's line), and the pickles that served, scored
+  offline on the same 1,433 NBA 1.83 legs, give claimed .666 / hit .504, identical to live. At the sportsbook's noon
+  line on October rows the model's tail is −.04 on player-games the DFS platforms did not post and −.10 (NBA) /
+  −.14 (NFL) on those posted at an even-money main line; stars unposted ±.00, stars posted −.10 / −.13; NFL
+  regulars (6+ games) −.11. The noon book line's side of Underdog's line hits .528; the model against it .468.
+  The model's edge exists only where the market is thin; the offline gates pool the whole quoted population and
+  so pass cells that lose every posted pick. I6d, I6f and the walk tune that same evaluation.
 - Pick'em losses are the live gap on the recommendation tail (2026-10-29, live-gap-2 lane
   `research/dfs_market_anchor_read.*`, `dfs_anchor_splits.*`, `offline_vs_live_tail.*`; plan Part 5): of 49,900
   settled legs since 10-09 only 6,222 sit at the fixed 1.83 payout; the recommended ones hit .521 [.491, .554]
