@@ -242,8 +242,13 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      post-hoc exceptions; gate-passing sends go without asking (owner 10-28), and a served cell that
      newly fails keeps its old pickle on production until the owner answers pull-or-leave. NFL
      retrained and sent 10-29 00:57 CDT: 15 of 16 served cells pass, interceptions fails Gate 1 on
-     the levelled rows (BSS .216 to .043, authentic rows 427 to 158) and is held on dev. NBA and NHL
-     follow the same night (lane `REPORT.md`, section I6d retrains). Each send moves that league's
+     the levelled rows (BSS .216 to .043, authentic rows 427 to 158) and is held on dev. NBA retrained and sent 06:58 CDT 10-29: 8 of 14 served cells pass and
+     went; AST, BLK, BLST, FG3M, REB and STL fail Gate 1 (the expected collapse of a re-decoded book
+     leg, share .78–.99; BSS .13–.15 to ±.02) and keep their 10-18 pickles on production (ask 10). NHL
+     retrained and sent 06:58: 11 of 11 pass (goals BSS .031 to −.008 inside the tie margin; no NHL
+     block is re-decoded, so the change is the refreshed matrix). The serve-parity probe cannot judge
+     NBA or NHL (it never runs `update()`, which the live loader does); the proof is each retrained
+     pickle's `expected_columns` equal to the pre-retrain pickle's (lane `REPORT.md`, I6d retrains). Each send moves that league's
      I6g read (§6) out.
   2. The blind confirm walk on the levelled matrices (Phase C), which reverts its own failures; the
      fresh sweep board it needs is compute-heavy, so scope it with the owner.
@@ -263,6 +268,12 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      worth building; the fault is the level of w at every lead, which the I6d retrain targets. What
      stays: a report-only λ* read beside I6d's M3 (§6), and the owner's call on carrying each line's
      first-scoring probabilities in history (~1 dev-day).
+  5. Profitability (owner's question 10-29; plan Part 5): on fixed-payout pick'em legs the model's
+     disagreement with the line and the sportsbook's near-even price lean at a shared line are both noise
+     ([honest-receipts.md](honest-receipts.md) §7 record of 10-29). The recommended cohort cannot be made
+     profitable by the sportsbook-anchored gates this lane tunes; the levers (a per-cell live pick'em
+     record gate, a λ_DFS calibration brief, a lock-line column for DFS closing-line value, the entry
+     correlation read) wait on ask 11; the correlation read (10-29) found no entry-level edge.
   5. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
@@ -348,6 +359,18 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    read every Sunday?
 9. The hurdle-cell book leg (§7): go on the serve-time fix (the book's own P(over) when the offer line
    equals the quoted line; otherwise a decode with a free zero mass), research-gated?
+10. The six NBA cells that fail their fresh Gate 1 on the levelled matrix (AST, BLK, BLST, FG3M, REB,
+    STL; 10-29): pull their 10-18 pickles off production so the quoted props serve the book consensus,
+    or leave them serving (the question of ask 6)?
+11. Profitability (plan Part 5; lane `REPORT.md` "Profitability read"; honest-receipts §7): on 1.83
+    pick'em legs the hit rate is .49–.53 whatever the model or the sportsbook's near-even lean says (the
+    book's line itself is modestly right where it differs from the DFS line, .511 vs .467), and recommended
+    legs hit .521 against .546. Go on (a) a per-cell live pick'em
+    record gate in `bet pickem` (recommend only where the 30-day one-sided 90 % lower bound clears the
+    entry's break-even), (b) the λ_DFS calibration brief, (c) an Underdog lock-line history column for a
+    DFS closing-line read? The parlay-correlation read (5.3b) ran 10-29 and is not a lever: same-team
+    pair lift .001 [−.021, .024], opponents −.003; the only lift is same-player same-side (+.12), a
+    mechanical overlap Underdog's per-pair modifier prices.
 
 ## 9. Records
 

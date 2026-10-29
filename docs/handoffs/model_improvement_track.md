@@ -1849,7 +1849,9 @@ justification to `.claude/.state/research_waiver`.
   NHL with the three fails as post-hoc exceptions. NFL retrained and sent 10-29: 15 of 16 served
   cells pass (tds BSS .128 to .012 and w .82 to .06, passing tds .159 to .031, receptions .041 to
   .006, as expected); interceptions fails Gate 1 (BSS .216 to .043 on 158 authentic rows) and is
-  held. The lead-time brief ([`archive/researcher_lead_time_blend.md`](../archive/researcher_lead_time_blend.md))
+  held. NBA retrained and sent 10-29: 8 of 14 served cells pass; AST, BLK, BLST, FG3M, REB and STL
+  fail Gate 1 as their re-decoded book leg levels (BSS .13–.15 to ±.02), as expected. NHL 11 of 11
+  (no NHL block is re-decoded). The lead-time brief ([`archive/researcher_lead_time_blend.md`](../archive/researcher_lead_time_blend.md))
   adds the post-retrain expectation and a read: quoted-leg Brier should improve (−.006 to −.010 by
   the common-λ proxy) and the recommended cohort shrink by a third to two thirds, not the tail's gap
   close; λ* of served `Win Prob` against `Market Prob` on post-I6d versions (lead under 24 h,

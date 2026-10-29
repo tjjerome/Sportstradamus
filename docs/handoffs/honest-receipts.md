@@ -1221,6 +1221,21 @@ side-rule read, each with a tagged `REPORT.md`, in `~/backups/sportstradamus/202
   games with no Over-led story on either platform (10 / 7 / 3), a platform lacking the Over-led story
   in a game given to Over (4 / 1 / 4 menus) and a Tonight card quoting an Under-led story in such a
   game (3 / 1 / 0).
+- The DFS line is the sharp number (2026-10-29, live-gap-2 lane `research/dfs_market_anchor_read.*`,
+  `dfs_anchor_splits.*`; plan Part 5): of 49,900 settled legs since 10-09 only 6,222 sit at the fixed 1.83
+  payout, and on those the hit rate is .49–.53 whatever `Win Prob` or `Market Prob` says. The sportsbook is not
+  less sharp than Underdog: where the two lines disagree (25 %) a pick on the book's side hits .511 against .467.
+  What is noise is the book's near-even price lean at a shared line (75 %): flat at every book count and quote
+  age, a decision-time P ≥ .55 closes at .51 (93 % toward .5); the model's top bin inverts there too (.63 → .51
+  within 6 h of tip, .75 → .36). The consensus is calibrated on both sides across 43,000 priced legs.
+  The recommended 1.83 cohort hits .521 [.491, .554] against .546 (−4.6 %; NBA .508, NFL .509, NHL .545);
+  lead time is not the cause (93 % scored within 6 h). Every offline gate and `kelly_shrinkage` grade the
+  model against the sportsbook's price lean, noise on these legs — which is why the selection shrink toward
+  the book failed; the book's line is the usable anchor. Priced alt lines sit at −10 % at every threshold. What would change it: a per-cell live
+  pick'em record gate, a λ_DFS calibration (brief first), an edge over Underdog's line (DFS closing-line
+  value at lock) — live-gap-2.md §8 ask 11. Entry correlation is not one of them: over 58,717 same-game
+  pairs of settled 1.83 Underdog legs, P(both) − p₁p₂ is .001 [−.021, .024] for teammates and −.003 for
+  opponents; only same-player same-side pairs lift (+.12), the mechanical overlap the per-pair modifier prices.
 
 ## 8. Owner asks (one each)
 
