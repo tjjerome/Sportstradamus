@@ -21,6 +21,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import VOLUME_STATS, write_gamelog
 from sportstradamus.stats.base import (
+    _SEASON_ROLLOVER_MONTH,
     GAMELOG_RETENTION_DAYS,
     ComboSpec,
     Stats,
@@ -81,6 +82,23 @@ SEASON_SUM_COLUMNS = {
     "reboundsAgainst": "OnIce_A_rebounds",
     "xReboundsAgainst": "OnIce_A_xRebounds",
 }
+# Characters 5-6 of an NHL game id (2025020001 -> 02): the season summary a comp profile
+# mirrors counts regular-season games only.
+_REGULAR_SEASON_GAME_TYPE: int = 2
+# The fields of a stored players.json row that describe the player, not his season. A comp
+# pool reads only these from the running season's row: its stats are season-to-date as of
+# the last roster fetch, so for a training row they look ahead.
+PLAYER_BIO_FIELDS = (
+    "age",
+    "bmi",
+    "height",
+    "weight",
+    "shootsCatches",
+    "playerName",
+    "position",
+    "team",
+    "birthDate",
+)
 
 
 class StatsNHL(Stats):
@@ -201,42 +219,128 @@ class StatsNHL(Stats):
         return playerProfile, playerDict, id_to_name
 
     def _current_season_key(self, target_game_date: date) -> int:
-        """Return the ``self.players`` key for the season containing ``target_game_date``.
+        """Return the ``self.players`` key (season start year) holding ``target_game_date``.
 
-        NHL seasons run Oct–Jun and ``self.players`` is keyed by the season
-        *start* year (int). Oct–Dec dates belong to that year's season;
-        Jan–Sep dates belong to the prior year's season.
+        The key rolls over in August with the depth charts (``_SEASON_ROLLOVER_MONTH``), so an
+        offseason date belongs to the coming season: 2026-09-30 -> 2026, 2026-07-31 -> 2025.
         """
-        if target_game_date.month >= 10:
+        if target_game_date.month >= _SEASON_ROLLOVER_MONTH:
             return target_game_date.year
         return target_game_date.year - 1
 
-    def _player_seasons_through(self, target_game_date: date) -> dict:
-        """Merge ``self.players`` seasons ``<=`` ``target_game_date``'s season.
+    def _season_to_date_profile(self, season: int, target_game_date: date) -> pd.DataFrame:
+        """Rebuild moneypuck's season-summary rates from the games before ``target_game_date``.
 
-        Returns a flat ``{player_id: stats_dict}`` mapping ready for
-        :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts.
+        One row per player id over the regular-season games of ``season``, with the formulas
+        of :meth:`_fetch_skater_summary` and :meth:`_fetch_goalie_summary` applied once to the
+        gamelog's per-game sums. Skater rows carry the skater rates, goalie rows the goalie rates.
+
+        Raises:
+            RuntimeError: a row of the slice lacks the ``SEASON_SUM_COLUMNS``.
         """
-        cutoff = self._current_season_key(target_game_date)
+        game = self.gamelog["gameId"]
+        rows = self.gamelog.loc[
+            (game // 1_000_000 == season)
+            & (game // 10_000 % 100 == _REGULAR_SEASON_GAME_TYPE)
+            & (self._gamelog_dates() < pd.Timestamp(target_game_date))
+        ]
+        if rows.reindex(columns=list(SEASON_SUM_COLUMNS)).isna().to_numpy().any():
+            raise RuntimeError(
+                f"NHL {season} gamelog rows before {target_game_date} lack the season sums; "
+                "run `sportstradamus admin backfill-nhl-gamelog` first"
+            )
+        by_player = rows.groupby(rows["playerId"].astype(int))
+        sums = by_player[
+            [
+                *SEASON_SUM_COLUMNS,
+                "timeOnIce",
+                "shots",
+                "goals",
+                "assists",
+                "hits",
+                "blocked",
+                "shotsAgainst",
+                "goalsAgainst",
+            ]
+        ].sum()
+        icetime = sums["timeOnIce"] * 60
+        per_hour = 3600 / icetime
+        skaters = pd.DataFrame(
+            {
+                "Fenwick": sums["onIceFenwickFor"]
+                / (sums["onIceFenwickFor"] + sums["onIceFenwickAgainst"])
+                - sums["offIceFenwickFor"]
+                / (sums["offIceFenwickFor"] + sums["offIceFenwickAgainst"]),
+                "timePerGame": sums["timeOnIce"] / by_player.size(),
+                "timePerShift": icetime / sums["shifts"],
+                "xGoals": sums["xGoals"] / sums["shotAttempts"],
+                "shotsOnGoal": sums["shots"] / sums["shotAttempts"],
+                "goals": (sums["goals"] - sums["xGoals"]) / sums["shotAttempts"],
+                "rebounds": sums["shotRebounds"] / sums["shotAttempts"],
+                "freeze": sums["shotFreezes"] / sums["shotAttempts"],
+                "oZoneStarts": sums["oZoneStarts"] / (sums["oZoneStarts"] + sums["dZoneStarts"]),
+                "flyStarts": sums["flyStarts"] / sums["shifts"],
+                "shotAttempts": sums["shotAttempts"] * per_hour,
+                "hits": sums["hits"] * per_hour,
+                "takeaways": sums["takeaways"] * per_hour,
+                "giveaways": sums["giveaways"] * per_hour,
+                "assists": sums["assists"] * per_hour,
+                "penaltyMinutes": sums["penaltyMinutes"] * per_hour,
+                "penaltyMinutesDrawn": sums["penaltyMinutesDrawn"] * per_hour,
+                "blockedShots": sums["blocked"] * per_hour,
+            }
+        )
+        saves = sums["shotsAgainst"] - sums["goalsAgainst"]
+        goalies = pd.DataFrame(
+            {
+                "timePerGame": skaters["timePerGame"],
+                "savePct": saves / sums["shotsAgainst"],
+                "freezeAgainst": (sums["freezesAgainst"] - sums["xFreezesAgainst"]) / saves,
+                "reboundsAgainst": (sums["reboundsAgainst"] - sums["xReboundsAgainst"]) / saves,
+                "goalsAgainst": (sums["goalsAgainst"] - sums["xGoalsAgainst"])
+                / sums["shotsAgainst"],
+            }
+        )
+        goalie = by_player["position"].first() == "G"
+        return pd.concat([skaters[~goalie], goalies[goalie]])
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """The comp pool at ``target_game_date`` as ``{player_id: stats_dict}``.
+
+        Past seasons' stored rows merge oldest to newest, so a player's latest one wins. The
+        running season's stored row is read for its ``PLAYER_BIO_FIELDS`` only; its stats are
+        rebuilt from the games before the date (:meth:`_season_to_date_profile`), and a player
+        without one keeps his latest past-season row. ``age`` is as of the date wherever a row
+        carries ``birthDate``.
+        """
+        season = self._current_season_key(target_game_date)
         merged: dict = {}
-        for season_key in sorted(self.players.keys()):
-            if season_key > cutoff:
-                continue
+        for season_key in sorted(key for key in self.players if key < season):
             merged.update(self.players[season_key])
-        return merged
+        if season in self.players:
+            rates = {
+                pid: row.dropna().to_dict()
+                for pid, row in self._season_to_date_profile(season, target_game_date).iterrows()
+            }
+            for pid, stored in self.players[season].items():
+                if pid in rates:
+                    bio = {field: stored[field] for field in PLAYER_BIO_FIELDS if field in stored}
+                    merged[pid] = bio | rates[pid]
+        return {
+            pid: row
+            | {"age": (target_game_date - date.fromisoformat(row["birthDate"])).days / 365.25}
+            if "birthDate" in row
+            else row
+            for pid, row in merged.items()
+        }
 
     def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps from loaded data at runtime (no JSON I/O).
 
-        When ``target_game_date`` is provided, the player pool is bounded to
-        ``self.players`` seasons that started on or before the target date's
-        season-start year, so a 2022 training row's comps no longer pool
-        with 2024+ rookies. ``self.playerProfile`` is already date-bounded
-        by :meth:`base_profile` upstream (it filters ``short_gamelog`` to
-        the 300-day window ending at ``date``), so the gate here is on the
-        per-season roster set that feeds :meth:`build_comp_profile`.
-        Today() default preserves inference / cron behavior.
+        The pool is :meth:`_player_seasons_through` at ``target_game_date``: past seasons'
+        stored summaries plus the running season rebuilt from the games before the date, so a
+        training row's comps know neither later rookies nor later games. Today() default
+        preserves inference / cron behavior.
         """
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
@@ -822,7 +926,6 @@ class StatsNHL(Stats):
         merged.drop(
             columns=[
                 "playerId",
-                "birthDate",
                 "nationality",
                 "primaryNumber",
                 "primaryPosition",
