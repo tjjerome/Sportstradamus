@@ -238,16 +238,31 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      `i6d/diag/`) finds no mis-levelling class: each cell's levelled price matches its reference
      (ladder rung or native close), and the residual is the book against outcomes (doubles a
      longshot over-lean in native quotes, live +.05; PR the closing book in the 2026 playoffs; REB
-     inside noise at 28 dates). The owner decides: retrain NFL and NHL (every read of theirs
-     passes), all three leagues, or none under a new pre-registered rule. Each send on the owner's
-     go; an NHL send before its I6g read (§6) pushes that read out.
+     inside noise at 28 dates). Owner (10-28 evening): option (2), retrain NFL, NBA and NHL, the three fails standing as
+     post-hoc exceptions; gate-passing sends go without asking (owner 10-28), and a served cell that
+     newly fails keeps its old pickle on production until the owner answers pull-or-leave. NFL
+     retrained and sent 10-29 00:57 CDT: 15 of 16 served cells pass, interceptions fails Gate 1 on
+     the levelled rows (BSS .216 to .043, authentic rows 427 to 158) and is held on dev. NBA and NHL
+     follow the same night (lane `REPORT.md`, section I6d retrains). Each send moves that league's
+     I6g read (§6) out.
   2. The blind confirm walk on the levelled matrices (Phase C), which reverts its own failures; the
      fresh sweep board it needs is compute-heavy, so scope it with the owner.
   3. I6f, the NHL comps look-ahead: the owner's high-priority fix
-     ([honest-receipts.md](honest-receipts.md) §6 item 3). Check every league's comp sources for the
-     same class; retrain after.
-  4. I6f, NFL offers scored days ahead: research ways to make the predictions robust to moving lines,
-     starting with whether early picks win less (untested).
+     ([honest-receipts.md](honest-receipts.md) §6 item 3). The class is the comp *pool*, undated in
+     every league (NHL's players.json season summary, the NBA/WNBA players.json half, MLB's affinity
+     CSVs, the NFL quarterbacks' PBP season aggregates); comp outcomes are point-in-time everywhere.
+     The NHL fix is built on `lg2w3-i6f` (10-29: the 21 per-game season sums on every gamelog row, a
+     backfill command, production healing its running season inside `_update`, the season-to-date
+     profile from games before the row's date, an August season key, age as of the date); the
+     pool-cache key (daily or weekly) and the push wait on the owner (lane `research/I6F_DESIGN.md`),
+     then the dev backfill, the NHL cold matrix pass, retrain, send, board and walk. The other leagues
+     ride their next cold rebuild.
+  4. I6f, NFL offers scored days ahead: researched and closed 10-29
+     ([model_improvement_track.md](model_improvement_track.md) §3.4; lane `research/LEAD_TIME_PLAN.md`).
+     Early picks win no less, and no lead-time schedule for the blend weight or the temperature is
+     worth building; the fault is the level of w at every lead, which the I6d retrain targets. What
+     stays: a report-only λ* read beside I6d's M3 (§6), and the owner's call on carrying each line's
+     first-scoring probabilities in history (~1 dev-day).
   5. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
@@ -261,6 +276,7 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
 | Gate-2 30-day read per version | 200 settled offers in the window | 30 days after each send (10-18 versions: 11-17) |
 | I6g version age | ≥ 5 fresh and 10 aged game days, ≥ 300 recommended legs per arm | when the floors clear (honest-receipts §6 item 2) |
 | Weekly tail scorecard (`admin tail-scorecard --parquet`) | Mondays into the lane folder; Spearman ρ offline vs live per-cell gaps | from 10-26; promotion after four agreeing weeks |
+| λ* of the served blend against the book (lead-time brief, lever 1; report-only beside I6d's M3) | post-I6d versions, quoted legs scored under 24 h out, 4 NFL Sundays and 5,000 legs; NHL read without goals | Tue 11-24 |
 
 Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 
@@ -275,6 +291,8 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | Book-leg levelling (H3, I6d) | re-read adopted, built, its decode table fit and the matrices re-injected in week 2; the deciding read failed on three cells the diagnosis traces to book level, so the retrains wait on the owner (§5) | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the brief traced it to two defects (§5) |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
+| Lead-time blend weight or temperature (§5 item 4) | not a lever (KILL 2026-10-29) | early NFL picks win no less; a per-lead weight is worth 3.5 × 10⁻⁵ Brier in-sample and nothing walk-forward; the fault is the level of w at every lead (I6d) |
+| Serve-time book leg on hurdle cells (NHL goals, MLB home runs) | found 10-28; fix proposed, owner's go | the price-to-mean decode clamps below the cell's fixed `zi`, so `Market Prob` is a per-version constant (.875, .903) and the blend used no book; every live read against `Market Prob` on those cells is a strawman (lane `REPORT.md`) |
 
 ## 8. Owner asks (one each)
 
@@ -320,6 +338,16 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    first NFL update after the deploy: on a copy of its logs the pass re-parsed 186 team-weeks (2,057
    player rows) in about a minute and left zeros only in week 7, which neither source holds yet.
    Past seasons are week 2, §5).
+6. NFL interceptions fails its fresh Gate 1 on the levelled matrix (10-29): pull the 10-27 pickle off
+   production so its quoted props serve the book consensus, or leave the old version serving?
+7. I6f pool-cache key: A1 daily (training builds the pool exactly as serving does; recommended) or A2
+   weekly (no base-class change, training's pool up to six days staler than serving's)? Lane
+   `research/I6F_DESIGN.md` §4.
+8. Lead-time brief lever 2: carry `First Win Prob`, `First Market Prob`, `First Standalone Prob` and
+   `First Quote Line` in history (~1 dev-day, measurement only) so "do early picks win less" can be
+   read every Sunday?
+9. The hurdle-cell book leg (§7): go on the serve-time fix (the book's own P(over) when the offer line
+   equals the quoted line; otherwise a decode with a free zero mass), research-gated?
 
 ## 9. Records
 

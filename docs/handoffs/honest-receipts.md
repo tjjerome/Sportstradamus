@@ -555,14 +555,15 @@ inside its group; §8 restates each open one as a plain question.
      explains 48–86 % of the train-serve gap in six NHL cells and flatters their offline gates. The
      owner ranked it a high-priority fix on 2026-10-28: season summaries kept as of each date, so
      training reads only what was known before each game (the Savant affinity below is the same
-     class for MLB). NFL offers scored days ahead read game lines that keep moving until kickoff:
+     class for MLB; the NHL fix is built on `lg2w3-i6f`, live-gap-2 §5 item 3). NFL offers scored days ahead read game lines that keep moving until kickoff:
      a touchdowns P served 3 or more days early sits .027 RMS from training's value for that game,
-     .011 on game day. That is how the problem is posed, not a bug; whether early picks win less
-     is untested, and the owner asked (10-28) for ways to make the predictions robust to moving
-     lines. Also open: the other training reads that take the newest quote for a past date (the
+     .011 on game day. That is how the problem is posed, not a bug; the lead-time brief (live-gap-2, 10-29) found
+     early picks win no less and killed a lead-time blend or temperature schedule
+     (model_improvement_track §3.4). Also open: the other training reads that take the newest quote for a past date (the
      MLB plate-appearance multiplier and starter-win leg, the NHL goalie legs, the Moneyline and
-     Totals book-weight fit); the book-leg cutoff aligned to decision time where ladder polls exist
-     (`TRAINING_LOOKBACK_HOURS`); archiving the daily Savant affinity CSVs, so MLB comps can be
+     Totals book-weight fit); the book-leg cutoff aligned to decision time (`TRAINING_LOOKBACK_HOURS`; deferred 10-29:
+     worth 3–7 % relative in w and under 0.2 pp on the gap, so fold it into a re-inject done for
+     another reason, anchored on kickoff minus 30 min, never on date + 20:00 UTC); archiving the daily Savant affinity CSVs, so MLB comps can be
      rebuilt point-in-time for 2027.
   4. **Hygiene.** I6c — done (decision 14): `_brier_temperature_loss` is the Brier alone, with no
      penalty toward T = 1. T lives in each model file, so a cell changes at its next `meditate`.

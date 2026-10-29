@@ -325,6 +325,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Selection-aware trust layer (R1, `prediction/trust.py`, post-argmax `Trust Prob`) | **Dead — KILL 2026-10-04** — the pre-registered ablation fires: dropping served p costs no out-of-sample log-loss (logistic +0.00038 nats, p = .07; GBM p = .75), so the layer's honest probability is market-anchored, i.e. the model-free engine the owner ruled out; Tier B 0 of 12 after Holm. The selection fix routes to model information (I6, honest-receipts lane §6); the standing monitor is Receipts' "edge captured" column (λ_sel) | [`archive/researcher_trust_layer.md`](../archive/researcher_trust_layer.md) |
 | Train/serve skew and tail-calibration repairs as the selected-tail fix (R3) | **Dead as a gap lever (2026-10-04); alive as correctness** — post-fix recommended legs read 12.5 pp above their hit rate; calibration-chain and quote skews together are worth ≤ 0.7 pp, price-blind or distance-conditional recalibration ≤ 1.2 pp; 89 % is selection on model–market disagreement where the served mean carries little at-market information. The lever is model information: serve-time feature log + parity monitor, the version-age test, as-of training inputs, NFL information research ([honest-receipts.md](honest-receipts.md) §6, I6a–I6g). The instrument is the tail scorecard (`sportstradamus admin tail-scorecard`), a diagnostic and never a gate | [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md) |
 | Book-leg levelling (I6d step 1) | **Adopted (owner 2026-10-27) and built: a provenance-keyed re-read at training read time** — a producer class per archived book-row (same-observation ladder row, or the WS1 writer's deploy boundary), the ladder price for the .5 rows, and per-block re-decode, keep or demote of migrated rows under a frozen prices-only test (\|mean diff\| ≤ .01, MAD ≤ .03); the archive stays raw; re-inject and one retrain per league. **Killed with it:** a per-cell, per-era logit shift on the book leg (outcome-fitted, and it cannot undo a gate floor or a .5 point mass), the 23:00 close as the training book leg (post-decision), repairing archive rows in place (`merge_archives` keeps `MAX(under_prob)`), dropping the migrated era on its own (NBA keeps no authentic row), re-buying the quotes (~26k credits against ~1k). A per-cell book-CITL column ships report-only | [`archive/researcher_i6d_book_leg_levelling.md`](../archive/researcher_i6d_book_leg_levelling.md); §8.2 #0f |
+| Lead-time-conditional blend weight or temperature (live-gap-2 item 3.2) | **Dead — KILL 2026-10-29** — early NFL picks win no less (recommended gap +.109 first scored 24 h+ out against +.121 on game day, difference −.012 [−.068, +.026]; same prop, line and version Brier difference −.0006 [−.0018, +.0009]); the book improves toward kickoff by only .0006–.0013 Brier and stays calibrated; the Brier-optimal pull toward the model is larger early (λ* .32 against .16) but both sit far below the served 1, so a per-lead weight gains 3.5 × 10⁻⁵ Brier in-sample and nothing walk-forward (±6 × 10⁻⁵), and weighing the book less early (λ = 1.25) worsens Brier .003–.004; training's book read is already a median 24 h before kickoff, so the fitted w is an early-book weight. Killed with it: T(lead), an earlier-cutoff refit, WS-1's time-decay discount. Alive: the level of w at every lead (I6d), a report-only λ* read beside M3 (11-24, §8.2 #0f), first-scoring probabilities in history (owner's call). Re-open only on post-I6d versions with those columns: same-version Δλ lower bound above .38 by game date over 8+ Sundays and 8,000 pairs, then a walk-forward Brier gain ≥ 5 × 10⁻⁴; not before January 2027 | [`archive/researcher_lead_time_blend.md`](../archive/researcher_lead_time_blend.md) |
 
 ## 4. Locked decisions
 
@@ -1844,7 +1845,32 @@ justification to `.claude/.state/research_waiver`.
   re-injected. The deciding read (2026-10-28) passes the NFL level (L_off .018, live .019) and the
   NHL band, and fails \|book CITL\| ≤ .03 on NBA PR, NBA REB and MLB doubles; the diagnosis traces
   all three to the book's own level against outcomes, not to the levelling
-  ([live-gap-2.md](live-gap-2.md) §5). No retrain until the owner decides.
+  ([live-gap-2.md](live-gap-2.md) §5). Owner (2026-10-28 evening): option (2), retrain NFL, NBA and
+  NHL with the three fails as post-hoc exceptions. NFL retrained and sent 10-29: 15 of 16 served
+  cells pass (tds BSS .128 to .012 and w .82 to .06, passing tds .159 to .031, receptions .041 to
+  .006, as expected); interceptions fails Gate 1 (BSS .216 to .043 on 158 authentic rows) and is
+  held. The lead-time brief ([`archive/researcher_lead_time_blend.md`](../archive/researcher_lead_time_blend.md))
+  adds the post-retrain expectation and a read: quoted-leg Brier should improve (−.006 to −.010 by
+  the common-λ proxy) and the recommended cohort shrink by a third to two thirds, not the tail's gap
+  close; λ* of served `Win Prob` against `Market Prob` on post-I6d versions (lead under 24 h,
+  game-cluster bootstrap, NFL as is, NHL without goals) reads Tue 11-24: an interval covering 1
+  closes the level question, an upper bound below 1 opens a blend-level brief, never a lead schedule.
+
+- **#0g — Instrument hazards in the live reads (2026-10-28/29).** (1) A hurdle cell's served book
+  leg is a per-version constant wherever the book's P(under .5) sits below the cell's fixed `zi`:
+  the price-to-mean decode (`get_ev`, capped at `SN_MAX_MEAN_FACTOR` × line) clamps every realistic
+  price, and the clamped mean decodes back to the same probability. NHL goals served P(under .5) =
+  .875 on 99 % of 2,540 quoted legs since 09-15 and MLB home runs .903 on all 487, so those blends
+  used no book, and every live read against `Market Prob` on them (Gate 2's book BSS, I6g, the tail
+  scorecard's live gap, M1 rule (iii)) compared the model to a strawman; the matrix `Odds` and
+  `Close Market Prob` (the archive under-prob at kickoff) stand. Fix proposed, research-gated
+  (live-gap-2 §7). (2) `Close Market Prob` and `Market Prob` sit .069 RMS apart even at lead 0:
+  never pair them in a lead or CLV comparison. (3) The archive stores in-play polls (3.6 % of NFL
+  rows with a known kickoff were observed 1–3 h after it; the props poll does not skip started
+  events) and rows without `Commence` take a 20:00 UTC stand-in kickoff in `clv.py`, after the 17:00
+  UTC Sunday starts, so some NFL closes are in-play. (4) The NFL serving chain lost to the book on
+  its two game days with `Standalone Prob` (+.0092 [+.0019, +.0159]) with attempts at the
+  temperature cap of 10; re-read after the I6d send.
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
