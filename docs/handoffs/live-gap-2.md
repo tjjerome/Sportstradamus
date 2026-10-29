@@ -256,12 +256,16 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      ([honest-receipts.md](honest-receipts.md) §6 item 3). The class is the comp *pool*, undated in
      every league (NHL's players.json season summary, the NBA/WNBA players.json half, MLB's affinity
      CSVs, the NFL quarterbacks' PBP season aggregates); comp outcomes are point-in-time everywhere.
-     The NHL fix is built on `lg2w3-i6f` (10-29: the 21 per-game season sums on every gamelog row, a
-     backfill command, production healing its running season inside `_update`, the season-to-date
-     profile from games before the row's date, an August season key, age as of the date); the
-     pool-cache key (daily or weekly) and the push wait on the owner (lane `research/I6F_DESIGN.md`),
-     then the dev backfill, the NHL cold matrix pass, retrain, send, board and walk. The other leagues
-     ride their next cold rebuild.
+     The NHL fix is on `devel` as push 10 (10-29 10:12 CDT: the 21 per-game season sums on every
+     gamelog row, `admin backfill-nhl-gamelog`, production healing its running season inside `_update`,
+     the season-to-date profile from games before the row's date, an August season key, age as of the
+     date; lane `research/I6F_DESIGN.md`). The dev gamelog is backfilled (5,805 games, 0 rows lacking;
+     derived profile vs stored finals corr ≥ .9978). The pool cache keeps the base weekly key until the
+     owner picks the daily one (one-line follow-up). Serving changes little by itself (its pool was
+     already season-to-date as of the fetch); the fix lands at training: the NHL cold matrix pass after
+     the walk releases the lock, retrain, send, board and walk. Found on the way, not fixed: the gamelog
+     dedups on `(gameId, playerName)`, so same-name teammates lose rows (the two Elias Petterssons on
+     VAN hold 74 + 8 rows for 82 games). The other leagues ride their next cold rebuild.
   4. I6f, NFL offers scored days ahead: researched and closed 10-29
      ([model_improvement_track.md](model_improvement_track.md) §3.4; lane `research/LEAD_TIME_PLAN.md`).
      Early picks win no less, and no lead-time schedule for the blend weight or the temperature is
@@ -302,7 +306,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | Instrumentation (§4.2) | do now | no model change, no clock reset |
 | Serve-side parity repairs (E5) | done in week 1: ±inf zeroed, features built as of each game date (`prediction/scoring.py`) | serve-side, no retrain; E5's FTN/PFR data gap is fixed (§8 ask 5), its timing gaps are I6f |
 | Train fraction / refit on all (H1) | not a lever | E1: no cell's forward Brier moved (0 of 5) |
-| Blind confirm walk (H2) | built in week 2; runs after the I6d retrains | protocol; changes no served probability by itself |
+| Blind confirm walk (H2) | built in week 2; started 10-29 10:12 CDT on the served NFL + NBA cells (48 h cap) | protocol; changes no served probability by itself |
 | Book-leg levelling (H3, I6d) | re-read adopted, built, its decode table fit and the matrices re-injected in week 2; the deciding read failed on three cells the diagnosis traces to book level, so the retrains wait on the owner (§5) | H3 holds: offline skill on the count cells is the training book leg's level error, and NHL's priced rows show the same; the brief traced it to two defects (§5) |
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
