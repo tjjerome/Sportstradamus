@@ -273,19 +273,42 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      stays: a report-only λ* read beside I6d's M3 (§6), and the owner's call on carrying each line's
      first-scoring probabilities in history (~1 dev-day).
   5. Why live misses the offline evaluation on the recommendation set (owner's priority 10-29; lane
-     REPORT.md "Root cause", `research/nba_matched_legs.*`, `*_population_split.*`): not serving (NBA
-     parity exact, RMS .009 on 9,232 matched legs at Underdog's line; the pickles that served, scored
-     offline on the same 1,433 NBA 1.83 legs, give claimed .666 / hit .504 = live) and not the season gap
-     alone (−.04 on all October book rows). It is the population: at the sportsbook's noon line the model's
-     tail reads −.04 on player-games the DFS platforms did not post and −.10 (NBA) / −.14 (NFL) on those
-     posted at an even-money main line; stars unposted ±.00, stars posted −.10 / −.13; the noon book
-     line's side of Underdog's line hits .528, the model against it .468. The model's edge exists only
-     where the market is thin; on the liquid regulars a DFS platform posts at even money the market centre
-     is sharp and the model's disagreement is error, and every offline gate pools the whole quoted
-     population where that subset is a minority. Plan from here: gates on the posted-main-line subset,
-     a market-centre anchor on posted legs (brief first), the NFL volume cells off pick'em; the walk
-     stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`), Part 5 levers 5.2/5.3 and the I6g /
-     tail-scorecard reads deferred. The owner pulled the seven held cells off production at 12:44 CDT.
+     REPORT.md "Root cause" and its correction; the brief
+     [archive/researcher_market_centre_anchor.md](../archive/researcher_market_centre_anchor.md), its reads in
+     lane `research/market_centre_brief_reads/`): not serving (NBA parity exact, RMS .009 on 9,232
+     matched legs at Underdog's line; the pickles that served, scored offline on the same 1,433 NBA
+     1.83 legs, give claimed .666 / hit .504 = live) and not the season gap alone. It is the line the
+     model is graded against. The held-out tail is calibrated where a row's line is the pipeline's own
+     (the `max(Avg10, 0.5)` synthetic line priced at .5, or a line derived from an expected value):
+     4,745 of the 4,876 October NBA matrix rows no DFS platform posted carry a synthetic line and none
+     a sportsbook quote, so the first 10-29 read ("calibrated where unposted, so the edge lives where
+     the market is thin") compared market lines with self-made ones and is withdrawn; the thin-market
+     contrast itself is untested (about 20 unposted near-even tail rows). On the same posted NBA
+     player-games the standalone tail (q ≥ .574) misses by .000 at synthetic lines, −.016 at derived,
+     −.130 at sportsbook and −.146 at pick'em lines. At a near-even sportsbook price the model's
+     disagreement with the book carries no information in NBA (encompassing β −.11 [−.29, +.11]),
+     little and unstable in NFL (+.14 before 2026, −.19 Jan–Sep 2026, +.33 October), real in NHL
+     (+.67 [+.39, +.94]); the live recommended 1.83 legs follow that order (.508 / .509 / .545). The
+     rule selects the largest disagreements with a sharp median, and the gap grows with the
+     disagreement (−.045, −.080, −.212 by bin) while hit − book stays flat near +.02: R3's selection
+     finding (§2 item 1), now measured at the market median. Recommended priced legs leak more than the
+     1.83 legs: since 10-09, count-once, 2,418 legs hit .483 against a .533 break-even, −9.7 % (90 %
+     lower bound −12.2 %; NBA −10.9, NFL −10.6, NHL −1.9). Levers (owner's go, §8 ask 11): L1 the
+     live-record release gate of Part 5 (one-sided 90 % lower bound above .5464 on ≥ 100 legs over
+     ≥ 10 dates, weekly looks, priced legs on mean unit profit > 0; a release mask downstream of the
+     unchanged `realized.recommended`), which releases nothing today; L2 a report-only market-median
+     pick'em eligibility screen from existing test-set columns (sportsbook rows within .06 of even and
+     pick'em rows in cells whose test over-rate lies in [.40, .60]; fused q ≥ 1.05/1.83; date-clustered
+     one-sided 90 % lower bound against .5464; ≥ 100 rows over ≥ 20 dates; never part of `ship`;
+     retrospectively NBA fails, NFL is borderline, NHL passes, and it reads 4–7.5 pp above live); L3 a
+     second blend weight for near-even sportsbook quotes (`w_ne`; fused β on near-even NBA rows +.36
+     [+.08, +.62], the model weighted about 3× too heavily there), research first, quoted legs only.
+     Killed: a DFS-line centre anchor (the 10-04 rule of
+     [model_improvement_track.md](model_improvement_track.md) §8.2 #0d; with NBA β ≈ 0 it fits to
+     abstention) and importance weighting toward the live posting distribution (concept shift, not
+     covariate shift). The walk stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5
+     levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven held cells left production
+     at 12:44 CDT (verified on the 13:06 board).
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
@@ -374,15 +397,21 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 10. The six NBA cells that fail their fresh Gate 1 on the levelled matrix (AST, BLK, BLST, FG3M, REB,
     STL; 10-29): pull their 10-18 pickles off production so the quoted props serve the book consensus,
     or leave them serving (the question of ask 6)?
-11. Profitability (plan Part 5; lane `REPORT.md` "Profitability read"; honest-receipts §7): on 1.83
-    pick'em legs the hit rate is .49–.53 whatever the model or the sportsbook's near-even lean says (the
-    book's line itself is modestly right where it differs from the DFS line, .511 vs .467), and recommended
-    legs hit .521 against .546. Go on (a) a per-cell live pick'em
-    record gate in `bet pickem` (recommend only where the 30-day one-sided 90 % lower bound clears the
-    entry's break-even), (b) the λ_DFS calibration brief, (c) an Underdog lock-line history column for a
-    DFS closing-line read? The parlay-correlation read (5.3b) ran 10-29 and is not a lever: same-team
-    pair lift .001 [−.021, .024], opponents −.003; the only lift is same-player same-side (+.12), a
-    mechanical overlap Underdog's per-pair modifier prices.
+11. Profitability (plan Part 5; lane `REPORT.md` "Profitability read" and "Root cause"; honest-receipts
+    §7; [archive/researcher_market_centre_anchor.md](../archive/researcher_market_centre_anchor.md)): on
+    1.83 pick'em legs the hit rate is .49–.53 whatever the model or the sportsbook's near-even lean says,
+    recommended legs hit .521 against .546, recommended priced legs run −9.7 % on 2,418, and at a
+    near-even sportsbook price the model's disagreement carries no information in NBA and little in NFL
+    (§5 item 5). Go on (a) L1, the per-cell live record release gate in `bet pickem` and on the board
+    (recommend only where the trailing-30-day one-sided 90 % lower bound clears .5464 on ≥ 100 legs over
+    ≥ 10 dates, priced legs on mean unit profit, weekly looks), accepting that it releases nothing today;
+    (b) L2, the report-only market-median eligibility screen beside the gates; (c) whether L3's `w_ne`
+    research step runs; (d) confirm the DFS-line centre anchor stays dead; (e) what the board shows when
+    the honest list is near empty; (f) whether a cell's record survives a retrain; (g) an Underdog
+    lock-line history column for a DFS closing-line read. Not levers: the λ_DFS shrink brief (superseded
+    by L1 and L3) and the parlay-correlation read (5.3b, ran 10-29: same-team pair lift .001 [−.021,
+    .024], opponents −.003; the only lift is same-player same-side, +.12, a mechanical overlap Underdog's
+    per-pair modifier prices).
 
 ## 9. Records
 

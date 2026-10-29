@@ -231,7 +231,12 @@ gate's natural threshold.
 
 **The gates score the bulk, not the recommended tail.** Gate 1 runs where the model and the book
 mostly agree (mean |model − market| .050 on its rows, against .120 on the legs the live rule
-recommends), so a cell can pass all six and still overstate its recommended legs.
+recommends), so a cell can pass all six and still overstate its recommended legs. The held-out tail
+also pools line types: a row no sportsbook quoted carries the pipeline's own `max(Avg10, 0.5)` line
+priced at .5, where the model's tail is calibrated against its own average, while at sportsbook and
+pick'em lines it is 13–15 pp over-confident (October 2026 NBA;
+[handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5), so read any tail by `QuoteAuthenticity`
+and price band, never pooled.
 `sportstradamus admin tail-scorecard` replays the live recommendation rule on the held-out test rows
 at the DFS rungs the archive held and reports that selected-tail gap. It is a training-time
 diagnostic and an acceptance input for model-information work
