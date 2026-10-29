@@ -74,11 +74,12 @@ def test_skater_row_logs_every_season_sum_source_as_a_float():
     assert row["opponent goalie"] == "Jeremy Swayman"
 
 
-def _row(game, player, shots, sums):
+def _row(game, player, shots, sums, pid=None):
     return {
         "gameId": game,
         "gameDate": f"2025-10-0{game % 10 + 6}",
         "playerName": player,
+        "playerId": str(pid if pid is not None else 8470000 + ord(player[0]) * 10 + int(player[1])),
         "team": "TOR",
         "shots": shots,
     } | dict.fromkeys(_SUMS, sums)
@@ -144,6 +145,42 @@ def test_backfill_adds_the_columns_a_stored_frame_never_had(monkeypatch):
     filled = stats.gamelog.set_index("playerName").loc[["B1", "B2", "A1", "A2"], _SUMS]
     assert filled.to_numpy().tolist() == [[7.0] * 21, [8.0] * 21, [7.0] * 21, [8.0] * 21]
     assert stats.gamelog.set_index("playerName").loc["B3", _SUMS].isna().all()
+
+
+def test_backfill_reads_a_blank_cell_as_zero_so_the_row_stops_lacking(monkeypatch):
+    calls = []
+
+    def parse_game(self, gameId, gameDate):
+        calls.append(gameId)
+        blank = _row(gameId, "B1", 99.0, 7.0) | {_SUMS[0]: np.nan}
+        return [blank, _row(gameId, "B2", 99.0, 8.0)], []
+
+    monkeypatch.setattr(StatsNHL, "parse_game", parse_game)
+    stats = StatsNHL()
+    stats.gamelog = _gamelog().query("playerName != 'B3'").reset_index(drop=True)
+
+    assert stats.backfill_season_sums() == 1
+
+    after = stats.gamelog.set_index("playerName")
+    assert after.loc["B1", _SUMS[0]] == 0.0
+    assert after.loc["B1", _SUMS[1:]].tolist() == [7.0] * (len(_SUMS) - 1)
+    assert stats.backfill_season_sums() == 0
+    assert calls == [_GAME_B]
+
+
+def test_backfill_matches_a_respelled_player_by_id(monkeypatch):
+    def parse_game(self, gameId, gameDate):
+        return [_row(gameId, "Alexander Kerfoot", 99.0, 7.0, pid=8475755)], []
+
+    monkeypatch.setattr(StatsNHL, "parse_game", parse_game)
+    stats = StatsNHL()
+    stats.gamelog = pd.DataFrame([_row(_GAME_B, "Alex Kerfoot", 3.0, np.nan, pid=8475755)])
+
+    assert stats.backfill_season_sums() == 1
+
+    row = stats.gamelog.iloc[0]
+    assert row["playerName"] == "Alex Kerfoot"
+    assert row[_SUMS].tolist() == [7.0] * len(_SUMS)
 
 
 class _SilentSites:

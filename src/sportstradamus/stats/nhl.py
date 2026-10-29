@@ -101,6 +101,13 @@ PLAYER_BIO_FIELDS = (
 )
 
 
+def _game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
+    """(gameId, playerId) row key; the stored playerId column is object-typed, so both sides cast."""
+    return pd.MultiIndex.from_arrays(
+        [frame["gameId"].astype(int), pd.to_numeric(frame["playerId"], errors="coerce")]
+    )
+
+
 class StatsNHL(Stats):
     """A class for handling and analyzing NHL statistics.
     Inherits from the Stats parent class.
@@ -744,13 +751,13 @@ class StatsNHL(Stats):
             rows, _ = self.parse_game(gameId, gameDate)
             parsed.extend(rows)
         if parsed:
-            key = ["gameId", "playerName"]
-            fresh = (
-                pd.DataFrame(parsed)
-                .drop_duplicates(subset=key, keep="last")
-                .set_index(key)[columns]
-            )
-            stored = log.set_index(key)[columns]
+            # Keyed on the player id, not the name: moneypuck respells names between seasons
+            # (Cam Atkinson, J.J. Moser), and a name key left 310 respelled 2024 rows lacking.
+            fresh = pd.DataFrame(parsed)
+            # A blank cell reads 0 as the hourly merge reads it; DataFrame.update skips NaN.
+            fresh = fresh.set_index(_game_player_key(fresh))[columns].fillna(0)
+            fresh = fresh[~fresh.index.duplicated(keep="last")]
+            stored = log.set_index(_game_player_key(log))[columns]
             stored.update(fresh)
             log[columns] = stored.to_numpy()
         self.gamelog = log
