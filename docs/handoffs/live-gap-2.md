@@ -317,12 +317,12 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      10-04 rule of [model_improvement_track.md](model_improvement_track.md) §8.2 #0d; with NBA β ≈ 0
      it fits to abstention) and importance weighting toward the live posting distribution (concept
      shift, not covariate shift). The builds the briefs leave alive go to a separate implementation
-     lane (owner 10-30): the replay, L2, X1–X3, the forward capture and the MLB replication are
-     pending there; the NFL wind pre-test ran first and ACCEPTS (2026-10-30; the collector is a new
-     lane, [model_improvement_track.md](model_improvement_track.md) §6.6 D-4). The walk stopped
-     13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5 levers 5.2/5.3 and the I6g /
-     tail-scorecard reads deferred; the seven held cells left production at 12:44 CDT (verified on
-     the 13:06 board).
+     lane (owner 10-30): the replay, L2, X1–X3 and the forward capture are pending there; the NFL
+     wind pre-test ACCEPTS (2026-10-30; the collector is a new lane,
+     [model_improvement_track.md](model_improvement_track.md) §6.6 D-4) and the MLB replication is a
+     KILL (§6.6 D-5). The walk stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5
+     levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven held cells left
+     production at 12:44 CDT (verified on the 13:06 board).
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
