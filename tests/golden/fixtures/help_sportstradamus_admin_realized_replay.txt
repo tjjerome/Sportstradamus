@@ -1,0 +1,20 @@
+Usage: sportstradamus admin realized-replay [OPTIONS]
+
+  Replay the live recommendation rule on held-out market-line rows and read it
+  against live.
+
+Options:
+  --league TEXT                Replay only these leagues (repeatable).
+  --test-sets-dir PATH         Directory of {LEAGUE}_{market}.csv dumps
+                               (default: the package's data/test_sets).
+  --offline-before [%Y-%m-%d]  Test rows dated before this are the offline
+                               sample.  [default: 2026-10-09]
+  --live-since [%Y-%m-%d]      Live legs dated from this day count (count-once
+                               holds from COUNT_ONCE_FROM).  [default:
+                               2026-10-09]
+  --live-until [%Y-%m-%d]      Live legs dated before this day count (default:
+                               every settled leg).
+  --out PATH                   [default: /tmp/realized_replay.csv]
+  --parquet PATH               Where the scope rows land (default:
+                               data/training/realized_replay.parquet).
+  --help                       Show this message and exit.

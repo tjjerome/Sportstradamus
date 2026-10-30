@@ -763,13 +763,15 @@ def _bootstrap_mean_ci_clustered(
     cluster_ids: np.ndarray,
     rng: np.random.Generator,
     n_boot: int = _GATE1_N_BOOT,
+    percentiles: tuple[float, float] = (_CI_LOW_PCT, _CI_HIGH_PCT),
 ) -> tuple[float, float, float]:
     """Cluster (player or game date) block bootstrap of the mean of ``values``.
 
     Resamples whole clusters with replacement, so within-cluster correlation is
     preserved and the CI is not anti-conservative on repeated-player panels or on
-    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns
-    ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
+    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`;
+    ``percentiles`` are the (low, high) bootstrap percentiles reported, the 95 % two-sided
+    pair by default. Returns ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
     """
     values = np.asarray(values, dtype=float)
     cluster_ids = np.asarray(cluster_ids)
@@ -784,7 +786,7 @@ def _bootstrap_mean_ci_clustered(
     for i in range(n_boot):
         pick = rng.integers(0, n_clusters, n_clusters)
         draws[i] = np.concatenate([groups[j] for j in pick]).mean()
-    lo, hi = np.percentile(draws, [_CI_LOW_PCT, _CI_HIGH_PCT])
+    lo, hi = np.percentile(draws, percentiles)
     return float(values.mean()), float(lo), float(hi)
 
 

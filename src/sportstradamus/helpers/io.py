@@ -80,6 +80,9 @@ TAIL_SCORECARD_PATH = _TRAINING_DIR / "tail_scorecard.parquet"
 # Live half of that read: the recommended cohort's (read - hit) per cell over the
 # graduation window, written nightly by reflect.
 LIVE_GAP_PATH = _RUNTIME_DIR / "live_gap_per_cell.parquet"
+# The offline realized-money replay, one row per scope, written by `admin realized-replay
+# --parquet`; a report beside the tail scorecard, never a gate (docs/ship_gate.md).
+REALIZED_REPLAY_PATH = _TRAINING_DIR / "realized_replay.parquet"
 # Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
 # running the Monte-Carlo backtest at page load). Written nightly by reflect.
 PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
