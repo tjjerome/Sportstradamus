@@ -91,3 +91,48 @@ def test_live_recommended_keeps_the_even_pick_band_only():
     live = rr.live_recommended(history, pd.Timestamp("2026-10-09"), None)
     assert list(live["Player"]) == ["x"]
     assert list(live["cell"]) == ["fantasy points prizepicks"]
+
+
+def _offline(n_dates: int, line_type: str, over_rate: float) -> pd.DataFrame:
+    dates = [f"2026-09-{d:02d}" for d in range(1, n_dates + 1)]
+    rows = n_dates * 20
+    return pd.DataFrame(
+        {
+            "League": "NBA",
+            "cell": "PTS",
+            "Date": np.repeat(dates, 20),
+            "Recommended": True,
+            "Win Prob": 0.60,
+            "Hit": np.tile([True, False], rows // 2),
+            "Unit": np.tile([0.83, -1.0], rows // 2),
+            "line_type": line_type,
+            "over_rate": over_rate,
+        }
+    )
+
+
+def test_l2_rows_drop_pickem_rows_of_lopsided_cells():
+    offline = pd.concat([_offline(2, "pickem", 0.70), _offline(2, "near_even", 0.70)])
+    assert set(rr.l2_rows(offline)["line_type"]) == {"near_even"}
+    assert len(rr.l2_rows(_offline(2, "pickem", 0.55))) == 40
+
+
+def test_l2_flag_needs_the_floors_and_reads_the_gap_form():
+    live = pd.DataFrame(
+        {
+            "League": ["NBA"] * 4,
+            "cell": ["PTS"] * 4,
+            "Date": ["2026-10-10", "2026-10-11"] * 2,
+            "Recommended": True,
+            "Win Prob": [0.62, 0.62, 0.62, 0.62],
+            "Hit": [True, True, False, True],
+            "Unit": [0.83, 0.83, -1.0, 0.83],
+        }
+    )
+    thin = rr.replay_table(_offline(2, "near_even", 0.5), live)
+    assert thin.loc[thin["scope"] == "l2", "l2_flag"].item() is None
+    full = rr.replay_table(_offline(25, "near_even", 0.5), live)
+    l2 = full[full["scope"] == "l2"].iloc[0]
+    assert l2["n"] == 500 and l2["dates"] == 25
+    assert abs(l2["implied_live_hit_lb"] - (0.62 - l2["gap_hi"])) < 1e-12
+    assert l2["l2_flag"] == bool(l2["implied_live_hit_lb"] > rr.BREAK_EVEN)

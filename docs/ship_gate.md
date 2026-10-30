@@ -250,6 +250,25 @@ player and game, feature by feature and by the model's own probability, and flag
 difference has a root mean square above one percentage point. It is a dev-side diagnostic like the
 tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
 
+### The realized replay and the L2 column (report only)
+
+`sportstradamus admin realized-replay` runs the live recommendation rule
+(`realized.recommended`, the Receipts ledger's) over each cell's held-out rows at market lines —
+pick'em rows and sportsbook rows within .06 of even, never a synthetic or EV-derived line — at the
+1.83 even pick, and reads each cell and league against the live record's recommended even-pick legs
+(`data/training/realized_replay.parquet`; `gap = read − hit`, the sign of `live_gap_per_cell.parquet`).
+`gap_delta` is the tolerance: how far the replay reads from live per league. A release gate may read
+this file only once that tolerance is stated and met and the cell order matches live (owner
+2026-10-30, [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); today it is a report.
+
+The `l2` rows are the league-level gap form the market-centre brief froze: near-even sportsbook rows
+plus pick'em rows of cells whose test over-rate sits in [.40, .60], the recommended tail, floors of
+300 rows over 20 dates, `implied_live_hit_lb = live_read − gap_hi` (the live claimed mean plus the
+one-sided 90 % lower bound of `hit − read`) and `l2_flag = implied_live_hit_lb > 1/1.83`. Its
+pre-registered read: over six league-windows (two 30-day windows each for NBA, NFL, NHL, run with
+`--live-since`/`--live-until`) the flag agrees with live's side of .5464 in ≥ 5 of 6 and the gaps sit
+within .03 in ≥ 4 of 6; killed at ≤ 3 of 6 or misses > .05 in ≥ 3 of 6. Never a gate.
+
 ---
 
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)
