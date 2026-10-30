@@ -326,8 +326,11 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Train/serve skew and tail-calibration repairs as the selected-tail fix (R3) | **Dead as a gap lever (2026-10-04); alive as correctness** — post-fix recommended legs read 12.5 pp above their hit rate; calibration-chain and quote skews together are worth ≤ 0.7 pp, price-blind or distance-conditional recalibration ≤ 1.2 pp; 89 % is selection on model–market disagreement where the served mean carries little at-market information. The lever is model information: serve-time feature log + parity monitor, the version-age test, as-of training inputs, NFL information research ([honest-receipts.md](honest-receipts.md) §6, I6a–I6g). The instrument is the tail scorecard (`sportstradamus admin tail-scorecard`), a diagnostic and never a gate | [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md) |
 | Book-leg levelling (I6d step 1) | **Adopted (owner 2026-10-27) and built: a provenance-keyed re-read at training read time** — a producer class per archived book-row (same-observation ladder row, or the WS1 writer's deploy boundary), the ladder price for the .5 rows, and per-block re-decode, keep or demote of migrated rows under a frozen prices-only test (\|mean diff\| ≤ .01, MAD ≤ .03); the archive stays raw; re-inject and one retrain per league. **Killed with it:** a per-cell, per-era logit shift on the book leg (outcome-fitted, and it cannot undo a gate floor or a .5 point mass), the 23:00 close as the training book leg (post-decision), repairing archive rows in place (`merge_archives` keeps `MAX(under_prob)`), dropping the migrated era on its own (NBA keeps no authentic row), re-buying the quotes (~26k credits against ~1k). A per-cell book-CITL column ships report-only | [`archive/researcher_i6d_book_leg_levelling.md`](../archive/researcher_i6d_book_leg_levelling.md); §8.2 #0f |
 | Lead-time-conditional blend weight or temperature (live-gap-2 item 3.2) | **Dead — KILL 2026-10-29** — early NFL picks win no less (recommended gap +.109 first scored 24 h+ out against +.121 on game day, difference −.012 [−.068, +.026]; same prop, line and version Brier difference −.0006 [−.0018, +.0009]); the book improves toward kickoff by only .0006–.0013 Brier and stays calibrated; the Brier-optimal pull toward the model is larger early (λ* .32 against .16) but both sit far below the served 1, so a per-lead weight gains 3.5 × 10⁻⁵ Brier in-sample and nothing walk-forward (±6 × 10⁻⁵), and weighing the book less early (λ = 1.25) worsens Brier .003–.004; training's book read is already a median 24 h before kickoff, so the fitted w is an early-book weight. Killed with it: T(lead), an earlier-cutoff refit, WS-1's time-decay discount. Alive: the level of w at every lead (I6d), a report-only λ* read beside M3 (11-24, §8.2 #0f), first-scoring probabilities in history (owner's call). Re-open only on post-I6d versions with those columns: same-version Δλ lower bound above .38 by game date over 8+ Sundays and 8,000 pairs, then a walk-forward Brier gain ≥ 5 × 10⁻⁴; not before January 2027 | [`archive/researcher_lead_time_blend.md`](../archive/researcher_lead_time_blend.md) |
-| DFS-line centre anchor on posted main-line legs (live-gap-2 §5 item 5, lever L4) | **Dead — KILL 2026-10-29** — a learned pull of the fused centre toward the DFS line is the market-anchored layer #0d forbids (model-free in disguise); with NBA's at-market encompassing β −.11 [−.29, +.11] it fits to near-full strength, which is abstention by another name, and a mean anchor on a right-skewed family leans Under (the even-money line is a median). Alive in its place: L1 the live-record release gate, L2 the report-only market-median screen, L3 a near-even blend weight `w_ne` (research first). Reopen only if the owner reverses the 10-04 rule and a cell's market-median β lower bound clears .40 | [`archive/researcher_market_centre_anchor.md`](../archive/researcher_market_centre_anchor.md) |
+| DFS-line centre anchor on posted main-line legs (live-gap-2 §5 item 5, lever L4) | **Dead — KILL 2026-10-29** — a learned pull of the fused centre toward the DFS line is the market-anchored layer #0d forbids (model-free in disguise); with NBA's at-market encompassing β −.11 [−.29, +.11] it fits to near-full strength, which is abstention by another name, and a mean anchor on a right-skewed family leans Under (the even-money line is a median). Alive in its place after the 10-29 briefs: an offline realized-money replay that must prove representative against the live record before any release gate reads it (owner 2026-10-30; live-gap-2 §5 item 5) and L2 as a league-level report-only column; L3 `w_ne` is dead (next rows). Reopen only if the owner reverses the 10-04 rule and a cell's market-median β lower bound clears .40 | [`archive/researcher_market_centre_anchor.md`](../archive/researcher_market_centre_anchor.md) |
 | Importance weighting of the pooled test set toward the live posting distribution (lever L5) | **Dead — KILL 2026-10-29** — the miss sits in P(hit \| q, line type) at the same features, a concept shift that reweighting P(x) cannot move; the weights would be extreme (277 near-even sportsbook rows among 7,375 NBA October test rows). Replaced by L2, which conditions on information known at forecast time (line type and price band) | same brief |
+| Near-even blend weight `w_ne` and a pick'em shrink λ_DFS / T_pickem (live-gap-2 L3, Part 5 item 2); the per-cell L2 screen | **Dead — KILL 2026-10-29** — `w_ne` fails its pre-registered acceptance in both test-set generations (near-even Brier improves in 0 of 3, then 1 of 3 leagues; the NBA tail gap closes .030 / .044 against the .04 bar) and on the levelled matrices the fitted weight is abstention (216 → 5 NBA legs); λ_DFS removes 320 of 320 NBA + NFL pick'em-only recommended legs (the #0d class) and is a no-op in NHL; the per-cell L2 screen ranks the losing cells no better than chance (ρ −.47 in its own convention, τ = 0 at 1.83): no offline statistic ranks them, so L2 survives only as a league-level gap-form column. The gates themselves hold: debiased ECE ≤ .024 on every served cell; the loss is confined to the recommended slice at market lines, where the model is over-confident (optimizer's curse), and the gates' confident bins are 78–93 % the pipeline's own or book-agreeing lines against 80–98 % market lines live | [`archive/researcher_gates_vs_pickem_profit.md`](../archive/researcher_gates_vs_pickem_profit.md) |
+| Learner-class swap, projection-pool widening, restart (owner's question 10-29) | **Dead — KILL 2026-10-29, three bounded probes alive** — the ceiling is information, not the learner: an oracle on each player's true mean would hit .601 NBA / .612 WNBA / .549 NFL at the line and ≈ .500 in NHL and MLB (shots and blocked shots excepted), and the model captures 0–7 % of that room; same-data pool members sit inside the book's price, a context-gated stacker is the killed trust layer, projections have no point-in-time archive; a restart re-buys nothing (the learner surface is ~0.9k lines; the archive since 2023 and the live ledger cannot be re-bought). Alive: X1 a learner-and-information audit on five cells (CatBoost / TabM / market-residual arms; accept = incremental R² lower bound ≥ .005 over the incumbent and β lower bound > 0 in ≥ 2 of 3 NBA cells); X2 a paper test of the books' raw-rung lean ≥ .55 at the pick'em line (.570–.622 on n 71–314, no interval clears break-even, 46 legs at .500 in the 1.83 era; model-free, so the owner's and report-only); X3 the NHL pick'em-line book-price decode fix (+.0023 Brier [+.0002, +.0040]; research-gated, #0g). `Market Prob` is a decode, not a price: on 597 legs where it leans ≥ .05 while the raw rungs sit within .03 of even its side hits .516, so every "market agrees" read uses the raw rungs at the pick'em line | [`archive/researcher_model_class_and_edge.md`](../archive/researcher_model_class_and_edge.md) |
+| Game-day information the pipeline does not read (availability, weather, officials, market movement, other platforms; owner's question 10-29) | **No breakthrough (2026-10-29): one grade-B input, the rest hygiene or dead** — NBA/WNBA availability is priced at decision time (beyond-price −.001 logit, SE .022; the r12 tail replay −2.4..+2.8 pp with ±5 intervals) → hygiene, not edge; NFL injury report / inactives, NHL goalie GSAx and scratches, NBA/WNBA stored movement and dispersion KILLED (≤ 1 pp per SD or within 1 SE of 0); predict-the-close KILLED as a breakthrough (backfill paths are two stale points, so their slope is regression to the mean a coin matches; live net slopes −.018..+.10; NHL-only CLV monitor); the pre-decision fade (31.6 % of recommended legs, hit .493 against .568 when the price moved our way) is #0e's price-path face and a market-observable selection rule (#0d), so a diagnostic only. Alive: NFL game wind (passing Overs −12.5 pp against the book price at ≥ 15 mph vs calm in 2024–25 and −14.6 pp on the 2022–23 holdout, receiving −5.6; measured on game-time actuals, so a one-day point-in-time forecast pre-test decides the build, §6.6 D-4), the MLB umpire / park-weather replication on 2025–26 before any 2027 build (grade C), and forward capture of what the polls already see (§6.4 item 3; §6.10 T2a / T2b) | [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md) |
 
 ## 4. Locked decisions
 
@@ -955,10 +958,19 @@ booms), Johnson SU as a LightGBMLSS default (not in the pinned 0.6.1), and ZINB-
 2. **M-3 / B-4 — schedule-derived fatigue.** B2B, 3-in-4, opponent-rest differential,
    travel/timezone — zero-scrape derivables from schedules already fetched + one new static
    stadium lat/lon/dome table under `src/sportstradamus/data/`. Order: NBA/WNBA/NHL first
-   (schedule density), then NFL/MLB. The stadium table is also D-4's dependency.
+   (schedule density), then NFL/MLB. The stadium table now has a tested consumer, NFL game wind
+   (§6.6 D-4): it must carry neutral and international sites and the per-game status of
+   retractable roofs.
 3. **M-4 / D-3 — NBA/WNBA starter flag.** nba_api boxscores carry `START_POSITION`
-   historically, so it backfills leakage-clean; emit starter flag + "starters missing" count.
-   Both leagues in one PR.
+   historically, but it is an actual, not a point-in-time fact: starters are confirmed only
+   ~0–60 min before tip and the daily-lineups history keeps the final state (stamps −46 to
+   +163 min from tip), so a backfilled flag leaks for any leg scored before confirmation and
+   for training's noon-UTC read (2026-10-29 audit). Build it from the official injury report's
+   as-of status (the PDF archive back to 2018-19 is point-in-time via Last-Modified, strict <),
+   from forward capture of the Expected / Confirmed lineup states (§6.10 T2a), or restricted to
+   decisions inside the confirmation window; emit starter flag + "starters missing" count.
+   Both leagues in one PR. Expect hygiene, not edge: availability is priced at decision time
+   (§3.4).
 4. **M-5 / A-2 — comp-weight re-optimization with the stability gate.** Idle tooling exists:
    [`comp_feature_stability.py`](../../src/sportstradamus/scripts/comp_feature_stability.py)
    (YoY keep/transform/drop),
@@ -1267,11 +1279,30 @@ try before the full hierarchical build; GBDTs stay the backbone. (c) **Hierarchi
 (rushing-yards QB ~19 vs RB ~37); selective, min-row guard + pooled fallback. **Monotone priors**
 (`monotone_priors.json`) for NFL small-n volume cells — only priors with mechanical meaning.
 
-**Research-brief-flagged feature items** (brief settles the leakage / information boundary before
-build): **C-3** line-movement & book-disagreement (`get_movement`/`get_ev_history` exist, resolve at
-`target_at`); **B-5** missing-value semantics (both `fillna(0)` sites, one PR — parity rule); **L-3**
-injuries/inactives + usage vacuum (report-timestamp leakage); **D-4** weather (Open-Meteo, needs the
-M-3 stadium table); **D-5** referee/umpire (lowest priority).
+**Research-brief-flagged feature items — settled by the 2026-10-29 information audit**
+([`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md); the §8.2
+research-first trigger is discharged for C-3, L-3, D-4 and D-5). **C-3** line-movement &
+book-disagreement: NBA/WNBA KILLED (−.056 logit (.095) / −.021 (.375); calibration flat across
+dispersion); NHL research only (era mismatch: backfill paths are two stale points, full paths only
+from 2026-07); the NFL few-book overconfidence of the consensus (calibration slope .40 / .48 / .69 /
+.96 at 1–2 / 3–4 / 5–7 / 8+ books) routes to the I6d book leg. **B-5** missing-value semantics (both
+`fillna(0)` sites, one PR — parity rule) is not an information source and stays open. **L-3**
+injuries/inactives + usage vacuum: NBA/WNBA hygiene, not edge (priced at decision time; the leakage
+boundary is in §6.4 item 3; WNBA forward-only from May 2027); NFL KILLED. **D-4** weather: NFL game
+wind is the one grade-B input — a one-day point-in-time pre-test on Open-Meteo / NWS forecasts at the
+~760 outdoor 2022–25 games decides the build (one-sided: passing ≤ −6 pp with p < .05 and passing +
+receiving ≤ −3 pp, pooled 2022–25, same sign at a 1-day lead; kill at > −3 pp or p > .20; power ~94 %
+for a true −12 pp, ~45 % for −6), then a 2–3 day build (the M-3 stadium table; a `weather` collector
+snapshot per prophecize run; `wind_kick` / `wind15` as of strictly before the decision; dome → 0,
+missing → NaN) and the NFL rebuild. Live acceptance Nov 2026–Jan 2027 needs no code (both APIs return
+the as-of forecast afterwards): passing and receiving Unders at ≥ 15 mph ≥ .546 with a game-clustered
+90 % lower bound > .50 after ≥ 10 windy games and a residual against Underdog's close ≤ −3 pp; kill at
+≤ .50 or > −1 pp. Plan on half the measured effect and 15–20 games a season. Open-Meteo's free tier is
+non-commercial (NWS is public domain): the owner's call before production. MLB weather is priced (HR
++.64 pp per 5 mph out, z 2.0; temperature n.s.); indoor leagues n/a. **D-5** referee/umpire: MLB
+umpire strikeout tendency grade C (+.68 / +1.1 pp per SD, 2024 only) — replicate on 2025–26 (`statsapi`
+schedule `hydrate=officials,weather`, one call per season) before any 2027 build, kill at p > .20;
+referees elsewhere parked.
 
 ### §6.7 WS-2 — MLB + NHL post-GO grind
 
@@ -1314,7 +1345,10 @@ input gap is the parity build:
    into the matrix and widening skater/team `stat_types` with MoneyPuck xG aggregates. Validate
    NHL comps (machinery + `playerCompStats.json[NHL]` exist). **Greenfield rule: start lean** —
    there is no incumbent baseline, the first scorecard IS the baseline; do not import NFL-width
-   column counts without SHAP evidence.
+   column counts without SHAP evidence. **Goalie half deprioritized (2026-10-29 audit):**
+   opposing-goalie GSAx is worth at most 0.7 pp per SD against the model and −0.4 pp (SE 0.3)
+   beyond the decision price even with the actual-starter leak, the NHL API publishes no projected
+   starter, and vacated time on ice from scratches reads ≈ 0; the xG half is untested.
 
 Anti-drift guard: foundation leagues have slower feedback while refinement leagues confirm fast —
 hold the equal-effort budget (§4) so effort does not silently flow to wherever feedback is
@@ -1492,7 +1526,18 @@ decision packet, never a session edit.
 sides at the platform payout, split by Model Version. Of step 3's candidates, shrink-to-book and the
 selection-aware trust layer are both killed (§3.4). What remains of the selected-tail gap is
 selection on disagreement, not sizing (§8.2 #0e), so judge any further change on the tail scorecard
-and the Receipts recommended cohort, at like version ages.
+and the Receipts recommended cohort, at like version ages. Post-decision line movement does not cause
+the live gap (2026-10-29 audit; 1,182 recommended 1.83 legs since 10-09: platform −0.34 pp [−0.50,
+−0.21], books −0.14 [−0.44, +0.08], 84–99 % of legs unmoved); the pre-decision fade (−1.01 pp, a third
+of legs, hit .493 against .568 when the price had moved our way) is #0e's price-path face and stays a
+report-only diagnostic. Two pre-registered WS-1 monitors wait on the forward capture of §6.4 item 3:
+**T2a**, the news guard — recommended legs whose game saw an Underdog suspension or a teammate's move
+to Out / Doubtful within 3 h before the decision, against the rest; read at ≥ 300 flagged legs (about
+2027-01-15); accept a hit difference ≤ −4 pp with a 90 % date-clustered interval below 0, which yields
+an abstention proposal for the owner, not a session change; re-read at 600, kill if not accepted —
+and **T2b**, popularity: outcome ~ logit of Underdog's implied p + lobby `entry_count` z,
+date-clustered, ≥ 5,000 legs; accept |coefficient| ≥ 2 pp per SD at p < .01 with the same sign in
+both halves; expected to fail.
 
 **Kill:** replay too confounded to adjudicate → a pre-registered **live A/B via the sim-bettor
 ledger** (roadmap D6). A serving-side *mechanism* implicated (not just sizing) → `research-analyst`
@@ -1725,6 +1770,12 @@ the code before relying on the list.
     information itself falls in September. Estimate with cell fixed effects, an intercept,
     model-only probabilities and the decision-time market reference; a pooled or through-origin
     estimate credits cross-cell levels ([honest-receipts.md](honest-receipts.md) §7).
+11. Weather matters only for outdoor and open-roof NFL games: MLB weather is priced into its lines
+    and NBA/WNBA/NHL are indoor. The WNBA has no injury-report archive. NFL yardage props price
+    near .5, so "beyond the price" ≈ "beyond the line" there. Sportsbook line paths before
+    2026-07 are two stale points (about 7 p.m. the evening before and 6 p.m. Central on game day),
+    so any movement or predict-the-close feature mixes eras. `statsapi` schedule calls cap at one
+    year (2026-10-29 audit).
 
 ### §7.5 Ship & session mechanics
 
@@ -1800,7 +1851,11 @@ justification to `.claude/.state/research_waiver`.
   `r1/prereg.py`, same 12-test Holm family, on the I2 decision-time columns, with an lp × version-age term
   and fallback reported separately) passes the K2 ablation AND live λ_sel's trailing-30-day CI lower bound
   clears 0. Cross-league caveat: the R1 window is 93% MLB and NFL had 5 fitted days; pooled cross-league
-  transfer failed (NFL W1/W2, WNBA W2); NBA abstains until ≥ 2,000 legs over ≥ 5 dates.
+  transfer failed (NFL W1/W2, WNBA W2); NBA abstains until ≥ 2,000 legs over ≥ 5 dates. The owner's
+  2026-10-30 reading of the rule: live realized money is too slow a signal to iterate against (every
+  fix meets a new sample), so a probability consumer may be gated on realized money only through an
+  offline replay that has proven representative of the live record; the live record then validates
+  the replay, not each change (live-gap-2 §5 item 5).
 
 - **#0e — At-market information is the selected-tail lever (R3); the version-age test is
   pre-registered.** [`archive/researcher_train_serve_skew.md`](../archive/researcher_train_serve_skew.md):
@@ -1893,6 +1948,20 @@ justification to `.claude/.state/research_waiver`.
   line and −.162 at Underdog's, which sits +.27 above it on average; and in-period calibration, the
   calibrators fitted on validation rows hash-interleaved with the test rows). Brief:
   [`archive/researcher_market_centre_anchor.md`](../archive/researcher_market_centre_anchor.md).
+
+- **#0h — Information audit (2026-10-29): the open questions.**
+  [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md). (1) Does NFL
+  wind survive the point-in-time forecast pre-test (§6.6 D-4)? (2) Does Underdog shade its lines for
+  wind (the live acceptance reads the residual against its close)? (3) The NBA/WNBA starter flag's
+  as-of problem (§6.4 item 3). (4) The NHL line-movement era mismatch (two-point backfill paths before
+  2026-07). (5) NFL few-book overconfidence of the consensus (#0f). (6) The MLB umpire / weather
+  replication on 2025–26. (7) Referee crews untested (official.nba.com assignments; nflverse
+  officials). (8) Licensing before any production collector: Open-Meteo's free tier is
+  non-commercial; NBA.com, stats.nba.com and statsapi are personal-use terms. (9) The cross-league
+  notes of §7.4 item 11. From the same day's sibling briefs: the gates' calibration population (Gate 5
+  and the temperature are fit and scored on 40–61 % synthetic-line rows; the confident bins are
+  78–93 % own or agreeing lines against 80–98 % market lines live) and the books' raw-rung lean at the
+  pick'em line as a model-free paper test (X2, the owner's; §3.4).
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
@@ -2059,6 +2128,13 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-10-29 · **Research round 2 on the live gap: the gates are not the fault; learner swap, pool
+  widening, restart and every collectable information source KILLED as breakthroughs; NFL wind the
+  one grade-B input.** Three briefs (archive: gates vs pick'em profit, model class and edge,
+  information audit; §3.4 rows, §6.6 verdicts, §8.2 #0h). The release gate is reframed by the owner
+  10-30: an offline realized-money replay must prove representative against the live record first;
+  the surviving builds (the replay, league-level L2, X1–X3, the wind pre-test, forward capture, the
+  MLB replication) move to a separate implementation lane.
 - 2026-10-03 · **NFL ship-15 campaign closed — 19/20 at ship, passing yards withheld.** Seven
   fresh-lane confirms at `--min-model-weight 0.2`: targets, yards, qb yards, sacks taken (the
   incumbent recipe, g5 0.0696), qb tds (SkewNormal → ZINB hurdle), completions (w 0.68, g1 ci_hi
@@ -2218,15 +2294,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   cells: **NFL tds and NBA PF only**; TOV/goalsAgainst g1-walled. E1 = NFL tds `--dist NegBin
   --posthoc roe_mean`, ~35min, no new code. Also: the cross-fit board is matrix-stale on 14/15
   cells — re-sweep before spending a confirm on any board nominee.
-- 2026-08-24 · R4 / Exp-3 verdict: count-objective default flip **NULL — stays `crps`**, brief
-  [count_dispersion_flip.md](../archive/count_dispersion_flip.md) closed. Three measurements:
-  44-cell offline replay (6 seeded half-splits, un-scaling verified against each cell's recorded
-  `g4_pit_ks`) median `pit_ks − crps` −0.0001, **zero threshold flips**, family sign unstable (DPO
-  +0.0001); 98 paired cross-fit corners median −0.0017 (82/98 better, p 4.7e-12) but `ships` 36 → 37
-  and **`g6_pass` identical on all 98** — closes §8.2 open-Q #9(b) NO-RISK; live NFL tds NegBin pair
-  at full HPO (300 trials, same frozen matrix, controls differing only in the objective) lands
-  `pit_ks` *worse* on its own statistic, g4 0.0743 vs 0.0700, both KILL. Structural read: a failing
-  cell never ships → never gets a pin → trains on the default, so blast radius == failing cohort (9
-  unpinned ZINB cells). The lever's best cells (NBA TOV −0.067, NHL goalsAgainst −0.022) are Gate-1
-  walled; the g4-only cells don't respond (NBA PF board Δ exactly 0.0000). Knob stays a swept axis +
-  opt-in pin; no code changed.

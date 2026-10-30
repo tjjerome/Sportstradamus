@@ -293,20 +293,32 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      disagreement (−.045, −.080, −.212 by bin) while hit − book stays flat near +.02: R3's selection
      finding (§2 item 1), now measured at the market median. Recommended priced legs leak more than the
      1.83 legs: since 10-09, count-once, 2,418 legs hit .483 against a .533 break-even, −9.7 % (90 %
-     lower bound −12.2 %; NBA −10.9, NFL −10.6, NHL −1.9). Levers (owner's go, §8 ask 11): L1 the
-     live-record release gate of Part 5 (one-sided 90 % lower bound above .5464 on ≥ 100 legs over
-     ≥ 10 dates, weekly looks, priced legs on mean unit profit > 0; a release mask downstream of the
-     unchanged `realized.recommended`), which releases nothing today; L2 a report-only market-median
-     pick'em eligibility screen from existing test-set columns (sportsbook rows within .06 of even and
-     pick'em rows in cells whose test over-rate lies in [.40, .60]; fused q ≥ 1.05/1.83; date-clustered
-     one-sided 90 % lower bound against .5464; ≥ 100 rows over ≥ 20 dates; never part of `ship`;
-     retrospectively NBA fails, NFL is borderline, NHL passes, and it reads 4–7.5 pp above live); L3 a
-     second blend weight for near-even sportsbook quotes (`w_ne`; fused β on near-even NBA rows +.36
-     [+.08, +.62], the model weighted about 3× too heavily there), research first, quoted legs only.
-     Killed: a DFS-line centre anchor (the 10-04 rule of
-     [model_improvement_track.md](model_improvement_track.md) §8.2 #0d; with NBA β ≈ 0 it fits to
-     abstention) and importance weighting toward the live posting distribution (concept shift, not
-     covariate shift). The walk stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5
+     lower bound −12.2 %; NBA −10.9, NFL −10.6, NHL −1.9). Three research briefs followed the same evening (archived:
+     [researcher_gates_vs_pickem_profit.md](../archive/researcher_gates_vs_pickem_profit.md),
+     [researcher_model_class_and_edge.md](../archive/researcher_model_class_and_edge.md),
+     [researcher_information_audit.md](../archive/researcher_information_audit.md); reads under the
+     lane folder's `research/`; verdicts in [model_improvement_track.md](model_improvement_track.md)
+     §3.4, §6.6 and §8.2 #0h). The gates are not broken: every served cell is calibrated on its own
+     probability (debiased ECE ≤ .024), the loss sits in the recommended slice at market lines, where
+     the model is over-confident (optimizer's curse), and no offline statistic ranks the losing cells
+     (τ = 0 at 1.83), so re-tuning confidence only abstains. The pre-10-09 test sets already show the
+     gap where they hold market lines at near-even prices (NBA −.06 / −.09, NFL −.10 / −.12, NHL ≈ 0);
+     the gates' confident bins are 78–93 % the pipeline's own or book-agreeing lines against 80–98 %
+     market lines live, and Gate 5 and the temperature are fit on 40–61 % synthetic-line rows.
+     Levers: **L1 is reframed (owner 2026-10-30)** — grading on live outcomes is the slow check this
+     lane already runs and every fix meets a new sample, so the build is first an offline
+     realized-money replay: the unchanged recommendation rule on held-out rows at market lines only
+     (pick'em rows and sportsbook rows priced within .06 of even; no synthetic or EV-derived lines),
+     1.83 payouts, count-once, date-clustered intervals, read per league and per cell against the
+     live record; a release gate may consume it only once it reads within a stated tolerance of live
+     and ranks cells (today the market-median tail reads 4–7.5 pp above live and matches only the
+     league order). L2 survives as a league-level report-only gap-form column (the per-cell screen
+     is dead, ρ −.47). Dead: L3 `w_ne`, the λ_DFS / T_pickem shrink, the DFS-line centre anchor (the
+     10-04 rule of [model_improvement_track.md](model_improvement_track.md) §8.2 #0d; with NBA β ≈ 0
+     it fits to abstention) and importance weighting toward the live posting distribution (concept
+     shift, not covariate shift). The builds the briefs leave alive (the replay, L2, X1–X3, the NFL
+     wind pre-test, the forward capture, the MLB replication) go to a separate implementation lane
+     (owner 10-30). The walk stopped 13:01 CDT (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5
      levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven held cells left production
      at 12:44 CDT (verified on the 13:06 board).
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
@@ -386,6 +398,8 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    Past seasons are week 2, §5).
 6. NFL interceptions fails its fresh Gate 1 on the levelled matrix (10-29): pull the 10-27 pickle off
    production so its quoted props serve the book consensus, or leave the old version serving?
+   (answered 2026-10-29: pull. The seven held cells' pickles left production 12:44 CDT into
+   `~/league-send-backup/PULL-20261029T174450Z/models/`, verified on the 13:06 board.)
 7. I6f pool-cache key: A1 daily (training builds the pool exactly as serving does; recommended) or A2
    weekly (no base-class change, training's pool up to six days staler than serving's)? Lane
    `research/I6F_DESIGN.md` §4.
@@ -396,7 +410,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    equals the quoted line; otherwise a decode with a free zero mass), research-gated?
 10. The six NBA cells that fail their fresh Gate 1 on the levelled matrix (AST, BLK, BLST, FG3M, REB,
     STL; 10-29): pull their 10-18 pickles off production so the quoted props serve the book consensus,
-    or leave them serving (the question of ask 6)?
+    or leave them serving (the question of ask 6)? (answered 2026-10-29: pulled with ask 6.)
 11. Profitability (plan Part 5; lane `REPORT.md` "Profitability read" and "Root cause"; honest-receipts
     §7; [archive/researcher_market_centre_anchor.md](../archive/researcher_market_centre_anchor.md)): on
     1.83 pick'em legs the hit rate is .49–.53 whatever the model or the sportsbook's near-even lean says,
@@ -411,7 +425,13 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
     lock-line history column for a DFS closing-line read. Not levers: the λ_DFS shrink brief (superseded
     by L1 and L3) and the parlay-correlation read (5.3b, ran 10-29: same-team pair lift .001 [−.021,
     .024], opponents −.003; the only lift is same-player same-side, +.12, a mechanical overlap Underdog's
-    per-pair modifier prices).
+    per-pair modifier prices). (answered 2026-10-30 after the three briefs: (a) not as a live-record
+    gate — build the offline realized-money replay first and let the live record validate it, §5
+    item 5; (b) yes, league-level only; (c) no, `w_ne` is dead; (d) confirmed dead; (e) and (f) fold
+    into the replay's design; (g) covered by the archive's Underdog polls, which the information
+    audit read at the close for 1,155 of 1,182 recommended legs. The owner also approved X1–X3, the
+    NFL wind pre-test, the forward capture and the MLB replication, all built in a separate
+    implementation session.)
 
 ## 9. Records
 
@@ -422,3 +442,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
   re-verified against `training/pipeline.py`, `model_strategy/confirm.py`, `training/scorecard.py` and the
   cells' matrix dates before this brief was written.
 - Lever T campaign: `~/backups/sportstradamus/2026-10-17-train-live-gap/REPORT.md`.
+- 2026-10-29 research round 2: the three briefs are archived under `docs/archive/`
+  (`researcher_gates_vs_pickem_profit.md`, `researcher_model_class_and_edge.md`,
+  `researcher_information_audit.md`); dispatch prompts and reads under the lane folder's `research/`
+  (`*_PROMPT.md`, `gates_vs_profit_reads/`, `model_class_reads/`, `information_audit_reads/`).
