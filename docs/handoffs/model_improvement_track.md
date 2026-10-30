@@ -330,7 +330,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | Importance weighting of the pooled test set toward the live posting distribution (lever L5) | **Dead — KILL 2026-10-29** — the miss sits in P(hit \| q, line type) at the same features, a concept shift that reweighting P(x) cannot move; the weights would be extreme (277 near-even sportsbook rows among 7,375 NBA October test rows). Replaced by L2, which conditions on information known at forecast time (line type and price band) | same brief |
 | Near-even blend weight `w_ne` and a pick'em shrink λ_DFS / T_pickem (live-gap-2 L3, Part 5 item 2); the per-cell L2 screen | **Dead — KILL 2026-10-29** — `w_ne` fails its pre-registered acceptance in both test-set generations (near-even Brier improves in 0 of 3, then 1 of 3 leagues; the NBA tail gap closes .030 / .044 against the .04 bar) and on the levelled matrices the fitted weight is abstention (216 → 5 NBA legs); λ_DFS removes 320 of 320 NBA + NFL pick'em-only recommended legs (the #0d class) and is a no-op in NHL; the per-cell L2 screen ranks the losing cells no better than chance (ρ −.47 in its own convention, τ = 0 at 1.83): no offline statistic ranks them, so L2 survives only as a league-level gap-form column. The gates themselves hold: debiased ECE ≤ .024 on every served cell; the loss is confined to the recommended slice at market lines, where the model is over-confident (optimizer's curse), and the gates' confident bins are 78–93 % the pipeline's own or book-agreeing lines against 80–98 % market lines live | [`archive/researcher_gates_vs_pickem_profit.md`](../archive/researcher_gates_vs_pickem_profit.md) |
 | Learner-class swap, projection-pool widening, restart (owner's question 10-29) | **Dead — KILL 2026-10-29, three bounded probes alive** — the ceiling is information, not the learner: an oracle on each player's true mean would hit .601 NBA / .612 WNBA / .549 NFL at the line and ≈ .500 in NHL and MLB (shots and blocked shots excepted), and the model captures 0–7 % of that room; same-data pool members sit inside the book's price, a context-gated stacker is the killed trust layer, projections have no point-in-time archive; a restart re-buys nothing (the learner surface is ~0.9k lines; the archive since 2023 and the live ledger cannot be re-bought). Alive: X1 a learner-and-information audit on five cells (CatBoost / TabM / market-residual arms; accept = incremental R² lower bound ≥ .005 over the incumbent and β lower bound > 0 in ≥ 2 of 3 NBA cells); X2 a paper test of the books' raw-rung lean ≥ .55 at the pick'em line (.570–.622 on n 71–314, no interval clears break-even, 46 legs at .500 in the 1.83 era; model-free, so the owner's and report-only); X3 the NHL pick'em-line book-price decode fix (+.0023 Brier [+.0002, +.0040]; research-gated, #0g). `Market Prob` is a decode, not a price: on 597 legs where it leans ≥ .05 while the raw rungs sit within .03 of even its side hits .516, so every "market agrees" read uses the raw rungs at the pick'em line | [`archive/researcher_model_class_and_edge.md`](../archive/researcher_model_class_and_edge.md) |
-| Game-day information the pipeline does not read (availability, weather, officials, market movement, other platforms; owner's question 10-29) | **No breakthrough (2026-10-29): one grade-B input, the rest hygiene or dead** — NBA/WNBA availability is priced at decision time (beyond-price −.001 logit, SE .022; the r12 tail replay −2.4..+2.8 pp with ±5 intervals) → hygiene, not edge; NFL injury report / inactives, NHL goalie GSAx and scratches, NBA/WNBA stored movement and dispersion KILLED (≤ 1 pp per SD or within 1 SE of 0); predict-the-close KILLED as a breakthrough (backfill paths are two stale points, so their slope is regression to the mean a coin matches; live net slopes −.018..+.10; NHL-only CLV monitor); the pre-decision fade (31.6 % of recommended legs, hit .493 against .568 when the price moved our way) is #0e's price-path face and a market-observable selection rule (#0d), so a diagnostic only. Alive: NFL game wind (passing Overs −12.5 pp against the book price at ≥ 15 mph vs calm in 2024–25 and −14.6 pp on the 2022–23 holdout, receiving −5.6; measured on game-time actuals, so a one-day point-in-time forecast pre-test decides the build, §6.6 D-4), the MLB umpire / park-weather replication on 2025–26 before any 2027 build (grade C), and forward capture of what the polls already see (§6.4 item 3; §6.10 T2a / T2b) | [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md) |
+| Game-day information the pipeline does not read (availability, weather, officials, market movement, other platforms; owner's question 10-29) | **No breakthrough (2026-10-29): one grade-B input, accepted at point-in-time 2026-10-30; the rest hygiene or dead** — NBA/WNBA availability is priced at decision time (beyond-price −.001 logit, SE .022; the r12 tail replay −2.4..+2.8 pp with ±5 intervals) → hygiene, not edge; NFL injury report / inactives, NHL goalie GSAx and scratches, NBA/WNBA stored movement and dispersion KILLED (≤ 1 pp per SD or within 1 SE of 0); predict-the-close KILLED as a breakthrough (backfill paths are two stale points, so their slope is regression to the mean a coin matches; live net slopes −.018..+.10; NHL-only CLV monitor); the pre-decision fade (31.6 % of recommended legs, hit .493 against .568 when the price moved our way) is #0e's price-path face and a market-observable selection rule (#0d), so a diagnostic only. NFL game wind (passing Overs −12.5 pp against the book price at ≥ 15 mph vs calm in 2024–25 and −14.6 pp on the 2022–23 holdout, receiving −5.6, on game-time actuals) passed its point-in-time forecast pre-test 2026-10-30 — ACCEPT; the collector and the decision-time feature are a new lane (§6.6 D-4). Alive: the MLB umpire / park-weather replication on 2025–26 before any 2027 build (grade C), and forward capture of what the polls already see (§6.4 item 3; §6.10 T2a / T2b) | [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md) |
 
 ## 4. Locked decisions
 
@@ -1289,20 +1289,31 @@ from 2026-07); the NFL few-book overconfidence of the consensus (calibration slo
 `fillna(0)` sites, one PR — parity rule) is not an information source and stays open. **L-3**
 injuries/inactives + usage vacuum: NBA/WNBA hygiene, not edge (priced at decision time; the leakage
 boundary is in §6.4 item 3; WNBA forward-only from May 2027); NFL KILLED. **D-4** weather: NFL game
-wind is the one grade-B input — a one-day point-in-time pre-test on Open-Meteo / NWS forecasts at the
-~760 outdoor 2022–25 games decides the build (one-sided: passing ≤ −6 pp with p < .05 and passing +
-receiving ≤ −3 pp, pooled 2022–25, same sign at a 1-day lead; kill at > −3 pp or p > .20; power ~94 %
-for a true −12 pp, ~45 % for −6), then a 2–3 day build (the M-3 stadium table; a `weather` collector
-snapshot per prophecize run; `wind_kick` / `wind15` as of strictly before the decision; dome → 0,
-missing → NaN) and the NFL rebuild. Live acceptance Nov 2026–Jan 2027 needs no code (both APIs return
-the as-of forecast afterwards): passing and receiving Unders at ≥ 15 mph ≥ .546 with a game-clustered
-90 % lower bound > .50 after ≥ 10 windy games and a residual against Underdog's close ≤ −3 pp; kill at
-≤ .50 or > −1 pp. Plan on half the measured effect and 15–20 games a season. Open-Meteo's free tier is
-non-commercial (NWS is public domain): the owner's call before production. MLB weather is priced (HR
-+.64 pp per 5 mph out, z 2.0; temperature n.s.); indoor leagues n/a. **D-5** referee/umpire: MLB
-umpire strikeout tendency grade C (+.68 / +1.1 pp per SD, 2024 only) — replicate on 2025–26 (`statsapi`
-schedule `hydrate=officials,weather`, one call per season) before any 2027 build, kill at p > .20;
-referees elsewhere parked.
+wind is the one grade-B input, and it passed the one-day point-in-time pre-test 2026-10-30
+(`~/backups/sportstradamus/2026-10-21-live-gap-2/research/wind_pit_reads/VERDICT.md`: Open-Meteo
+forecasts at the outdoor 2022–25 games, residuals built as the audit's r09b / r09c with only `wind`
+changed; one-sided, windy = forecast ≥ 15 mph averaged over the kickoff hour and the next three)
+against the pre-registered bar of passing ≤ −6 pp and passing + receiving ≤ −3 pp at p < .05 (kill
+at > −3 pp or p > .20): the short-lead arm pooled 2022–25 reads passing −14.2 pp (Welch p .034, 23
+windy / 744 calm games), passing + receiving −7.7 pp (p .005) and dose-response ρ −.084 (p .010);
+the day-1 arm 2024–25, the decision-time-honest read for picks placed the day before, reads −21.7 pp
+(p .003) and −9.3 pp (p .007) and clears the bar on its own. The build is a new lane, not
+live-gap-2: a 2–3 day build (the M-3 stadium table, for which `wind_pit_reads/stadiums.csv` spells
+the 31 outdoor / open sites as nflverse 2022–25 does while the 2026 rows rename seven — Highmark
+Stadium, EverBank Stadium, Huntington Bank Field, Northwest Stadium, Tottenham Hotspur Stadium,
+Estadio Banorte, Maracana Stadium; a `weather` collector snapshot per prophecize run; the feature
+carries the continuous forecast wind as of strictly before the decision, not a ≥ 15 mph flag,
+because the 4-hour grid mean selects stronger systems than nflverse's single reading and the
+dose-response holds on both arms; dome → 0, missing → NaN) and the NFL rebuild. Live acceptance Nov
+2026–Jan 2027 needs no code (both APIs return the as-of forecast afterwards): passing and receiving
+Unders at ≥ 15 mph ≥ .546 with a game-clustered 90 % lower bound > .50 after ≥ 10 windy games and a
+residual against Underdog's close ≤ −3 pp; kill at ≤ .50 or > −1 pp. Plan on half the measured
+effect and 15–20 games a season. Open-Meteo's free tier is non-commercial (NWS is public domain):
+the production collector waits on the owner's licence call. MLB weather is priced (HR +.64 pp per 5
+mph out, z 2.0; temperature n.s.); indoor leagues n/a. **D-5** referee/umpire: MLB umpire strikeout
+tendency grade C (+.68 / +1.1 pp per SD, 2024 only) — replicate on 2025–26 (`statsapi` schedule
+`hydrate=officials,weather`, one call per season) before any 2027 build, kill at p > .20; referees
+elsewhere parked.
 
 ### §6.7 WS-2 — MLB + NHL post-GO grind
 
@@ -1950,18 +1961,19 @@ justification to `.claude/.state/research_waiver`.
   [`archive/researcher_market_centre_anchor.md`](../archive/researcher_market_centre_anchor.md).
 
 - **#0h — Information audit (2026-10-29): the open questions.**
-  [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md). (1) Does NFL
-  wind survive the point-in-time forecast pre-test (§6.6 D-4)? (2) Does Underdog shade its lines for
-  wind (the live acceptance reads the residual against its close)? (3) The NBA/WNBA starter flag's
-  as-of problem (§6.4 item 3). (4) The NHL line-movement era mismatch (two-point backfill paths before
-  2026-07). (5) NFL few-book overconfidence of the consensus (#0f). (6) The MLB umpire / weather
-  replication on 2025–26. (7) Referee crews untested (official.nba.com assignments; nflverse
-  officials). (8) Licensing before any production collector: Open-Meteo's free tier is
-  non-commercial; NBA.com, stats.nba.com and statsapi are personal-use terms. (9) The cross-league
-  notes of §7.4 item 11. From the same day's sibling briefs: the gates' calibration population (Gate 5
-  and the temperature are fit and scored on 40–61 % synthetic-line rows; the confident bins are
-  78–93 % own or agreeing lines against 80–98 % market lines live) and the books' raw-rung lean at the
-  pick'em line as a model-free paper test (X2, the owner's; §3.4).
+  [`archive/researcher_information_audit.md`](../archive/researcher_information_audit.md). (1) NFL
+  wind survives the point-in-time forecast pre-test (ACCEPT 2026-10-30, §6.6 D-4); open in its place
+  is the collector lane under (8). (2) Does Underdog shade its lines for wind (the live acceptance
+  reads the residual against its close)? (3) The NBA/WNBA starter flag's as-of problem (§6.4 item
+  3). (4) The NHL line-movement era mismatch (two-point backfill paths before 2026-07). (5) NFL
+  few-book overconfidence of the consensus (#0f). (6) The MLB umpire / weather replication on
+  2025–26. (7) Referee crews untested (official.nba.com assignments; nflverse officials). (8)
+  Licensing before any production collector, now the wind collector's gate: Open-Meteo's free tier
+  is non-commercial; NBA.com, stats.nba.com and statsapi are personal-use terms. (9) The
+  cross-league notes of §7.4 item 11. From the same day's sibling briefs: the gates' calibration
+  population (Gate 5 and the temperature are fit and scored on 40–61 % synthetic-line rows; the
+  confident bins are 78–93 % own or agreeing lines against 80–98 % market lines live) and the books'
+  raw-rung lean at the pick'em line as a model-free paper test (X2, the owner's; §3.4).
 
 - **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
   [`researcher_mixture_serve.md`](../archive/researcher_mixture_serve.md):
