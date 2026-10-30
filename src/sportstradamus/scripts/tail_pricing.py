@@ -155,7 +155,11 @@ def _training_weight(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
 
 
 def serve(
-    rows: pd.DataFrame, knobs: dict, w_row: np.ndarray, ev_book: np.ndarray
+    rows: pd.DataFrame,
+    knobs: dict,
+    w_row: np.ndarray,
+    ev_book: np.ndarray,
+    gate_book: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Re-serve test rows from their persisted model-only parameters at each row's ``Line``.
 
@@ -164,6 +168,9 @@ def serve(
     calibration (DPO phi capped at its ceiling), ``get_odds`` at the pickle's ``step``,
     the whole-CDF recal, temperature, then a PROB_STAGE posthoc. Training and serving
     differ only in ``w_row`` and ``ev_book``.
+
+    ``gate_book``: a per-row book gate for a hurdle cell (the X3 rung leg); ``None`` is the
+    pickle's ``hist_gate``.
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
@@ -203,7 +210,10 @@ def serve(
         under = get_odds(line, base, dist, step=step, phi=shape.phi)
     else:
         gate_kw = (
-            {"gate_model": rows["Gate_model"].to_numpy(float), "gate_book": knobs["hist_gate"]}
+            {
+                "gate_model": rows["Gate_model"].to_numpy(float),
+                "gate_book": knobs["hist_gate"] if gate_book is None else gate_book,
+            }
             if dist == "ZINB"
             else {}
         )

@@ -82,6 +82,7 @@ for _league, _markets in _stat_meta_committed.items():
             "shipped": _meta_cell["shipped"],
             "target_normalization": _meta_cell["target_normalization"],
             "posthoc": _meta_cell.get("posthoc", "none"),
+            "book_leg": _meta_cell.get("book_leg", "quote"),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
@@ -120,6 +121,16 @@ def book_gate(league: str, market: str, dist: str) -> float | None:
     if dist not in ("ZINB", "ZAGamma"):
         return None
     return stat_zi.get(league, {}).get(market, 0) or None
+
+
+def book_leg(league: str, market: str) -> str:
+    """How a cell prices its book leg: ``"quote"`` (the decoded composite EV) or ``"rung"``.
+
+    ``"rung"`` reads the sportsbooks' raw ladder rungs at the offered line
+    (:func:`sportstradamus.prediction.book_quotes.apply_rung_book_leg`); a cell without the
+    knob is ``"quote"``. Flipped per cell in ``stat_meta.json`` after X3's acceptance read.
+    """
+    return stat_meta.get(league, {}).get(market, {}).get("book_leg", "quote")
 
 
 def book_skewnormal_shape(

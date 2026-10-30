@@ -24,6 +24,7 @@ from sportstradamus.helpers import (
     apply_temperature,
     archive_market,
     book_gate,
+    book_leg,
     decode_predictive_mean,
     fused_loc,
     get_odds,
@@ -44,7 +45,9 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
+    RUNG_BOOK_LEG,
     annotate_quote_provenance,
+    apply_rung_book_leg,
     book_evs_for_players,
     price_offers_at_quotes,
     servable_fallback_quotes,
@@ -435,7 +438,12 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
             return {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": 0.0}
         return {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
     if dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns:
-        return {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
+        # A rung-legged hurdle cell carries the book gate per row (apply_rung_book_leg).
+        gate_book = col_or_none(offer_df, "Book Gate")
+        return {
+            "gate_model": offer_df["Model Gate"].to_numpy(),
+            "gate_book": hist_gate if gate_book is None else gate_book,
+        }
     return {}
 
 
@@ -1186,6 +1194,11 @@ def model_prob(
     offer_df["Market EV"] = book_over_prob(
         offer_df, dist, cv, step, hist_gate or None, league, market
     )
+    if book_leg(league, market) == RUNG_BOOK_LEG:
+        n_rung = apply_rung_book_leg(offer_df, league, market, dist, cv, hist_gate, date_map)
+        logger.info(
+            f"{filename} book leg from sportsbook rungs on {n_rung} of {len(offer_df)} offers"
+        )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
     _sanitize_model_ev(offer_df, dist)
     # Read before the blend, which rewrites Projection and the shape columns in place.
@@ -1201,7 +1214,10 @@ def model_prob(
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma"):
-        offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
+        gate_book = col_or_none(offer_df, "Book Gate")
+        offer_df["Market Projection"] = (
+            1 - (hist_gate if gate_book is None else gate_book)
+        ) * offer_df["Market Projection"]
     _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
     two_part_candidate_output = None

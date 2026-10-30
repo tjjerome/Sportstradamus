@@ -93,6 +93,10 @@ _BOOK_LINE_HISTORY_COLS = [
     "p_over",
 ]
 
+# A poll stamps its rungs seconds apart; rungs within this of a book's last stamp are one poll.
+LADDER_POLL_TOLERANCE_S = 300
+_LADDER_RUNG_COLS = ["entity", "book", "line", "p_over", "observed_at"]
+
 # Hours before commence_time treated as "the books' line" during training.
 # Aligned with the typical Vegas closing-window inflection (~8h pre-game).
 TRAINING_LOOKBACK_HOURS: int = 8
@@ -982,6 +986,54 @@ class Archive:
             ).fetchdf()
         finally:
             self._connection.unregister(_KEY_JOIN_VIEW)
+
+    def get_ladder_rungs(
+        self,
+        league: str,
+        market: str,
+        date: str | datetime.date,
+        entities: Sequence[str],
+        *,
+        exclude_books: Sequence[str] = (),
+        at: datetime.datetime | None = None,
+    ) -> pd.DataFrame:
+        """Each book's ladder at its latest poll for a slate: ``[entity, book, line, p_over, observed_at]``.
+
+        A book's poll is every rung observed within :data:`LADDER_POLL_TOLERANCE_S` of its last
+        stamp; ``at`` bounds the stamps (a replay at a decision time); ``exclude_books`` drops the
+        DFS boards when the caller wants the sportsbooks alone. Sorted by entity, book, line;
+        column-stable and empty when nothing was polled.
+        """
+        d = _safe_date(date)
+        if d is None or not len(entities):
+            return pd.DataFrame(columns=_LADDER_RUNG_COLS)
+        params: dict = {
+            "league": league,
+            "market": market,
+            "date": d,
+            "entities": list(entities),
+            # DuckDB cannot type an empty list parameter; a blank book name matches nothing.
+            "exclude": list(exclude_books) or [""],
+            "tolerance": LADDER_POLL_TOLERANCE_S,
+        }
+        cutoff = ""
+        if at is not None:
+            cutoff = " AND observed_at <= $at"
+            params["at"] = pd.Timestamp(at).to_pydatetime()
+        return self._connection.execute(
+            "WITH scope AS ("
+            "  SELECT entity, book, line, p_over, observed_at FROM ladder"
+            "  WHERE league = $league AND market = $market AND game_date = $date"
+            "    AND list_contains($entities, entity) AND NOT list_contains($exclude, book)"
+            f"{cutoff}"
+            "), polls AS (SELECT entity, book, max(observed_at) AS last_poll FROM scope GROUP BY ALL) "
+            "SELECT s.entity, s.book, s.line, arg_max(s.p_over, s.observed_at) AS p_over, "
+            "  max(s.observed_at) AS observed_at "
+            "FROM scope s JOIN polls p USING (entity, book) "
+            "WHERE s.observed_at >= p.last_poll - to_seconds($tolerance) "
+            "GROUP BY ALL ORDER BY entity, book, line",
+            params,
+        ).fetchdf()
 
     def get_ev_history(
         self,

@@ -13,8 +13,9 @@ from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.special import expit, logit
 
-from sportstradamus.helpers import LazyArchive, book_weights, combo_props, get_odds
+from sportstradamus.helpers import LazyArchive, book_weights, combo_props, get_ev, get_odds
 from sportstradamus.helpers.training_quotes import (
     COMBO_SUM_SOURCE,
     DFS_PLATFORM_BOOKS,
@@ -27,6 +28,15 @@ from sportstradamus.helpers.training_quotes import (
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
 archive = LazyArchive()
+
+# X3: a cell whose stat_meta book_leg is "rung" prices its book leg from the sportsbooks' raw
+# ladder rungs at the offered line instead of the decoded composite EV (docs/ship_gate.md).
+RUNG_BOOK_LEG = "rung"
+RUNG_QUOTE_SOURCE = "book_rung"
+# Fewer sportsbooks than this at or around the line is one book's opinion, not a market leg.
+RUNG_MIN_BOOKS = 2
+# Logit interpolation needs a price strictly inside (0, 1).
+_RUNG_P_EPS = 1e-3
 
 # A book quote serves only when its same-line cohort holds at least this many real
 # sportsbooks. DFS platforms repost (or discount) consensus rather than price
@@ -252,3 +262,102 @@ def annotate_quote_provenance(frame: pd.DataFrame, quotes: Sequence[TrainingQuot
     frame["Quote Books"] = [float(q.book_count) if q else np.nan for q in quotes]
     frame["Quote Line"] = [q.line if q else np.nan for q in quotes]
     frame["Quote Observed At"] = pd.to_datetime([q.observed_at if q else None for q in quotes])
+
+
+def rung_book_leg(rungs: pd.DataFrame, line: float) -> tuple[float, int]:
+    """The sportsbooks' mean over-probability at ``line`` from their rungs, and how many priced it.
+
+    Per book: the rung at the line is its price; otherwise the nearest rungs below and above
+    interpolate on the logit scale; a ladder whose price does not fall with the line is stale and
+    skipped; a book with no bracket says nothing. NaN below ``RUNG_MIN_BOOKS`` books.
+    """
+    legs = []
+    for _, book in rungs.groupby("book"):
+        exact = book.loc[book["line"] == line, "p_over"]
+        if not exact.empty:
+            legs.append(float(exact.iloc[0]))
+            continue
+        below, above = book[book["line"] < line], book[book["line"] > line]
+        if below.empty or above.empty:
+            continue
+        lo, hi = below.loc[below["line"].idxmax()], above.loc[above["line"].idxmin()]
+        if hi["p_over"] >= lo["p_over"]:
+            continue
+        p_lo, p_hi = np.clip([lo["p_over"], hi["p_over"]], _RUNG_P_EPS, 1 - _RUNG_P_EPS)
+        frac = (line - lo["line"]) / (hi["line"] - lo["line"])
+        legs.append(float(expit(logit(p_lo) + frac * (logit(p_hi) - logit(p_lo)))))
+    if len(legs) < RUNG_MIN_BOOKS:
+        return np.nan, len(legs)
+    return float(np.mean(legs)), len(legs)
+
+
+def rung_book_legs(
+    offer_df: pd.DataFrame, league: str, market: str, date_map: dict[str, str]
+) -> pd.DataFrame:
+    """Each offer's rung leg at its line: ``p_over`` (NaN under ``RUNG_MIN_BOOKS``) and ``n_books``.
+
+    One ladder read per game date on the slate, each sportsbook's latest poll; the DFS boards
+    never count. Positional over the ``Player`` and ``Line`` columns, returned on the frame's index.
+    """
+    players, lines = offer_df["Player"].to_numpy(), offer_df["Line"].to_numpy(float)
+    dates = np.array([date_map.get(player) for player in players], dtype=object)
+    p_over, n_books = np.full(len(offer_df), np.nan), np.zeros(len(offer_df), dtype=int)
+    for day in sorted(set(dates) - {None}):
+        positions = np.flatnonzero(dates == day)
+        rungs = archive.get_ladder_rungs(
+            league, market, day, sorted(set(players[positions])), exclude_books=DFS_PLATFORM_BOOKS
+        )
+        # dict(groupby) reads DataFrameGroupBy.keys (the "entity" string) as a mapping and fails.
+        by_player = {entity: group for entity, group in rungs.groupby("entity")}  # noqa: C416
+        for pos in positions:
+            player_rungs = by_player.get(players[pos])
+            if player_rungs is not None:
+                p_over[pos], n_books[pos] = rung_book_leg(player_rungs, lines[pos])
+    return pd.DataFrame({"p_over": p_over, "n_books": n_books}, index=offer_df.index)
+
+
+def apply_rung_book_leg(
+    offer_df: pd.DataFrame,
+    league: str,
+    market: str,
+    dist: str,
+    cv: float,
+    hist_gate: float,
+    date_map: dict[str, str],
+) -> int:
+    """Re-leg the book side from the sportsbooks' rungs where enough books price the offered line.
+
+    On a qualified row ``Market EV`` becomes the rungs' over-probability and ``Market Projection``
+    the mean that decodes back to it (``get_ev`` at the family defaults ``book_over_prob`` decodes
+    with, so the blend and the record read one price). A hurdle count cell (``ZINB`` with a
+    historical gate) prices only its 0.5 line: one rung is one equation, so the base mean stays
+    the model's own (``Projection``, pre-blend) and the rung's P(0) is solved into a per-row
+    ``Book Gate`` that ``fused_loc`` pools with the model gate; every other row keeps
+    ``hist_gate`` there. Returns the number of re-legged rows.
+    """
+    legs = rung_book_legs(offer_df, league, market, date_map)
+    priced = legs["p_over"].notna()
+    hurdle = dist == "ZINB" and hist_gate > 0
+    if hurdle:
+        priced &= offer_df["Line"].eq(0.5)
+        offer_df["Book Gate"] = hist_gate
+    if not priced.any():
+        return 0
+    p_over = legs.loc[priced, "p_over"].to_numpy(float)
+    if hurdle:
+        base = offer_df.loc[priced, "Projection"].to_numpy(float)
+        r = 1 / cv
+        zero_base = (r / (r + base)) ** r
+        offer_df.loc[priced, "Book Gate"] = np.clip(
+            (1 - p_over - zero_base) / (1 - zero_base), 0, 1
+        )
+        offer_df.loc[priced, "Market Projection"] = base
+    else:
+        lines = offer_df.loc[priced, "Line"].to_numpy(float)
+        offer_df.loc[priced, "Market Projection"] = [
+            get_ev(line, 1 - p, cv, dist) for line, p in zip(lines, p_over, strict=True)
+        ]
+    offer_df.loc[priced, "Market EV"] = p_over
+    offer_df.loc[priced, "Quote Source"] = RUNG_QUOTE_SOURCE
+    offer_df.loc[priced, "Quote Books"] = legs.loc[priced, "n_books"].to_numpy(float)
+    return int(priced.sum())
