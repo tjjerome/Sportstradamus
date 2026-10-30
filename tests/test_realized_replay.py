@@ -136,3 +136,15 @@ def test_l2_flag_needs_the_floors_and_reads_the_gap_form():
     assert l2["n"] == 500 and l2["dates"] == 25
     assert abs(l2["implied_live_hit_lb"] - (0.62 - l2["gap_hi"])) < 1e-12
     assert l2["l2_flag"] == bool(l2["implied_live_hit_lb"] > rr.BREAK_EVEN)
+
+
+def test_tolerance_rows_need_the_live_floor():
+    table = pd.DataFrame(
+        {
+            "scope": ["league", "l2", "l2", "l2"],
+            "league": ["NBA", "NBA", "WNBA", "NHL"],
+            "live_n": [500, 500, 26, rr.LIVE_MIN_LEGS],
+            "gap_delta": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
+    assert list(rr.tolerance_rows(table)["league"]) == ["NBA", "NHL"]

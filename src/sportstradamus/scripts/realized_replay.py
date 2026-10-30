@@ -8,7 +8,8 @@ sportsbook quotes stay out: the live board posts market lines, and the gates' co
 mostly the pipeline's own lines (docs/ship_gate.md, line types). Every scope reports the recommended
 cohort's read, hit and gap (``read - hit``, positive = the read runs high, the sign of
 ``live_gap_per_cell.parquet``) with date-block bootstrap bounds, beside the same numbers from the
-live record; ``gap_delta`` is how far the replay reads from live, the tolerance the owner asked for.
+live record; ``gap_delta`` is how far the replay reads from live. The tolerance the owner asked for
+is read on the ``l2`` rows of leagues whose live sample holds ``LIVE_MIN_LEGS`` recommended legs.
 The league rows also carry the L2 gap-form column (``implied_live_hit_lb``, ``l2_flag``).
 
 A report, never a gate (owner 2026-10-30, docs/handoffs/live-gap-2.md §5 item 5).
@@ -45,6 +46,9 @@ LIVE_PAYOUT_BAND = (1.80, 1.90)
 # L2 floors: a league row carries a flag only over this many recommended rows and dates.
 L2_MIN_ROWS = 300
 L2_MIN_DATES = 20
+# A league's live sample must hold this many recommended even-pick legs before its gap_delta
+# counts toward the tolerance.
+LIVE_MIN_LEGS = 100
 # Pick'em rows count toward L2 only in cells whose test rows go Over within this band (frozen L2).
 L2_OVER_RATE_BAND = (0.40, 0.60)
 # The one-sided 90 % bounds the brief pre-registered, as the bootstrap's (low, high) percentiles.
@@ -231,6 +235,11 @@ def replay_table(offline: pd.DataFrame, live: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def tolerance_rows(table: pd.DataFrame) -> pd.DataFrame:
+    """The ``l2`` rows of leagues whose live sample holds ``LIVE_MIN_LEGS`` recommended legs."""
+    return table[(table["scope"] == "l2") & (table["live_n"] >= LIVE_MIN_LEGS)]
+
+
 @click.command()
 @click.option("--league", "leagues", multiple=True, help="Replay only these leagues (repeatable).")
 @click.option(
@@ -308,9 +317,23 @@ def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, pa
         "l2_flag",
     ]
     click.echo(leagues_out[shown].to_string(float_format=lambda x: f"{x:.3f}"))
-    league_rows = table[table["scope"] == "league"]
-    click.echo(
-        f"tolerance reached: max |gap_delta| {league_rows['gap_delta'].abs().max():.3f} over "
-        f"{len(league_rows)} leagues; sides of {BREAK_EVEN:.4f} agree in {int(league_rows['agrees'].fillna(False).sum())}"
+    tolerance = tolerance_rows(table)
+    deltas = ", ".join(
+        f"{league} {delta:.3f}"
+        for league, delta in zip(tolerance["league"], tolerance["gap_delta"], strict=True)
     )
+    click.echo(
+        f"tolerance reached: {deltas} (l2 rows, live_n >= {LIVE_MIN_LEGS}); "
+        f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; sides of {BREAK_EVEN:.4f} "
+        f"agree in {int(tolerance['agrees'].fillna(False).sum())} of {len(tolerance)}"
+    )
+    below = table[(table["scope"] == "l2") & (table["live_n"] < LIVE_MIN_LEGS)]
+    if not below.empty:
+        click.echo(
+            "below the live floor: "
+            + ", ".join(
+                f"{league} ({n})"
+                for league, n in zip(below["league"], below["live_n"], strict=True)
+            )
+        )
     click.echo(f"wrote {len(table)} rows to {out} and {parquet}")

@@ -257,8 +257,9 @@ tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
 pick'em rows and sportsbook rows within .06 of even, never a synthetic or EV-derived line — at the
 1.83 even pick, and reads each cell and league against the live record's recommended even-pick legs
 (`data/training/realized_replay.parquet`; `gap = read − hit`, the sign of `live_gap_per_cell.parquet`).
-`gap_delta` is the tolerance: how far the replay reads from live per league. A release gate may read
-this file only once that tolerance is stated and met and the cell order matches live (owner
+`gap_delta` is the tolerance: how far the replay reads from live per league, read on the `l2` rows
+over leagues with at least 100 live recommended even-pick legs (`LIVE_MIN_LEGS`). A release gate
+may read this file only once that tolerance is stated and met and the cell order matches live (owner
 2026-10-30, [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); today it is a report.
 
 The `l2` rows are the league-level gap form the market-centre brief froze: near-even sportsbook rows
