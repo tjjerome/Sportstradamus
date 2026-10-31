@@ -156,7 +156,11 @@ class _Ladder:
 
 
 def test_apply_rung_book_leg_relegs_only_the_priced_rows(monkeypatch):
-    rungs = _rungs(("a", "fanduel", 2.5, 0.60, None), ("a", "draftkings", 2.5, 0.50, None))
+    polled = pd.Timestamp("2026-10-20 15:00")
+    rungs = _rungs(
+        ("a", "fanduel", 2.5, 0.60, polled - pd.Timedelta(minutes=3)),
+        ("a", "draftkings", 2.5, 0.50, polled),
+    )
     ladder = _Ladder(rungs)
     monkeypatch.setattr(bq, "archive", ladder)
     offers = pd.DataFrame(
@@ -180,6 +184,9 @@ def test_apply_rung_book_leg_relegs_only_the_priced_rows(monkeypatch):
     decoded = 1 - get_odds(2.5, offers.loc[0, "Market Projection"], "DPO", 0.6, step=1)
     assert decoded == pytest.approx(0.55, abs=1e-6)
     assert offers.loc[0, "Quote Source"] == bq.RUNG_QUOTE_SOURCE
+    assert offers.loc[0, "Quote Authenticity"] == "authentic"
+    assert offers.loc[0, "Quote Line"] == 2.5 and offers.loc[0, "Quote Observed At"] == polled
+    assert offers.loc[1, "Quote Source"] == "book" and pd.isna(offers.loc[1, "Quote Authenticity"])
     assert offers.loc[1, "Market EV"] == 0.3 and np.isnan(offers.loc[2, "Market EV"])
     assert "Book Gate" not in offers.columns
 

@@ -21,6 +21,7 @@ from scipy.special import expit, logit
 
 from sportstradamus.helpers import LazyArchive, book_weights, combo_props, get_ev, get_odds
 from sportstradamus.helpers.training_quotes import (
+    AUTHENTIC,
     COMBO_SUM_SOURCE,
     DFS_PLATFORM_BOOKS,
     TrainingQuote,
@@ -299,7 +300,8 @@ def rung_book_leg(rungs: pd.DataFrame, line: float) -> tuple[float, int]:
 def rung_book_legs(
     offer_df: pd.DataFrame, league: str, market: str, date_map: dict[str, str]
 ) -> pd.DataFrame:
-    """Each offer's rung leg at its line: ``p_over`` (NaN under ``RUNG_MIN_BOOKS``) and ``n_books``.
+    """Each offer's rung leg at its line: ``p_over`` (NaN under ``RUNG_MIN_BOOKS``), ``n_books``
+    and ``observed_at``, the newest poll stamp on the player's ladder.
 
     One ladder read per game date on the slate, each sportsbook's latest poll; the DFS boards
     never count. Positional over the ``Player`` and ``Line`` columns, returned on the frame's index.
@@ -307,6 +309,7 @@ def rung_book_legs(
     players, lines = offer_df["Player"].to_numpy(), offer_df["Line"].to_numpy(float)
     dates = np.array([date_map.get(player) for player in players], dtype=object)
     p_over, n_books = np.full(len(offer_df), np.nan), np.zeros(len(offer_df), dtype=int)
+    observed_at = [pd.NaT] * len(offer_df)
     for day in sorted(set(dates) - {None}):
         positions = np.flatnonzero(dates == day)
         rungs = archive.get_ladder_rungs(
@@ -318,7 +321,11 @@ def rung_book_legs(
             player_rungs = by_player.get(players[pos])
             if player_rungs is not None:
                 p_over[pos], n_books[pos] = rung_book_leg(player_rungs, lines[pos])
-    return pd.DataFrame({"p_over": p_over, "n_books": n_books}, index=offer_df.index)
+                observed_at[pos] = player_rungs["observed_at"].max()
+    return pd.DataFrame(
+        {"p_over": p_over, "n_books": n_books, "observed_at": pd.to_datetime(observed_at)},
+        index=offer_df.index,
+    )
 
 
 def apply_rung_book_leg(
@@ -339,7 +346,10 @@ def apply_rung_book_leg(
     its 0.5 line: one rung is one equation, so the base mean stays the model's own
     (``Projection``, sanitized, pre-blend) and the rung's P(0) is solved into a per-row
     ``Book Gate`` (clipped to [0, 1]) that ``fused_loc`` pools with the model gate; every other row
-    keeps ``hist_gate`` there. Edits ``offer_df`` in place; returns the number of re-legged rows.
+    keeps ``hist_gate`` there. The quote provenance columns follow the rung (an authentic
+    sportsbook price at the offered line, stamped at the ladder's newest poll), so the record
+    never carries the replaced quote's line or freshness on a ``book_rung`` row. Edits
+    ``offer_df`` in place; returns the number of re-legged rows.
     """
     legs = rung_book_legs(offer_df, league, market, date_map)
     priced = legs["p_over"].notna()
@@ -367,5 +377,8 @@ def apply_rung_book_leg(
         ]
     offer_df.loc[priced, "Market EV"] = p_over
     offer_df.loc[priced, "Quote Source"] = RUNG_QUOTE_SOURCE
+    offer_df.loc[priced, "Quote Authenticity"] = AUTHENTIC
     offer_df.loc[priced, "Quote Books"] = legs.loc[priced, "n_books"].to_numpy(float)
+    offer_df.loc[priced, "Quote Line"] = offer_df.loc[priced, "Line"]
+    offer_df.loc[priced, "Quote Observed At"] = legs.loc[priced, "observed_at"]
     return int(priced.sum())
