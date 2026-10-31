@@ -1216,9 +1216,8 @@ def model_prob(
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma"):
         gate_book = col_or_none(offer_df, "Book Gate")
-        offer_df["Market Projection"] = (
-            1 - (hist_gate if gate_book is None else gate_book)
-        ) * offer_df["Market Projection"]
+        gate = hist_gate if gate_book is None else gate_book
+        offer_df["Market Projection"] = (1 - gate) * offer_df["Market Projection"]
     _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
     two_part_candidate_output = None
