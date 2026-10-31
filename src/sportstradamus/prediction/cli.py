@@ -36,6 +36,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
+    UNDERDOG_CAPTURE_DIR,
     read_history,
     trim_parlay_hist,
     upsert_parlay_hist,
@@ -255,7 +256,7 @@ def main(progress, contest_variant, log_level):
     ud_corr, ud_story = [], []
     try:
         ud_offers, ud_parlays = process_offers(
-            get_ud(),
+            get_ud(capture_dir=UNDERDOG_CAPTURE_DIR),
             "Underdog",
             stats,
             contest_variant=contest_variant,

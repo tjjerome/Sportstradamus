@@ -305,7 +305,7 @@ def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]
     """
     from sportstradamus.prediction import cli as prediction_cli
 
-    monkeypatch.setattr(prediction_cli, "get_ud", dict)
+    monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
 
     calls: dict[str, list] = {"offers": [], "corr": [], "context": [], "stories": []}

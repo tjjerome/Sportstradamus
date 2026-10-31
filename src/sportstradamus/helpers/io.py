@@ -101,6 +101,12 @@ MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
 # game date. Train/serve parity diagnostics model_prob writes as it scores; the dashboard
 # never reads it.
 FEATURE_LOG_DIR = _RUNTIME_DIR / "feature_log"
+# Forward captures the information-audit reads (T2a news guard, T2b popularity) grade later:
+# per-poll Underdog line states, the daily pill entry counts, NBA injury reports and lineups.
+# Written only by prophecize / the fetch commands; the dashboard never reads them.
+UNDERDOG_CAPTURE_DIR = _RUNTIME_DIR / "underdog_capture"
+NBA_INJURY_DIR = _RUNTIME_DIR / "nba_injury"
+NBA_LINEUPS_DIR = _RUNTIME_DIR / "nba_lineups"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes a withheld cell's.

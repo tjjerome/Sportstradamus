@@ -30,7 +30,7 @@ Sportstradamus/
 │   │   ├── training/            # meditate pipeline (train, calibrate, report, gates)
 │   │   ├── prediction/          # prophecize pipeline (score, parlay search, snapshots)
 │   │   ├── strategies/          # Kelly sizing, Underdog pick'em builder, simulated ledger
-│   │   ├── collectors/          # authenticated data-collector framework (fp/ctg/savant)
+│   │   ├── collectors/          # authenticated data-collector framework (fp/ctg/savant) + forward-capture collectors
 │   │   ├── dashboard/           # Streamlit dashboard package
 │   │   ├── scripts/             # standalone maintenance / backfill / diagnostic scripts
 │   │   ├── books/               # DFS scrapers
@@ -164,8 +164,12 @@ for cookie/bearer authenticated sources, plus one subpackage per source:
 `fantasypoints/` (`fetch fp`), `cleaningtheglass/` (`fetch ctg`),
 `baseballsavant/` (`fetch savant`). Each writes period-keyed snapshots — by game
 week for FP, by date for the other two — that `stats/` loaders fold into
-features. Beside them, `headshots.py` (`fetch headshots`) fills the dashboard's
-player-headshot cache; it is not a `Source`. Canonical guide: [docs/data_collectors.md](data_collectors.md).
+features. Beside them sit the plain-command collectors, none a `Source`:
+`headshots.py` (`fetch headshots`) fills the dashboard's player-headshot cache, and
+`underdog_capture.py` (written from each `prophecize` poll), `underdog_lobby.py`,
+`nba_injury_report.py` and `nba_lineups.py` (`fetch underdog-lobby` / `nba-injuries` /
+`nba-lineups`) store what the polls already see for the T2a / T2b reads, as parquet
+under `data/runtime/` the dashboard never reads. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 ### `dashboard/` — Streamlit dashboard
 
@@ -282,6 +286,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | See how a cell's recommended legs would have done on held-out rows | `sportstradamus admin tail-scorecard` (`scripts/tail_scorecard.py`; re-serve in `tail_pricing.py`, information test in `tail_information.py`) — the live rule replayed at the archived DFS rungs; a diagnostic, never a gate |
 | See the live rule replayed at market lines, read against the live record | `sportstradamus admin realized-replay` (`scripts/realized_replay.py`) — the offline realized-money replay and the L2 league gap column; a report, never a gate |
 | Check that serving feeds a model the features it trained on | `sportstradamus admin feature-parity` (`scripts/feature_parity.py`) — re-scores the serve-time feature log through the model file each row names (the served pickle or its `data/models/prior/` copy), compares each logged row with its training-matrix row feature by feature and by the model's own probability, flags a cell whose difference has a root mean square above one percentage point at the lower end of its player-clustered 95% interval, ranks cells by that RMS as served times their settled live legs, and lists settled cells and dates the log missed; `--fixed-file` scores every logged row through the served pickle instead, and `--versions` adds the paired same-leg difference between model versions. Dev-side and read-only; a diagnostic, never a gate |
+| Capture what the polls see for the T2a / T2b reads | `collectors/underdog_capture.py` (per prophecize poll), `fetch underdog-lobby`, `fetch nba-injuries`, `fetch nba-lineups` (`collectors/`); parquet under `data/runtime/`, never read by the dashboard |
 | Read archived / removed code | `src/deprecated/` (reintroduction protocol in its README) |
 
 ---

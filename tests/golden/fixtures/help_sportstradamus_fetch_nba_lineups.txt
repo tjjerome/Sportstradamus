@@ -1,0 +1,6 @@
+Usage: sportstradamus fetch nba-lineups [OPTIONS]
+
+  Snapshot today's NBA daily lineups when a tip is within two hours.
+
+Options:
+  --help  Show this message and exit.

@@ -8,11 +8,13 @@ the ten-minute auth token.
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
+from pathlib import Path
 
 from tqdm import tqdm
 
+from sportstradamus.collectors.underdog_capture import by_id, write_poll_capture
 from sportstradamus.helpers import (
     ABBR_MAP,
     UNDERDOG_EVEN_PICK_MULTIPLIER,
@@ -101,12 +103,6 @@ def _ud_league(sport_id: str) -> str:
     return sport_id.replace("COMBOS", "")
 
 
-def _by_id(container) -> dict:
-    """Index a feed list or a lobby dict by ``str(id)``: JSON keys are strings, match ids ints."""
-    items = container.values() if isinstance(container, dict) else container
-    return {str(item["id"]): item for item in items}
-
-
 def _ud_sides(title: str) -> tuple[str, str] | None:
     """``(home, away)`` from a game title: ``AWAY @ HOME``, or ``HOME vs AWAY`` for soccer and solo games."""
     if " @ " in title:
@@ -145,7 +141,7 @@ def _ud_matches(games: dict, solo_games: dict, team_abbr: dict) -> dict:
 
 def _team_abbrs(payload: dict) -> dict:
     """``{team_id: abbr}`` from a lobby payload's ``teams`` dict; the feed carries none."""
-    return {team_id: team["abbr"] for team_id, team in _by_id(payload.get("teams", [])).items()}
+    return {team_id: team["abbr"] for team_id, team in by_id(payload.get("teams", [])).items()}
 
 
 def _ud_entities(payload: dict, team_abbr: dict | None = None) -> tuple[dict, dict, dict, dict]:
@@ -158,16 +154,16 @@ def _ud_entities(payload: dict, team_abbr: dict | None = None) -> tuple[dict, di
     holds for US sports, but ``vs`` titles put the home side first in soccer and
     the away side first in esports, so it only serves leagues without a model.
     """
-    players = _by_id(payload.get("players", []))
-    games = _by_id(payload.get("games", []))
-    appearances = _by_id(payload.get("appearances", []))
+    players = by_id(payload.get("players", []))
+    games = by_id(payload.get("games", []))
+    appearances = by_id(payload.get("appearances", []))
     team_abbr = {**(team_abbr or {}), **_team_abbrs(payload)}
     for game in games.values():
         sides = _ud_sides(game.get("abbreviated_title") or game["title"])
         if sides is not None:
             team_abbr.setdefault(game["home_team_id"], sides[0])
             team_abbr.setdefault(game["away_team_id"], sides[1])
-    matches = _ud_matches(games, _by_id(payload.get("solo_games", [])), team_abbr)
+    matches = _ud_matches(games, by_id(payload.get("solo_games", [])), team_abbr)
     return players, appearances, matches, team_abbr
 
 
@@ -280,24 +276,28 @@ def _ud_offers(payload: dict, team_abbr: dict | None = None) -> list[tuple[dict,
     return priced
 
 
-def _ud_team_offers(scraper: Scrape, sports: set[str]) -> tuple[list[tuple[dict, dict]], dict]:
-    """Team and game markets per modeled sport, plus the team abbreviations their lobbies carry.
+def _ud_team_offers(
+    scraper: Scrape, sports: set[str]
+) -> tuple[list[tuple[dict, dict]], dict, dict[str, dict]]:
+    """Team and game markets per modeled sport, their lobbies' team abbreviations, and the lobbies.
 
     One ``match_grouped_lines`` request per sport carrying every category in
-    ``UD_TEAM_CATEGORIES``; the combined answer is the union of the single ones.
+    ``UD_TEAM_CATEGORIES``; the combined answer is the union of the single ones. The raw
+    payloads come back for the per-poll capture.
     """
     categories = "&".join(f"market_categories%5B%5D={category}" for category in UD_TEAM_CATEGORIES)
-    urls = [
-        f"{UD_LOBBY_URL}/match_grouped_lines?sport_id={sport}&include_live=true&{categories}&{_UD_QUERY}"
+    urls = {
+        sport: f"{UD_LOBBY_URL}/match_grouped_lines?sport_id={sport}&include_live=true&{categories}&{_UD_QUERY}"
         for sport in sorted(sports & set(UD_MODELED_LEAGUES))
-    ]
-    priced, team_abbr = [], {}
-    for url in tqdm(urls, desc="Getting Underdog team markets", unit="request"):
+    }
+    priced, team_abbr, lobbies = [], {}, {}
+    for sport, url in tqdm(urls.items(), desc="Getting Underdog team markets", unit="request"):
         payload = scraper.get(url)
         if payload:
+            lobbies[sport] = payload
             team_abbr.update(_team_abbrs(payload))
             priced.extend(_ud_offers(payload))
-    return priced, team_abbr
+    return priced, team_abbr, lobbies
 
 
 def _ud_rungs(
@@ -375,8 +375,12 @@ def _ud_alt_lines(candidates: list[tuple[dict, str]]) -> list[dict]:
     return rungs
 
 
-def get_ud():
+def get_ud(capture_dir: Path | None = None):
     """Retrieve Underdog offers: player props, team and game markets, alternate lines.
+
+    Args:
+        capture_dir: Write this poll's line states there (``collectors.underdog_capture``);
+            ``None`` writes nothing.
 
     Returns:
         dict: ``{league: {market: [offer, ...]}}`` where each offer carries
@@ -406,7 +410,13 @@ def get_ud():
         )
         return {}
     sports = {_ud_league(game["sport_id"]) for game in feed["games"]}
-    team_offers, team_abbr = _ud_team_offers(scraper, sports)
+    team_offers, team_abbr, lobbies = _ud_team_offers(scraper, sports)
+    if capture_dir is not None:
+        # Diagnostics: nothing that goes wrong in the capture may cost the board its offers.
+        try:
+            write_poll_capture(feed, lobbies, capture_dir, datetime.now(UTC))
+        except Exception:
+            logger.exception("Underdog poll capture not written")
     feed_offers = _ud_offers(feed, team_abbr)
     if len(feed_offers) >= UD_EVEN_PICK_MIN_LINES and not any(
         UNDERDOG_EVEN_PICK_MULTIPLIER in (offer["Boost_Over"], offer["Boost_Under"])

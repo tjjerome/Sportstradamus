@@ -71,6 +71,9 @@ cli.add_command(
             "ctg": "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch",
             "savant": "sportstradamus.collectors.baseballsavant.cli:savant_fetch",
             "headshots": "sportstradamus.collectors.headshots:headshots",
+            "underdog-lobby": "sportstradamus.collectors.underdog_lobby:underdog_lobby",
+            "nba-injuries": "sportstradamus.collectors.nba_injury_report:nba_injuries",
+            "nba-lineups": "sportstradamus.collectors.nba_lineups:nba_lineups",
         },
     )
 )

@@ -22,6 +22,7 @@ import time
 import types
 from http import HTTPStatus
 
+import pandas as pd
 import pytest
 
 from sportstradamus.books import underdog
@@ -365,6 +366,38 @@ def test_get_ud_parses_feed_and_lobby(monkeypatch: pytest.MonkeyPatch, offline) 
     assert underdog.get_ud() == _EXPECTED
     assert scraper.calls == [underdog.UD_LINES_URL, _core_url("MLB"), _core_url("NBA")]
     assert _FakeSession.calls == [_ALT_F1_URL]
+
+
+def test_get_ud_capture_dir_writes_the_poll(
+    monkeypatch: pytest.MonkeyPatch, offline, tmp_path
+) -> None:
+    scraper = _FakeScraper(
+        {underdog.UD_LINES_URL: _FEED, _core_url("MLB"): {}, _core_url("NBA"): _NBA_LOBBY}
+    )
+    monkeypatch.setattr(underdog, "_get_scraper", lambda: scraper)
+
+    assert underdog.get_ud(capture_dir=tmp_path) == _EXPECTED
+    lines = list((tmp_path / "lines").rglob("*.parquet"))
+    assert len(lines) == 1
+    captured = pd.read_parquet(lines[0])
+    assert set(captured["source"]) == {"feed", "lobby:NBA"}
+    assert len(captured) == len(_FEED["over_under_lines"]) + len(_NBA_LOBBY["over_under_lines"])
+
+
+def test_get_ud_serves_the_board_when_the_capture_fails(
+    monkeypatch: pytest.MonkeyPatch, offline, tmp_path
+) -> None:
+    scraper = _FakeScraper(
+        {underdog.UD_LINES_URL: _FEED, _core_url("MLB"): {}, _core_url("NBA"): _NBA_LOBBY}
+    )
+    monkeypatch.setattr(underdog, "_get_scraper", lambda: scraper)
+
+    def _fail(*args):
+        raise OSError("capture disk full")
+
+    monkeypatch.setattr(underdog, "write_poll_capture", _fail)
+
+    assert underdog.get_ud(capture_dir=tmp_path) == _EXPECTED
 
 
 def test_get_ud_empty_feed_stops(monkeypatch: pytest.MonkeyPatch, offline) -> None:

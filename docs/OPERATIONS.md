@@ -37,7 +37,8 @@ All jobs run through [`scripts/run_job.sh`](../scripts/run_job.sh), which adds a
 per-job `flock` (an overlapping run of the same job is skipped), a self-deploy
 `git pull` before each job (restarting the dashboard when that pull moves its
 code — see [Dashboard as a service](#dashboard-as-a-service)), a shared archive
-lock (DuckDB allows one writer; `close-lines` takes it itself, below), and Healthchecks.io
+lock (DuckDB allows one writer; `close-lines` takes it itself and the forward-capture
+collectors skip it, below), and Healthchecks.io
 start/fail/success pings. Each job pings
 `HEALTHCHECK_URL_<JOB>` (the job name uppercased, `-` → `_`; e.g. `close-lines`
 → `HEALTHCHECK_URL_CLOSE_LINES`), falling back to the shared `HEALTHCHECK_URL`.
@@ -64,12 +65,15 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
 0 5 1 * *              <repo-dir>/scripts/run_job.sh headshots
+20 9 * * *             <repo-dir>/scripts/run_job.sh underdog-lobby
+*/30 9-23 * * *        <repo-dir>/scripts/run_job.sh nba-injuries   # NBA season; install after the NBA.com licence call
+*/15 16-22 * * *       <repo-dir>/scripts/run_job.sh nba-lineups    # NBA season; fetches only within 2 h of a tip
 15 4 28-31 * *         <repo-dir>/scripts/run_job.sh odds-backfill --league NFL --markets 'yards,qb yards' --start 2024-09-05 --end 2026-10-04 --dates-from 'Moneyline,rushing yards'
 ```
 
 | Job | Cadence | Purpose |
 |---|---|---|
-| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
+| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots and the per-poll Underdog capture (below) |
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
 | `meditate` | off on prod | retrain models — runs dev-side weekly; `scripts/sync_to_prod.sh` sends the results (below) |
@@ -78,7 +82,20 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
 | `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
+| `underdog-lobby` | daily 9:20am | per-line Underdog entry counts and the lineup-status decode for the T2b / T2a reads; needs `HEALTHCHECK_URL_UNDERDOG_LOBBY` |
+| `nba-injuries` | every 30 min, 9am–11pm, NBA season | newest official injury report (T2a); owner installs after the NBA.com licence call |
+| `nba-lineups` | every 15 min, 4–10pm, NBA season | daily lineups while a tip is within 2 h (T2a); same licence call |
 | `odds-backfill` | 4:15am, days 28–31 | buy odds history with the credit cycle's leftover: acts on the cycle's last day only, newest date first, and makes no API call once its range is held; needs `HEALTHCHECK_URL_ODDS_BACKFILL` |
+
+Forward capture (per-poll): `prophecize` also stores every Underdog feed and lobby
+line it polled, with its state, at
+`data/runtime/underdog_capture/{lines,matches}/date=<UTC date>/HHMMSS.parquet` on
+every run (`get_ud(capture_dir=…)`, no extra request); `underdog-lobby`,
+`nba-injuries` and `nba-lineups` fill the rest of the capture set. What each file
+holds and how the T2a / T2b reads join it is in
+[data_collectors.md](data_collectors.md) (Forward capture collectors).
+`scripts/sync_from_prod.sh` carries the directories down with the rest of
+`data/runtime` (update mode, nothing to add).
 
 Couplings to keep in sync:
 
@@ -87,9 +104,13 @@ Couplings to keep in sync:
   config claims underspends the monthly credit budget; more overspends it.
 - `close-lines` is the per-game data floor and is never throttled by the
   governor — don't widen its hours without re-checking the credit budget.
-- Every job but `close-lines` holds the shared archive lock for its whole run,
-  including ones like `gate-status` that never read the archive, which is why
-  `gate-status` sits at 4am rather than inside `reflect`'s ~1.5 h hold from 2am.
+- Every job but `close-lines` and the three capture collectors holds the shared
+  archive lock for its whole run, including ones like `gate-status` that never
+  read the archive, which is why `gate-status` sits at 4am rather than inside
+  `reflect`'s ~1.5 h hold from 2am. `underdog-lobby`, `nba-injuries` and
+  `nba-lineups` write parquet under `data/runtime` and never open the archive, so
+  `run_job.sh` skips the lock for them: a quarter-hour lineup tick must not queue
+  900 s behind `prophecize` and exit 75.
   `ledger-commit` queues behind the 8:50 and 14:50 `prophecize` runs (17-35 min),
   so its lines raise `ARCHIVE_LOCK_TIMEOUT` from 15 to 40 min.
 - `close-lines` runs a few seconds but must not queue behind those holds, or the
