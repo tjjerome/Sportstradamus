@@ -1,4 +1,4 @@
-"""``fetch nba-injuries``: the newest official NBA injury report, parsed, with its publication stamp.
+"""``fetch nba-injuries``: the newest official NBA injury report, parsed, with its publication time.
 
 The league posts a PDF every quarter hour (ET) at a URL that carries the stamp; a stamp not yet
 posted answers 403 (the bucket denies a missing key rather than answering 404). A run probes the
@@ -85,14 +85,15 @@ _TEAM = "|".join(re.escape(team) for team in sorted(REPORT_TEAMS, key=len, rever
 _ROW = re.compile(
     r"^(?:(?P<game_date>\d{2}/\d{2}/\d{4}) )?(?:(?P<game_time>\d{2}:\d{2} \(ET\)) )?"
     rf"(?:(?P<matchup>[A-Z]{{3}}@[A-Z]{{3}}) )?(?:(?P<team>{_TEAM}) )?"
-    rf"(?:(?P<player>.+?, \S+(?: \S+)*?) (?P<status>{_STATUSES})(?: (?P<reason>.*))?|NOT YET SUBMITTED)$"
+    rf"(?:(?P<player>.+?, \S+(?: \S+)*?) (?P<status>{_STATUSES})(?: (?P<reason>.*))?"
+    r"|NOT YET SUBMITTED)$"
 )
 
 
 def candidate_stamps(now: datetime) -> list[str]:
     """The newest ``PROBE_SLOTS`` quarter-hour stamps at or before ``now``, newest first."""
     clock = now.astimezone(_ET).replace(second=0, microsecond=0)
-    slot = clock - timedelta(minutes=clock.minute % 15)
+    slot = clock - (timedelta(minutes=clock.minute) % PUBLISH_STEP)
     return [(slot - i * PUBLISH_STEP).strftime("%Y-%m-%d_%I_%M%p") for i in range(PROBE_SLOTS)]
 
 
@@ -104,9 +105,7 @@ def parse_lines(lines: list[str]) -> list[dict]:
         if match is None:
             continue
         fields = match.groupdict()
-        for key in carried:
-            if fields[key]:
-                carried[key] = fields[key]
+        carried |= {key: fields[key] for key in carried if fields[key]}
         if fields["player"] is None:
             continue
         rows.append(
@@ -121,6 +120,7 @@ def parse_lines(lines: list[str]) -> list[dict]:
 
 
 def pdf_lines(raw: bytes) -> list[str]:
+    """The report PDF's text lines, page by page; pypdf yields one line per table row."""
     return [
         line
         for page in PdfReader(io.BytesIO(raw)).pages
