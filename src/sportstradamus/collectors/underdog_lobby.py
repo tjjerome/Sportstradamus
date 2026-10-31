@@ -22,15 +22,17 @@ from sportstradamus.books.underdog import (
     UD_MODELED_LEAGUES,
     _ud_league,
 )
-from sportstradamus.collectors.underdog_capture import by_id
-from sportstradamus.helpers.io import (
-    UNDERDOG_CAPTURE_DIR,
-    _atomic_write_json,
-    _atomic_write_parquet,
-)
+from sportstradamus.collectors.underdog_capture import by_id, write_poll_parquet
+from sportstradamus.helpers.io import UNDERDOG_CAPTURE_DIR, _atomic_write_json
 from sportstradamus.helpers.scraping import Scrape
 
-UD_PILL_URL = f"{UD_LOBBY_URL}/lines?sport_id={{sport}}&filter_type=PickemStat&filter_id={{stat_id}}&limit=1000&{_UD_QUERY}"
+# A pill has no pagination (page=2 repeats page 1), so this cap must cover the largest pill
+# (750 lines) or its counts truncate without an error (docs/underdog_api.md §6.2).
+UD_PILL_LIMIT = 1000
+UD_PILL_URL = (
+    f"{UD_LOBBY_URL}/lines?sport_id={{sport}}&filter_type=PickemStat&filter_id={{stat_id}}"
+    f"&limit={UD_PILL_LIMIT}&{_UD_QUERY}"
+)
 UD_LINEUP_STATUSES_URL = "https://stats.underdogfantasy.com/v1/lineup_statuses"
 ENTRY_DTYPES = {
     "polled_at": "datetime64[ns]",
@@ -80,13 +82,11 @@ def underdog_lobby() -> None:
             for line in payload.get("lines", [])
         ]
     entries = pd.DataFrame(rows, columns=list(ENTRY_DTYPES)).astype(ENTRY_DTYPES)
-    day, clock = polled_at.strftime("%Y-%m-%d"), polled_at.strftime("%H%M%S")
-    _atomic_write_parquet(
-        entries, UNDERDOG_CAPTURE_DIR / "entry_counts" / f"date={day}" / f"{clock}.parquet"
-    )
+    write_poll_parquet(entries, UNDERDOG_CAPTURE_DIR / "entry_counts", polled_at)
     statuses = scraper.get(UD_LINEUP_STATUSES_URL)
     if statuses:
         _atomic_write_json(statuses, UNDERDOG_CAPTURE_DIR / "lineup_statuses.json")
     click.echo(
-        f"underdog-lobby: {len(entries)} lines over {entries['pickem_stat_id'].nunique()} pills; lineup statuses {'refreshed' if statuses else 'unchanged'}"
+        f"underdog-lobby: {len(entries)} lines over {entries['pickem_stat_id'].nunique()} pills; "
+        f"lineup statuses {'refreshed' if statuses else 'unchanged'}"
     )
