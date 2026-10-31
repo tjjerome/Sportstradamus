@@ -375,7 +375,7 @@ def _ud_alt_lines(candidates: list[tuple[dict, str]]) -> list[dict]:
     return rungs
 
 
-def get_ud(capture_dir: Path | None = None):
+def get_ud(capture_dir: Path | None = None) -> dict[str, dict[str, list[dict]]]:
     """Retrieve Underdog offers: player props, team and game markets, alternate lines.
 
     Args:
