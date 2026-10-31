@@ -134,6 +134,22 @@ def test_unknown_blending_slug_rejected():
         )
 
 
+def test_unknown_book_leg_rejected():
+    from sportstradamus.training import ship_config
+
+    with pytest.raises(ValueError, match="unknown book_leg"):
+        ship_config._validate_cell(
+            "NHL",
+            "goals",
+            {
+                "shipped": "withheld",
+                "dist": "ZINB",
+                "target_normalization": "none",
+                "book_leg": "rungs",
+            },
+        )
+
+
 def test_fit_blend_weight_rejects_unknown_slug():
     with pytest.raises(ValueError, match="Unknown blending slug"):
         calibration.fit_blend_weight("bogus", [1.0], [1.0], [1.0], "NegBin")

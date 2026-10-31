@@ -13,7 +13,9 @@ from scipy.special import expit, logit
 
 from sportstradamus.helpers import get_ev, get_odds
 from sportstradamus.helpers.archive import Archive
+from sportstradamus.helpers.training_quotes import DFS_PLATFORM_BOOKS
 from sportstradamus.prediction import book_quotes as bq
+from sportstradamus.prediction.model_prob import _zi_kwargs
 
 
 def _rungs(*rows):
@@ -92,6 +94,26 @@ def test_get_ladder_rungs_keeps_each_books_latest_poll_before_at():
                 "shots",
                 date(2026, 10, 20),
                 "a",
+                "draftkings",
+                2.5,
+                0.50,
+                datetime(2026, 10, 20, 15, 1, 0),
+            ),
+            (
+                "NHL",
+                "shots",
+                date(2026, 10, 20),
+                "a",
+                "draftkings",
+                2.5,
+                0.53,
+                datetime(2026, 10, 20, 15, 2, 0),
+            ),
+            (
+                "NHL",
+                "shots",
+                date(2026, 10, 20),
+                "a",
                 "Underdog",
                 2.5,
                 0.52,
@@ -104,6 +126,7 @@ def test_get_ladder_rungs_keeps_each_books_latest_poll_before_at():
         stub, "NHL", "shots", "2026-10-20", ["a"], exclude_books=["Underdog"]
     )
     assert rungs[["book", "line", "p_over"]].to_dict("records") == [
+        {"book": "draftkings", "line": 2.5, "p_over": 0.53},
         {"book": "fanduel", "line": 2.5, "p_over": 0.60},
         {"book": "fanduel", "line": 3.5, "p_over": 0.35},
     ]
@@ -117,20 +140,25 @@ def test_get_ladder_rungs_keeps_each_books_latest_poll_before_at():
         at=datetime(2026, 10, 20, 13, 0),
     )
     assert earlier["p_over"].tolist() == [0.55]
+    unfiltered = Archive.get_ladder_rungs(stub, "NHL", "shots", "2026-10-20", ["a"])
+    assert set(unfiltered["book"]) == {"draftkings", "fanduel", "Underdog"}
     assert Archive.get_ladder_rungs(stub, "NHL", "shots", "2026-10-21", ["a"]).empty
 
 
 class _Ladder:
     def __init__(self, rungs):
         self.rungs = rungs
+        self.calls = []
 
     def get_ladder_rungs(self, league, market, date, entities, *, exclude_books=(), at=None):
+        self.calls.append((date, list(entities), exclude_books))
         return self.rungs[self.rungs["entity"].isin(entities)]
 
 
 def test_apply_rung_book_leg_relegs_only_the_priced_rows(monkeypatch):
     rungs = _rungs(("a", "fanduel", 2.5, 0.60, None), ("a", "draftkings", 2.5, 0.50, None))
-    monkeypatch.setattr(bq, "archive", _Ladder(rungs))
+    ladder = _Ladder(rungs)
+    monkeypatch.setattr(bq, "archive", ladder)
     offers = pd.DataFrame(
         {
             "Player": ["a", "a", "b"],
@@ -141,9 +169,14 @@ def test_apply_rung_book_leg_relegs_only_the_priced_rows(monkeypatch):
             "Quote Source": ["book", "book", None],
         }
     )
-    dates = {"a": "2026-10-20", "b": "2026-10-20"}
+    dates = {"a": "2026-10-20", "b": "2026-10-21"}
     assert bq.apply_rung_book_leg(offers, "NHL", "shots", "DPO", 0.6, 0.0, dates) == 1
+    assert ladder.calls == [
+        ("2026-10-20", ["a"], DFS_PLATFORM_BOOKS),
+        ("2026-10-21", ["b"], DFS_PLATFORM_BOOKS),
+    ]
     assert offers.loc[0, "Market EV"] == pytest.approx(0.55)
+    assert offers.loc[0, "Quote Books"] == 2
     decoded = 1 - get_odds(2.5, offers.loc[0, "Market Projection"], "DPO", 0.6, step=1)
     assert decoded == pytest.approx(0.55, abs=1e-6)
     assert offers.loc[0, "Quote Source"] == bq.RUNG_QUOTE_SOURCE
@@ -171,6 +204,12 @@ def test_apply_rung_book_leg_hurdle_solves_the_gate_at_the_half_line_only(monkey
     reproduced = 1 - get_odds(0.5, 0.9, "ZINB", 0.8, gate=offers.loc[0, "Book Gate"])
     assert reproduced == pytest.approx(0.42)
     assert offers.loc[0, "Market EV"] == pytest.approx(0.42) and offers.loc[1, "Market EV"] == 0.2
+
+
+def test_zi_kwargs_pools_the_per_row_book_gate_when_a_cell_carries_one():
+    frame = pd.DataFrame({"Model Gate": [0.2, 0.4], "Book Gate": [0.1, 0.5]})
+    assert _zi_kwargs(frame, "ZINB", 0.3)["gate_book"].tolist() == [0.1, 0.5]
+    assert _zi_kwargs(frame.drop(columns="Book Gate"), "ZINB", 0.3)["gate_book"] == 0.3
 
 
 @pytest.mark.parametrize("dist", ["DPO", "NegBin"])

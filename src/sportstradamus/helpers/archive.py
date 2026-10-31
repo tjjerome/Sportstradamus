@@ -1012,8 +1012,7 @@ class Archive:
             "market": market,
             "date": d,
             "entities": list(entities),
-            # DuckDB cannot type an empty list parameter; a blank book name matches nothing.
-            "exclude": list(exclude_books) or [""],
+            "exclude": list(exclude_books),
             "tolerance": LADDER_POLL_TOLERANCE_S,
         }
         cutoff = ""

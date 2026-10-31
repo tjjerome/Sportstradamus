@@ -1194,13 +1194,14 @@ def model_prob(
     offer_df["Market EV"] = book_over_prob(
         offer_df, dist, cv, step, hist_gate or None, league, market
     )
+    _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
+    _sanitize_model_ev(offer_df, dist)
+    # After the sanitizer: a hurdle row's gate is solved against the model mean the blend pools.
     if book_leg(league, market) == RUNG_BOOK_LEG:
         n_rung = apply_rung_book_leg(offer_df, league, market, dist, cv, hist_gate, date_map)
         logger.info(
             f"{filename} book leg from sportsbook rungs on {n_rung} of {len(offer_df)} offers"
         )
-    _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
-    _sanitize_model_ev(offer_df, dist)
     # Read before the blend, which rewrites Projection and the shape columns in place.
     offer_df["Standalone Prob"] = _model_over_and_push(
         offer_df, dist, cv, step, offer_df["Projection"].to_numpy()

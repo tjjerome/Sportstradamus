@@ -328,10 +328,11 @@ def apply_rung_book_leg(
     """Re-leg the book side from the sportsbooks' rungs where enough books price the offered line.
 
     On a qualified row ``Market EV`` becomes the rungs' over-probability and ``Market Projection``
-    the mean that decodes back to it (``get_ev`` at the family defaults ``book_over_prob`` decodes
-    with, so the blend and the record read one price). A hurdle count cell (``ZINB`` with a
-    historical gate) prices only its 0.5 line: one rung is one equation, so the base mean stays
-    the model's own (``Projection``, pre-blend) and the rung's P(0) is solved into a per-row
+    the mean that decodes back to it under the blend's own book leg (``get_ev`` at the family's
+    constant-CV default shape, the one ``fused_loc`` assumes for the book side), so the blend and
+    the record read one price. A hurdle count cell (``ZINB`` with a historical gate) prices only
+    its 0.5 line: one rung is one equation, so the base mean stays the model's own
+    (``Projection``, sanitized, pre-blend) and the rung's P(0) is solved into a per-row
     ``Book Gate`` that ``fused_loc`` pools with the model gate; every other row keeps
     ``hist_gate`` there. Returns the number of re-legged rows.
     """
@@ -346,6 +347,8 @@ def apply_rung_book_leg(
     p_over = legs.loc[priced, "p_over"].to_numpy(float)
     if hurdle:
         base = offer_df.loc[priced, "Projection"].to_numpy(float)
+        # NegBin P(0): get_odds reads cv == 1 with no r as Poisson, but only an uncalibrated cell
+        # has cv exactly 1.0 and such a cell serves no model.
         r = 1 / cv
         zero_base = (r / (r + base)) ** r
         offer_df.loc[priced, "Book Gate"] = np.clip(
