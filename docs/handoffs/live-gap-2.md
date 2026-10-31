@@ -317,13 +317,17 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      10-04 rule of [model_improvement_track.md](model_improvement_track.md) §8.2 #0d; with NBA β ≈ 0
      it fits to abstention) and importance weighting toward the live posting distribution (concept
      shift, not covariate shift). The builds the briefs leave alive go to a separate implementation
-     lane (owner 10-30): the replay, L2, X2, X3 and the forward capture are pending there; the NFL
-     wind pre-test ACCEPTS (2026-10-30; the collector is a new lane,
+     lane (owner 10-30): the replay, L2, X2 and the forward capture are pending there; the NFL wind
+     pre-test ACCEPTS (2026-10-30; the collector is a new lane,
      [model_improvement_track.md](model_improvement_track.md) §6.6 D-4), the MLB replication is a
-     KILL (§6.6 D-5) and X1 returns NEITHER, no learner build (§3.4). The walk stopped 13:01 CDT
-     (restart `walk/start_walk.sh NFL,NBA 8 48`); Part 5 levers 5.2/5.3 and the I6g / tail-scorecard
-     reads deferred; the seven held cells left production at 12:44 CDT (verified on the 13:06
-     board).
+     KILL (§6.6 D-5), X1 returns NEITHER, no learner build (§3.4), and X3, the NHL book leg from
+     sportsbook rungs, ACCEPTS on the live replay (−0.0033 Brier [−0.0059, −0.0009] on 727 re-legged
+     even-pick legs) and offline on shots (−0.0004 [−0.0008, −0.0001], no gate flip), stays open on
+     assists and points under the 1,500-row floor and is killed on goals under the hurdle design
+     (+0.0019 [+0.0003, +0.0034]), so the owner's one flip is NHL `shots` to `book_leg: "rung"` once
+     push III lands the inert code (§3.4). The walk stopped 13:01 CDT (restart `walk/start_walk.sh
+     NFL,NBA 8 48`); Part 5 levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven
+     held cells left production at 12:44 CDT (verified on the 13:06 board).
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
