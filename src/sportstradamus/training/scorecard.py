@@ -769,9 +769,9 @@ def _bootstrap_mean_ci_clustered(
 
     Resamples whole clusters with replacement, so within-cluster correlation is
     preserved and the CI is not anti-conservative on repeated-player panels or on
-    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`;
-    ``percentiles`` are the (low, high) bootstrap percentiles reported, the 95 % two-sided
-    pair by default. Returns ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
+    rows that share a slate. ``n_boot`` defaults to :data:`_GATE1_N_BOOT`; ``percentiles``
+    is the (low, high) CI-bound pair on ``np.percentile``'s 0-100 scale (default: the 95%
+    two-sided bounds). Returns ``(mean, ci_lo, ci_hi)``; ``(nan, nan, nan)`` if empty.
     """
     values = np.asarray(values, dtype=float)
     cluster_ids = np.asarray(cluster_ids)
