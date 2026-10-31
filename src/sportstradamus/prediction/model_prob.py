@@ -37,6 +37,7 @@ from sportstradamus.helpers import (
     stat_map,
     stat_zi,
 )
+from sportstradamus.helpers.config import RUNG_BOOK_LEG
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import (
     market_file_slug,
@@ -45,7 +46,6 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
-    RUNG_BOOK_LEG,
     annotate_quote_provenance,
     apply_rung_book_leg,
     book_evs_for_players,

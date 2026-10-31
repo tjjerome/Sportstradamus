@@ -70,6 +70,12 @@ if _cal_path.is_file():
 else:
     _stat_cal = {}
 
+# A cell's book leg: the decoded composite quote (the default) or the sportsbooks' raw ladder
+# rungs at the offered line (prediction.book_quotes.apply_rung_book_leg); read by book_leg().
+QUOTE_BOOK_LEG = "quote"
+RUNG_BOOK_LEG = "rung"
+BOOK_LEG_VALUES = frozenset({QUOTE_BOOK_LEG, RUNG_BOOK_LEG})
+
 # Public union of committed meta + runtime calibration. Each cell carries
 # every field; callers that want a typed view can read the field directly.
 stat_meta: dict[str, dict[str, dict]] = {}
@@ -82,7 +88,7 @@ for _league, _markets in _stat_meta_committed.items():
             "shipped": _meta_cell["shipped"],
             "target_normalization": _meta_cell["target_normalization"],
             "posthoc": _meta_cell.get("posthoc", "none"),
-            "book_leg": _meta_cell.get("book_leg", "quote"),
+            "book_leg": _meta_cell.get("book_leg", QUOTE_BOOK_LEG),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
@@ -130,7 +136,7 @@ def book_leg(league: str, market: str) -> str:
     (:func:`sportstradamus.prediction.book_quotes.apply_rung_book_leg`); a cell without the
     knob is ``"quote"``. Flipped per cell in ``stat_meta.json`` after X3's acceptance read.
     """
-    return stat_meta.get(league, {}).get(market, {}).get("book_leg", "quote")
+    return stat_meta.get(league, {}).get(market, {}).get("book_leg", QUOTE_BOOK_LEG)
 
 
 def book_skewnormal_shape(

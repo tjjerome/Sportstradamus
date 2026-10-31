@@ -60,6 +60,7 @@ import json
 from pathlib import Path
 
 from sportstradamus import data
+from sportstradamus.helpers.config import BOOK_LEG_VALUES, QUOTE_BOOK_LEG
 from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS
 from sportstradamus.training.calibration import BLENDING_SLUGS, DEFAULT_BLENDING
 from sportstradamus.training.posthoc import POSTHOC_SLUGS
@@ -98,10 +99,6 @@ _ALLOWED_FOR_BRANCH: dict[str, frozenset[str]] = {
 
 # All recognized values for the ``shipped`` field.
 _SHIPPED_VALUES: frozenset[str] = frozenset({WITHHELD, "devel", "main"})
-
-# All recognized values for the ``book_leg`` field (helpers.config.book_leg; "rung" is
-# prediction.book_quotes.RUNG_BOOK_LEG). A cell without the field prices the quote leg.
-_BOOK_LEG_VALUES: frozenset[str] = frozenset({"quote", "rung"})
 
 STAT_META_PATH = pkg_resources.files(data) / "config" / "stat_meta.json"
 
@@ -144,11 +141,11 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
             f"stat_meta.json: cell {league}/{market} has unknown blending "
             f"value {blending!r}; valid: {sorted(BLENDING_SLUGS)}"
         )
-    book_leg = cell.get("book_leg", "quote")
-    if book_leg not in _BOOK_LEG_VALUES:
+    book_leg = cell.get("book_leg", QUOTE_BOOK_LEG)
+    if book_leg not in BOOK_LEG_VALUES:
         raise ValueError(
             f"stat_meta.json: cell {league}/{market} has unknown book_leg "
-            f"value {book_leg!r}; valid: {sorted(_BOOK_LEG_VALUES)}"
+            f"value {book_leg!r}; valid: {sorted(BOOK_LEG_VALUES)}"
         )
     if dist in CONTINUOUS_DISTS and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(

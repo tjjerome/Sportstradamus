@@ -29,9 +29,9 @@ from sportstradamus.helpers.training_quotes import (
 # access. See LazyArchive docstring in helpers/archive.py.
 archive = LazyArchive()
 
-# X3: a cell whose stat_meta book_leg is "rung" prices its book leg from the sportsbooks' raw
-# ladder rungs at the offered line instead of the decoded composite EV (docs/ship_gate.md).
-RUNG_BOOK_LEG = "rung"
+# X3: a cell whose stat_meta book_leg is helpers.config.RUNG_BOOK_LEG prices its book leg from the
+# sportsbooks' raw ladder rungs at the offered line instead of the decoded composite EV
+# (docs/ship_gate.md); the rows it re-legs carry this Quote Source.
 RUNG_QUOTE_SOURCE = "book_rung"
 # Fewer sportsbooks than this at or around the line is one book's opinion, not a market leg.
 RUNG_MIN_BOOKS = 2
