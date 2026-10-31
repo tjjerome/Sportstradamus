@@ -194,6 +194,21 @@ class StatsNHL(Stats):
         self._combo_archive_cache_key = None
         self._combo_archive_cache = {}
 
+    def load(self) -> None:
+        """Read the cached bundle, respelling every stored player name through ``remove_accents``.
+
+        Moneypuck drops the non-ASCII letters of some names; ``name_map`` aliases that spelling
+        to the books'. Rows stored before an alias existed keep the old spelling, so the stored
+        names are respelled here and the next update writes them back.
+        """
+        super().load()
+        if not self.gamelog.empty:
+            spellings = {name: remove_accents(name) for name in self.gamelog["playerName"].unique()}
+            self.gamelog["playerName"] = self.gamelog["playerName"].map(spellings)
+        for roster in self.players.values():
+            for row in roster.values():
+                row["playerName"] = remove_accents(row["playerName"])
+
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Keep only players who can accrue the requested NHL market."""
         allowed = allowed_nhl_positions(market)
@@ -656,7 +671,6 @@ class StatsNHL(Stats):
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
         if self._full_clean_due():
-            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)

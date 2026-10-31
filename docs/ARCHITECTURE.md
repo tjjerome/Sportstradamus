@@ -270,7 +270,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Change which distribution a stat uses | `src/sportstradamus/data/config/stat_meta.json` (`dist` field) |
 | Control which cells train and serve | `stat_meta.json` per-cell `shipped` field — `"withheld"` (matrix kept warm, training skipped, pickle pruned) / `"devel"` / `"main"` release surfaces |
 | Change which books feed consensus lines | `moneylines.py` — `confer` keeps every sportsbook the Odds API returns for the `us` region (`us2` for `US2_ONLY_MARKETS`); `helpers/training_quotes.py:DFS_PLATFORM_BOOKS` keeps pick'em platforms out of the consensus (`helpers/archive.py:_sportsbook_line`) |
-| Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
+| Add a player name alias | `src/sportstradamus/data/config/name_map.json`, applied by `helpers/text.py:remove_accents`. Moneypuck drops the non-ASCII letters of some NHL names (`Tim Sttzle`), so an NHL rookie whose name has one needs an alias; `StatsNHL.load` respells the stored gamelog and rosters through it |
 | Understand a training stats metric | `training/report.py` (schema owner) + [docs/ship_gate.md](ship_gate.md) for the gate columns |
 | Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → `{kelly_shrinkage, brier_skill_score, model_weight}` from `data/training/model_stats.parquet` |
 | Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `LIVE_BLEND_FLOOR`, `LIVE_BLEND_FULL` |
