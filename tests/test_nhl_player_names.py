@@ -9,10 +9,11 @@ applies it to rows stored before the alias.
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import name_map
 from sportstradamus.helpers.text import remove_accents
 from sportstradamus.stats import StatsNHL, base
 
-# (moneypuck's or the gamelog's spelling, the spelling books and DFS offers carry)
+# (a source's spelling, the canonical spelling it maps to)
 ALIASES = [
     ("Tim Sttzle", "Tim Stutzle"),
     ("Alexis Lafrenire", "Alexis Lafreniere"),
@@ -24,6 +25,9 @@ ALIASES = [
     ("Charles Alexis Legault", "Charles-Alexis Legault"),
     ("Thomas Novak", "Tommy Novak"),
     ("Dmitriy Simashev", "Dmitri Simashev"),
+    ("Egor Chinakhov", "Yegor Chinakhov"),
+    ("Nick Robertson", "Nicholas Robertson"),
+    ("Axel Sandin-Pellikka", "Axel Sandin Pellikka"),
 ]
 STUTZLE = "8482116"
 MCDAVID = "8478402"
@@ -33,6 +37,13 @@ MCDAVID = "8478402"
 def test_alias_maps_the_stored_spelling_to_the_books_and_is_stable(stored, books):
     assert remove_accents(stored) == books
     assert remove_accents(books) == books
+
+
+def test_name_map_does_not_chain():
+    """``load`` respells stored names every run, so a target that is another key would drift."""
+    assert {
+        key: value for key, value in name_map.items() if name_map.get(value, value) != value
+    } == {}
 
 
 def _load(monkeypatch, gamelog, players):
