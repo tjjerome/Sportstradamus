@@ -5,6 +5,10 @@ leg (:func:`book_evs_for_players`) and pools them with the model; the book-fallb
 path prices the offers off them outright. Admission is shared and deliberately strict —
 a DFS platform reposting its own line is not independent support — so neither path can
 serve a price the market never made.
+
+A cell whose ``stat_meta`` ``book_leg`` is ``rung`` takes the model path's leg from the
+sportsbooks' raw ladder rungs wherever enough of them price the offered line
+(:func:`apply_rung_book_leg`).
 """
 
 from __future__ import annotations
@@ -267,6 +271,7 @@ def annotate_quote_provenance(frame: pd.DataFrame, quotes: Sequence[TrainingQuot
 def rung_book_leg(rungs: pd.DataFrame, line: float) -> tuple[float, int]:
     """The sportsbooks' mean over-probability at ``line`` from their rungs, and how many priced it.
 
+    ``rungs`` is one player's ``Archive.get_ladder_rungs`` frame (``book``, ``line``, ``p_over``).
     Per book: the rung at the line is its price; otherwise the nearest rungs below and above
     interpolate on the logit scale; a ladder whose price does not fall with the line is stale and
     skipped; a book with no bracket says nothing. NaN below ``RUNG_MIN_BOOKS`` books.
@@ -333,8 +338,8 @@ def apply_rung_book_leg(
     the record read one price. A hurdle count cell (``ZINB`` with a historical gate) prices only
     its 0.5 line: one rung is one equation, so the base mean stays the model's own
     (``Projection``, sanitized, pre-blend) and the rung's P(0) is solved into a per-row
-    ``Book Gate`` that ``fused_loc`` pools with the model gate; every other row keeps
-    ``hist_gate`` there. Returns the number of re-legged rows.
+    ``Book Gate`` (clipped to [0, 1]) that ``fused_loc`` pools with the model gate; every other row
+    keeps ``hist_gate`` there. Edits ``offer_df`` in place; returns the number of re-legged rows.
     """
     legs = rung_book_legs(offer_df, league, market, date_map)
     priced = legs["p_over"].notna()
