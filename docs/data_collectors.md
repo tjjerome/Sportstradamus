@@ -242,7 +242,9 @@ per-line popularity; the lobby's `lines?filter_type=PickemStat` pill does
 ([underdog_api.md](underdog_api.md) §2, §6.4). One request per
 `(sport, pickem_stat_id)` the feed shows that day for a modeled league, about a
 hundred, once a day: T2b wants one count per leg, not a time series. The same run
-refreshes `lineup_statuses.json`.
+refreshes `lineup_statuses.json`. An empty feed exits 1 before writing; a pill that
+answers empty still lets the others land, then the run exits 1 naming it, so the
+healthcheck shows a day with a gap instead of a green tick.
 
 **NBA official injury report** (`collectors/nba_injury_report.py`). The league
 posts a PDF every quarter hour (ET) at a URL that carries the stamp; a run walks

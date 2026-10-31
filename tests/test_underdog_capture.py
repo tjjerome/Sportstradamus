@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pandas as pd
+from click.testing import CliRunner
 
 from sportstradamus.collectors import underdog_capture as cap
+from sportstradamus.collectors import underdog_lobby as lobby
 from sportstradamus.collectors.underdog_lobby import feed_pills
 
 _APPEARANCE = "7e076ff5"
@@ -120,3 +122,39 @@ def test_polls_share_one_schema_across_a_date(tmp_path):
 
 def test_feed_pills_are_the_modeled_leagues_stats():
     assert feed_pills(_FEED) == {("NFL", "s1"), ("NFL", "s2")}
+
+
+class _FakeScraper:
+    def __init__(self, answers):
+        self.answers = answers
+
+    def get(self, url, **kwargs):
+        return next((body for key, body in self.answers.items() if key in url), {})
+
+
+def test_underdog_lobby_fails_loud_on_an_empty_feed(monkeypatch, tmp_path):
+    monkeypatch.setattr(lobby, "Scrape", lambda: _FakeScraper({}))
+    monkeypatch.setattr(lobby, "UNDERDOG_CAPTURE_DIR", tmp_path)
+    result = CliRunner().invoke(lobby.underdog_lobby)
+    assert result.exit_code == 1 and "empty feed" in result.output
+    assert not list(tmp_path.rglob("*.parquet"))
+
+
+def test_underdog_lobby_writes_what_came_back_then_fails_on_empty_pills(monkeypatch, tmp_path):
+    pill = {
+        "lines": [
+            {
+                "over_under_line_id": "l1",
+                "appearance_id": _APPEARANCE,
+                "entry_count": 12,
+                "header": "Rush Yards",
+            }
+        ]
+    }
+    answers = {lobby.UD_LINES_URL: _FEED, "filter_id=s1": pill}
+    monkeypatch.setattr(lobby, "Scrape", lambda: _FakeScraper(answers))
+    monkeypatch.setattr(lobby, "UNDERDOG_CAPTURE_DIR", tmp_path)
+    result = CliRunner().invoke(lobby.underdog_lobby)
+    assert result.exit_code == 1 and "1 pills answered empty: ['NFL/s2']" in result.output
+    written = list((tmp_path / "entry_counts").rglob("*.parquet"))
+    assert len(written) == 1 and len(pd.read_parquet(written[0])) == 1

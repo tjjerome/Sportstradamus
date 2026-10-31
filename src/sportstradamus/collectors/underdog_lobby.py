@@ -66,9 +66,13 @@ def underdog_lobby() -> None:
     polled_at = datetime.now(UTC)
     stamp = pd.Timestamp(polled_at).tz_localize(None)
     feed = scraper.get(UD_LINES_URL)
-    rows = []
+    if not feed:
+        raise click.ClickException("underdog-lobby: empty feed, nothing captured")
+    rows, failed = [], []
     for sport, stat_id in tqdm(sorted(feed_pills(feed)), desc="Underdog pills", unit="pill"):
         payload = scraper.get(UD_PILL_URL.format(sport=sport, stat_id=stat_id))
+        if not payload:
+            failed.append(f"{sport}/{stat_id}")
         rows += [
             {
                 "polled_at": stamp,
@@ -90,3 +94,6 @@ def underdog_lobby() -> None:
         f"underdog-lobby: {len(entries)} lines over {entries['pickem_stat_id'].nunique()} pills; "
         f"lineup statuses {'refreshed' if statuses else 'unchanged'}"
     )
+    if failed:
+        # The day's counts are on disk; the job still fails so the healthcheck shows the gap.
+        raise click.ClickException(f"underdog-lobby: {len(failed)} pills answered empty: {failed}")
