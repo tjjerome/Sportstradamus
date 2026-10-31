@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus import realized
-from sportstradamus.helpers.archive import archive_market
-from sportstradamus.helpers.distributions import DFS_FAIR_PICK_PROB, UNDERDOG_BOOST_BASELINE
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, archive_market
+from sportstradamus.helpers.distributions import DFS_FAIR_PICK_PROB
 from sportstradamus.helpers.io import (
     REALIZED_REPLAY_PATH,
     _atomic_write_csv,
@@ -58,13 +58,13 @@ _PCT_90 = (10.0, 90.0)
 REPLAY_SEED = 1729
 BREAK_EVEN = 1 / UNDERDOG_BOOST_BASELINE
 _TEST_COLUMNS = ["Player", "Date", "Result", "Line", "P", "Odds", "QuoteAuthenticity", "Book_EV"]
-_COHORT = ("n", "dates", "read", "hit", "hit_lb", "gap", "gap_lo", "gap_hi", "roi")
+_COHORT_COLUMNS = ("n", "dates", "read", "hit", "hit_lb", "gap", "gap_lo", "gap_hi", "roi")
 REPLAY_COLUMNS = (
     "scope",
     "league",
     "market",
-    *_COHORT,
-    *(f"live_{col}" for col in _COHORT),
+    *_COHORT_COLUMNS,
+    *(f"live_{col}" for col in _COHORT_COLUMNS),
     "gap_delta",
     "agrees",
     "implied_live_hit_lb",
@@ -74,6 +74,23 @@ REPLAY_COLUMNS = (
     "live_until",
     "computed_at",
 )
+_REPORT_COLUMNS = [
+    "n",
+    "dates",
+    "read",
+    "hit",
+    "hit_lb",
+    "gap",
+    "gap_lo",
+    "gap_hi",
+    "live_n",
+    "live_hit",
+    "live_gap",
+    "gap_delta",
+    "agrees",
+    "implied_live_hit_lb",
+    "l2_flag",
+]
 
 
 def market_line_rows(test: pd.DataFrame) -> pd.DataFrame:
@@ -247,6 +264,33 @@ def tolerance_rows(table: pd.DataFrame) -> pd.DataFrame:
     return table[(table["scope"] == "l2") & (table["live_n"] >= LIVE_MIN_LEGS)]
 
 
+def _echo_report(table: pd.DataFrame) -> None:
+    leagues_out = table[table["scope"] != "cell"].set_index(["scope", "league"])
+    click.echo(leagues_out[_REPORT_COLUMNS].to_string(float_format=lambda x: f"{x:.3f}"))
+    tolerance = tolerance_rows(table)
+    deltas = ", ".join(
+        f"{league} {delta:.3f}"
+        for league, delta in zip(tolerance["league"], tolerance["gap_delta"], strict=True)
+    )
+    flagged = tolerance[tolerance["l2_flag"].notna()]
+    matches = int((flagged["l2_flag"] == (flagged["live_hit"] > BREAK_EVEN)).sum())
+    click.echo(
+        f"tolerance reached: {deltas} (l2 rows, live_n >= {LIVE_MIN_LEGS}); "
+        f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; offline/live hit sides of "
+        f"{BREAK_EVEN:.4f} agree in {int(tolerance['agrees'].eq(True).sum())} of {len(tolerance)}; "
+        f"l2_flag matches live's side in {matches} of {len(flagged)}"
+    )
+    below = table[(table["scope"] == "l2") & (table["live_n"] < LIVE_MIN_LEGS)]
+    if not below.empty:
+        click.echo(
+            "below the live floor: "
+            + ", ".join(
+                f"{league} ({n})"
+                for league, n in zip(below["league"], below["live_n"], strict=True)
+            )
+        )
+
+
 @click.command()
 @click.option("--league", "leagues", multiple=True, help="Replay only these leagues (repeatable).")
 @click.option(
@@ -287,7 +331,15 @@ def tolerance_rows(table: pd.DataFrame) -> pd.DataFrame:
     default=REALIZED_REPLAY_PATH,
     help="Where the scope rows land (default: data/training/realized_replay.parquet).",
 )
-def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, parquet) -> None:
+def main(
+    leagues: tuple[str, ...],
+    test_sets_dir: Path,
+    offline_before: datetime,
+    live_since: datetime,
+    live_until: datetime | None,
+    out: Path,
+    parquet: Path,
+) -> None:
     """Replay the live recommendation rule on held-out market-line rows and read it against live."""
     before, since = pd.Timestamp(offline_before), pd.Timestamp(live_since)
     until = pd.Timestamp(live_until) if live_until else None
@@ -305,45 +357,5 @@ def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, pa
     )[list(REPLAY_COLUMNS)].astype({"agrees": "boolean", "l2_flag": "boolean"})
     _atomic_write_csv(table, out)
     _atomic_write_parquet(table, parquet)
-    leagues_out = table[table["scope"] != "cell"].set_index(["scope", "league"])
-    shown = [
-        "n",
-        "dates",
-        "read",
-        "hit",
-        "hit_lb",
-        "gap",
-        "gap_lo",
-        "gap_hi",
-        "live_n",
-        "live_hit",
-        "live_gap",
-        "gap_delta",
-        "agrees",
-        "implied_live_hit_lb",
-        "l2_flag",
-    ]
-    click.echo(leagues_out[shown].to_string(float_format=lambda x: f"{x:.3f}"))
-    tolerance = tolerance_rows(table)
-    deltas = ", ".join(
-        f"{league} {delta:.3f}"
-        for league, delta in zip(tolerance["league"], tolerance["gap_delta"], strict=True)
-    )
-    flagged = tolerance[tolerance["l2_flag"].notna()]
-    matches = int((flagged["l2_flag"] == (flagged["live_hit"] > BREAK_EVEN)).sum())
-    click.echo(
-        f"tolerance reached: {deltas} (l2 rows, live_n >= {LIVE_MIN_LEGS}); "
-        f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; offline/live hit sides of "
-        f"{BREAK_EVEN:.4f} agree in {int(tolerance['agrees'].eq(True).sum())} of {len(tolerance)}; "
-        f"l2_flag matches live's side in {matches} of {len(flagged)}"
-    )
-    below = table[(table["scope"] == "l2") & (table["live_n"] < LIVE_MIN_LEGS)]
-    if not below.empty:
-        click.echo(
-            "below the live floor: "
-            + ", ".join(
-                f"{league} ({n})"
-                for league, n in zip(below["league"], below["live_n"], strict=True)
-            )
-        )
+    _echo_report(table)
     click.echo(f"wrote {len(table)} rows to {out} and {parquet}")
