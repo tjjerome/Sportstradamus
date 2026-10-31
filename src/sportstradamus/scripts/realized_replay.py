@@ -34,7 +34,8 @@ from sportstradamus.helpers.io import (
     read_history,
 )
 from sportstradamus.helpers.training_quotes import AUTHENTIC, PICKEM
-from sportstradamus.prediction.offer_records import _MAX_CONFIDENCE
+from sportstradamus.prediction.offer_records import _MAX_CONFIDENCE, UNQUOTED_BOOK_DISAGREEMENT_MAX
+from sportstradamus.scripts.tail_information import key_rng
 from sportstradamus.scripts.tail_scorecard import TEST_SETS_DIR
 from sportstradamus.training.labels import over_label
 from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
@@ -53,7 +54,7 @@ LIVE_MIN_LEGS = 100
 L2_OVER_RATE_BAND = (0.40, 0.60)
 # The one-sided 90 % bounds the brief pre-registered, as the bootstrap's (low, high) percentiles.
 _PCT_90 = (10.0, 90.0)
-# The research scripts' seed, so a read that matches their method reproduces their draws.
+# One generator per scope key (key_rng), so a --league run reproduces the full run's bounds.
 REPLAY_SEED = 1729
 BREAK_EVEN = 1 / UNDERDOG_BOOST_BASELINE
 _TEST_COLUMNS = ["Player", "Date", "Result", "Line", "P", "Odds", "QuoteAuthenticity", "Book_EV"]
@@ -89,7 +90,10 @@ def replay_offers(test: pd.DataFrame, league: str, market: str, version: str) ->
 
     ``Boost`` 1.0 on Underdog is the 1.83 even pick, so ``recommended`` runs unchanged. ``Result``
     is the test row's outcome against its line (a push drops out downstream, as live). The side is
-    the fused ``P``'s, its ``Win Prob`` capped as ``finalize_records`` caps it.
+    the fused ``P``'s, its ``Win Prob`` capped as ``finalize_records`` caps it. A pick'em row whose
+    capped ``Win Prob`` sits more than ``UNQUOTED_BOOK_DISAGREEMENT_MAX`` from its ``Market Prob``
+    drops as the board drops it: the one ``finalize_records`` gate binding at one line per player
+    (the three-per-player trim and the boost cap cannot).
     """
     rows = market_line_rows(test)
     over = rows["P"].to_numpy() >= 0.5
@@ -116,7 +120,10 @@ def replay_offers(test: pd.DataFrame, league: str, market: str, version: str) ->
             "line_type": rows["line_type"].to_numpy(),
         }
     )
-    return realized.settled_offers(offers)
+    phantom = offers["line_type"].eq("pickem") & (
+        (offers["Win Prob"] - offers["Market Prob"]).abs() > UNQUOTED_BOOK_DISAGREEMENT_MAX
+    )
+    return realized.settled_offers(offers[~phantom])
 
 
 def cohort(offers: pd.DataFrame, rng: np.random.Generator) -> dict:
@@ -186,8 +193,9 @@ def load_offline(
 
 
 def _scope_row(
-    scope: str, league: str, market: str, offline: pd.DataFrame, live: pd.DataFrame, rng
+    scope: str, league: str, market: str, offline: pd.DataFrame, live: pd.DataFrame
 ) -> dict:
+    rng = key_rng(REPLAY_SEED, f"{scope}/{league}/{market}")
     off, liv = cohort(offline, rng), cohort(live, rng)
     row = {"scope": scope, "league": league, "market": market, **off}
     row.update({f"live_{key}": value for key, value in liv.items()})
@@ -210,23 +218,14 @@ def l2_rows(offline: pd.DataFrame) -> pd.DataFrame:
 
 def replay_table(offline: pd.DataFrame, live: pd.DataFrame) -> pd.DataFrame:
     """One row per cell, league and L2 league scope; the live columns read the same scope live."""
-    rng = np.random.default_rng(REPLAY_SEED)
     rows = []
     for (league, cell), part in offline.groupby(["League", "cell"]):
-        rows.append(
-            _scope_row(
-                "cell",
-                league,
-                cell,
-                part,
-                live[(live["League"] == league) & (live["cell"] == cell)],
-                rng,
-            )
-        )
+        live_part = live[(live["League"] == league) & (live["cell"] == cell)]
+        rows.append(_scope_row("cell", league, cell, part, live_part))
     for league, part in offline.groupby("League"):
         live_part = live[live["League"] == league]
-        rows.append(_scope_row("league", league, "", part, live_part, rng))
-        row = _scope_row("l2", league, "", l2_rows(part), live_part, rng)
+        rows.append(_scope_row("league", league, "", part, live_part))
+        row = _scope_row("l2", league, "", l2_rows(part), live_part)
         if row["n"] >= L2_MIN_ROWS and row["dates"] >= L2_MIN_DATES and row["live_n"]:
             # The brief's "live claimed mean + the (hit - claimed) gap's one-sided 90 % lower bound".
             row["implied_live_hit_lb"] = row["live_read"] - row["gap_hi"]
@@ -295,7 +294,7 @@ def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, pa
         live_since=since,
         live_until=until,
         computed_at=pd.Timestamp(datetime.now(UTC)).tz_localize(None),
-    )[list(REPLAY_COLUMNS)]
+    )[list(REPLAY_COLUMNS)].astype({"agrees": "boolean", "l2_flag": "boolean"})
     _atomic_write_csv(table, out)
     _atomic_write_parquet(table, parquet)
     leagues_out = table[table["scope"] != "cell"].set_index(["scope", "league"])
@@ -325,7 +324,7 @@ def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, pa
     click.echo(
         f"tolerance reached: {deltas} (l2 rows, live_n >= {LIVE_MIN_LEGS}); "
         f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; sides of {BREAK_EVEN:.4f} "
-        f"agree in {int(tolerance['agrees'].fillna(False).sum())} of {len(tolerance)}"
+        f"agree in {int(tolerance['agrees'].eq(True).sum())} of {len(tolerance)}"
     )
     below = table[(table["scope"] == "l2") & (table["live_n"] < LIVE_MIN_LEGS)]
     if not below.empty:

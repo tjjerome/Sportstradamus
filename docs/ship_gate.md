@@ -254,8 +254,9 @@ tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
 
 `sportstradamus admin realized-replay` runs the live recommendation rule
 (`realized.recommended`, the Receipts ledger's) over each cell's held-out rows at market lines —
-pick'em rows and sportsbook rows within .06 of even, never a synthetic or EV-derived line — at the
-1.83 even pick, and reads each cell and league against the live record's recommended even-pick legs
+pick'em rows and sportsbook rows within .06 of even, never a synthetic or EV-derived line, and never
+a pick'em row the live board itself drops (the unquoted-disagreement gate) — at the 1.83 even pick,
+and reads each cell and league against the live record's recommended even-pick legs
 (`data/training/realized_replay.parquet`; `gap = read − hit`, the sign of `live_gap_per_cell.parquet`).
 `gap_delta` is the tolerance: how far the replay reads from live per league, read on the `l2` rows
 over leagues with at least 100 live recommended even-pick legs (`LIVE_MIN_LEGS`). A release gate
