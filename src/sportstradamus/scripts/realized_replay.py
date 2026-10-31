@@ -26,7 +26,7 @@ import pandas as pd
 
 from sportstradamus import realized
 from sportstradamus.helpers.archive import archive_market
-from sportstradamus.helpers.distributions import UNDERDOG_BOOST_BASELINE
+from sportstradamus.helpers.distributions import DFS_FAIR_PICK_PROB, UNDERDOG_BOOST_BASELINE
 from sportstradamus.helpers.io import (
     REALIZED_REPLAY_PATH,
     _atomic_write_csv,
@@ -90,15 +90,19 @@ def replay_offers(test: pd.DataFrame, league: str, market: str, version: str) ->
 
     ``Boost`` 1.0 on Underdog is the 1.83 even pick, so ``recommended`` runs unchanged. ``Result``
     is the test row's outcome against its line (a push drops out downstream, as live). The side is
-    the fused ``P``'s, its ``Win Prob`` capped as ``finalize_records`` caps it. A pick'em row whose
-    capped ``Win Prob`` sits more than ``UNQUOTED_BOOK_DISAGREEMENT_MAX`` from its ``Market Prob``
-    drops as the board drops it: the one ``finalize_records`` gate binding at one line per player
-    (the three-per-player trim and the boost cap cannot).
+    the fused ``P``'s, its ``Win Prob`` capped as ``finalize_records`` caps it. A pick'em row's
+    ``Market Prob`` is the payout-implied ``DFS_FAIR_PICK_PROB``, as the board prices an even pick
+    (the dump's ``Odds`` there is the decoded book leg), and one whose capped ``Win Prob`` sits more
+    than ``UNQUOTED_BOOK_DISAGREEMENT_MAX`` from that price drops as the board drops it: the one
+    ``finalize_records`` gate binding at one line per player (the three-per-player trim and the
+    boost cap cannot).
     """
     rows = market_line_rows(test)
+    pickem = rows["line_type"].to_numpy() == "pickem"
     over = rows["P"].to_numpy() >= 0.5
     actual, line = rows["Result"].to_numpy(float), rows["Line"].to_numpy(float)
     book_over = 1 - rows["Odds"].to_numpy(float)
+    win_prob = np.minimum(np.where(over, rows["P"], 1 - rows["P"]), _MAX_CONFIDENCE)
     offers = pd.DataFrame(
         {
             "League": league,
@@ -107,8 +111,10 @@ def replay_offers(test: pd.DataFrame, league: str, market: str, version: str) ->
             "Date": rows["Date"].to_numpy(),
             "Line": line,
             "Bet": np.where(over, "Over", "Under"),
-            "Win Prob": np.minimum(np.where(over, rows["P"], 1 - rows["P"]), _MAX_CONFIDENCE),
-            "Market Prob": np.where(over, book_over, 1 - book_over),
+            "Win Prob": win_prob,
+            "Market Prob": np.where(
+                pickem, DFS_FAIR_PICK_PROB, np.where(over, book_over, 1 - book_over)
+            ),
             "Boost": 1.0,
             "Platform": "Underdog",
             "Alt Line": False,
@@ -120,9 +126,7 @@ def replay_offers(test: pd.DataFrame, league: str, market: str, version: str) ->
             "line_type": rows["line_type"].to_numpy(),
         }
     )
-    phantom = offers["line_type"].eq("pickem") & (
-        (offers["Win Prob"] - offers["Market Prob"]).abs() > UNQUOTED_BOOK_DISAGREEMENT_MAX
-    )
+    phantom = pickem & (np.abs(win_prob - DFS_FAIR_PICK_PROB) > UNQUOTED_BOOK_DISAGREEMENT_MAX)
     return realized.settled_offers(offers[~phantom])
 
 
@@ -226,7 +230,11 @@ def replay_table(offline: pd.DataFrame, live: pd.DataFrame) -> pd.DataFrame:
         live_part = live[live["League"] == league]
         rows.append(_scope_row("league", league, "", part, live_part))
         row = _scope_row("l2", league, "", l2_rows(part), live_part)
-        if row["n"] >= L2_MIN_ROWS and row["dates"] >= L2_MIN_DATES and row["live_n"]:
+        if (
+            row["n"] >= L2_MIN_ROWS
+            and row["dates"] >= L2_MIN_DATES
+            and row["live_n"] >= LIVE_MIN_LEGS
+        ):
             # The brief's "live claimed mean + the (hit - claimed) gap's one-sided 90 % lower bound".
             row["implied_live_hit_lb"] = row["live_read"] - row["gap_hi"]
             row["l2_flag"] = bool(row["implied_live_hit_lb"] > BREAK_EVEN)
@@ -321,10 +329,13 @@ def main(leagues, test_sets_dir, offline_before, live_since, live_until, out, pa
         f"{league} {delta:.3f}"
         for league, delta in zip(tolerance["league"], tolerance["gap_delta"], strict=True)
     )
+    flagged = tolerance[tolerance["l2_flag"].notna()]
+    matches = int((flagged["l2_flag"] == (flagged["live_hit"] > BREAK_EVEN)).sum())
     click.echo(
         f"tolerance reached: {deltas} (l2 rows, live_n >= {LIVE_MIN_LEGS}); "
-        f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; sides of {BREAK_EVEN:.4f} "
-        f"agree in {int(tolerance['agrees'].eq(True).sum())} of {len(tolerance)}"
+        f"max |gap_delta| {tolerance['gap_delta'].abs().max():.3f}; offline/live hit sides of "
+        f"{BREAK_EVEN:.4f} agree in {int(tolerance['agrees'].eq(True).sum())} of {len(tolerance)}; "
+        f"l2_flag matches live's side in {matches} of {len(flagged)}"
     )
     below = table[(table["scope"] == "l2") & (table["live_n"] < LIVE_MIN_LEGS)]
     if not below.empty:

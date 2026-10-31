@@ -12,7 +12,8 @@ from sportstradamus.scripts import realized_replay as rr
 def _test_set() -> pd.DataFrame:
     # a: pick'em Over hit; b: pick'em Under hit; c: near-even sportsbook row, P above the cap;
     # d: pick'em push (dropped); e: lopsided sportsbook row (excluded); f: synthetic (excluded);
-    # g: pick'em row the board's unquoted-disagreement gate drops.
+    # g: pick'em row the board's unquoted-disagreement gate drops. b and g carry decoded Odds away
+    # from .5 that would flip both verdicts if the gate read the decode instead of the .5 price.
     return pd.DataFrame(
         {
             "Player": ["a", "b", "c", "d", "e", "f", "g"],
@@ -28,7 +29,7 @@ def _test_set() -> pd.DataFrame:
             "Result": [3.0, 1.0, 2.0, 2.5, 9.0, 0.0, 4.0],
             "Line": [2.5, 2.5, 1.5, 2.5, 5.5, 0.5, 2.5],
             "P": [0.62, 0.40, 0.97, 0.58, 0.70, 0.55, 0.70],
-            "Odds": [0.50, 0.52, 0.47, 0.50, 0.30, 0.50, 0.50],
+            "Odds": [0.50, 0.40, 0.47, 0.50, 0.30, 0.50, 0.30],
             "QuoteAuthenticity": [
                 "pickem",
                 "pickem",
@@ -51,6 +52,7 @@ def test_replay_offers_keeps_market_lines_at_the_even_pick():
     assert list(offers["Hit"]) == [True, True, True]
     assert offers["Recommended"].all()
     assert offers.loc[offers["Player"] == "c", "Win Prob"].item() == 0.90
+    assert offers["Market Prob"].tolist() == pytest.approx([0.5, 0.5, 0.53])
     assert list(offers["line_type"]) == ["pickem", "pickem", "near_even"]
     assert list(offers["Quote"]) == ["unquoted", "unquoted", "quoted"]
 
@@ -123,22 +125,25 @@ def test_l2_rows_drop_pickem_rows_of_lopsided_cells():
 
 
 def test_l2_flag_needs_the_floors_and_reads_the_gap_form():
+    legs = rr.LIVE_MIN_LEGS
     live = pd.DataFrame(
         {
-            "League": ["NBA"] * 4,
-            "cell": ["PTS"] * 4,
-            "Date": ["2026-10-10", "2026-10-11"] * 2,
+            "League": "NBA",
+            "cell": "PTS",
+            "Date": np.tile(["2026-10-10", "2026-10-11"], legs // 2),
             "Recommended": True,
-            "Win Prob": [0.62, 0.62, 0.62, 0.62],
-            "Hit": [True, True, False, True],
-            "Unit": [0.83, 0.83, -1.0, 0.83],
+            "Win Prob": 0.62,
+            "Hit": np.tile([True, True, False, True], legs // 4),
+            "Unit": np.tile([0.83, 0.83, -1.0, 0.83], legs // 4),
         }
     )
     thin = rr.replay_table(_offline(2, "near_even", 0.5), live)
     assert thin.loc[thin["scope"] == "l2", "l2_flag"].item() is None
+    under_floor = rr.replay_table(_offline(25, "near_even", 0.5), live.head(legs - 1))
+    assert under_floor.loc[under_floor["scope"] == "l2", "l2_flag"].item() is None
     full = rr.replay_table(_offline(25, "near_even", 0.5), live)
     l2 = full[full["scope"] == "l2"].iloc[0]
-    assert l2["n"] == 500 and l2["dates"] == 25
+    assert l2["n"] == 500 and l2["dates"] == 25 and l2["live_n"] == legs
     assert l2["implied_live_hit_lb"] == pytest.approx(0.52)
     assert l2["l2_flag"] is False
 

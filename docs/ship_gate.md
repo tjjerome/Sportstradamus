@@ -265,8 +265,9 @@ may read this file only once that tolerance is stated and met and the cell order
 
 The `l2` rows are the league-level gap form the market-centre brief froze: near-even sportsbook rows
 plus pick'em rows of cells whose test over-rate sits in [.40, .60], the recommended tail, floors of
-300 rows over 20 dates, `implied_live_hit_lb = live_read − gap_hi` (the live claimed mean plus the
-one-sided 90 % lower bound of `hit − read`) and `l2_flag = implied_live_hit_lb > 1/1.83`. Its
+300 rows over 20 dates and 100 live legs, `implied_live_hit_lb = live_read − gap_hi` (the live
+claimed mean plus the one-sided 90 % lower bound of `hit − read`) and
+`l2_flag = implied_live_hit_lb > 1/1.83`. Its
 pre-registered read: over six league-windows (two 30-day windows each for NBA, NFL, NHL, run with
 `--live-since`/`--live-until`) the flag agrees with live's side of .5464 in ≥ 5 of 6 and the gaps sit
 within .03 in ≥ 4 of 6; killed at ≤ 3 of 6 or misses > .05 in ≥ 3 of 6. Never a gate.
