@@ -8,9 +8,10 @@ load cost per call site.
 
 Per-cell training metadata is split across two files:
 
-* ``stat_meta.json`` — **committed.** Per-cell ``{dist, shipped, target_normalization, posthoc}``:
-  the semi-stable ML config humans curate (distribution family, release
-  state, target-normalization slug, post-hoc corrector slug).
+* ``stat_meta.json`` — **committed.** Per-cell
+  ``{dist, shipped, target_normalization, posthoc, book_leg}``: the semi-stable ML config humans
+  curate (distribution family, release state, target-normalization slug, post-hoc corrector
+  slug, book-leg pricing per :func:`book_leg`).
 * ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
   the calibration values that meditate recomputes every run.
 
