@@ -167,9 +167,9 @@ def serve(
     against book base mean ``ev_book``, ``correct_fused_mean``, the dispersion / skew
     calibration (DPO phi capped at its ceiling), ``get_odds`` at the pickle's ``step``,
     the whole-CDF recal, temperature, then a PROB_STAGE posthoc. Training and serving
-    differ only in ``w_row`` and ``ev_book``.
+    differ only in ``w_row``, ``ev_book`` and ``gate_book``.
 
-    ``gate_book``: a per-row book gate for a hurdle cell (the X3 rung leg); ``None`` is the
+    ``gate_book`` is a ZINB cell's per-row book gate (the X3 rung leg); ``None`` is the
     pickle's ``hist_gate``.
 
     Returns:
@@ -209,14 +209,12 @@ def serve(
         shape = DecodedParams(ev=base, phi=np.minimum(phi * shape_cal, _DP_PHI_CEILING))
         under = get_odds(line, base, dist, step=step, phi=shape.phi)
     else:
-        gate_kw = (
-            {
+        gate_kw = {}
+        if dist == "ZINB":
+            gate_kw = {
                 "gate_model": rows["Gate_model"].to_numpy(float),
                 "gate_book": knobs["hist_gate"] if gate_book is None else gate_book,
             }
-            if dist == "ZINB"
-            else {}
-        )
         r_model = rows["R_model"].to_numpy(float)
         r, p, gate = fused_loc(w_row, ev_model, ev_book, cv, "NegBin", r=r_model, **gate_kw)
         base = correct_fused_mean(slug, blob, r * (1 - p) / p, gate)
