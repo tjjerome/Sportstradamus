@@ -63,10 +63,12 @@ RARE_MARKETS = {
     "NHL": frozenset({"goals", "powerPlayPoints"}),
     "NFL": frozenset({"tds"}),
 }
-# A rung polled within this many hours of the scoring is "fresh" (secondary arm).
+# Secondary arms (boolean columns of paper_sides): "books3" needs BOOKS3_MIN sportsbooks on the
+# line, "fresh" a rung polled within FRESH_RUNG_H hours of the scoring.
+BOOKS3_MIN = 3
 FRESH_RUNG_H = 1.0
 SECONDARY_ARMS = ("books3", "fresh", "model_agrees")
-# The sequence's level and the sample it is tightest at.
+# The level of the date-block bound and the sequence, and the sample the sequence is tightest at.
 CS_ALPHA = 0.10
 CS_DESIGN_LEGS = 1000
 # The brief's accept / kill floors (X2).
@@ -110,7 +112,7 @@ GROUP BY ALL ORDER BY rid, book, line
 
 
 def qualified_legs(history: pd.DataFrame) -> pd.DataFrame:
-    """One settled leg per prop since ``COUNT_ONCE_FROM`` with a scoring stamp, outside the rare cells.
+    """One settled leg per prop since ``COUNT_ONCE_FROM`` with a scoring stamp, outside rare cells.
 
     The main line stands for a prop posted at several (``Alt Line`` False first); the archive cell
     name joins the ladder.
@@ -129,7 +131,7 @@ def qualified_legs(history: pd.DataFrame) -> pd.DataFrame:
 
 
 def ladder_leans(con: duckdb.DuckDBPyConnection, legs: pd.DataFrame) -> pd.DataFrame:
-    """Per leg: the sportsbooks' rung leg at its line as of ``Scored At``, the book count, the rung age.
+    """Per leg: the sportsbooks' rung leg at its line as of ``Scored At``, book count and rung age.
 
     ``age_h`` is the hours from the newest rung's poll to the scoring; NaN with ``p_books`` where
     no sportsbook brackets the line.
@@ -158,22 +160,22 @@ def ladder_leans(con: duckdb.DuckDBPyConnection, legs: pd.DataFrame) -> pd.DataF
 
 
 def paper_sides(legs: pd.DataFrame) -> pd.DataFrame:
-    """The paper pick per leg: the lean's side inside the band, priced by that side's own posted payout.
+    """The paper pick per leg: the lean's side inside the band, at that side's own posted payout.
 
     ``Payout Over`` / ``Payout Under`` are the record's decimal payouts of each side at the last
     scoring, so a pick against the board's ``Bet`` is priced as the app posted it, never derived.
     """
-    p = legs["p_books"]
-    side = np.select([p >= LEAN_MIN, p <= 1 - LEAN_MIN], ["Over", "Under"], None)
+    p_books = legs["p_books"]
+    side = np.select([p_books >= LEAN_MIN, p_books <= 1 - LEAN_MIN], ["Over", "Under"], None)
     payout = np.where(side == "Over", legs["Payout Over"], legs["Payout Under"])
     legs = legs.assign(side=side, payout=payout)
-    inside = legs["side"].notna() & p.between(1 - LEAN_MAX, LEAN_MAX)
+    inside = legs["side"].notna() & p_books.between(1 - LEAN_MAX, LEAN_MAX)
     # The record writes 0 for a side the app never posted; such a pick sits out.
     picks = legs[inside & (legs["payout"] > 0)].copy()
     picks["breakeven"] = 1 / picks["payout"]
     picks["hit"] = picks["side"].eq(picks["Result"])
     picks["excess"] = picks["hit"].astype(float) - picks["breakeven"]
-    picks["books3"] = picks["n_books"] >= 3
+    picks["books3"] = picks["n_books"] >= BOOKS3_MIN
     picks["fresh"] = picks["age_h"] <= FRESH_RUNG_H
     picks["model_agrees"] = picks["side"].eq(picks["Bet"])
     picks["league_group"] = np.where(picks["League"].eq("NHL"), "NHL", "other")
@@ -197,7 +199,7 @@ def sequence_bounds(excess: np.ndarray, alpha: float) -> tuple[float, float]:
 
 
 def verdict(n: int, dates: int, hit: float, excess_lb: float, cs_lo: float, cs_hi: float) -> str:
-    """The brief's rule: kill reads first, accept needs the sample floors or the sequence, else open."""
+    """The brief's rule: kill first, accept on the sample floors or the sequence, else open."""
     if cs_hi < 0 or (n >= KILL_MIN_LEGS and hit <= KILL_HIT):
         return "kill"
     if (n >= ACCEPT_MIN_LEGS and dates >= ACCEPT_MIN_DATES and excess_lb > 0) or cs_lo > 0:
