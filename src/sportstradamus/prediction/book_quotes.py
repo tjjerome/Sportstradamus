@@ -300,11 +300,12 @@ def rung_book_leg(rungs: pd.DataFrame, line: float) -> tuple[float, int]:
 def rung_book_legs(
     offer_df: pd.DataFrame, league: str, market: str, date_map: dict[str, str]
 ) -> pd.DataFrame:
-    """Each offer's rung leg at its line: ``p_over`` (NaN under ``RUNG_MIN_BOOKS``), ``n_books``
-    and ``observed_at``, the newest poll stamp on the player's ladder.
+    """Each offer's rung leg at its line: ``p_over``, ``n_books`` and ``observed_at``.
 
-    One ladder read per game date on the slate, each sportsbook's latest poll; the DFS boards
-    never count. Positional over the ``Player`` and ``Line`` columns, returned on the frame's index.
+    ``p_over`` is NaN below ``RUNG_MIN_BOOKS`` books; ``observed_at`` is the newest poll stamp on
+    the player's ladder. One ladder read per game date on the slate, each sportsbook's latest poll;
+    the DFS boards never count. Positional over the ``Player`` and ``Line`` columns, returned on
+    the frame's index.
     """
     players, lines = offer_df["Player"].to_numpy(), offer_df["Line"].to_numpy(float)
     dates = np.array([date_map.get(player) for player in players], dtype=object)
