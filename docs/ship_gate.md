@@ -294,8 +294,8 @@ settled legs since `COUNT_ONCE_FROM`: where the sportsbooks' rungs at the posted
 leg's scoring, lean .55–.65 to a side, take that side at the payout the app posted for it
 (`Payout Over` / `Payout Under`); rare-outcome cells sit out. Each look appends one row per stratum
 (arm × platform × league group) to `data/training/books_lean_looks.parquet`, with the date-block
-90 % lower bound of the excess over break-even and an anytime-valid normal-mixture confidence
-sequence (α .10, tightest at 1,000 legs; the three secondary arms Bonferroni-split).
+lower bound of the excess over break-even and an anytime-valid normal-mixture confidence sequence,
+both at the stratum's α (.10, tightest at 1,000 legs; the three secondary arms Bonferroni-split).
 Pre-registered in `docs/archive/researcher_model_class_and_edge.md` (X2): accept at 1,000 legs over
 60 dates with the lower bound above 0, or the sequence above 0 at any look; kill when the sequence
 sits below 0 or 400 legs hit .53 or less. Hand-run weekly after `sync_from_prod.sh` and the archive
