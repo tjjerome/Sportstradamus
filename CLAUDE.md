@@ -386,7 +386,7 @@ accumulate in in-memory buffers (`_pending_odds`, `_pending_lines`, `_pending_la
 latest. Public methods: `get_ev`, `get_line` (sportsbook consensus line),
 `get_reference_line` (that, else the entry's line of record), `get_composite_under_prob`,
 `get_moneyline`, `get_total`, `get_team_market`, `get_team_market_map`, `get_line_history`,
-`get_book_line_histories`, `get_ev_history`, `get_movement`, `get_training_book_quotes`,
+`get_book_line_histories`, `get_ladder_rungs`, `get_ev_history`, `get_movement`, `get_training_book_quotes`,
 `get_training_quote_inputs`, `get_ev_line_inputs`, `to_pandas`, `add_dfs`, `add_ladder`,
 `merge_player_books`, `set_team_books`, `write`.
 
@@ -494,7 +494,7 @@ production data.
 
 | File | Purpose |
 |------|---------|
-| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`) |
+| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`, `book_leg`) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi, book_shape}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |

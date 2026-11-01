@@ -272,6 +272,36 @@ pre-registered read: over six league-windows (two 30-day windows each for NBA, N
 `--live-since`/`--live-until`) the flag agrees with live's side of .5464 in ≥ 5 of 6 and the gaps sit
 within .03 in ≥ 4 of 6; killed at ≤ 3 of 6 or misses > .05 in ≥ 3 of 6. Never a gate.
 
+### The rung book leg (`book_leg: "rung"`, X3)
+
+A cell whose `stat_meta.json` entry carries `book_leg: "rung"` prices its book leg from the
+sportsbooks' raw ladder rungs at the offered line (`prediction/book_quotes.py:apply_rung_book_leg`,
+read by `Archive.get_ladder_rungs`, each sportsbook's latest poll, the DFS boards excluded) instead
+of the decoded composite EV: `Market EV` is the rungs' mean over-probability (exact rung, else a
+logit interpolation between the bracketing rungs, at least two sportsbooks), `Market Projection`
+the mean that decodes back to it, and a hurdle count cell (ZINB with a historical gate) solves the
+rung's P(0) into a per-row `Book Gate` on its 0.5 line only, the base mean staying the model's own.
+Rows no two books price keep the decode. Where the leg applied the record reads
+`Quote Source == "book_rung"`, authentic, with `Quote Books` the count and `Quote Line` the offered
+line. Accepted per cell by the X3 read (`docs/archive/researcher_model_class_and_edge.md`; the
+per-cell NHL verdicts in [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); the owner
+flips the knob. Default `"quote"` is the decode every other cell runs.
+
+### The books'-lean paper test (`admin books-lean`, report only)
+
+`sportstradamus admin books-lean` (`scripts/books_lean.py`) grades a model-free paper rule on the
+settled legs since `COUNT_ONCE_FROM`: where the sportsbooks' rungs at the posted line, as of the
+leg's scoring, lean .55–.65 to a side, take that side at the payout the app posted for it
+(`Payout Over` / `Payout Under`); rare-outcome cells sit out. Each look appends one row per stratum
+(arm × platform × league group) to `data/training/books_lean_looks.parquet`, with the date-block
+90 % lower bound of the excess over break-even and an anytime-valid normal-mixture confidence
+sequence (α .10, tightest at 1,000 legs; the three secondary arms Bonferroni-split).
+Pre-registered in `docs/archive/researcher_model_class_and_edge.md` (X2): accept at 1,000 legs over
+60 dates with the lower bound above 0, or the sequence above 0 at any look; kill when the sequence
+sits below 0 or 400 legs hit .53 or less. Hand-run weekly after `sync_from_prod.sh` and the archive
+merge; never a serving rule. Look 1 and the population question it raised:
+[handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5.
+
 ---
 
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)
