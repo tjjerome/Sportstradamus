@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import duckdb
 import numpy as np
 import pandas as pd
 import pytest
@@ -81,20 +82,99 @@ def test_sequence_radius_at_the_design_sample_and_its_growth():
 
 
 def test_verdict_rule():
+    assert bl.verdict(n=500, dates=30, hit=0.60, excess_lb=0.01, cs_lo=-0.02, cs_hi=0.05) == "open"
     assert (
-        bl.verdict(n=500, dates=30, hit=0.60, excess_lb90=0.01, cs_lo=-0.02, cs_hi=0.05) == "open"
+        bl.verdict(n=1000, dates=60, hit=0.60, excess_lb=0.01, cs_lo=-0.02, cs_hi=0.05) == "accept"
     )
     assert (
-        bl.verdict(n=1000, dates=60, hit=0.60, excess_lb90=0.01, cs_lo=-0.02, cs_hi=0.05)
-        == "accept"
+        bl.verdict(n=300, dates=20, hit=0.60, excess_lb=-0.01, cs_lo=0.001, cs_hi=0.05) == "accept"
     )
+    assert bl.verdict(n=400, dates=30, hit=0.53, excess_lb=-0.05, cs_lo=-0.08, cs_hi=0.01) == "kill"
     assert (
-        bl.verdict(n=300, dates=20, hit=0.60, excess_lb90=-0.01, cs_lo=0.001, cs_hi=0.05)
-        == "accept"
+        bl.verdict(n=200, dates=10, hit=0.40, excess_lb=-0.20, cs_lo=-0.30, cs_hi=-0.01) == "kill"
     )
-    assert (
-        bl.verdict(n=400, dates=30, hit=0.53, excess_lb90=-0.05, cs_lo=-0.08, cs_hi=0.01) == "kill"
+
+
+def test_ladder_leans_reads_each_books_latest_poll_before_scoring():
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE ladder(league VARCHAR, market VARCHAR, game_date DATE, entity VARCHAR, "
+        "book VARCHAR, line DOUBLE, p_over DOUBLE, observed_at TIMESTAMP)"
     )
-    assert (
-        bl.verdict(n=200, dates=10, hit=0.40, excess_lb90=-0.20, cs_lo=-0.30, cs_hi=-0.01) == "kill"
+    # a: two sportsbooks and Underdog (a DFS book, out); an old poll at .70 superseded by the
+    # book's 19:00 poll; a fanduel poll after the 20:00 scoring, ignored. b: no rung at all.
+    rows = []
+    for book, p_old, p_new in (
+        ("fanduel", 0.70, 0.58),
+        ("draftkings", 0.70, 0.60),
+        ("Underdog", 0.5, 0.5),
+    ):
+        for line, dp in ((19.5, 0.08), (20.5, 0.0), (21.5, -0.08)):
+            rows.append(
+                ("NBA", "PTS", "2026-10-10", "a", book, line, p_old + dp, "2026-10-10 15:00:00")
+            )
+            rows.append(
+                ("NBA", "PTS", "2026-10-10", "a", book, line, p_new + dp, "2026-10-10 19:00:00")
+            )
+    rows.append(("NBA", "PTS", "2026-10-10", "a", "fanduel", 20.5, 0.30, "2026-10-10 21:00:00"))
+    con.executemany("INSERT INTO ladder VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    legs = pd.DataFrame(
+        {
+            "League": ["NBA", "NBA"],
+            "cell": ["PTS", "PTS"],
+            "Date": ["2026-10-10", "2026-10-10"],
+            "Player": ["a", "b"],
+            "Line": [20.5, 10.5],
+            "Scored At": [pd.Timestamp("2026-10-10 20:00")] * 2,
+        },
+        index=[7, 3],
     )
+    leans = bl.ladder_leans(con, legs)
+    assert list(leans.index) == [7, 3]
+    assert leans.loc[7, "p_books"] == pytest.approx(0.59)
+    assert leans.loc[7, "n_books"] == 2 and leans.loc[7, "age_h"] == 1.0
+    assert np.isnan(leans.loc[3, "p_books"]) and leans.loc[3, "n_books"] == 0
+    assert np.isnan(leans.loc[3, "age_h"])
+
+
+def test_look_rows_strata_and_the_split_level():
+    rng = np.random.default_rng(7)
+    n = 48
+    picks = pd.DataFrame(
+        {
+            "Date": [f"2026-10-{10 + i % 12:02d}" for i in range(n)],
+            "Platform": ["Underdog", "Sleeper"] * (n // 2),
+            "league_group": ["NHL"] * (n // 2) + ["other"] * (n // 2),
+            "hit": rng.random(n) < 0.6,
+            "breakeven": 1 / 1.83,
+            "books3": True,
+            "fresh": False,
+            "model_agrees": [True, False] * (n // 2),
+        }
+    )
+    picks["excess"] = picks["hit"].astype(float) - picks["breakeven"]
+    table = bl.look_rows(picks, pd.Timestamp("2026-11-01"))
+    assert list(table.columns) == list(bl.LOOK_COLUMNS)
+    strata = list(zip(table["arm"], table["platform"], table["league_group"], strict=True))
+    assert strata == [
+        ("primary", "all", "all"),
+        ("primary", "Sleeper", "NHL"),
+        ("primary", "Sleeper", "other"),
+        ("primary", "Underdog", "NHL"),
+        ("primary", "Underdog", "other"),
+        ("books3", "all", "all"),
+        ("model_agrees", "all", "all"),
+    ]
+    assert list(table["alpha"]) == [bl.CS_ALPHA] * 5 + [bl.CS_ALPHA / 3] * 2
+    assert list(table["n"]) == [48, 12, 12, 12, 12, 48, 24]
+    assert table["verdict"].isin(["open", "accept", "kill"]).all()
+    # books3 holds every pick: its bound at alpha / 3 sits at or below the same draws' bound at alpha.
+    _, lb_at_alpha, _ = bl._bootstrap_mean_ci_clustered(
+        picks["excess"].to_numpy(float),
+        picks["Date"].to_numpy(),
+        bl.key_rng(bl.LEAN_SEED, "books3/all/all"),
+        percentiles=(100 * bl.CS_ALPHA, 100 * (1 - bl.CS_ALPHA)),
+    )
+    books3 = table[table["arm"] == "books3"].iloc[0]
+    assert books3["excess_lb"] <= lb_at_alpha
+    assert books3["cs_lo"] < table.iloc[0]["cs_lo"]

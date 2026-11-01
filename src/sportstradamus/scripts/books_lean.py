@@ -66,15 +66,14 @@ RARE_MARKETS = {
 # A rung polled within this many hours of the scoring is "fresh" (secondary arm).
 FRESH_RUNG_H = 1.0
 SECONDARY_ARMS = ("books3", "fresh", "model_agrees")
-# The sequence's level and the sample it is tightest at (the brief's accept floor).
+# The sequence's level and the sample it is tightest at.
 CS_ALPHA = 0.10
 CS_DESIGN_LEGS = 1000
+# The brief's accept / kill floors (X2).
 ACCEPT_MIN_LEGS = 1000
 ACCEPT_MIN_DATES = 60
 KILL_MIN_LEGS = 400
 KILL_HIT = 0.53
-# The one-sided 90 % lower bound the brief pre-registered, as the bootstrap's percentiles.
-_PCT_90 = (10.0, 90.0)
 # One generator per stratum (key_rng), so a stratum's bounds hold still as other strata appear.
 LEAN_SEED = 1729
 _DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
@@ -88,7 +87,7 @@ LOOK_COLUMNS = (
     "hit",
     "breakeven",
     "excess",
-    "excess_lb90",
+    "excess_lb",
     "cs_lo",
     "cs_hi",
     "alpha",
@@ -135,7 +134,7 @@ def ladder_leans(con: duckdb.DuckDBPyConnection, legs: pd.DataFrame) -> pd.DataF
     ``age_h`` is the hours from the newest rung's poll to the scoring; NaN with ``p_books`` where
     no sportsbook brackets the line.
     """
-    scored_at = pd.to_datetime(legs["Scored At"]).reset_index(drop=True)
+    scored_at = pd.to_datetime(legs["Scored At"])
     keys = pd.DataFrame(
         {
             "rid": np.arange(len(legs)),
@@ -154,7 +153,7 @@ def ladder_leans(con: duckdb.DuckDBPyConnection, legs: pd.DataFrame) -> pd.DataF
     n_books = np.zeros(len(legs), dtype=int)
     for rid, group in rungs.groupby("rid"):
         p_books[rid], n_books[rid] = rung_book_leg(group, lines[rid])
-        age_h[rid] = (scored_at[rid] - group["observed_at"].max()) / pd.Timedelta(hours=1)
+        age_h[rid] = (scored_at.iloc[rid] - group["observed_at"].max()) / pd.Timedelta(hours=1)
     return pd.DataFrame({"p_books": p_books, "n_books": n_books, "age_h": age_h}, index=legs.index)
 
 
@@ -181,10 +180,6 @@ def paper_sides(legs: pd.DataFrame) -> pd.DataFrame:
     return picks
 
 
-def _boundary(v: float, rho: float, alpha: float) -> float:
-    return math.sqrt((v + rho) * math.log((v + rho) / (rho * alpha**2)))
-
-
 def mixture_rho(design_legs: int, alpha: float) -> float:
     """The mixture scale that makes the boundary tightest at the design sample (variance t/4)."""
     v0 = design_legs / 4
@@ -195,16 +190,17 @@ def mixture_rho(design_legs: int, alpha: float) -> float:
 
 def sequence_bounds(excess: np.ndarray, alpha: float) -> tuple[float, float]:
     """The confidence sequence for the mean excess after these legs: mean +/- u(t/4) / t."""
-    t = len(excess)
-    radius = _boundary(t / 4, mixture_rho(CS_DESIGN_LEGS, alpha), alpha) / t
+    t, rho = len(excess), mixture_rho(CS_DESIGN_LEGS, alpha)
+    v = t / 4
+    radius = math.sqrt((v + rho) * math.log((v + rho) / (rho * alpha**2))) / t
     return float(excess.mean() - radius), float(excess.mean() + radius)
 
 
-def verdict(n: int, dates: int, hit: float, excess_lb90: float, cs_lo: float, cs_hi: float) -> str:
+def verdict(n: int, dates: int, hit: float, excess_lb: float, cs_lo: float, cs_hi: float) -> str:
     """The brief's rule: kill reads first, accept needs the sample floors or the sequence, else open."""
     if cs_hi < 0 or (n >= KILL_MIN_LEGS and hit <= KILL_HIT):
         return "kill"
-    if (n >= ACCEPT_MIN_LEGS and dates >= ACCEPT_MIN_DATES and excess_lb90 > 0) or cs_lo > 0:
+    if (n >= ACCEPT_MIN_LEGS and dates >= ACCEPT_MIN_DATES and excess_lb > 0) or cs_lo > 0:
         return "accept"
     return "open"
 
@@ -213,7 +209,7 @@ def look_rows(picks: pd.DataFrame, look_at: pd.Timestamp) -> pd.DataFrame:
     """One row per stratum of this look.
 
     The primary arm pooled and by platform x league group, then each secondary arm pooled at the
-    Bonferroni-split level.
+    Bonferroni-split level; the bootstrap bound and the sequence both read at the stratum's alpha.
     """
     strata = [("primary", "all", "all", picks, CS_ALPHA)]
     strata += [
@@ -231,7 +227,7 @@ def look_rows(picks: pd.DataFrame, look_at: pd.Timestamp) -> pd.DataFrame:
         excess = part["excess"].to_numpy(float)
         rng = key_rng(LEAN_SEED, f"{arm}/{platform}/{group}")
         mean, lb, _ = _bootstrap_mean_ci_clustered(
-            excess, part["Date"].to_numpy(), rng, percentiles=_PCT_90
+            excess, part["Date"].to_numpy(), rng, percentiles=(100 * alpha, 100 * (1 - alpha))
         )
         cs_lo, cs_hi = sequence_bounds(excess, alpha)
         n, dates, hit = len(part), int(part["Date"].nunique()), float(part["hit"].mean())
@@ -246,7 +242,7 @@ def look_rows(picks: pd.DataFrame, look_at: pd.Timestamp) -> pd.DataFrame:
                 "hit": hit,
                 "breakeven": float(part["breakeven"].mean()),
                 "excess": mean,
-                "excess_lb90": lb,
+                "excess_lb": lb,
                 "cs_lo": cs_lo,
                 "cs_hi": cs_hi,
                 "alpha": alpha,
