@@ -105,6 +105,7 @@ cli.add_command(
             "count-family-screen": "sportstradamus.scripts.count_family_screen:main",
             "tail-scorecard": "sportstradamus.scripts.tail_scorecard:main",
             "realized-replay": "sportstradamus.scripts.realized_replay:main",
+            "books-lean": "sportstradamus.scripts.books_lean:main",
             "feature-parity": "sportstradamus.scripts.feature_parity:main",
             "restamp-identity": "sportstradamus.scripts.restamp_strategy_identity:main",
         },

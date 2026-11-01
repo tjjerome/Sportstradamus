@@ -1,0 +1,13 @@
+Usage: sportstradamus admin books-lean [OPTIONS]
+
+  Grade the sportsbooks' lean at the posted line on the settled legs (X2, report
+  only).
+
+Options:
+  --archive FILE  Odds archive, opened read-only (default:
+                  $SPORTSTRADAMUS_ARCHIVE_DB or archive/archive.duckdb).
+  --ledger FILE   This look's graded legs (default:
+                  data/training/books_lean_ledger.parquet).
+  --looks FILE    Every look's rows, appended (default:
+                  data/training/books_lean_looks.parquet).
+  --help          Show this message and exit.

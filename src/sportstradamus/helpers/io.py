@@ -83,6 +83,10 @@ LIVE_GAP_PATH = _RUNTIME_DIR / "live_gap_per_cell.parquet"
 # Offline realized-money replay, one row per scope, written by `admin realized-replay --parquet`;
 # a report beside the tail scorecard, never a gate (docs/ship_gate.md).
 REALIZED_REPLAY_PATH = _TRAINING_DIR / "realized_replay.parquet"
+# X2, the books'-lean paper test: the graded legs of the latest look and every look's row
+# (`admin books-lean`); dev-side reads, never a serving input (docs/ship_gate.md).
+BOOKS_LEAN_LEDGER_PATH = _TRAINING_DIR / "books_lean_ledger.parquet"
+BOOKS_LEAN_LOOKS_PATH = _TRAINING_DIR / "books_lean_looks.parquet"
 # Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
 # running the Monte-Carlo backtest at page load). Written nightly by reflect.
 PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
