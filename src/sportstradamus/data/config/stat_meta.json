@@ -104,7 +104,7 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "main",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "nll",
@@ -361,7 +361,7 @@
         },
         "blocked": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "main",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "crps",
@@ -642,7 +642,7 @@
         },
         "hits": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "main",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
@@ -746,7 +746,7 @@
         },
         "singles": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "main",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
