@@ -323,10 +323,10 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      optimistic than live (`gap_delta`), every live recommended hit sits below .5464 (NBA .508, NFL
      .509, NHL .545) while the L2 flag clears NFL and NHL, so making it read within .03 of live per
      league is the model-build lane's first job and no release gate reads it; forward capture is live
-     from push II (81c1ed33, 11-01: per-poll Underdog line states and match entry counts, the daily
+     from push II (81c1ed33, 11-06: per-poll Underdog line states and match entry counts, the daily
      pill entry counts, and `fetch nba-injuries` / `fetch nba-lineups`, whose cron lines wait on the
      owner's licence call; T2a at 300 flagged legs, T2b at 5,000); X2 landed as `admin books-lean`
-     (push III, 11-01) and look 1 kills on every stratum by construction — the apps shade exactly
+     (push III, 11-06) and look 1 (11-01) kills on every stratum by construction — the apps shade exactly
      where the books lean (the lean's side is the discounted side on 100 % of shaded Underdog rungs;
      the books lean on 14 of 1,964 even rungs), so the population is the owner's call before look 2;
      the NFL wind
@@ -337,7 +337,7 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      even-pick legs) and offline on shots (−0.0004 [−0.0008, −0.0001], no gate flip), stays open on
      assists and points under the 1,500-row floor and is killed on goals under the hurdle design
      (+0.0019 [+0.0003, +0.0034]), so the owner's one flip is NHL `shots` to `book_leg: "rung"`; push III
-     (11-01) landed the inert code (§3.4). The model-build lane starts from
+     (11-06) landed the inert code (§3.4). The model-build lane starts from
      `~/backups/sportstradamus/2026-10-21-live-gap-2/research/MODEL_BUILD_KICKOFF.md`. The walk stopped 13:01 CDT (restart `walk/start_walk.sh
      NFL,NBA 8 48`); Part 5 levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven
      held cells left production at 12:44 CDT (verified on the 13:06 board).
@@ -370,7 +370,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
 | Gate-1 margin | not a fix | `devel` serves ties by the owner's policy; `main` requires the live pass |
 | Side rule, edge floor, selection shrink, trust layer | not retried | killed verdicts |
 | Lead-time blend weight or temperature (§5 item 4) | not a lever (KILL 2026-10-29) | early NFL picks win no less; a per-lead weight is worth 3.5 × 10⁻⁵ Brier in-sample and nothing walk-forward; the fault is the level of w at every lead (I6d) |
-| Serve-time book leg on hurdle cells (NHL goals, MLB home runs) | found 10-28; the X3 rung leg (push III 11-01) is the serving half and lost offline on goals (+0.0019 Brier; MIT §3.4, §8.2 #0g), so the X3 VERDICT's two untested alternatives stand; owner's go on one | the price-to-mean decode clamps below the cell's fixed `zi`, so `Market Prob` is a per-version constant (.875, .903) and the blend used no book; every live read against `Market Prob` on those cells is a strawman (lane `REPORT.md`) |
+| Serve-time book leg on hurdle cells (NHL goals, MLB home runs) | found 10-28; the X3 rung leg (push III 11-06) is the serving half and lost offline on goals (+0.0019 Brier; MIT §3.4, §8.2 #0g), so the X3 VERDICT's two untested alternatives stand; owner's go on one | the price-to-mean decode clamps below the cell's fixed `zi`, so `Market Prob` is a per-version constant (.875, .903) and the blend used no book; every live read against `Market Prob` on those cells is a strawman (lane `REPORT.md`) |
 
 ## 8. Owner asks (one each)
 
@@ -428,7 +428,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
    read every Sunday?
 9. The hurdle-cell book leg (§7): go on the serve-time fix (the book's own P(over) when the offer line
    equals the quoted line; otherwise a decode with a free zero mass), research-gated? (answered
-   2026-10-30 as X3, built behind `book_leg: "rung"` in push III 11-01: accepted live and on shots,
+   2026-10-30 as X3, built behind `book_leg: "rung"` in push III 11-06: accepted live and on shots,
    killed on goals under the hurdle design, so the hurdle fix itself stays open on the VERDICT's
    untested alternatives; §7.)
 10. The six NBA cells that fail their fresh Gate 1 on the levelled matrix (AST, BLK, BLST, FG3M, REB,
@@ -454,7 +454,7 @@ Mechanisms are tested now on the data in hand (§4); live data grades the fixes.
     into the replay's design; (g) covered by the archive's Underdog polls, which the information
     audit read at the close for 1,155 of 1,182 recommended legs. The owner also approved X1–X3, the
     NFL wind pre-test, the forward capture and the MLB replication, all built in a separate
-    implementation session: pushes I–III landed 10-31 / 11-01; the replay's read 1 and X2's look 1
+    implementation session: pushes I–III landed 10-31 / 11-06; the replay's read 1 and X2's look 1
     are in §5 item 5.)
 
 ## 9. Records
