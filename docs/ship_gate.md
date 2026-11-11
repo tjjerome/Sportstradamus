@@ -298,9 +298,9 @@ lower bound of the excess over break-even and an anytime-valid normal-mixture co
 both at the stratum's α (.10, tightest at 1,000 legs; the three secondary arms Bonferroni-split).
 Pre-registered in `docs/archive/researcher_model_class_and_edge.md` (X2): accept at 1,000 legs over
 60 dates with the lower bound above 0, or the sequence above 0 at any look; kill when the sequence
-sits below 0 or 400 legs hit .53 or less. Hand-run weekly after `sync_from_prod.sh` and the archive
-merge; never a serving rule. Look 1 and the population question it raised:
-[handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5.
+sits below 0 or 400 legs hit .53 or less. Never a serving rule. Closed by the owner on 2026-11-11
+after look 1, which killed by construction (the apps' shade covers the books' lean); the command
+stays for a hand read: [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5.
 
 ---
 
