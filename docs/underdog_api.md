@@ -1230,7 +1230,3 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 - 2026-10-10 `get_ud` raises on a full feed with no even pick (§7.4)
 - 2026-10-08 owner app read: 4-pick Flex one-loss tier 1.4 (was 1.8); app shows decimal prices (even pick 1.87×), feed multiplier unchanged; four Power pair quotes (§6.8)
 - 2026-10-04 `underdog_payouts.json` set to the §6.8 quotes (owner re-confirmed in app); file-vs-quote column dropped
-- 2026-09-11 team and game markets for every modeled league from one `match_grouped_lines?market_categories[]=` read per sport (P45, §7.6): NFL pills dropped; markets keyed `team <slug>` / `match <slug>`; mass-option lines skipped
-- 2026-09-11 scraper rebuilt on this doc (`books/underdog.py`): feed + core + budgeted rungs (three workers, 120 s, empty-streak stop; the origin answers empty past ~36/s, §9.4); `/v1/teams` and `rival_lines` gone; team codes from lobby `teams` dicts (esports titles list the away side first, §7.3)
-- 2026-09-10 modifier mapped: slip = table × Π picks × m; Flex m = Gaussian copula, ρ 0.48 per pair type; Power m pair-specific + asymmetric; untaxed pairs = free correlation. Rivals retired, Ladders replaced them (owner)
-- 2026-09-10 authed batch: `entry_slips/estimate` quotes payout tables (2–8 picks) + which pairs are taxed; scaffolds/sections public, `market_filters` needs token; `state_configs` needs lat/long; ladders not on web
