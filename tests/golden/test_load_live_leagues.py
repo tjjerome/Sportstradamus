@@ -151,7 +151,7 @@ def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE):
     monkeypatch.setattr(
         prediction_cli, "process_offers", lambda *args, **kwargs: (offers.copy(), pd.DataFrame())
     )
-    monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None: {})
+    monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None, scored_at=None: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
     monkeypatch.setattr(prediction_cli, "read_history", pd.DataFrame)
     monkeypatch.setattr(

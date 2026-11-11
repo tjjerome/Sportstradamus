@@ -237,8 +237,9 @@ def main(progress, contest_variant, log_level):
         extra={"contest_variant": contest_variant},
     )
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
-    # One stamp per run: every history row this run writes joins the archive state
-    # the run saw, which is what point-in-time research needs.
+    # One stamp per run: every history row and capture this run writes carries it, so a
+    # leg joins the archive state and the captures its own run saw, which is what
+    # point-in-time research needs.
     scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
     stats, updates_failed = load_live_leagues()
@@ -256,7 +257,7 @@ def main(progress, contest_variant, log_level):
     ud_corr, ud_story = [], []
     try:
         ud_offers, ud_parlays = process_offers(
-            get_ud(capture_dir=UNDERDOG_CAPTURE_DIR),
+            get_ud(capture_dir=UNDERDOG_CAPTURE_DIR, scored_at=scored_at),
             "Underdog",
             stats,
             contest_variant=contest_variant,

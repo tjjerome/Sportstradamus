@@ -106,8 +106,8 @@ MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
 # never reads it.
 FEATURE_LOG_DIR = _RUNTIME_DIR / "feature_log"
 # Forward captures the information-audit reads (T2a news guard, T2b popularity) grade later:
-# per-poll Underdog line states, the daily pill entry counts, NBA injury reports and lineups.
-# Written only by prophecize / the fetch commands; the dashboard never reads them.
+# per-poll Underdog line states and pill entry counts, NBA injury reports and lineups.
+# Written only by prophecize / the two NBA fetch commands; the dashboard never reads them.
 UNDERDOG_CAPTURE_DIR = _RUNTIME_DIR / "underdog_capture"
 NBA_INJURY_DIR = _RUNTIME_DIR / "nba_injury"
 NBA_LINEUPS_DIR = _RUNTIME_DIR / "nba_lineups"
@@ -229,6 +229,16 @@ def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None
     path, tmp = _atomic_tmp(path)
     df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
     tmp.replace(path)
+
+
+def write_capture_parquet(frame: pd.DataFrame, table_dir: Path, polled_at: pd.Timestamp) -> None:
+    """Write one forward-capture table to ``table_dir/date=YYYY-MM-DD/HHMMSS.parquet``.
+
+    ``polled_at`` is the run's ``Scored At``, naive UTC: every row carries it and the file is
+    named by its date and clock, so a leg's ``Scored At`` finds the captures of its own run.
+    """
+    day, clock = polled_at.strftime("%Y-%m-%d"), polled_at.strftime("%H%M%S")
+    _atomic_write_parquet(frame, table_dir / f"date={day}" / f"{clock}.parquet")
 
 
 def _atomic_write_json(obj, path) -> None:

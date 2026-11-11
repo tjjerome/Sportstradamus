@@ -54,16 +54,15 @@ parser change away (§8, §10).
 
 ## 2. The scraper today
 
-`get_ud` ([books/underdog.py](../src/sportstradamus/books/underdog.py)) and the daily
-`fetch underdog-lobby` ([collectors/underdog_lobby.py](../src/sportstradamus/collectors/underdog_lobby.py))
-make only unauthenticated GETs **[CODE]**:
+`get_ud` ([books/underdog.py](../src/sportstradamus/books/underdog.py)) makes only
+unauthenticated GETs **[CODE]**:
 
 | Call | When | Purpose |
 |---|---|---|
-| `GET api…/v1/over_under_lines` (`UD_LINES_URL`) | once | every player prop, all sports (§6.1); with `capture_dir` set (`prophecize`) the raw feed and lobby lines are stored per poll, suspended and live ones included, before the parse ([data_collectors.md](data_collectors.md), forward capture) |
+| `GET api…/v1/over_under_lines` (`UD_LINES_URL`) | once | every player prop, all sports (§6.1); with `capture_dir` set (`prophecize`) the raw feed and lobby lines are stored per poll, the suspended and live ones the parser drops included ([data_collectors.md](data_collectors.md), forward capture) |
 | `GET api…/v1/lobbies/content/match_grouped_lines?sport_id=<X>&include_live=true&market_categories[]=core&…=partial_core&…=team_prop&…=misc` + trio (`UD_LOBBY_URL`, `UD_TEAM_CATEGORIES`) | once per modeled league (`UD_MODELED_LEAGUES`) with games in the feed | every team and game market of the league in one answer: moneyline, spread, total, period and inning-range lines, team totals and props, yes/no game props (§7.6, P45); its `teams` dict also names the feed's teams (§7.3) |
 | `GET api…/v3/over_unders/<over_under_id>/alternate_projections` (`UD_ALT_LINES_URL`) | one per modeled, `stat_map`-mapped player prop flagged `has_alternates`, three workers on one session, until `UD_ALT_LINES_BUDGET_S` (120 s) runs out or `UD_ALT_LINES_EMPTY_STREAK` (25) markets in a row answer without rungs; games about to lock and deep lines first | alternate lines (§9.4) |
-| `GET api…/v1/lobbies/content/lines?sport_id=<X>&filter_type=PickemStat&filter_id=<pickem_stat_id>&limit=1000` (`UD_PILL_URL`; `fetch underdog-lobby`, not `get_ud`) | once a day, one per `(sport, pickem_stat_id)` the feed shows for a modeled league, ~100 requests | per-line `entry_count` for the T2b popularity read, with `stats…/v1/lineup_statuses` refreshed beside it (§6.4, §9.3; [data_collectors.md](data_collectors.md)) |
+| `GET api…/v1/lobbies/content/lines?sport_id=<X>&filter_type=PickemStat&filter_id=<pickem_stat_id>&limit=1000` (`UD_PILL_URL`), then `stats…/v1/lineup_statuses` (`UD_LINEUP_STATUSES_URL`) | with `capture_dir` set (`prophecize`), last, after the alternate-line pass: one per `(sport, pickem_stat_id)` the feed shows for a modeled league, ~70 requests a poll, then the decode | per-line `entry_count` for the T2b popularity read and the `lineup_status_id` decode (§6.4, §9.3; [data_collectors.md](data_collectors.md)) |
 
 The parser takes both container styles (§7.3), drops suspended and live lines, combo
 players, appearances without a game (season futures) and mass-option lines (race to
@@ -1005,7 +1004,7 @@ pill sweep is the fallback if the feed retires, priced above.
 |---|---|---|
 | `stats…/v2/sports` (92 KB) | `pickem_status` tells a poller which of the 141 sport ids have a board today, so it never requests dead sports; `ladder_status` flags the two ladder sports | [P-4] |
 | `stats…/v1/teams` (11 MB) | abbreviations; 900 s TTL, ETag | [HAR] |
-| `stats…/v1/lineup_statuses` (1.4 KB) | decode `appearances[].lineup_status_id`; `fetch underdog-lobby` refreshes it daily to `data/runtime/underdog_capture/lineup_statuses.json` | [P-9] |
+| `stats…/v1/lineup_statuses` (1.4 KB) | decode `appearances[].lineup_status_id`; `get_ud`'s capture refreshes it each poll to `data/runtime/underdog_capture/lineup_statuses.json` | [P-9] |
 | `app…/client-version` (34 B) | only if a client ever sends `Client-Version`; public reads do not need it | [P-3] |
 
 Payout tables are not a reference download; `entry_slips/estimate` quotes them per slip
@@ -1116,9 +1115,8 @@ Each lever names where the data sits and the gate before it can be trusted.
    running stat next to the live line **[P-11]**. Gate: a live-market model.
 10. **Popularity and movement stamps.** `entry_count` per line and per match,
     `updated_at` per line and per option **[HAR]**; cheap features for a
-    line-movement archive. Captured: per match on every poll and per line once a
-    day (`fetch underdog-lobby`), for the T2b read
-    ([data_collectors.md](data_collectors.md)).
+    line-movement archive. Captured per match and per line on every poll
+    (`get_ud`'s capture), for the T2b read ([data_collectors.md](data_collectors.md)).
 11. **Context.** `game.pre_game_data.weather` / `venue` / `broadcasts`, `scoreboard`
     **[HAR]**; low value, already available elsewhere.
 12. **Boosts and power-ups.** `over_under.boost` (null in the capture),
@@ -1227,6 +1225,7 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 
 ## Changelog
 
+- 2026-11-11 pill `entry_count` + `lineup_statuses` ride `get_ud`'s per-poll capture, last, after the rung pass (~70 requests); capture files carry the run's `Scored At`; `fetch underdog-lobby` gone (§2)
 - 2026-10-30 per-poll capture of raw feed + lobby lines (`status`, `lineup_status_id`, option states, match `entry_count`) via `get_ud(capture_dir=)`; daily `fetch underdog-lobby` pill pull for per-line `entry_count` + `lineup_statuses` (§2, data_collectors.md)
 - 2026-10-10 `get_ud` raises on a full feed with no even pick (§7.4)
 - 2026-10-08 owner app read: 4-pick Flex one-loss tier 1.4 (was 1.8); app shows decimal prices (even pick 1.87×), feed multiplier unchanged; four Power pair quotes (§6.8)

@@ -1,22 +1,25 @@
-"""Per-poll capture of what Underdog's feed and lobbies already show, beside the parse.
+"""Per-poll capture of what Underdog's feed, lobbies and pills show, beside the parse.
 
 ``get_ud`` fetches the feed and one lobby per modeled league on every ``prophecize`` run and keeps
 only the active, priced lines. The information-audit reads need what it drops: a line's ``status``
 (suspended lines are a news signal), the appearance's ``lineup_status_id`` (Underdog's own Q / D / O
-flag), each option's status and multiplier, and the lobby's per-match ``entry_count``. One parquet
-per poll under ``UNDERDOG_CAPTURE_DIR/{lines,matches}/date=YYYY-MM-DD/HHMMSS.parquet`` (UTC);
-``over_under_id`` survives line moves, so two polls diff on it. ``books.underdog`` imports this
-module, so the payload indexer ``by_id`` lives here.
+flag), each option's status and multiplier, and the lobby's per-match ``entry_count``. Once the
+board is built, ``get_ud`` also reads each PickemStat pill the feed points at for the per-line
+``entry_count`` and the ``lineup_status_id`` decode. One parquet per poll and table under
+``UNDERDOG_CAPTURE_DIR/{lines,matches,entry_counts}/date=YYYY-MM-DD/HHMMSS.parquet``, named by the
+run's ``Scored At`` (UTC); ``over_under_id`` survives line moves, so two polls diff on it.
+``books.underdog`` imports this module, so the payload indexer ``by_id`` lives here and the
+requests stay there.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from sportstradamus.helpers.io import _atomic_write_parquet
+from sportstradamus.helpers.io import _atomic_write_json, write_capture_parquet
+from sportstradamus.spiderLogger import logger
 
 # Column order and dtype of each capture table, pinned so every poll's parquet carries one
 # schema: an all-null column left to pyarrow is typed ``null`` and a date's files stop reading
@@ -57,6 +60,15 @@ MATCH_DTYPES = {
     "match_id": "Int64",
     "entry_count": "string",
 }
+ENTRY_DTYPES = {
+    "polled_at": "datetime64[ns]",
+    "sport_id": "string",
+    "pickem_stat_id": "string",
+    "over_under_line_id": "string",
+    "appearance_id": "string",
+    "entry_count": "string",
+    "header": "string",
+}
 # Option choices on the over slot and the under slot (the parser's _CHOICE_SLOT, by name).
 _OVER_CHOICES = ("higher", "yes", "home")
 _UNDER_CHOICES = ("lower", "no", "away")
@@ -72,13 +84,12 @@ def _option(options: list[dict], choices: tuple[str, ...]) -> dict:
     return next((option for option in options if option["choice"] in choices), {})
 
 
-def poll_rows(payload: dict, source: str, polled_at: datetime) -> pd.DataFrame:
+def poll_rows(payload: dict, source: str, polled_at: pd.Timestamp) -> pd.DataFrame:
     """One row per over/under line in a feed or lobby payload, suspended and live lines included."""
     players = by_id(payload.get("players", []))
     appearances = by_id(payload.get("appearances", []))
     games = {**by_id(payload.get("games", [])), **by_id(payload.get("solo_games", []))}
     lines = payload.get("over_under_lines", [])
-    stamp = pd.Timestamp(polled_at).tz_convert("UTC").tz_localize(None)
     rows = []
     for line in lines.values() if isinstance(lines, dict) else lines:
         stat = line["over_under"]["appearance_stat"]
@@ -90,7 +101,7 @@ def poll_rows(payload: dict, source: str, polled_at: datetime) -> pd.DataFrame:
         name = f"{player.get('first_name') or ''} {player.get('last_name') or ''}".strip()
         rows.append(
             {
-                "polled_at": stamp,
+                "polled_at": polled_at,
                 "source": source,
                 "line_id": line["id"],
                 "over_under_id": line["over_under_id"],
@@ -123,12 +134,11 @@ def poll_rows(payload: dict, source: str, polled_at: datetime) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(CAPTURE_DTYPES)).astype(CAPTURE_DTYPES)
 
 
-def match_rows(lobbies: dict[str, dict], polled_at: datetime) -> pd.DataFrame:
+def match_rows(lobbies: dict[str, dict], polled_at: pd.Timestamp) -> pd.DataFrame:
     """The lobbies' per-match entry counts (display strings such as ``"75.2K"``)."""
-    stamp = pd.Timestamp(polled_at).tz_convert("UTC").tz_localize(None)
     rows = [
         {
-            "polled_at": stamp,
+            "polled_at": polled_at,
             "source": f"lobby:{sport}",
             "match_id": group["id"],
             "entry_count": group.get("entry_count"),
@@ -139,21 +149,45 @@ def match_rows(lobbies: dict[str, dict], polled_at: datetime) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(MATCH_DTYPES)).astype(MATCH_DTYPES)
 
 
-def write_poll_parquet(frame: pd.DataFrame, table_dir: Path, polled_at: datetime) -> None:
-    """Write ``frame`` to ``table_dir/date=YYYY-MM-DD/HHMMSS.parquet``.
-
-    The date and clock are ``polled_at``'s in UTC.
-    """
-    stamp = pd.Timestamp(polled_at).tz_convert("UTC")
-    day, clock = stamp.strftime("%Y-%m-%d"), stamp.strftime("%H%M%S")
-    _atomic_write_parquet(frame, table_dir / f"date={day}" / f"{clock}.parquet")
+def entry_rows(pills: dict[tuple[str, str], dict], polled_at: pd.Timestamp) -> pd.DataFrame:
+    """The per-line entry counts of each ``(sport, pickem_stat_id)`` pill's ``lines[]``."""
+    rows = [
+        {
+            "polled_at": polled_at,
+            "sport_id": sport,
+            "pickem_stat_id": stat_id,
+            "over_under_line_id": line.get("over_under_line_id"),
+            "appearance_id": line.get("appearance_id"),
+            "entry_count": line.get("entry_count"),
+            "header": line.get("header"),
+        }
+        for (sport, stat_id), payload in pills.items()
+        for line in payload.get("lines", [])
+    ]
+    return pd.DataFrame(rows, columns=list(ENTRY_DTYPES)).astype(ENTRY_DTYPES)
 
 
 def write_poll_capture(
-    feed: dict, lobbies: dict[str, dict], capture_dir: Path, polled_at: datetime
+    feed: dict, lobbies: dict[str, dict], capture_dir: Path, polled_at: pd.Timestamp
 ) -> None:
     """Write this poll's line rows and match rows, one parquet each, under ``capture_dir``."""
     lines = [poll_rows(feed, "feed", polled_at)]
     lines += [poll_rows(payload, f"lobby:{sport}", polled_at) for sport, payload in lobbies.items()]
-    write_poll_parquet(pd.concat(lines, ignore_index=True), capture_dir / "lines", polled_at)
-    write_poll_parquet(match_rows(lobbies, polled_at), capture_dir / "matches", polled_at)
+    write_capture_parquet(pd.concat(lines, ignore_index=True), capture_dir / "lines", polled_at)
+    write_capture_parquet(match_rows(lobbies, polled_at), capture_dir / "matches", polled_at)
+
+
+def write_entry_capture(
+    pills: dict[tuple[str, str], dict], statuses: dict, capture_dir: Path, polled_at: pd.Timestamp
+) -> None:
+    """Write the pills' entry counts and, when it answered, the ``lineup_status_id`` decode.
+
+    A pill that answered nothing costs only its own rows; the warning names it. An empty decode
+    leaves the last one on disk.
+    """
+    empty = [f"{sport}/{stat_id}" for (sport, stat_id), payload in pills.items() if not payload]
+    if empty:
+        logger.warning(f"{len(empty)} Underdog pills answered empty: {empty}")
+    write_capture_parquet(entry_rows(pills, polled_at), capture_dir / "entry_counts", polled_at)
+    if statuses:
+        _atomic_write_json(statuses, capture_dir / "lineup_statuses.json")

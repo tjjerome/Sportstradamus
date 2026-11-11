@@ -13,11 +13,16 @@ for an alternate-line fetch. The feed's NBA game title is listed away-first so
 the lobby ``teams`` dict, not the title, must set the sides; the MLB lobby
 answers empty so its sides come from the title. A copy of the feed with every
 side at the app's decimal price drives the even-pick check, its line floor
-patched down to the feed's four priced lines.
+patched down to the feed's four priced lines. A capture run adds, after the
+alternate-line read, one read per PickemStat pill a modeled league's line in a
+listed game points at (NBA and MLB; the NHL line's game is missing and tennis
+has no model) and one of the lineup-status decode.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 import types
 from http import HTTPStatus
@@ -41,6 +46,7 @@ def _line(line_id, appearance_id, stat, display_stat, stat_value, options, **fla
             "has_alternates": flags.get("alternates", False),
             "appearance_stat": {
                 "appearance_id": appearance_id,
+                "pickem_stat_id": flags.get("pill"),
                 "stat": stat,
                 "display_stat": display_stat,
             },
@@ -108,10 +114,11 @@ _FEED = {
             "25.5",
             [("higher", "1.0", "active"), ("lower", "1.2", "active")],
             alternates=True,
+            pill="nba-points",
         ),
-        _line("f2", "a3", "fantasy_points", "Fantasy Points", "7.5", _EVEN),
-        _line("f3", "a4", "points", "Points", "50.5", _EVEN, alternates=True),
-        _line("f4", "a5", "points", "Points", "120.5", _EVEN, alternates=True),
+        _line("f2", "a3", "fantasy_points", "Fantasy Points", "7.5", _EVEN, pill="mlb-fantasy"),
+        _line("f3", "a4", "points", "Points", "50.5", _EVEN, alternates=True, pill="nba-points"),
+        _line("f4", "a5", "points", "Points", "120.5", _EVEN, alternates=True, pill="nhl-points"),
         _line("f5", "a2", "rebounds", "Rebounds", "8.5", _EVEN, status="suspended"),
         _line(
             "f6",
@@ -122,7 +129,7 @@ _FEED = {
             [("higher", "1.9", "active"), ("lower", "1.5", "suspended")],
             alternates=True,
         ),
-        _line("f7", "a6", "aces", "Aces", "8.5", _EVEN, alternates=True),
+        _line("f7", "a6", "aces", "Aces", "8.5", _EVEN, alternates=True, pill="tennis-aces"),
     ],
 }
 
@@ -261,6 +268,29 @@ def _core_url(sport: str) -> str:
 _ALT_F1_URL = underdog.UD_ALT_LINES_URL.format(over_under_id="ou-f1")
 
 
+def _pill_url(sport: str, stat_id: str) -> str:
+    return underdog.UD_PILL_URL.format(sport=sport, stat_id=stat_id)
+
+
+# The run's Scored At, naive UTC, with the microseconds a real stamp carries.
+_SCORED_AT = pd.Timestamp("2026-06-03 21:50:07.123456")
+_NBA_PILL = {
+    "lines": [
+        {"over_under_line_id": "f1", "appearance_id": "a1", "entry_count": "1.2K", "header": "Pts"}
+    ]
+}
+_STATUSES = {"lineup_statuses": [{"id": "s-q", "abbr": "Q", "display": "QUESTIONABLE"}]}
+# The MLB pill answers empty: its rows are lost, the NBA pill's still land.
+_CAPTURE_ROUTES = {
+    underdog.UD_LINES_URL: _FEED,
+    _core_url("MLB"): {},
+    _core_url("NBA"): _NBA_LOBBY,
+    _pill_url("MLB", "mlb-fantasy"): {},
+    _pill_url("NBA", "nba-points"): _NBA_PILL,
+    underdog.UD_LINEUP_STATUSES_URL: _STATUSES,
+}
+
+
 class _FakeScraper:
     def __init__(self, routes: dict):
         self.routes = routes
@@ -369,35 +399,55 @@ def test_get_ud_parses_feed_and_lobby(monkeypatch: pytest.MonkeyPatch, offline) 
 
 
 def test_get_ud_capture_dir_writes_the_poll(
-    monkeypatch: pytest.MonkeyPatch, offline, tmp_path
+    monkeypatch: pytest.MonkeyPatch, offline, tmp_path, caplog
 ) -> None:
-    scraper = _FakeScraper(
-        {underdog.UD_LINES_URL: _FEED, _core_url("MLB"): {}, _core_url("NBA"): _NBA_LOBBY}
-    )
+    scraper = _FakeScraper(_CAPTURE_ROUTES)
+    # One log for both clients, so the order pins the pill reads after the rung reads.
+    scraper.calls = _FakeSession.calls
     monkeypatch.setattr(underdog, "_get_scraper", lambda: scraper)
 
-    assert underdog.get_ud(capture_dir=tmp_path) == _EXPECTED
-    lines = list((tmp_path / "lines").rglob("*.parquet"))
-    assert len(lines) == 1
-    captured = pd.read_parquet(lines[0])
-    assert set(captured["source"]) == {"feed", "lobby:NBA"}
-    assert len(captured) == len(_FEED["over_under_lines"]) + len(_NBA_LOBBY["over_under_lines"])
-
-
-def test_get_ud_serves_the_board_when_the_capture_fails(
-    monkeypatch: pytest.MonkeyPatch, offline, tmp_path
-) -> None:
-    scraper = _FakeScraper(
-        {underdog.UD_LINES_URL: _FEED, _core_url("MLB"): {}, _core_url("NBA"): _NBA_LOBBY}
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert underdog.get_ud(capture_dir=tmp_path, scored_at=_SCORED_AT) == _EXPECTED
+    assert scraper.calls == [
+        underdog.UD_LINES_URL,
+        _core_url("MLB"),
+        _core_url("NBA"),
+        _ALT_F1_URL,
+        _pill_url("MLB", "mlb-fantasy"),
+        _pill_url("NBA", "nba-points"),
+        underdog.UD_LINEUP_STATUSES_URL,
+    ]
+    lines, matches, entries = (
+        pd.read_parquet(tmp_path / table / "date=2026-06-03" / "215007.parquet")
+        for table in ("lines", "matches", "entry_counts")
     )
+    assert set(lines["source"]) == {"feed", "lobby:NBA"}
+    assert len(lines) == len(_FEED["over_under_lines"]) + len(_NBA_LOBBY["over_under_lines"])
+    assert matches.empty
+    assert entries[["sport_id", "over_under_line_id", "entry_count"]].values.tolist() == [
+        ["NBA", "f1", "1.2K"]
+    ]
+    assert (pd.concat([lines["polled_at"], entries["polled_at"]]) == _SCORED_AT).all()
+    assert json.loads((tmp_path / "lineup_statuses.json").read_text()) == _STATUSES
+    assert "1 Underdog pills answered empty: ['MLB/mlb-fantasy']" in caplog.text
+
+
+@pytest.mark.parametrize("step", ["write_poll_capture", "_ud_pills", "write_entry_capture"])
+def test_get_ud_serves_the_board_when_the_capture_fails(
+    monkeypatch: pytest.MonkeyPatch, offline, tmp_path, step: str
+) -> None:
+    scraper = _FakeScraper(_CAPTURE_ROUTES)
     monkeypatch.setattr(underdog, "_get_scraper", lambda: scraper)
 
     def _fail(*args):
         raise OSError("capture disk full")
 
-    monkeypatch.setattr(underdog, "write_poll_capture", _fail)
+    monkeypatch.setattr(underdog, step, _fail)
 
-    assert underdog.get_ud(capture_dir=tmp_path) == _EXPECTED
+    assert underdog.get_ud(capture_dir=tmp_path, scored_at=_SCORED_AT) == _EXPECTED
+    # The line states need no request, so only a failure writing them loses them.
+    written = (tmp_path / "lines" / "date=2026-06-03" / "215007.parquet").is_file()
+    assert written == (step != "write_poll_capture")
 
 
 def test_get_ud_empty_feed_stops(monkeypatch: pytest.MonkeyPatch, offline) -> None:

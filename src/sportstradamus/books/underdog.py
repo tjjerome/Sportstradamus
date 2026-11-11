@@ -8,13 +8,17 @@ the ten-minute auth token.
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
 
 from tqdm import tqdm
 
-from sportstradamus.collectors.underdog_capture import by_id, write_poll_capture
+from sportstradamus.collectors.underdog_capture import (
+    by_id,
+    write_entry_capture,
+    write_poll_capture,
+)
 from sportstradamus.helpers import (
     ABBR_MAP,
     UNDERDOG_EVEN_PICK_MULTIPLIER,
@@ -41,6 +45,14 @@ _UD_QUERY = (
     "&product_experience_id=b34dfd93-d0e8-4da3-8bf4-45c15c548dec"
     "&state_config_id=16fa6ed3-ea21-4654-bcee-fb32d2f31357"
 )
+# A pill has no pagination (page=2 repeats page 1), so this cap must cover the largest pill
+# (750 lines) or its counts truncate without an error (docs/underdog_api.md §6.2).
+UD_PILL_LIMIT = 1000
+UD_PILL_URL = (
+    f"{UD_LOBBY_URL}/lines?sport_id={{sport}}&filter_type=PickemStat&filter_id={{stat_id}}"
+    f"&limit={UD_PILL_LIMIT}&{_UD_QUERY}"
+)
+UD_LINEUP_STATUSES_URL = "https://stats.underdogfantasy.com/v1/lineup_statuses"
 
 # Leagues with a Stats model: team markets and alternate lines are fetched only
 # where prophecize can price them.
@@ -375,12 +387,38 @@ def _ud_alt_lines(candidates: list[tuple[dict, str]]) -> list[dict]:
     return rungs
 
 
-def get_ud(capture_dir: Path | None = None) -> dict[str, dict[str, list[dict]]]:
+def _ud_pills(scraper: Scrape, feed: dict) -> dict[tuple[str, str], dict]:
+    """Each PickemStat pill the feed's modeled-league lines point at, by ``(sport, pickem_stat_id)``.
+
+    A pill's ``lines[]`` carry the per-line ``entry_count`` the feed lacks (docs/underdog_api.md
+    §6.4); ``{}`` for a pill that answered nothing.
+    """
+    appearances = by_id(feed.get("appearances", []))
+    games = by_id(feed.get("games", []))
+    pills = set()
+    for line in feed["over_under_lines"]:
+        stat = line["over_under"]["appearance_stat"]
+        game = games.get(str(appearances.get(stat["appearance_id"], {}).get("match_id")), {})
+        sport = _ud_league(game.get("sport_id", ""))
+        if sport in UD_MODELED_LEAGUES and stat.get("pickem_stat_id"):
+            pills.add((sport, stat["pickem_stat_id"]))
+    return {
+        (sport, stat_id): scraper.get(UD_PILL_URL.format(sport=sport, stat_id=stat_id))
+        for sport, stat_id in tqdm(sorted(pills), desc="Getting Underdog pills", unit="pill")
+    }
+
+
+def get_ud(
+    capture_dir: Path | None = None, scored_at: datetime | None = None
+) -> dict[str, dict[str, list[dict]]]:
     """Retrieve Underdog offers: player props, team and game markets, alternate lines.
 
     Args:
-        capture_dir: Write this poll's line states there (``collectors.underdog_capture``);
-            ``None`` writes nothing.
+        capture_dir: Write this poll's capture there (``collectors.underdog_capture``): the
+            line states, then each pill's per-line entry counts and the lineup-status decode,
+            read once the board is built. ``None`` captures nothing and makes none of those reads.
+        scored_at: The run's ``Scored At``, naive UTC: every capture row carries it and its
+            files are named by it. Set with ``capture_dir``.
 
     Returns:
         dict: ``{league: {market: [offer, ...]}}`` where each offer carries
@@ -399,7 +437,8 @@ def get_ud(capture_dir: Path | None = None) -> dict[str, dict[str, list[dict]]]:
 
     Requests per run: the feed, one lobby read per modeled league with games in
     it (all of its team and game categories), then one alternate-line read per
-    modeled, mapped player prop until the budget runs out.
+    modeled, mapped player prop until the budget runs out. A capture run then
+    reads each pill the feed's modeled-league lines point at and the decode.
     """
     scraper = _get_scraper()
     logger.info("Getting Underdog Lines")
@@ -411,12 +450,6 @@ def get_ud(capture_dir: Path | None = None) -> dict[str, dict[str, list[dict]]]:
         return {}
     sports = {_ud_league(game["sport_id"]) for game in feed["games"]}
     team_offers, team_abbr, lobbies = _ud_team_offers(scraper, sports)
-    if capture_dir is not None:
-        # Diagnostics: nothing that goes wrong in the capture may cost the board its offers.
-        try:
-            write_poll_capture(feed, lobbies, capture_dir, datetime.now(UTC))
-        except Exception:
-            logger.exception("Underdog poll capture not written")
     feed_offers = _ud_offers(feed, team_abbr)
     if len(feed_offers) >= UD_EVEN_PICK_MIN_LINES and not any(
         UNDERDOG_EVEN_PICK_MULTIPLIER in (offer["Boost_Over"], offer["Boost_Under"])
@@ -442,4 +475,14 @@ def get_ud(capture_dir: Path | None = None) -> dict[str, dict[str, list[dict]]]:
     logger.info(
         f"{sum(len(rows) for markets in offers.values() for rows in markets.values())} Underdog offers found"
     )
+    if capture_dir is not None:
+        # Diagnostics: nothing that goes wrong in the capture may cost the board its offers.
+        # Last, so its pill reads can neither delay the board's requests nor get them blocked;
+        # the line states need no request and land before those reads can fail.
+        try:
+            write_poll_capture(feed, lobbies, capture_dir, scored_at)
+            pills = _ud_pills(scraper, feed)
+            write_entry_capture(pills, scraper.get(UD_LINEUP_STATUSES_URL), capture_dir, scored_at)
+        except Exception:
+            logger.exception("Underdog poll capture failed")
     return offers

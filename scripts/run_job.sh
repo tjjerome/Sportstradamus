@@ -16,8 +16,6 @@
 #   ctg-fetch          fetch ctg run (weekly in season: snapshot Cleaning the Glass NBA tables)
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
 #   headshots          fetch headshots (monthly: refresh the player-headshot cache)
-#   underdog-lobby     fetch underdog-lobby (daily: per-line Underdog entry counts and
-#                      the lineup-status decode)
 #   nba-injuries       fetch nba-injuries (NBA season: newest official injury report)
 #   nba-lineups        fetch nba-lineups (NBA season: daily lineups while a tip is
 #                      within 2 h)
@@ -46,8 +44,8 @@
 #   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
 #     the pull and run the checkout as-is. A failed pull never blocks the job.
 #   - Shared archive flock (-w): every job but close-lines and the forward-capture
-#     collectors (underdog-lobby, nba-injuries, nba-lineups) serializes on the DuckDB
-#     archive so they don't fight over the single-writer lock. A queued job waits up to
+#     collectors (nba-injuries, nba-lineups) serializes on the DuckDB archive so they
+#     don't fight over the single-writer lock. A queued job waits up to
 #     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
 #     close-lines takes the same lock from Python around its archive write alone, and
 #     leaves what it fetched spooled for its next tick when the lock stays busy. The
@@ -65,7 +63,7 @@ LOCK_DIR="${LOCK_DIR:-/tmp}"
 DASHBOARD_UNIT="${DASHBOARD_UNIT:-sportstradamus-dashboard.service}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|underdog-lobby|nba-injuries|nba-lineups|ledger-commit|odds-backfill> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|nba-injuries|nba-lineups|ledger-commit|odds-backfill> [args...]" >&2
     exit 64
 fi
 
@@ -87,7 +85,6 @@ case "$JOB" in
     ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;
     savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
     headshots)    CMD=("${UMBRELLA[@]}" fetch headshots) ;;
-    underdog-lobby) CMD=("${UMBRELLA[@]}" fetch underdog-lobby) ;;
     nba-injuries) CMD=("${UMBRELLA[@]}" fetch nba-injuries) ;;
     nba-lineups)  CMD=("${UMBRELLA[@]}" fetch nba-lineups) ;;
     ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
@@ -256,7 +253,7 @@ fi
 # prophecize misses the games it exists to capture. The forward-capture collectors
 # write parquet under data/runtime and never open the archive.
 case "$JOB" in
-    close-lines | underdog-lobby | nba-injuries | nba-lineups) ;;
+    close-lines | nba-injuries | nba-lineups) ;;
     *)
         exec 8>"$ARCHIVE_LOCK_FILE"
         wait_start=$(date +%s)

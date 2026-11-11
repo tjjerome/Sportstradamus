@@ -38,8 +38,7 @@ src/sportstradamus/collectors/
   cleaningtheglass/  CTG_SOURCE (cookie, date-keyed)
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
-  underdog_capture.py  per-poll Underdog line states, written from `get_ud(capture_dir=…)`
-  underdog_lobby.py  `fetch underdog-lobby` per-line Underdog entry counts + lineup-status decode
+  underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
   nba_injury_report.py `fetch nba-injuries` official NBA injury-report PDF, parsed
   nba_lineups.py     `fetch nba-lineups` stats.nba.com daily lineups
 ```
@@ -216,36 +215,40 @@ drops: the inputs of the two pre-registered reads in
 Doubtful before the decision), and **T2b**, popularity (the lobby's
 `entry_count`). The bars, sample sizes and read dates live there and are not
 repeated here. Nothing in these files changes a served number: no `Stats` hook
-reads them, the dashboard never does, and only `prophecize` and the three
-`fetch` commands write them. Each is a plain command (the per-poll capture, a
-seam inside `get_ud`), not a `Source`.
+reads them, the dashboard never does, and only `prophecize` and the two NBA
+`fetch` commands write them. None is a `Source`: the Underdog captures are a seam
+inside `get_ud`, the NBA ones plain commands.
 
 | Capture | Trigger | Files under `data/runtime/` | Schema (pinned in the module) |
 |---|---|---|---|
 | Underdog per poll | every `prophecize` run, `get_ud(capture_dir=UNDERDOG_CAPTURE_DIR)`; no extra request | `underdog_capture/lines/date=<UTC date>/HHMMSS.parquet`, `underdog_capture/matches/…` | `collectors/underdog_capture.py` |
-| Underdog daily pill pull | `fetch underdog-lobby`, once a day | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_lobby.py` |
+| Underdog pill entry counts | every `prophecize` run, the same capture, last in `get_ud`; ~70 requests | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_capture.py` |
 | NBA official injury report | `fetch nba-injuries`, every 30 min in season | `nba_injury/reports/date=<ET date>/<stamp>.parquet`; the PDF at `nba_injury/pdf/<stamp>.pdf` | `collectors/nba_injury_report.py` |
 | NBA daily lineups | `fetch nba-lineups`, every 15 min in season; requests only while an NBA event in `upcoming_events.json` commences within 2 h | `nba_lineups/date=<ET date>/HHMMSS.parquet` | `collectors/nba_lineups.py` |
 
 **Underdog per poll** (`collectors/underdog_capture.py`). Every line of the feed
-and of each modeled league's lobby read, before the parser drops the suspended
-and live ones: the line's `status`, the appearance's `lineup_status_id`
+and of each modeled league's lobby read, the suspended and live ones the parser
+drops included: the line's `status`, the appearance's `lineup_status_id`
 (Underdog's own Q / D / O flag; decode it with `lineup_statuses.json`), both
 options' status and multiplier, and `over_under_id`, which survives a line move
 so two polls diff on it. `matches/` holds each lobby's per-match `entry_count`, a
 display string (`"75.2K"`). `source` names the payload (`feed`, `lobby:NBA`).
-The ledger's `get_ud()` passes no `capture_dir` and writes nothing. Every poll's
-file carries the one schema the module's dtype table pins, so a read over a date
-partition concatenates the files as they are.
+The ledger's `get_ud()` passes no `capture_dir`: it writes nothing and reads no
+pill. Every poll's file carries the one schema the module's dtype table pins, so a
+read over a date partition concatenates the files as they are. A feed that trips
+the even-pick check ([underdog_api.md](underdog_api.md) §7.4) raises before the
+capture, so that run stores nothing.
 
-**Underdog daily pill pull** (`collectors/underdog_lobby.py`). The feed carries no
-per-line popularity; the lobby's `lines?filter_type=PickemStat` pill does
-([underdog_api.md](underdog_api.md) §2, §6.4). One request per
-`(sport, pickem_stat_id)` the feed shows that day for a modeled league, about a
-hundred, once a day: T2b wants one count per leg, not a time series. The same run
-refreshes `lineup_statuses.json`. An empty feed exits 1 before writing; a pill that
-answers empty still lets the others land, then the run exits 1 naming it, so the
-healthcheck shows a day with a gap instead of a green tick.
+**Underdog pill entry counts** (`collectors/underdog_capture.py`, the reads in
+`books/underdog.py`). The feed carries no per-line popularity; the lobby's
+`lines?filter_type=PickemStat` pill does ([underdog_api.md](underdog_api.md) §2,
+§6.4). Each poll reads one pill per `(sport, pickem_stat_id)` the feed shows for a
+modeled league, about seventy requests, then refreshes `lineup_statuses.json`. The
+reads come last in `get_ud`, after the alternate-line pass, so they can neither
+delay the board's own requests nor get them blocked, and the line states are on
+disk before they start. A pill that answers empty is named in one warning and the
+others still land; nothing in the capture fails the run or costs the board its
+offers.
 
 **NBA official injury report** (`collectors/nba_injury_report.py`). The league
 posts a PDF every quarter hour (ET) at a URL that carries the stamp; a run walks
@@ -274,7 +277,11 @@ makes no request.
 capture to the latest one at or before it (the poll's `polled_at`, the report's
 `report_stamp`). This is `<=`, not the strict `<` of the dated snapshots above: a
 capture is the state at a moment, never a table that may already fold the game
-in.
+in. Every capture a `prophecize` run writes carries that run's `Scored At` as its
+`polled_at` and file name, so `<=` picks the leg's own run. Underdog files written
+before 2026-11-11 carry their own clock instead, minutes after their run's `Scored
+At` (their `polled_at` matches no history stamp): a reader assigns each to the run
+whose `Scored At` is the latest before it.
 
 **Ops.** `run_job.sh` has a case per `fetch` command and skips the shared archive
 lock for them (they never open the archive); the cron lines are in
