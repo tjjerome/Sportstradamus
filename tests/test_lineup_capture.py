@@ -1,11 +1,14 @@
-"""Per-run lineup capture: the starters each live league's update names for its next games."""
+"""Per-run lineup capture: each live league's starters for its next games, and the NBA's news."""
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pandas as pd
+import requests
 
 from sportstradamus.collectors import lineup_capture as lc
 
@@ -36,6 +39,45 @@ _MLB_GAMES = {
 _NHL_GAMES = {
     "EDM": {"Opponent": "CGY", "Home": True, "Goalie": "Stuart Skinner"},
     "CGY": {"Opponent": "EDM", "Home": False, "Goalie": ""},
+}
+# 9:30 PM Eastern on the 28th, already the 29th in UTC.
+_NBA_SCORED_AT = pd.Timestamp("2026-10-29 01:30:07.123456")
+_NBA_PAYLOAD = {
+    "games": [
+        {
+            "gameId": "0022600132",
+            "gameStatus": 1,
+            "gameStatusText": "7:00 pm ET",
+            "homeTeam": {
+                "teamId": 1,
+                "teamAbbreviation": "ATL",
+                "players": [
+                    {
+                        "personId": 1629638,
+                        "playerName": "Nickeil Alexander-Walker",
+                        "lineupStatus": "Confirmed",
+                        "position": "SG",
+                        "rosterStatus": "Active",
+                        "timestamp": "2026-10-28T23:22:00",
+                    }
+                ],
+            },
+            "awayTeam": {
+                "teamId": 2,
+                "teamAbbreviation": "BOS",
+                "players": [
+                    {
+                        "personId": 2,
+                        "playerName": "Jayson Tatum",
+                        "lineupStatus": "",
+                        "position": "",
+                        "rosterStatus": "Inactive",
+                        "timestamp": None,
+                    }
+                ],
+            },
+        }
+    ]
 }
 
 
@@ -95,3 +137,81 @@ def test_a_league_whose_capture_raises_does_not_stop_the_next(monkeypatch, tmp_p
 
     assert [path.relative_to(tmp_path).parts[0] for path in tmp_path.rglob("*.parquet")] == ["NHL"]
     assert "MLB lineup capture not written" in caplog.text
+
+
+def test_nba_rows_flatten_both_teams():
+    rows = lc.nba_lineup_rows(_NBA_PAYLOAD, _NBA_SCORED_AT)
+
+    assert rows.dtypes.astype(str).to_dict() == lc.NBA_LINEUP_DTYPES
+    assert list(rows["team"]) == ["ATL", "BOS"]
+    assert list(rows["roster_status"]) == ["Active", "Inactive"]
+    assert list(rows["lineup_status"]) == ["Confirmed", ""]
+    assert (rows["polled_at"] == _NBA_SCORED_AT).all()
+
+
+def test_due_only_within_two_hours_of_an_nba_tip():
+    now = datetime(2026, 10, 28, 22, 0, tzinfo=UTC)
+    nba = {"league": "NBA", "commence_time": "2026-10-28T23:30:00Z"}
+    nhl = {"league": "NHL", "commence_time": "2026-10-28T23:00:00+00:00"}
+    late = {"league": "NBA", "commence_time": "2026-10-29T02:30:00+00:00"}
+    assert lc.due([nba], now) and not lc.due([nhl], now) and not lc.due([late], now)
+
+
+def _nba_run(monkeypatch, tmp_path, tip: str, status: int = 200) -> tuple[list, list]:
+    """Stub the ledger, stats.nba.com and the injury report; return the URLs and report calls."""
+    requested, reports = [], []
+
+    def fake_get(url, **_):
+        requested.append(url)
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps(_NBA_PAYLOAD).encode()
+        return response
+
+    monkeypatch.setattr(lc, "LINEUP_CAPTURE_DIR", tmp_path)
+    monkeypatch.setattr(
+        lc, "read_upcoming_events", lambda: [{"league": "NBA", "commence_time": tip}]
+    )
+    monkeypatch.setattr(lc.requests, "get", fake_get)
+    monkeypatch.setattr(lc, "capture_injury_report", reports.append)
+    return requested, reports
+
+
+def test_nba_capture_reads_the_eastern_day_while_a_tip_is_due(monkeypatch, tmp_path):
+    requested, reports = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z")
+
+    lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
+
+    assert requested == [lc.LINEUPS_URL.format(day="20261028")]
+    (written,) = tmp_path.rglob("*.parquet")
+    assert written.relative_to(tmp_path).as_posix() == "NBA/date=2026-10-29/013007.parquet"
+    assert (pd.read_parquet(written)["polled_at"] == _NBA_SCORED_AT).all()
+    assert reports == [_NBA_SCORED_AT]
+
+
+def test_nba_capture_without_a_tip_due_stores_only_the_injury_report(monkeypatch, tmp_path):
+    """No lineup request outside the window; with the NBA not live, no report either."""
+    requested, reports = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T04:30:00Z")
+
+    lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
+    lc.capture_lineups({"MLB": SimpleNamespace(upcoming_games={})}, _NBA_SCORED_AT)
+
+    assert not requested and not any(tmp_path.rglob("*.parquet"))
+    assert reports == [_NBA_SCORED_AT]
+
+
+def test_nba_lineups_and_injury_report_fail_apart(monkeypatch, tmp_path, caplog):
+    """A refused lineup fetch still lets the report run; the report's alarm is logged, not raised."""
+    _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z", status=500)
+
+    def alarm(scored_at):
+        raise RuntimeError("NBA injury report: nothing posted with an NBA game on the ledger")
+
+    monkeypatch.setattr(lc, "capture_injury_report", alarm)
+
+    with caplog.at_level(logging.ERROR, logger="log"):
+        lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
+
+    assert not any(tmp_path.rglob("*.parquet"))
+    assert "NBA lineup capture not written" in caplog.text
+    assert "NBA injury report not captured" in caplog.text

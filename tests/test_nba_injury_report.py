@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
-import click
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import requests
 
 from sportstradamus.collectors import nba_injury_report as inj
+
+# The run's Scored At, naive UTC: the report's fetched_at.
+_FETCHED_AT = pd.Timestamp("2026-10-28 21:50:07.123456")
 
 
 def test_candidate_stamps_walk_back_by_quarter_hour_in_eastern_time():
@@ -78,7 +82,7 @@ def test_parse_lines_carries_game_and_team_forward():
 
 
 def test_probe_loop_skips_403_stores_the_first_200_and_raises_on_anything_else(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, caplog
 ):
     stamps = ["2026-10-28_05_00PM", "2026-10-28_04_45PM", "2026-10-28_04_30PM"]
     answers = {stamps[0]: 403, stamps[1]: 200}
@@ -98,25 +102,31 @@ def test_probe_loop_skips_403_stores_the_first_200_and_raises_on_anything_else(
         inj, "pdf_lines", lambda raw: ["Toronto Raptors Dragic, Goran Out Not With Team"]
     )
     monkeypatch.setattr(inj, "candidate_stamps", lambda now: stamps)
-    inj.nba_injuries.callback()
+    inj.capture_injury_report(_FETCHED_AT)
     out = tmp_path / "reports" / "date=2026-10-28" / f"{stamps[1]}.parquet"
     assert (
         requested == stamps[:2] and (tmp_path / "pdf" / f"{stamps[1]}.pdf").read_bytes() == b"%PDF"
     )
     assert pq.read_schema(out).field("last_modified").type == pa.string()
+    assert (pd.read_parquet(out)["fetched_at"] == _FETCHED_AT).all()
     monkeypatch.setattr(inj, "candidate_stamps", lambda now: stamps[1:])
-    inj.nba_injuries.callback()
+    inj.capture_injury_report(_FETCHED_AT)
     assert requested == stamps[:2]
     answers[stamps[0]] = 500
     monkeypatch.setattr(inj, "candidate_stamps", lambda now: stamps)
     with pytest.raises(requests.HTTPError):
-        inj.nba_injuries.callback()
+        inj.capture_injury_report(_FETCHED_AT)
     unposted = ["2026-10-29_05_00PM", "2026-10-29_04_45PM"]
     answers.update(dict.fromkeys(unposted, 403))
     monkeypatch.setattr(inj, "candidate_stamps", lambda now: unposted)
     monkeypatch.setattr(inj, "read_upcoming_events", list)
-    inj.nba_injuries.callback()
+    with caplog.at_level(logging.INFO, logger="log"):
+        inj.capture_injury_report(_FETCHED_AT)
+    assert (
+        caplog.messages[-1]
+        == f"NBA injury report: nothing posted from {unposted[1]} to {unposted[0]}"
+    )
     monkeypatch.setattr(inj, "read_upcoming_events", lambda: [{"league": "NBA"}])
-    with pytest.raises(click.ClickException):
-        inj.nba_injuries.callback()
+    with pytest.raises(RuntimeError, match="with an NBA game on the ledger"):
+        inj.capture_injury_report(_FETCHED_AT)
     assert requested[-4:] == unposted * 2

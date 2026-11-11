@@ -37,8 +37,7 @@ All jobs run through [`scripts/run_job.sh`](../scripts/run_job.sh), which adds a
 per-job `flock` (an overlapping run of the same job is skipped), a self-deploy
 `git pull` before each job (restarting the dashboard when that pull moves its
 code — see [Dashboard as a service](#dashboard-as-a-service)), a shared archive
-lock (DuckDB allows one writer; `close-lines` takes it itself and the forward-capture
-collectors skip it, below), and Healthchecks.io
+lock (DuckDB allows one writer; `close-lines` takes it itself, below), and Healthchecks.io
 start/fail/success pings. Each job pings
 `HEALTHCHECK_URL_<JOB>` (the job name uppercased, `-` → `_`; e.g. `close-lines`
 → `HEALTHCHECK_URL_CLOSE_LINES`), falling back to the shared `HEALTHCHECK_URL`.
@@ -66,14 +65,12 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
 30 7 * 11-12,1-4 1     <repo-dir>/scripts/run_job.sh ctg-fetch
 0 5 1 * *              <repo-dir>/scripts/run_job.sh headshots
-*/30 9-23 * * *        <repo-dir>/scripts/run_job.sh nba-injuries   # NBA season; install after the NBA.com licence call
-*/15 16-22 * * *       <repo-dir>/scripts/run_job.sh nba-lineups    # NBA season; fetches only within 2 h of a tip
 15 4 28-31 * *         <repo-dir>/scripts/run_job.sh odds-backfill --league NFL --markets 'yards,qb yards' --start 2024-09-05 --end 2026-10-04 --dates-from 'Moneyline,rushing yards'
 ```
 
 | Job | Cadence | Purpose |
 |---|---|---|
-| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots and the per-poll Underdog capture (below) |
+| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots and the forward captures (below) |
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
 | `meditate` | off on prod | retrain models — runs dev-side weekly; `scripts/sync_to_prod.sh` sends the results (below) |
@@ -83,8 +80,6 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
 | `ctg-fetch` | Mon 7:30am, Nov–Apr | Cleaning the Glass NBA player tables, regular season to date; needs a CTG cookie in `creds/keys.json` and `HEALTHCHECK_URL_CTG_FETCH` |
 | `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
-| `nba-injuries` | every 30 min, 9am–11pm, NBA season | newest official injury report (T2a); owner installs after the NBA.com licence call |
-| `nba-lineups` | every 15 min, 4–10pm, NBA season | daily lineups while a tip is within 2 h (T2a); same licence call |
 | `odds-backfill` | 4:15am, days 28–31 | buy odds history with the credit cycle's leftover: acts on the cycle's last day only, newest date first, and makes no API call once its range is held; needs `HEALTHCHECK_URL_ODDS_BACKFILL` |
 
 Forward capture (per-poll): `prophecize` also stores every Underdog feed and lobby
@@ -92,11 +87,13 @@ line it polled, with its state, at
 `data/runtime/underdog_capture/{lines,matches}/date=<UTC date>/HHMMSS.parquet` on
 every run (`get_ud(capture_dir=…)`, no extra request), then reads each pill the
 feed points at for its per-line entry counts (`entry_counts/`, ~70 requests after
-the board's own, under a 90 s budget) and refreshes the lineup-status decode. Each run also stores the
-MLB and NHL starters its league updates read, under `data/runtime/lineups/<league>/`
-(no extra request); `nba-injuries` and `nba-lineups` fill the rest of the capture
-set. What each file holds and how the T2a / T2b reads join it is in
-[data_collectors.md](data_collectors.md) (Forward capture collectors).
+the board's own, under a 90 s budget) and refreshes the lineup-status decode. Each run
+also stores, under `data/runtime/lineups/<league>/`, the MLB and NHL starters its league
+updates read (no extra request) and, with the NBA live, stats.nba.com's daily lineups while a
+tip is within 2 h, plus the newest official NBA injury report
+(`data/runtime/nba_injury/`). [data_collectors.md](data_collectors.md) (Forward
+capture collectors) covers what each file holds, how the T2a / T2b reads join it
+and how a failure surfaces.
 `scripts/sync_from_prod.sh` carries the directories down with the rest of
 `data/runtime` (update mode, nothing to add).
 
@@ -107,13 +104,9 @@ Couplings to keep in sync:
   config claims underspends the monthly credit budget; more overspends it.
 - `close-lines` is the per-game data floor and is never throttled by the
   governor — don't widen its hours without re-checking the credit budget.
-- Every job but `close-lines` and the two capture collectors holds the shared
-  archive lock for its whole run, including ones like `gate-status` that never
-  read the archive, which is why `gate-status` sits at 4am rather than inside
-  `reflect`'s ~1.5 h hold from 2am. `nba-injuries` and `nba-lineups` write parquet
-  under `data/runtime` and never open the archive, so `run_job.sh` skips the lock
-  for them: a quarter-hour lineup tick must not queue 900 s behind `prophecize`
-  and exit 75.
+- Every job but `close-lines` holds the shared archive lock for its whole run,
+  including ones like `gate-status` that never read the archive, which is why
+  `gate-status` sits at 4am rather than inside `reflect`'s ~1.5 h hold from 2am.
   `ledger-commit` queues behind the 8:50 and 14:50 `prophecize` runs (17-35 min),
   so its lines raise `ARCHIVE_LOCK_TIMEOUT` from 15 to 40 min.
 - `close-lines` runs a few seconds but must not queue behind those holds, or the
@@ -183,7 +176,7 @@ tables stop changing after April, so the line covers November through April;
 October is left out because the page's answer for a season with no games is
 unverified. Monday 7:30 falls after `reflect`'s archive-lock hold and before the
 first `confer` and `prophecize` runs, so it never queues (it takes the shared lock
-like every job but the capture ones). It needs the CTG cookie in prod's
+like every job but `close-lines`). It needs the CTG cookie in prod's
 `creds/keys.json` and `HEALTHCHECK_URL_CTG_FETCH` set; see
 [cleaningtheglass.md](cleaningtheglass.md). The weekly `sync_from_prod.sh` brings its
 snapshots to the dev box.

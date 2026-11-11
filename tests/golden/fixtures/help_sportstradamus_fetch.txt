@@ -6,9 +6,7 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  ctg           Snapshot Cleaning the Glass NBA advanced tables to disk.
-  fp            Snapshot Fantasy Points Data Suite tools to disk.
-  headshots     Fill this box's player-headshot cache, one square WebP per...
-  nba-injuries  Store the newest official NBA injury report not yet on disk.
-  nba-lineups   Snapshot today's NBA daily lineups when a tip is within two...
-  savant        Snapshot Baseball Savant (Statcast) MLB leaderboards to disk.
+  ctg        Snapshot Cleaning the Glass NBA advanced tables to disk.
+  fp         Snapshot Fantasy Points Data Suite tools to disk.
+  headshots  Fill this box's player-headshot cache, one square WebP per...
+  savant     Snapshot Baseball Savant (Statcast) MLB leaderboards to disk.

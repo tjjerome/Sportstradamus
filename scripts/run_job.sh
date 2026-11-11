@@ -16,9 +16,6 @@
 #   ctg-fetch          fetch ctg run (weekly in season: snapshot Cleaning the Glass NBA tables)
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
 #   headshots          fetch headshots (monthly: refresh the player-headshot cache)
-#   nba-injuries       fetch nba-injuries (NBA season: newest official injury report)
-#   nba-lineups        fetch nba-lineups (NBA season: daily lineups while a tip is
-#                      within 2 h)
 #   ledger-commit      bet ledger-commit --run-slot {morning,afternoon}
 #   odds-backfill      scripts.backfill_historical_odds on the live polling key, in
 #                      leftover-only mode; the cron line names the pull
@@ -43,13 +40,11 @@
 #   - Per-job flock (-n): a second invocation of the *same* job is skipped.
 #   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
 #     the pull and run the checkout as-is. A failed pull never blocks the job.
-#   - Shared archive flock (-w): every job but close-lines and the forward-capture
-#     collectors (nba-injuries, nba-lineups) serializes on the DuckDB archive so they
-#     don't fight over the single-writer lock. A queued job waits up to
+#   - Shared archive flock (-w): every job but close-lines serializes on the DuckDB
+#     archive so they don't fight over the single-writer lock. A queued job waits up to
 #     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
 #     close-lines takes the same lock from Python around its archive write alone, and
-#     leaves what it fetched spooled for its next tick when the lock stays busy. The
-#     capture collectors write parquet under data/runtime and never open the archive.
+#     leaves what it fetched spooled for its next tick when the lock stays busy.
 #
 # Exit codes: propagates the wrapped command's exit code.
 
@@ -63,7 +58,7 @@ LOCK_DIR="${LOCK_DIR:-/tmp}"
 DASHBOARD_UNIT="${DASHBOARD_UNIT:-sportstradamus-dashboard.service}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|nba-injuries|nba-lineups|ledger-commit|odds-backfill> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit|odds-backfill> [args...]" >&2
     exit 64
 fi
 
@@ -85,8 +80,6 @@ case "$JOB" in
     ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;
     savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
     headshots)    CMD=("${UMBRELLA[@]}" fetch headshots) ;;
-    nba-injuries) CMD=("${UMBRELLA[@]}" fetch nba-injuries) ;;
-    nba-lineups)  CMD=("${UMBRELLA[@]}" fetch nba-lineups) ;;
     ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
     # The paying key and the leftover-only flags live here, not on the cron line: the
     # same pull without --surplus-only buys its whole range at once on the key live
@@ -250,10 +243,9 @@ fi
 # archive so we don't crash on DuckDB's single-writer constraint. Wait up to
 # ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish. close-lines takes this lock
 # itself, around its archive write only: a 2-second job queued behind a 20-minute
-# prophecize misses the games it exists to capture. The forward-capture collectors
-# write parquet under data/runtime and never open the archive.
+# prophecize misses the games it exists to capture.
 case "$JOB" in
-    close-lines | nba-injuries | nba-lineups) ;;
+    close-lines) ;;
     *)
         exec 8>"$ARCHIVE_LOCK_FILE"
         wait_start=$(date +%s)

@@ -1,11 +1,12 @@
-"""``fetch nba-injuries``: the newest official NBA injury report, parsed, with its publication time.
+"""The newest official NBA injury report, parsed, with its publication time.
 
 The league posts a PDF every quarter hour (ET) at a URL that carries the stamp; a stamp not yet
-posted answers 403 (the bucket denies a missing key rather than answering 404). A run probes the
-last ``PROBE_SLOTS`` quarter-hours, keeps the first that answers and is not stored yet, writes its
+posted answers 403 (the bucket denies a missing key rather than answering 404). Every
+``prophecize`` run with the NBA live probes the last ``PROBE_SLOTS`` quarter-hours (from
+``collectors.lineup_capture``), keeps the first that answers and is not stored yet, writes its
 rows to ``NBA_INJURY_DIR/reports/date=<ET date>/<stamp>.parquet`` and the PDF itself to
-``NBA_INJURY_DIR/pdf/<stamp>.pdf``, so a decision time joins to the latest report at or before it.
-Licence: NBA.com terms; the cron line is the owner's to install (docs/OPERATIONS.md).
+``NBA_INJURY_DIR/pdf/<stamp>.pdf``, so a decision time joins to the latest report stored at or
+before it (``fetched_at``). Licence: NBA.com terms.
 """
 
 from __future__ import annotations
@@ -16,13 +17,13 @@ from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from zoneinfo import ZoneInfo
 
-import click
 import pandas as pd
 import requests
 from pypdf import PdfReader
 
 from sportstradamus.helpers.io import NBA_INJURY_DIR, _atomic_write_parquet, read_upcoming_events
 from sportstradamus.helpers.scraping import BROWSER_USER_AGENT, REQUEST_TIMEOUT_S
+from sportstradamus.spiderLogger import logger
 
 REPORT_URL = "https://ak-static.cms.nba.com/referee/injury/Injury-Report_{stamp}.pdf"
 # Reports are posted on the quarter hour, Eastern; the file name carries that clock.
@@ -128,16 +129,21 @@ def pdf_lines(raw: bytes) -> list[str]:
     ]
 
 
-@click.command("nba-injuries")
-def nba_injuries() -> None:
-    """Store the newest official NBA injury report not yet on disk."""
-    now = datetime.now(UTC)
-    stamps = candidate_stamps(now)
+def capture_injury_report(fetched_at: pd.Timestamp) -> None:
+    """Store the newest official NBA injury report not yet on disk.
+
+    ``fetched_at`` is the run's ``Scored At``, naive UTC.
+
+    Raises:
+        RuntimeError: Nothing answered in the probe window while an NBA game sits on
+            ``upcoming_events.json``.
+    """
+    stamps = candidate_stamps(fetched_at.tz_localize(UTC))
     for stamp in stamps:
         day = stamp[:10]
         out = NBA_INJURY_DIR / "reports" / f"date={day}" / f"{stamp}.parquet"
         if out.exists():
-            click.echo(f"nba-injuries: {stamp} already stored")
+            logger.info(f"NBA injury report {stamp} already stored")
             return
         response = requests.get(
             REPORT_URL.format(stamp=stamp),
@@ -152,7 +158,7 @@ def nba_injuries() -> None:
             .assign(
                 report_stamp=stamp,
                 last_modified=response.headers.get("Last-Modified"),
-                fetched_at=pd.Timestamp(now).tz_localize(None),
+                fetched_at=fetched_at,
             )
             .astype(REPORT_DTYPES)
         )
@@ -160,11 +166,11 @@ def nba_injuries() -> None:
         pdf.parent.mkdir(parents=True, exist_ok=True)
         pdf.write_bytes(response.content)
         _atomic_write_parquet(frame, out)
-        click.echo(f"nba-injuries: {stamp} stored, {len(frame)} rows")
+        logger.info(f"NBA injury report {stamp} stored, {len(frame)} rows")
         return
     window = f"nothing posted from {stamps[-1]} to {stamps[0]}"
     # In season the league posts around the clock and S3 answers 403 for a block as for a
     # missing key, so an empty window on a day with an NBA game on the ledger is the alarm.
     if any(event["league"] == "NBA" for event in read_upcoming_events()):
-        raise click.ClickException(f"nba-injuries: {window} with an NBA game on the ledger")
-    click.echo(f"nba-injuries: {window}")
+        raise RuntimeError(f"NBA injury report: {window} with an NBA game on the ledger")
+    logger.info(f"NBA injury report: {window}")

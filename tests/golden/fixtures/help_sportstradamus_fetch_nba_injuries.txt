@@ -1,6 +1,0 @@
-Usage: sportstradamus fetch nba-injuries [OPTIONS]
-
-  Store the newest official NBA injury report not yet on disk.
-
-Options:
-  --help  Show this message and exit.
