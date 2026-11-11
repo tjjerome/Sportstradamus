@@ -398,7 +398,8 @@ def _ud_pills(scraper: Scrape, feed: dict) -> dict[tuple[str, str], dict]:
     pills = set()
     for line in feed["over_under_lines"]:
         stat = line["over_under"]["appearance_stat"]
-        game = games.get(str(appearances.get(stat["appearance_id"], {}).get("match_id")), {})
+        appearance = appearances.get(stat["appearance_id"], {})
+        game = games.get(str(appearance.get("match_id")), {})
         sport = _ud_league(game.get("sport_id", ""))
         if sport in UD_MODELED_LEAGUES and stat.get("pickem_stat_id"):
             pills.add((sport, stat["pickem_stat_id"]))
@@ -482,7 +483,8 @@ def get_ud(
         try:
             write_poll_capture(feed, lobbies, capture_dir, scored_at)
             pills = _ud_pills(scraper, feed)
-            write_entry_capture(pills, scraper.get(UD_LINEUP_STATUSES_URL), capture_dir, scored_at)
+            statuses = scraper.get(UD_LINEUP_STATUSES_URL)
+            write_entry_capture(pills, statuses, capture_dir, scored_at)
         except Exception:
             logger.exception("Underdog poll capture failed")
     return offers
