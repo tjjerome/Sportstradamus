@@ -185,8 +185,8 @@ The stats base class exposes two per-league hooks
 Returns `None` — degrading to gamelog-only features, unchanged — whenever no
 snapshot predates the game **or the source's join schema (`key_col`/`meta_cols`)
 is unset**. Those constants live next to each league's hook (`_CTG_*` in
-`stats/nba.py`, `_SAVANT_*` in `stats/mlb.py`) and are empty until a real capture
-pins the provider's column names; see the per-source docs. New `{col}_asof`
+`stats/nba.py`, `_SAVANT_*` in `stats/mlb.py`) and are empty until the source's
+tables are wired into the features; see the per-source docs. New `{col}_asof`
 columns enter the candidate feature set automatically (the no-filter rewire
 removed `Filtered`) and appear in models on the next `meditate` that rebuilds the
 matrix cache — no forced retrain, no `feature_filter.json` edit.
@@ -201,10 +201,11 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
    (each source's `player_data/` and `team_data/` dir), pushed by an **additive**
    pass (never `--delete`, so prod-only siblings survive). A dir absent on dev is
    skipped. Only the models pass mirrors with `--delete`.
-4. **Cron.** CTG/savant are **dev-side**: run them on the dev box beside the
-   manual weekly `meditate`, then a full `scripts/sync_to_prod.sh` uploads the
-   snapshots (`--league` sends none; see [OPERATIONS.md](OPERATIONS.md)).
-   Optionally schedule them via `run_job.sh` with a `HEALTHCHECK_URL_*` set.
+4. **Cron.** FP and CTG run on prod from `run_job.sh` with a `HEALTHCHECK_URL_*`
+   set (schedule: [OPERATIONS.md](OPERATIONS.md)), and `sync_from_prod.sh` brings
+   their snapshots to the dev box. Savant is **dev-side**: run it on the dev box
+   beside the manual weekly `meditate`, then a full `scripts/sync_to_prod.sh`
+   uploads the snapshots (`--league` sends none).
 
 ## Forward capture collectors
 
@@ -291,7 +292,8 @@ never sends them.
 2. **Write the source package** `collectors/<source>/source.py`: a `Source` with
    `make_client`, `default_context`, `dispatch`, `path_for`
    (`partial(dated_path_for, league=…, source_dir=…)` for a date source),
-   `transform=parse_tabular_response`, and either `auth_fields`/`env_prefix` (a
+   `transform=parse_tabular_response` (CTG, whose data is JSON inside an HTML page,
+   brings its own parser), and either `auth_fields`/`env_prefix` (a
    cookie source, reusing `CookieClient`) or `auth_fields=None` (public, reusing
    `Scrape`). Then `cli.py`: `<name>_fetch = build_source_cli(SOURCE)`.
 3. **Wire consumption.** Add the join-schema constants and override the two hooks

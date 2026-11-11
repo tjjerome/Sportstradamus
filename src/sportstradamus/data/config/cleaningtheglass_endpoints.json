@@ -1,1 +1,28 @@
-[]
+[
+  {
+    "name": "player_stats",
+    "url": "https://cleaningtheglass.com/stats/players",
+    "output_subdir": "player_stats",
+    "method": "GET",
+    "params": {
+      "season": "{season}",
+      "seasontype": "regseason"
+    },
+    "response_format": "html",
+    "weekly": true,
+    "notes": "Offensive overview, shooting, foul drawing and defense/rebounding tabs; one row per player."
+  },
+  {
+    "name": "player_onoff",
+    "url": "https://cleaningtheglass.com/stats/players",
+    "output_subdir": "player_onoff",
+    "method": "GET",
+    "params": {
+      "season": "{season}",
+      "seasontype": "regseason"
+    },
+    "response_format": "html",
+    "weekly": true,
+    "notes": "On/off tabs; several rows per player-team, told apart by position."
+  }
+]

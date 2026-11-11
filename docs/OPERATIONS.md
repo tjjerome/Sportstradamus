@@ -64,6 +64,7 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
 0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
+30 7 * 11-12,1-4 1     <repo-dir>/scripts/run_job.sh ctg-fetch
 0 5 1 * *              <repo-dir>/scripts/run_job.sh headshots
 20 9 * * *             <repo-dir>/scripts/run_job.sh underdog-lobby
 */30 9-23 * * *        <repo-dir>/scripts/run_job.sh nba-injuries   # NBA season; install after the NBA.com licence call
@@ -81,6 +82,7 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due or spooled |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
+| `ctg-fetch` | Mon 7:30am, Nov–Apr | Cleaning the Glass NBA player tables, regular season to date; needs a CTG cookie in `creds/keys.json` and `HEALTHCHECK_URL_CTG_FETCH` |
 | `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
 | `underdog-lobby` | daily 9:20am | per-line Underdog entry counts and the lineup-status decode for the T2b / T2a reads; needs `HEALTHCHECK_URL_UNDERDOG_LOBBY` |
 | `nba-injuries` | every 30 min, 9am–11pm, NBA season | newest official injury report (T2a); owner installs after the NBA.com licence call |
@@ -160,21 +162,30 @@ against the offers already on disk, so it costs one archive read and no scrape.
 
 Keep it off `prophecize`'s `:50` minute — it takes the same archive lock.
 
-Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the prod
-crontab — they run on the dev box beside the manual weekly `meditate`, then
+The dev-side collector `savant-fetch` (MLB) is **not** in the prod crontab — it
+runs on the dev box beside the manual weekly `meditate`, then
 `scripts/sync_to_prod.sh` uploads the models, the gitignored serving artifacts
 (`book_weights.json`, `stat_calibration.json`, `model_stats.{parquet,csv}`,
 per-league `corr_*` files, MLB's two Savant comp tables — see the script
-header), and their snapshots
+header), and its snapshots
 (snapshots additive, never `--delete`). The models mirror skips
 `data/models/prior/` and the script never sends `data/test_sets/`: the superseded
 model files and test sets a retrain keeps stay on the box that trained them
 (`training/prior_models.py` in [ARCHITECTURE.md](ARCHITECTURE.md)). Training runs dev-side this way, so prod's
 `meditate` cron line stays commented out — the two workflows would overwrite
 each other's models and serving artifacts.
-Both collectors are `run_job.sh` cases, so scheduling either (with a
-`HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
-See [data_collectors.md](data_collectors.md).
+`savant-fetch` is a `run_job.sh` case, so scheduling it (with
+`HEALTHCHECK_URL_SAVANT_FETCH` set) is possible. See [data_collectors.md](data_collectors.md).
+
+`ctg-fetch` (NBA) runs on prod like `fp-fetch`. Cleaning the Glass's regular-season
+tables stop changing after April, so the line covers November through April;
+October is left out because the page's answer for a season with no games is
+unverified. Monday 7:30 falls after `reflect`'s archive-lock hold and before the
+first `confer` and `prophecize` runs, so it never queues (it takes the shared lock
+like every job but the capture ones). It needs the CTG cookie in prod's
+`creds/keys.json` and `HEALTHCHECK_URL_CTG_FETCH` set; see
+[cleaningtheglass.md](cleaningtheglass.md). The weekly `sync_from_prod.sh` brings its
+snapshots to the dev box.
 
 The dev box's own crontab holds one line: the weekly pull of production's archive,
 runtime outputs and collector snapshots (`scripts/sync_from_prod.sh`), so nothing

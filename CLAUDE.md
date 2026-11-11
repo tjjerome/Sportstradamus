@@ -305,12 +305,17 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   `docs/fantasypoints.md`) and `HEALTHCHECK_URL_FP_FETCH` set so
   cookie-expiry surfaces as an immediate alert.
 
-  The `ctg-fetch` (NBA, Cleaning the Glass) and `savant-fetch` (MLB,
-  Baseball Savant) collectors are **dev-side**, not prod-cron: run them on
-  the dev box beside the manual weekly `meditate`, then a full
-  `scripts/sync_to_prod.sh` pushes their date-stamped snapshots up (it also sends
-  every league's models and serving files; `--league LEAGUE` sends one league and
-  no snapshots — docs/OPERATIONS.md). They share the `fp-fetch`
+  The `ctg-fetch` job (NBA, Cleaning the Glass) runs weekly on prod, Mondays
+  November through April: it snapshots the regular-season player tables to
+  `src/sportstradamus/data/player_data/NBA/cleaningtheglass/{season}/{date}/`.
+  Needs a session cookie in `creds/keys.json` (see `docs/cleaningtheglass.md`)
+  and `HEALTHCHECK_URL_CTG_FETCH` set so a failed run surfaces as an alert.
+
+  The `savant-fetch` (MLB, Baseball Savant) collector is **dev-side**, not
+  prod-cron: run it on the dev box beside the manual weekly `meditate`, then a
+  full `scripts/sync_to_prod.sh` pushes its date-stamped snapshots up (it also
+  sends every league's models and serving files; `--league LEAGUE` sends one
+  league and no snapshots — docs/OPERATIONS.md). Both share the `fp-fetch`
   framework (`sportstradamus.collectors`); `StatsNBA`/`StatsMLB` fold the
   snapshots in via the `_join_fp_*_features` hooks once each source's join
   schema is pinned. Canonical guide: `docs/data_collectors.md`.
