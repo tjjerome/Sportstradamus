@@ -39,6 +39,7 @@ src/sportstradamus/collectors/
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
   underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
+  lineup_capture.py  per-run MLB / NHL starters from the live leagues' `Stats`, written from `prophecize`
   nba_injury_report.py `fetch nba-injuries` official NBA injury-report PDF, parsed
   nba_lineups.py     `fetch nba-lineups` stats.nba.com daily lineups
 ```
@@ -208,7 +209,7 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
 
 ## Forward capture collectors
 
-Four captures store, at decision time, what the polls already see and the parse
+Five captures store, at decision time, what the polls already see and the parse
 drops: the inputs of the two pre-registered reads in
 [handoffs/model_improvement_track.md](handoffs/model_improvement_track.md) §6.10,
 **T2a**, the news guard (a line's suspension or a teammate's move to Out /
@@ -217,7 +218,8 @@ Doubtful before the decision), and **T2b**, popularity (the lobby's
 repeated here. Nothing in these files changes a served number: no `Stats` hook
 reads them, the dashboard never does, and only `prophecize` and the two NBA
 `fetch` commands write them. None is a `Source`: the Underdog captures are a seam
-inside `get_ud`, the NBA ones plain commands.
+inside `get_ud`, the MLB / NHL starters a call in `prophecize`, the NBA ones plain
+commands.
 
 | Capture | Trigger | Files under `data/runtime/` | Schema (pinned in the module) |
 |---|---|---|---|
@@ -225,6 +227,7 @@ inside `get_ud`, the NBA ones plain commands.
 | Underdog pill entry counts | every `prophecize` run, the same capture, last in `get_ud`; ~70 requests | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_capture.py` |
 | NBA official injury report | `fetch nba-injuries`, every 30 min in season | `nba_injury/reports/date=<ET date>/<stamp>.parquet`; the PDF at `nba_injury/pdf/<stamp>.pdf` | `collectors/nba_injury_report.py` |
 | NBA daily lineups | `fetch nba-lineups`, every 15 min in season; requests only while an NBA event in `upcoming_events.json` commences within 2 h | `nba_lineups/date=<ET date>/HHMMSS.parquet` | `collectors/nba_lineups.py` |
+| MLB / NHL starters | every `prophecize` run, `capture_lineups` right after the leagues update; no extra request | `lineups/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
 
 **Underdog per poll** (`collectors/underdog_capture.py`). Every line of the feed
 and of each modeled league's lobby read, the suspended and live ones the parser
@@ -272,6 +275,18 @@ both teams (`lineup_status`, `roster_status`, `position`). The JSON's own
 the poll time in `polled_at` and keeps the source's in `source_timestamp`.
 Lineups post about half an hour before tip, so a tick outside the 2 h window
 makes no request.
+
+**MLB / NHL starters** (`collectors/lineup_capture.py`). The update `prophecize`
+runs on each live league already reads each team's next game: MLB's probable
+pitchers and the batting orders posted so far (`StatsMLB.upcoming_games`), NHL's
+predicted starting goalie from dobbersports (`StatsNHL.upcoming_games`). The next
+update overwrites them, so each run stores them, one row per team, role and
+player (`pitcher`, `batter` with its batting `slot`, `goalie`) beside the
+opponent and the home flag. A starter not yet named keeps his row with `player`
+empty; an order not yet posted has no `batter` rows. `team` is the
+`upcoming_games` key, so an MLB doubleheader's second game reads `NYY2`. A league
+out of season, whose update failed or with no game ahead writes nothing; one
+league's failed capture is logged and costs neither the others nor the board.
 
 **The decision-time join.** A leg's decision time is its `Scored At`; join each
 capture to the latest one at or before it (the poll's `polled_at`, the report's

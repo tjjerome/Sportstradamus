@@ -92,9 +92,10 @@ line it polled, with its state, at
 `data/runtime/underdog_capture/{lines,matches}/date=<UTC date>/HHMMSS.parquet` on
 every run (`get_ud(capture_dir=…)`, no extra request), then reads each pill the
 feed points at for its per-line entry counts (`entry_counts/`, ~70 requests after
-the board's own) and refreshes the lineup-status decode; `nba-injuries` and
-`nba-lineups` fill the rest of the capture set. What each file
-holds and how the T2a / T2b reads join it is in
+the board's own) and refreshes the lineup-status decode. Each run also stores the
+MLB and NHL starters its league updates read, under `data/runtime/lineups/<league>/`
+(no extra request); `nba-injuries` and `nba-lineups` fill the rest of the capture
+set. What each file holds and how the T2a / T2b reads join it is in
 [data_collectors.md](data_collectors.md) (Forward capture collectors).
 `scripts/sync_from_prod.sh` carries the directories down with the rest of
 `data/runtime` (update mode, nothing to add).

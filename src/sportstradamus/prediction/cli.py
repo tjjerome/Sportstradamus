@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.books import get_sleeper, get_ud
+from sportstradamus.collectors.lineup_capture import capture_lineups
 from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
@@ -243,6 +244,7 @@ def main(progress, contest_variant, log_level):
     scored_at = pd.Timestamp.now("UTC").tz_localize(None)
 
     stats, updates_failed = load_live_leagues()
+    capture_lineups(stats, scored_at)
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
