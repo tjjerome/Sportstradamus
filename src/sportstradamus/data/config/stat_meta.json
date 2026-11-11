@@ -354,6 +354,7 @@
         "assists": {
             "dist": "DPO",
             "shipped": "devel",
+            "book_leg": "rung",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
@@ -434,6 +435,7 @@
         "shots": {
             "dist": "DPO",
             "shipped": "devel",
+            "book_leg": "rung",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "crps",
