@@ -14,6 +14,7 @@ import hashlib
 import importlib.resources as pkg_resources
 import json
 import math
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 import numpy as np
@@ -233,7 +234,9 @@ def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None
     tmp.replace(path)
 
 
-def write_capture_parquet(frame: pd.DataFrame, table_dir: Path, polled_at: pd.Timestamp) -> None:
+def write_capture_parquet(
+    frame: pd.DataFrame, table_dir: Traversable, polled_at: pd.Timestamp
+) -> None:
     """Write one forward-capture table to ``table_dir/date=YYYY-MM-DD/HHMMSS.parquet``.
 
     ``polled_at`` is the run's ``Scored At``, naive UTC: every row carries it and the file is
