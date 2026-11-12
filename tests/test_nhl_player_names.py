@@ -105,6 +105,25 @@ def test_an_offer_meets_the_roster_the_gamelog_and_the_comp_pool_after_load(monk
     assert id_to_name == {STUTZLE: "Tim Stutzle", MCDAVID: "Connor Mcdavid"}
 
 
+def test_load_keeps_a_stored_name_that_is_not_a_string(monkeypatch):
+    """A feed that sends no name must not stop the league loading."""
+    gamelog = pd.DataFrame({"playerId": [STUTZLE, MCDAVID], "playerName": ["Tim Sttzle", None]})
+    players = {
+        2026: {
+            STUTZLE: {"playerName": "Tim Sttzle", "position": "C"},
+            MCDAVID: {"playerName": float("nan"), "position": "C"},
+            "8470001": {"position": "D"},
+        }
+    }
+
+    stats = _load(monkeypatch, gamelog, players)
+
+    assert stats.gamelog["playerName"].tolist() == ["Tim Stutzle", None]
+    assert stats.players[2026][STUTZLE]["playerName"] == "Tim Stutzle"
+    assert pd.isna(stats.players[2026][MCDAVID]["playerName"])
+    assert stats.players[2026]["8470001"] == {"position": "D"}
+
+
 def test_load_without_stored_nhl_data_leaves_the_frames_empty(monkeypatch):
     stats = _load(monkeypatch, pd.DataFrame(), {})
 

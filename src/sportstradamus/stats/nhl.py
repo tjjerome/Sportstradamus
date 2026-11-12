@@ -199,15 +199,24 @@ class StatsNHL(Stats):
 
         Moneypuck drops the non-ASCII letters of some names; ``name_map`` aliases that spelling
         to the books'. Rows stored before an alias existed keep the old spelling, so the stored
-        names are respelled here and the next update writes them back.
+        names are respelled here and the next update writes them back. A stored name that is not
+        a string (a feed that sent none) stays as stored, so one bad row cannot stop the league
+        loading.
         """
         super().load()
         if not self.gamelog.empty:
-            spellings = {name: remove_accents(name) for name in self.gamelog["playerName"].unique()}
-            self.gamelog["playerName"] = self.gamelog["playerName"].map(spellings)
+            spellings = {
+                name: remove_accents(name)
+                for name in self.gamelog["playerName"].unique()
+                if isinstance(name, str)
+            }
+            self.gamelog["playerName"] = self.gamelog["playerName"].map(
+                lambda name: spellings.get(name, name)
+            )
         for roster in self.players.values():
             for row in roster.values():
-                row["playerName"] = remove_accents(row["playerName"])
+                if isinstance(row.get("playerName"), str):
+                    row["playerName"] = remove_accents(row["playerName"])
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Keep only players who can accrue the requested NHL market."""
