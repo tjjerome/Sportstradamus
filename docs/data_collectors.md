@@ -246,10 +246,11 @@ capture, so that run stores nothing.
 `books/underdog.py`). The feed carries no per-line popularity; the lobby's
 `lines?filter_type=PickemStat` pill does ([underdog_api.md](underdog_api.md) §2,
 §6.4). Each poll reads one pill per `(sport, pickem_stat_id)` the feed shows for a
-modeled league, about seventy requests, then refreshes `lineup_statuses.json`. The
-reads come last in `get_ud`, after the alternate-line pass, so they can neither
-delay the board's own requests nor get them blocked, and the line states are on
-disk before they start. A pill that answers empty is named in one warning and the
+modeled league, about seventy requests under a time budget that a run of empty
+answers ends early ([underdog_api.md](underdog_api.md) §2), then refreshes
+`lineup_statuses.json`. The reads come last in `get_ud`, after the alternate-line
+pass, so they can neither delay the board's own requests nor get them blocked, and
+the line states are on disk before they start. A pill that answers empty is named in one warning and the
 others still land; nothing in the capture fails the run or costs the board its
 offers.
 

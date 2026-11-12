@@ -321,7 +321,7 @@ class _FakeSession:
 
     def get(self, url, timeout=None):
         _FakeSession.calls.append(url)
-        return _FakeResponse({_ALT_F1_URL: _ALT_F1}[url])
+        return _FakeResponse({_ALT_F1_URL: _ALT_F1, **_CAPTURE_ROUTES}[url])
 
 
 class _FakeRequests:
@@ -530,3 +530,37 @@ def test_alt_lines_stop_on_empty_streak(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert underdog._ud_alt_lines(candidates) == []
     assert underdog.UD_ALT_LINES_EMPTY_STREAK <= len(calls) < len(candidates)
+
+
+# Twenty NBA pills, one per stat: more than the empty streak lets the pass read.
+_TWENTY_PILL_FEED = {
+    "appearances": [{"id": "a1", "match_id": 1}],
+    "games": [{"id": 1, "sport_id": "NBA"}],
+    "over_under_lines": [
+        {"over_under": {"appearance_stat": {"appearance_id": "a1", "pickem_stat_id": f"s{i:02d}"}}}
+        for i in range(20)
+    ],
+}
+
+
+class _LinelessSession(_FakeSession):
+    def get(self, url, timeout=None):
+        _FakeSession.calls.append(url)
+        return _FakeResponse({"lines": []})
+
+
+def test_pills_stop_on_empty_streak() -> None:
+    """A refusing lobby answers without lines; the capture must not walk every pill before the board."""
+    _FakeSession.calls.clear()
+
+    pills = underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED)
+
+    assert len(pills) == len(_FakeSession.calls) == underdog.UD_PILL_EMPTY_STREAK
+
+
+def test_pills_stop_at_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _FakeSession.calls.clear()
+    monkeypatch.setattr(underdog, "UD_PILL_BUDGET_S", -1)
+
+    assert underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED) == {}
+    assert _FakeSession.calls == []

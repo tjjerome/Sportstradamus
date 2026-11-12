@@ -53,6 +53,14 @@ UD_PILL_URL = (
     f"&limit={UD_PILL_LIMIT}&{_UD_QUERY}"
 )
 UD_LINEUP_STATUSES_URL = "https://stats.underdogfantasy.com/v1/lineup_statuses"
+# The capture's reads run before get_ud hands back the board, so a refusing or hung lobby
+# must cost the board seconds, not the run (prophecize is flocked: a run held past the hour
+# makes the next one skip). One attempt each with a short timeout, the pill pass under a
+# wall-clock budget and stopped by a run of empty answers; a pill missed now is read again
+# on the next run.
+UD_CAPTURE_TIMEOUT_S = 10
+UD_PILL_BUDGET_S = 90
+UD_PILL_EMPTY_STREAK = 5
 
 # Leagues with a Stats model: team markets and alternate lines are fetched only
 # where prophecize can price them.
@@ -387,11 +395,24 @@ def _ud_alt_lines(candidates: list[tuple[dict, str]]) -> list[dict]:
     return rungs
 
 
-def _ud_pills(scraper: Scrape, feed: dict) -> dict[tuple[str, str], dict]:
+def _ud_capture_read(session: requests.Session, url: str) -> dict:
+    """One capture read: a single attempt under ``UD_CAPTURE_TIMEOUT_S``, ``{}`` when it fails."""
+    try:
+        response = session.get(url, timeout=UD_CAPTURE_TIMEOUT_S)
+        if response.status_code == HTTPStatus.OK:
+            return response.json()
+        logger.debug(f"Underdog capture read {url}: {response.status_code}")
+    except requests.RequestException as exc:
+        logger.debug(f"Underdog capture read {url}: {exc}")
+    return {}
+
+
+def _ud_pills(session: requests.Session, feed: dict) -> dict[tuple[str, str], dict]:
     """Each PickemStat pill the feed's modeled-league lines point at, by ``(sport, pickem_stat_id)``.
 
     A pill's ``lines[]`` carry the per-line ``entry_count`` the feed lacks (docs/underdog_api.md
-    §6.4); ``{}`` for a pill that answered nothing.
+    §6.4); ``{}`` for a pill that answered nothing. The pass stops at ``UD_PILL_BUDGET_S`` or
+    after ``UD_PILL_EMPTY_STREAK`` pills in a row without lines, leaving the rest unread.
     """
     appearances = by_id(feed.get("appearances", []))
     games = by_id(feed.get("games", []))
@@ -403,10 +424,20 @@ def _ud_pills(scraper: Scrape, feed: dict) -> dict[tuple[str, str], dict]:
         sport = _ud_league(game.get("sport_id", ""))
         if sport in UD_MODELED_LEAGUES and stat.get("pickem_stat_id"):
             pills.add((sport, stat["pickem_stat_id"]))
-    return {
-        (sport, stat_id): scraper.get(UD_PILL_URL.format(sport=sport, stat_id=stat_id))
-        for sport, stat_id in tqdm(sorted(pills), desc="Getting Underdog pills", unit="pill")
-    }
+    deadline = time.monotonic() + UD_PILL_BUDGET_S
+    answers: dict[tuple[str, str], dict] = {}
+    streak = 0
+    for sport, stat_id in tqdm(sorted(pills), desc="Getting Underdog pills", unit="pill"):
+        if time.monotonic() > deadline or streak == UD_PILL_EMPTY_STREAK:
+            logger.warning(
+                f"Underdog pill pass stopped after {len(answers)} of {len(pills)} pills "
+                f"({streak} in a row without lines)"
+            )
+            break
+        answer = _ud_capture_read(session, UD_PILL_URL.format(sport=sport, stat_id=stat_id))
+        answers[sport, stat_id] = answer
+        streak = 0 if answer.get("lines") else streak + 1
+    return answers
 
 
 def get_ud(
@@ -439,7 +470,8 @@ def get_ud(
     Requests per run: the feed, one lobby read per modeled league with games in
     it (all of its team and game categories), then one alternate-line read per
     modeled, mapped player prop until the budget runs out. A capture run then
-    reads each pill the feed's modeled-league lines point at and the decode.
+    reads each pill the feed's modeled-league lines point at, under its own
+    budget, and the decode.
     """
     scraper = _get_scraper()
     logger.info("Getting Underdog Lines")
@@ -482,8 +514,9 @@ def get_ud(
         # the line states need no request and land before those reads can fail.
         try:
             write_poll_capture(feed, lobbies, capture_dir, scored_at)
-            pills = _ud_pills(scraper, feed)
-            statuses = scraper.get(UD_LINEUP_STATUSES_URL)
+            with requests.Session() as session:
+                pills = _ud_pills(session, feed)
+                statuses = _ud_capture_read(session, UD_LINEUP_STATUSES_URL)
             write_entry_capture(pills, statuses, capture_dir, scored_at)
         except Exception:
             logger.exception("Underdog poll capture failed")
