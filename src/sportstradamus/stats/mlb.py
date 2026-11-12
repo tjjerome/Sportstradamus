@@ -271,7 +271,9 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
                 away_order, home_order = [], []
             else:
                 game_bs = mlb.boxscore_data(game["game_id"])
-                players = {p["id"]: p["fullName"] for p in game_bs["playerInfo"].values()}
+                players = {
+                    p["id"]: remove_accents(p["fullName"]) for p in game_bs["playerInfo"].values()
+                }
                 away_order = [players[i] for i in game_bs["away"]["battingOrder"]]
                 home_order = [players[i] for i in game_bs["home"]["battingOrder"]]
             playoff = game["game_type"] in _MLB_POSTSEASON_GAME_TYPES

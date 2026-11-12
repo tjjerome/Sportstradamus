@@ -11,8 +11,8 @@ The schedule request reaches past today, and a game dated after today is listed 
 day only: a later-dated offer reads its own game there, and the next-game map holds
 what it did when the request ended today.
 
-The feed's codes for Washington and Arizona are mapped to the ones the gamelog and the
-offers use.
+The feed's codes for Washington and Arizona, and its spellings of the names in a batting
+order, are mapped to the ones the gamelog and the offers use.
 """
 
 from __future__ import annotations
@@ -171,6 +171,29 @@ def test_washington_and_arizona_are_listed_under_the_codes_the_offers_use(
     assert sorted(upcoming) == ["ARI", "WAS"]
     assert upcoming["WAS"]["Opponent"] == "ARI"
     assert sorted(by_date) == [("ARI", _TODAY.isoformat()), ("WAS", _TODAY.isoformat())]
+
+
+def test_a_batting_order_is_spelled_as_the_gamelog_and_the_offers_spell_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The box score keeps accents and suffixes; the gamelog and the offers drop them.
+
+    A raw name matched no offer: the depth lookup fell back to the player's usual slot and
+    the card read a posted lineup as the usual one.
+    """
+    box_score = {
+        "playerInfo": {
+            "ID10": {"id": 10, "fullName": "Julio Rodríguez"},
+            "ID11": {"id": 11, "fullName": "Jazz Chisholm Jr."},
+        },
+        "away": {"battingOrder": [10, 11]},
+        "home": {"battingOrder": []},
+    }
+    monkeypatch.setattr(stats_mlb.mlb, "boxscore_data", lambda game_id: box_score)
+
+    upcoming, _ = stats_mlb._build_mlb_upcoming_games([_game("Scheduled")], _TEAMS, _TODAY)
+
+    assert upcoming["NYY"]["Batting Order"] == ["Julio Rodriguez", "Jazz Chisholm"]
 
 
 def _feed_through_today() -> list[dict]:

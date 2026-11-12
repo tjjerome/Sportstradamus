@@ -14,7 +14,7 @@ from sportstradamus.collectors import lineup_capture as lc
 
 # The run's Scored At, naive UTC, with the microseconds a real stamp carries.
 _SCORED_AT = pd.Timestamp("2026-07-04 23:50:07.123456")
-_ORDER = ["Paul Goldschmidt", "Aaron Judge", "Cody Bellinger", "Ben Rice", "Jazz Chisholm Jr."]
+_ORDER = ["Paul Goldschmidt", "Aaron Judge", "Cody Bellinger", "Ben Rice", "Jazz Chisholm"]
 
 
 def _mlb(pitcher: str, home: bool, opponent: str, order: list[str]) -> dict:
