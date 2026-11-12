@@ -53,13 +53,14 @@ UD_PILL_URL = (
     f"&limit={UD_PILL_LIMIT}&{_UD_QUERY}"
 )
 UD_LINEUP_STATUSES_URL = "https://stats.underdogfantasy.com/v1/lineup_statuses"
+
 # The capture's reads run before get_ud hands back the board, so a refusing or hung lobby
 # must cost the board seconds, not the run (prophecize is flocked: a run held past the hour
-# makes the next one skip). One attempt each with a short timeout, the pill pass under a
-# wall-clock budget and stopped by a run of empty answers; a pill missed now is read again
-# on the next run.
+# makes the next one skip). One attempt per read; a pill missed now is read again on the
+# next run.
 UD_CAPTURE_TIMEOUT_S = 10
 UD_PILL_BUDGET_S = 90
+# A refusing lobby answers every pill without lines: this many in a row end the pass.
 UD_PILL_EMPTY_STREAK = 5
 
 # Leagues with a Stats model: team markets and alternate lines are fetched only
