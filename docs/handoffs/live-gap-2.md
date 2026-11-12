@@ -324,8 +324,8 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      .509, NHL .545) while the L2 flag clears NFL and NHL, so making it read within .03 of live per
      league is the model-build lane's first job and no release gate reads it; forward capture is live
      from push II (81c1ed33, 11-06) and since 11-11 rides every prophecize run at the run's Scored At
-     (Underdog line states, match and per-line entry counts, MLB and NHL lineups; the NBA injury
-     report and lineups wait on the owner's NBA.com call; T2a at 300 flagged legs, T2b at 5,000); X2
+     (Underdog line states, match and per-line entry counts, MLB and NHL lineups, and since the
+     owner's go 11-11 the NBA injury report and lineups; T2a at 300 flagged legs, T2b at 5,000); X2
      landed as `admin books-lean` (push III, 11-06) and look 1 (11-01) kills on every stratum by
      construction — the apps shade exactly where the books lean (the lean's side is the discounted
      side on 100 % of shaded Underdog rungs; the books lean on 14 of 1,964 even rungs) — and the owner
