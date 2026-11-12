@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 # The leagues whose starters a run stores: MLB and NHL from their update, the NBA from
 # stats.nba.com.
 LINEUP_LEAGUES = ("MLB", "NHL", "NBA")
-# Column order and dtype of every league's table, pinned so a date's files read together: an
+# Column order and dtype of the MLB and NHL tables, pinned so a date's files read together: an
 # all-null column left to pyarrow is typed ``null``.
 LINEUP_DTYPES = {
     "polled_at": "datetime64[ns]",
@@ -51,11 +51,7 @@ LINEUP_DTYPES = {
     "slot": "Int64",
     "player": "string",
 }
-LINEUPS_URL = "https://stats.nba.com/js/data/leaders/00_daily_lineups_{day}.json"
-# How close an NBA tip must be for a run to fetch: lineups post ~30 min out, earlier polls repeat.
-DUE_WINDOW = timedelta(hours=2)
-# stats.nba.com names a day's lineups file by its Eastern date.
-_ET = ZoneInfo("America/New_York")
+# The NBA's table, pinned the same way: one row per listed player, not per starter.
 NBA_LINEUP_DTYPES = {
     "polled_at": "datetime64[ns]",
     "game_id": "string",
@@ -68,6 +64,11 @@ NBA_LINEUP_DTYPES = {
     "roster_status": "string",
     "source_timestamp": "string",
 }
+LINEUPS_URL = "https://stats.nba.com/js/data/leaders/00_daily_lineups_{day}.json"
+# How close an NBA tip must be for a run to fetch: lineups post ~30 min out, earlier polls repeat.
+DUE_WINDOW = timedelta(hours=2)
+# stats.nba.com names a day's lineups file by its Eastern date.
+_ET = ZoneInfo("America/New_York")
 
 
 def _starters(league: str, game: dict) -> list[tuple[str, int | None, str]]:

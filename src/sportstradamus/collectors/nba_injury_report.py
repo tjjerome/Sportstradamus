@@ -1,12 +1,12 @@
 """The newest official NBA injury report, parsed, with its publication time.
 
 The league posts a PDF every quarter hour (ET) at a URL that carries the stamp; a stamp not yet
-posted answers 403 (the bucket denies a missing key rather than answering 404). Every
-``prophecize`` run with the NBA live probes the last ``PROBE_SLOTS`` quarter-hours (from
-``collectors.lineup_capture``), keeps the first that answers and is not stored yet, writes its
-rows to ``NBA_INJURY_DIR/reports/date=<ET date>/<stamp>.parquet`` and the PDF itself to
-``NBA_INJURY_DIR/pdf/<stamp>.pdf``, so a decision time joins to the latest report stored at or
-before it (``fetched_at``). Licence: NBA.com terms.
+posted answers 403 (the bucket denies a missing key rather than answering 404). On every
+``prophecize`` run with the NBA live, ``collectors.lineup_capture`` calls ``capture_injury_report``:
+it probes the last ``PROBE_SLOTS`` quarter-hours, keeps the first that answers and is not stored
+yet, writes its rows to ``NBA_INJURY_DIR/reports/date=<ET date>/<stamp>.parquet`` and the PDF
+itself to ``NBA_INJURY_DIR/pdf/<stamp>.pdf``, so a decision time joins to the latest report stored
+at or before it (``fetched_at``). Licence: NBA.com terms.
 """
 
 from __future__ import annotations
