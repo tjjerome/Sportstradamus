@@ -29,6 +29,7 @@ from sportstradamus.helpers import (
     requests,
     stat_map,
 )
+from sportstradamus.helpers.scraping import CAPTURE_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
 _UD_BASE = "https://api.underdogfantasy.com"
@@ -54,11 +55,9 @@ UD_PILL_URL = (
 )
 UD_LINEUP_STATUSES_URL = "https://stats.underdogfantasy.com/v1/lineup_statuses"
 
-# The capture's reads run before get_ud hands back the board, so a refusing or hung lobby
-# must cost the board seconds, not the run (prophecize is flocked: a run held past the hour
-# makes the next one skip). One attempt per read; a pill missed now is read again on the
-# next run.
-UD_CAPTURE_TIMEOUT_S = 10
+# The pill pass runs before get_ud hands back the board, so a slow lobby must cost the board
+# seconds, not the run (prophecize is flocked: a run held past the hour makes the next one
+# skip); a pill missed now is read again on the next run.
 UD_PILL_BUDGET_S = 90
 # A refusing lobby answers every pill without lines: this many in a row end the pass.
 UD_PILL_EMPTY_STREAK = 5
@@ -397,9 +396,9 @@ def _ud_alt_lines(candidates: list[tuple[dict, str]]) -> list[dict]:
 
 
 def _ud_capture_read(session: requests.Session, url: str) -> dict:
-    """One capture read: a single attempt under ``UD_CAPTURE_TIMEOUT_S``, ``{}`` when it fails."""
+    """One capture read: a single attempt under ``CAPTURE_TIMEOUT_S``, ``{}`` when it fails."""
     try:
-        response = session.get(url, timeout=UD_CAPTURE_TIMEOUT_S)
+        response = session.get(url, timeout=CAPTURE_TIMEOUT_S)
         if response.status_code == HTTPStatus.OK:
             return response.json()
         logger.debug(f"Underdog capture read {url}: {response.status_code}")
@@ -429,10 +428,14 @@ def _ud_pills(session: requests.Session, feed: dict) -> dict[tuple[str, str], di
     answers: dict[tuple[str, str], dict] = {}
     streak = 0
     for sport, stat_id in tqdm(sorted(pills), desc="Getting Underdog pills", unit="pill"):
-        if time.monotonic() > deadline or streak == UD_PILL_EMPTY_STREAK:
+        if streak == UD_PILL_EMPTY_STREAK or time.monotonic() > deadline:
+            cause = (
+                f"{streak} in a row without lines"
+                if streak == UD_PILL_EMPTY_STREAK
+                else f"its {UD_PILL_BUDGET_S} s budget spent"
+            )
             logger.warning(
-                f"Underdog pill pass stopped after {len(answers)} of {len(pills)} pills "
-                f"({streak} in a row without lines)"
+                f"Underdog pill pass stopped after {len(answers)} of {len(pills)} pills ({cause})"
             )
             break
         answer = _ud_capture_read(session, UD_PILL_URL.format(sport=sport, stat_id=stat_id))

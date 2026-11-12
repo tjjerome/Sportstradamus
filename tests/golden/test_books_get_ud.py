@@ -549,18 +549,22 @@ class _LinelessSession(_FakeSession):
         return _FakeResponse({"lines": []})
 
 
-def test_pills_stop_on_empty_streak() -> None:
+def test_pills_stop_on_empty_streak(caplog) -> None:
     """A refusing lobby answers without lines; the capture must not walk every pill before the board."""
     _FakeSession.calls.clear()
 
-    pills = underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED)
+    with caplog.at_level(logging.WARNING, logger="log"):
+        pills = underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED)
 
     assert len(pills) == len(_FakeSession.calls) == underdog.UD_PILL_EMPTY_STREAK
+    assert "in a row without lines" in caplog.text
 
 
-def test_pills_stop_at_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pills_stop_at_the_budget(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     _FakeSession.calls.clear()
     monkeypatch.setattr(underdog, "UD_PILL_BUDGET_S", -1)
 
-    assert underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED) == {}
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert underdog._ud_pills(_LinelessSession(), _TWENTY_PILL_FEED) == {}
     assert _FakeSession.calls == []
+    assert "budget spent" in caplog.text

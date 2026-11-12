@@ -30,7 +30,7 @@ from sportstradamus.helpers.io import (
     read_upcoming_events,
     write_capture_parquet,
 )
-from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
+from sportstradamus.helpers.scraping import CAPTURE_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.nba_client import NBA_STATS_HEADERS
 
@@ -138,7 +138,7 @@ def _nba_lineups(scored_at: pd.Timestamp) -> pd.DataFrame:
     response = requests.get(
         LINEUPS_URL.format(day=now.astimezone(_ET).strftime("%Y%m%d")),
         headers=NBA_STATS_HEADERS,
-        timeout=REQUEST_TIMEOUT_S,
+        timeout=CAPTURE_TIMEOUT_S,
     )
     response.raise_for_status()
     return nba_lineup_rows(response.json(), scored_at)

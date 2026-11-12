@@ -22,7 +22,7 @@ import requests
 from pypdf import PdfReader
 
 from sportstradamus.helpers.io import NBA_INJURY_DIR, _atomic_write_parquet, read_upcoming_events
-from sportstradamus.helpers.scraping import BROWSER_USER_AGENT, REQUEST_TIMEOUT_S
+from sportstradamus.helpers.scraping import BROWSER_USER_AGENT, CAPTURE_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
 REPORT_URL = "https://ak-static.cms.nba.com/referee/injury/Injury-Report_{stamp}.pdf"
@@ -148,7 +148,7 @@ def capture_injury_report(fetched_at: pd.Timestamp) -> None:
         response = requests.get(
             REPORT_URL.format(stamp=stamp),
             headers={"User-Agent": BROWSER_USER_AGENT},
-            timeout=REQUEST_TIMEOUT_S,
+            timeout=CAPTURE_TIMEOUT_S,
         )
         if response.status_code == HTTPStatus.FORBIDDEN:
             continue

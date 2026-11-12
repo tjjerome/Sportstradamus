@@ -182,10 +182,14 @@ def write_entry_capture(
 ) -> None:
     """Write the pills' entry counts and, when it answered, the ``lineup_status_id`` decode.
 
-    A pill that answered nothing costs only its own rows; the warning names it. An empty decode
+    A pill that answered no lines costs only its own rows; the warning names it. An empty decode
     leaves the last one on disk.
     """
-    empty = [f"{sport}/{stat_id}" for (sport, stat_id), payload in pills.items() if not payload]
+    empty = [
+        f"{sport}/{stat_id}"
+        for (sport, stat_id), payload in pills.items()
+        if not payload.get("lines")
+    ]
     if empty:
         logger.warning(f"{len(empty)} Underdog pills answered empty: {empty}")
     write_capture_parquet(entry_rows(pills, polled_at), capture_dir / "entry_counts", polled_at)
