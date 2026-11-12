@@ -1,4 +1,4 @@
-"""Per-run lineup capture: each live league's starters for its next games, and the NBA's news."""
+"""Per-run lineup capture: each live league's starters for its next games."""
 
 from __future__ import annotations
 
