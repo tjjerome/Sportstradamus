@@ -323,22 +323,22 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      optimistic than live (`gap_delta`), every live recommended hit sits below .5464 (NBA .508, NFL
      .509, NHL .545) while the L2 flag clears NFL and NHL, so making it read within .03 of live per
      league is the model-build lane's first job and no release gate reads it; forward capture is live
-     from push II (81c1ed33, 11-06: per-poll Underdog line states and match entry counts, the daily
-     pill entry counts, and `fetch nba-injuries` / `fetch nba-lineups`, whose cron lines wait on the
-     owner's licence call; T2a at 300 flagged legs, T2b at 5,000); X2 landed as `admin books-lean`
-     (push III, 11-06) and look 1 (11-01) kills on every stratum by construction — the apps shade exactly
-     where the books lean (the lean's side is the discounted side on 100 % of shaded Underdog rungs;
-     the books lean on 14 of 1,964 even rungs), so the population is the owner's call before look 2;
-     the NFL wind
-     pre-test ACCEPTS (2026-10-30; the collector is a new lane,
-     [model_improvement_track.md](model_improvement_track.md) §6.6 D-4), the MLB replication is a
-     KILL (§6.6 D-5), X1 returns NEITHER, no learner build (§3.4), and X3, the NHL book leg from
+     from push II (81c1ed33, 11-06) and since 11-11 rides every prophecize run at the run's Scored At
+     (Underdog line states, match and per-line entry counts, MLB and NHL lineups, and since the
+     owner's go 11-11 the NBA lineups; T2a at 300 flagged legs, T2b at 5,000); X2
+     landed as `admin books-lean` (push III, 11-06) and look 1 (11-01) kills on every stratum by
+     construction — the apps shade exactly where the books lean (the lean's side is the discounted
+     side on 100 % of shaded Underdog rungs; the books lean on 14 of 1,964 even rungs) — and the owner
+     closed X2 on X3's live evidence (11-11); the NFL wind pre-test ACCEPTS (2026-10-30; the collector
+     is a new lane, [model_improvement_track.md](model_improvement_track.md) §6.6 D-4), the MLB
+     replication is a KILL (§6.6 D-5), X1 is a KILL (the owner's one-sided reading, 11-11; §3.4), and X3, the NHL book leg from
      sportsbook rungs, ACCEPTS on the live replay (−0.0033 Brier [−0.0059, −0.0009] on 727 re-legged
      even-pick legs) and offline, on the post-I6f read of 11-06, on shots (−0.0005 [−0.0008, −0.0002])
      and assists (−0.0020 [−0.0034, −0.0006]) with no gate flip, stays open on points (upper bound
      +0.0001, under the 1,500-row kill floor) and is killed on goals under the hurdle design (+0.0022
-     [+0.0005, +0.0036]), so the owner's two flips are NHL `shots` and `assists` to `book_leg: "rung"`;
-     push III (11-06) landed the inert code (§3.4). The model-build lane starts from
+     [+0.0005, +0.0036]), so the owner flipped NHL `shots` and `assists` to `book_leg: "rung"` (11-11,
+     on code push III landed 11-06; §3.4). The williamhill_us home-run placeholder rule is in
+     [model_improvement_track.md](model_improvement_track.md) §3.2. The model-build lane starts from
      `~/backups/sportstradamus/2026-10-21-live-gap-2/research/MODEL_BUILD_KICKOFF.md`. The walk stopped 13:01 CDT (restart `walk/start_walk.sh
      NFL,NBA 8 48`); Part 5 levers 5.2/5.3 and the I6g / tail-scorecard reads deferred; the seven
      held cells left production at 12:44 CDT (verified on the 13:06 board).

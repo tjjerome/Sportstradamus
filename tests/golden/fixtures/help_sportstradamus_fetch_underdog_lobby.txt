@@ -1,7 +1,0 @@
-Usage: sportstradamus fetch underdog-lobby [OPTIONS]
-
-  Snapshot per-line Underdog entry counts for today's modeled-league stats, once
-  a day.
-
-Options:
-  --help  Show this message and exit.

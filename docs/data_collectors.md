@@ -15,9 +15,9 @@ thin package under it. This document is the canonical description of the
 framework and the recipe for adding a fourth source. The per-source specifics —
 where to get the cookie, which endpoints to register — live in
 [fantasypoints.md](fantasypoints.md), [cleaningtheglass.md](cleaningtheglass.md),
-and [baseballsavant.md](baseballsavant.md). Beside the framework sit plain
-commands: `fetch headshots`, and the forward-capture collectors that store what
-the polls already see for the T2a / T2b reads (their own section below).
+and [baseballsavant.md](baseballsavant.md). Beside the framework sit a plain
+command, `fetch headshots`, and the forward captures each `prophecize` run writes
+of what the polls already see for the T2a / T2b reads (their own section below).
 
 ## Architecture
 
@@ -38,10 +38,8 @@ src/sportstradamus/collectors/
   cleaningtheglass/  CTG_SOURCE (cookie, date-keyed)
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
-  underdog_capture.py  per-poll Underdog line states, written from `get_ud(capture_dir=…)`
-  underdog_lobby.py  `fetch underdog-lobby` per-line Underdog entry counts + lineup-status decode
-  nba_injury_report.py `fetch nba-injuries` official NBA injury-report PDF, parsed
-  nba_lineups.py     `fetch nba-lineups` stats.nba.com daily lineups
+  underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
+  lineup_capture.py  per-run MLB / NHL starters from the live leagues' `Stats` + NBA daily lineups, written from `prophecize`
 ```
 
 A source is a `Source` dataclass (`cli.py`) — **data and callables, not a
@@ -217,72 +215,78 @@ drops: the inputs of the two pre-registered reads in
 Doubtful before the decision), and **T2b**, popularity (the lobby's
 `entry_count`). The bars, sample sizes and read dates live there and are not
 repeated here. Nothing in these files changes a served number: no `Stats` hook
-reads them, the dashboard never does, and only `prophecize` and the three
-`fetch` commands write them. Each is a plain command (the per-poll capture, a
-seam inside `get_ud`), not a `Source`.
+reads them, the dashboard never does, and only `prophecize` writes them. None is
+a `Source`: the Underdog captures are a seam inside `get_ud`, the rest one call in
+`prophecize` (`capture_lineups`) right after the leagues update.
 
 | Capture | Trigger | Files under `data/runtime/` | Schema (pinned in the module) |
 |---|---|---|---|
 | Underdog per poll | every `prophecize` run, `get_ud(capture_dir=UNDERDOG_CAPTURE_DIR)`; no extra request | `underdog_capture/lines/date=<UTC date>/HHMMSS.parquet`, `underdog_capture/matches/…` | `collectors/underdog_capture.py` |
-| Underdog daily pill pull | `fetch underdog-lobby`, once a day | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_lobby.py` |
-| NBA official injury report | `fetch nba-injuries`, every 30 min in season | `nba_injury/reports/date=<ET date>/<stamp>.parquet`; the PDF at `nba_injury/pdf/<stamp>.pdf` | `collectors/nba_injury_report.py` |
-| NBA daily lineups | `fetch nba-lineups`, every 15 min in season; requests only while an NBA event in `upcoming_events.json` commences within 2 h | `nba_lineups/date=<ET date>/HHMMSS.parquet` | `collectors/nba_lineups.py` |
+| Underdog pill entry counts | every `prophecize` run, the same capture, last in `get_ud`; ~70 requests | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_capture.py` |
+| NBA daily lineups | every `prophecize` run with the NBA live, `capture_lineups`; one request, only while an NBA event in `upcoming_events.json` commences within 2 h | `lineups/NBA/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
+| MLB / NHL starters | every `prophecize` run, `capture_lineups` right after the leagues update; no extra request | `lineups/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
 
 **Underdog per poll** (`collectors/underdog_capture.py`). Every line of the feed
-and of each modeled league's lobby read, before the parser drops the suspended
-and live ones: the line's `status`, the appearance's `lineup_status_id`
+and of each modeled league's lobby read, the suspended and live ones the parser
+drops included: the line's `status`, the appearance's `lineup_status_id`
 (Underdog's own Q / D / O flag; decode it with `lineup_statuses.json`), both
 options' status and multiplier, and `over_under_id`, which survives a line move
 so two polls diff on it. `matches/` holds each lobby's per-match `entry_count`, a
 display string (`"75.2K"`). `source` names the payload (`feed`, `lobby:NBA`).
-The ledger's `get_ud()` passes no `capture_dir` and writes nothing. Every poll's
-file carries the one schema the module's dtype table pins, so a read over a date
-partition concatenates the files as they are.
+The ledger's `get_ud()` passes no `capture_dir`: it writes nothing and reads no
+pill. Every poll's file carries the one schema the module's dtype table pins, so a
+read over a date partition concatenates the files as they are. A feed that trips
+the even-pick check ([underdog_api.md](underdog_api.md) §7.4) raises before the
+capture, so that run stores nothing.
 
-**Underdog daily pill pull** (`collectors/underdog_lobby.py`). The feed carries no
-per-line popularity; the lobby's `lines?filter_type=PickemStat` pill does
-([underdog_api.md](underdog_api.md) §2, §6.4). One request per
-`(sport, pickem_stat_id)` the feed shows that day for a modeled league, about a
-hundred, once a day: T2b wants one count per leg, not a time series. The same run
-refreshes `lineup_statuses.json`. An empty feed exits 1 before writing; a pill that
-answers empty still lets the others land, then the run exits 1 naming it, so the
-healthcheck shows a day with a gap instead of a green tick.
+**Underdog pill entry counts** (`collectors/underdog_capture.py`, the reads in
+`books/underdog.py`). The feed carries no per-line popularity; the lobby's
+`lines?filter_type=PickemStat` pill does ([underdog_api.md](underdog_api.md) §2,
+§6.4). Each poll reads one pill per `(sport, pickem_stat_id)` the feed shows for a
+modeled league, about seventy requests under a time budget that a run of empty
+answers ends early ([underdog_api.md](underdog_api.md) §2), then refreshes
+`lineup_statuses.json`. The reads come last in `get_ud`, after the alternate-line
+pass, so they can neither delay the board's own requests nor get them blocked, and
+the line states are on disk before they start. A pill that answers empty is named in one warning and the
+others still land; nothing in the capture fails the run or costs the board its
+offers.
 
-**NBA official injury report** (`collectors/nba_injury_report.py`). The league
-posts a PDF every quarter hour (ET) at a URL that carries the stamp; a run walks
-the last eight quarter-hours newest first and stores the first that answers,
-and a stamp already on disk ends the run. `pypdf` yields one text line per table
-row: `[date] [time] [matchup] [team] Last, First Status Reason`, where date, time,
-matchup and team carry forward to the rows below them. The only non-player data
-lines end in `NOT YET SUBMITTED` (a team that has not filed); they carry the
-game's date, time and matchup, which the parser carries forward without emitting
-a row. A report spans two game dates, so `game_date` is a column and the
-partition is the report's date; `report_stamp` is the publication time. An
-empty probe window while an NBA game sits on `upcoming_events.json` exits 1
-(`run_job.sh` logs FAIL and pings `/fail`), because the origin answers 403 for a
-block exactly as for a missing stamp; off-season the same empty window is a plain
-message.
+**NBA daily lineups** (`collectors/lineup_capture.py`). The NBA update names no
+starters, so the run reads `stats.nba.com`'s `00_daily_lineups_<YYYYMMDD>.json`
+for the Eastern date, flattened to one row per listed player on both teams
+(`lineup_status`, `roster_status`, `position`). The JSON's own `timestamp` is
+unreliable (the probes found stale values), so each row carries the run's
+`Scored At` in `polled_at` and keeps the source's in `source_timestamp`. Lineups
+post about half an hour before tip, so a run outside the 2 h window makes no
+request. It runs only with the NBA live, and a failed read costs neither another
+league's capture nor the board.
 
-**NBA daily lineups** (`collectors/nba_lineups.py`). `stats.nba.com`'s
-`00_daily_lineups_<YYYYMMDD>.json`, flattened to one row per listed player on
-both teams (`lineup_status`, `roster_status`, `position`). The JSON's own
-`timestamp` is unreliable (the probes found stale values), so each row carries
-the poll time in `polled_at` and keeps the source's in `source_timestamp`.
-Lineups post about half an hour before tip, so a tick outside the 2 h window
-makes no request.
+**MLB / NHL starters** (`collectors/lineup_capture.py`). The update `prophecize`
+runs on each live league already reads each team's next game: MLB's probable
+pitchers and the batting orders posted so far (`StatsMLB.upcoming_games`), NHL's
+predicted starting goalie from dobbersports (`StatsNHL.upcoming_games`). The next
+update overwrites them, so each run stores them, one row per team, role and
+player (`pitcher`, `batter` with its batting `slot`, `goalie`) beside the
+opponent and the home flag. A starter not yet named keeps his row with `player`
+empty; an order not yet posted has no `batter` rows. `team` is the
+`upcoming_games` key, so an MLB doubleheader's second game reads `NYY2`. A league
+out of season, whose update failed or with no game ahead writes nothing; one
+league's failed capture is logged and costs neither the others nor the board.
 
 **The decision-time join.** A leg's decision time is its `Scored At`; join each
-capture to the latest one at or before it (the poll's `polled_at`, the report's
-`report_stamp`). This is `<=`, not the strict `<` of the dated snapshots above: a
-capture is the state at a moment, never a table that may already fold the game
-in.
+capture to the latest one at or before it (`polled_at`). This is `<=`, not the strict `<` of the dated snapshots above:
+a capture is the state at a moment, never a table that may already fold the game
+in. Every capture a `prophecize` run writes carries that run's `Scored At` in that
+column, and every file is named by it, so `<=` picks the leg's own
+run. Underdog files written before 2026-11-11 carry their own clock instead,
+minutes after their run's `Scored At` (their `polled_at` matches no history
+stamp): a reader assigns each to the run whose `Scored At` is the latest before it.
 
-**Ops.** `run_job.sh` has a case per `fetch` command and skips the shared archive
-lock for them (they never open the archive); the cron lines are in
-[OPERATIONS.md](OPERATIONS.md), and the two NBA.com lines are the owner's to
-install after the licence call. `scripts/sync_from_prod.sh` pulls `data/runtime`
-whole, so the captures reach the dev box with the rest of it; `sync_to_prod.sh`
-never sends them.
+**Ops.** No capture has a cron line or `fetch` command of its own: all ride the
+`prophecize` job ([OPERATIONS.md](OPERATIONS.md)). A capture that fails is an ERROR with its traceback in the
+run's log; it never fails the run, so no healthcheck sees it.
+`scripts/sync_from_prod.sh` pulls `data/runtime` whole, so the captures reach the
+dev box with the rest of it; `sync_to_prod.sh` never sends them.
 
 ## Recipe: add a new source
 

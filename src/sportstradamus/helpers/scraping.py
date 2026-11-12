@@ -22,6 +22,9 @@ from sportstradamus import creds
 from sportstradamus.spiderLogger import logger
 
 REQUEST_TIMEOUT_S = 60  # bound network hangs; generous because proxy-routed fetches legitimately take tens of seconds
+# The per-run captures read inside prophecize before it scores the board, so a hung host must
+# cost the run seconds: one attempt each, and a read missed now is read again next run.
+CAPTURE_TIMEOUT_S = 10
 
 # Real-browser User-Agent captured from a working live Firefox session (2026-05).
 # stats.nba.com fingerprints on it (refresh from the browser dev-tools Network tab,
