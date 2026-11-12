@@ -93,6 +93,7 @@ def build_run_dated(source: Source):
             season=season,
             week=0,
             refetch=refetch,
+            after_write=source.after_write,
         )
 
     return run

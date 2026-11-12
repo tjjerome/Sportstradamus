@@ -28,8 +28,8 @@ names, and the constant stands. To force a gamelog update in the offseason, set
 Pre-season is never priced: a game dated before the feed's opening night for its
 league is archived and not scored (`_in_season_markets` in `prediction/scoring.py`).
 A new NBA season reads the newest earlier `player_data/NBA/nba_players_<season>.csv`
-seed, with a warning in the log, until that season's own Cleaning the Glass export
-is dropped in.
+seed, with a warning in the log, until `ctg-fetch` writes that season's own file
+(or the export is dropped in by hand).
 
 ## Recommended Cron
 
@@ -184,8 +184,9 @@ unverified. Monday 7:30 falls after `reflect`'s archive-lock hold and before the
 first `confer` and `prophecize` runs, so it never queues (it takes the shared lock
 like every job but the capture ones). It needs the CTG cookie in prod's
 `creds/keys.json` and `HEALTHCHECK_URL_CTG_FETCH` set; see
-[cleaningtheglass.md](cleaningtheglass.md). The weekly `sync_from_prod.sh` brings its
-snapshots to the dev box.
+[cleaningtheglass.md](cleaningtheglass.md). Besides the snapshots it rewrites the
+season's `nba_players_<season>.csv` roster seed in place, which the next `prophecize`
+update reads. The weekly `sync_from_prod.sh` brings both to the dev box.
 
 The dev box's own crontab holds one line: the weekly pull of production's archive,
 runtime outputs and collector snapshots (`scripts/sync_from_prod.sh`), so nothing

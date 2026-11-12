@@ -1,7 +1,8 @@
 # Cleaning the Glass snapshotter
 
 `sportstradamus fetch ctg` snapshots Cleaning the Glass NBA player tables to date-stamped
-parquets that `StatsNBA` can fold into player features. It runs on the shared collector
+parquets that `StatsNBA` can fold into player features, and keeps the season's roster seed CSV
+current from the player table. It runs on the shared collector
 framework — see [data_collectors.md](data_collectors.md) for the CLI surface
 (`run`/`verify`/`list`/`refresh-auth`), the idempotent skip-if-on-disk behavior, the mid-run
 token-refresh flow, and the strict-`<` leakage rule. This page covers only what is CTG-specific.
@@ -42,6 +43,28 @@ games. Each run writes `data/player_data/NBA/cleaningtheglass/{season}/{date}/{s
 
 Not captured: team pages (`/stats/teams`, `/stats/league/*`, `/stats/lineups`), which need their
 own capture of the page, and playoffs (`seasontype=playoffs`).
+
+## Roster seed
+
+`StatsNBA._update` seeds each season's roster (name, team, age, position) from
+`player_data/NBA/nba_players_<season>.csv` (the 2026 season is `nba_players_2026-27.csv`), CTG's
+own player CSV export, at every update. A run that fetches `player_stats` rewrites that file in
+place from the table it just parsed, so the next `prophecize` or `meditate` update reads the
+current roster with no step between. Nobody drops the export in by hand any more.
+
+`_roster_seed` rebuilds the export's 16 columns (`Player, Age, Team, Pos, MIN, MPG`, then a rank
+and a value for Usage, PSA, AST%, AST:Usg and TOV%) the way the browser formats them: half-up
+rounding, `MIN` floored, ranks the percentile on a 0-100 scale. Lines of CTG's own export are
+the oracle in `tests/test_collectors_ctg.py`.
+
+- Only `player_stats` writes it; `--only player_onoff` leaves it alone.
+- It follows the snapshot: a rerun on the same date skips `player_stats` and leaves the file
+  as it was, `--refetch` rewrites it.
+- The file sits at the league root beside the snapshot dir, untracked like the other
+  `nba_players_*.csv`. `sync_to_prod.sh` never sends these files, so prod's weekly job refreshes
+  prod's copy and `sync_from_prod.sh` pulls it to dev, keeping a dev copy that is newer.
+- The cron skips October, so a new season's first updates read the newest earlier file (with the
+  warning in the log) until the first November capture, unless the export is dropped in by hand.
 
 ## Session cookie
 
@@ -97,7 +120,8 @@ as-of loader. The `_CTG_*` join constants in `stats/nba.py` are deliberately sti
 features stay gamelog-only. Wiring them is a separate decision: it adds about 340 `{col}_asof`
 columns to every NBA cell, all NaN until snapshots accumulate, and the loader needs one row per
 player, which `onoff.parquet` does not give (cut it to a `position` first). Both tables carry
-`player_id` and `team_id`, the join keys.
+CTG's own `player_id` and `team_id`, which are not NBA ids (none of 287 match the gamelog's),
+so a join to NBA data goes by name.
 
 ## Moving snapshots
 

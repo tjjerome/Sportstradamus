@@ -41,6 +41,7 @@ from sportstradamus.collectors.transport import CollectorAuthRecoveryError
 PathFor = Callable[[EndpointSpec], Path]
 FetchOne = Callable[[EndpointSpec], "tuple[Any | None, dict[str, Any] | None]"]
 Transform = Callable[..., pd.DataFrame]
+AfterWrite = Callable[[EndpointSpec, pd.DataFrame, int], None]
 
 
 def fetch_and_write_one(
@@ -55,6 +56,7 @@ def fetch_and_write_one(
     period: str | None = None,
     request_body: dict | list | None = None,
     refetch: bool = False,
+    after_write: AfterWrite | None = None,
 ) -> RunResult:
     """Route, fetch, parse to DataFrame, write parquet, return the outcome.
 
@@ -67,6 +69,10 @@ def fetch_and_write_one(
     as already-fetched and the result is recorded as ``RESULT_SKIPPED``.
     Zero-row parquets are treated as failed downloads and re-fetched anyway.
     Pass ``refetch=True`` to force a re-download.
+
+    ``after_write(spec, df, season)`` runs once the parquet of a non-empty table
+    has landed, never on a skip. An error in it, like one in ``transform``, is
+    not captured: it ends the run.
     """
     # style: allow-complexity — per-endpoint orchestrator: route -> fetch ->
     # parse -> write, capturing every failure (routing, fetch, decode) into the
@@ -133,6 +139,8 @@ def fetch_and_write_one(
         "wrote parquet",
         extra={"endpoint": spec.name, "path": str(target), "rows": len(df)},
     )
+    if after_write is not None and not df.empty:
+        after_write(spec, df, season)
     return base_result
 
 
@@ -188,6 +196,7 @@ def run_specs(
     season: int,
     week: int,
     refetch: bool,
+    after_write: AfterWrite | None = None,
 ) -> None:
     """Walk ``specs`` once, writing each parquet, then dump the report.
 
@@ -205,6 +214,7 @@ def run_specs(
             week=week,
             request_body=request_body_for(spec),
             refetch=refetch,
+            after_write=after_write,
         )
         for spec in tqdm(specs, desc=desc, unit="endpoint")
     )

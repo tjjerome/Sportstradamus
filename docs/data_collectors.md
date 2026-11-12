@@ -60,6 +60,7 @@ subclass hierarchy**. Its fields:
 | `auth_fields` | `AuthFields` naming the keys.json slots, or `None` for a public source |
 | `env_prefix` | env-var prefix for auth overrides (`{PREFIX}_COOKIE`, …) |
 | `period_kind` | `"week"` (FP) or `"date"` (CTG/savant) — selects the command set |
+| `after_write(spec, df, season)` | date sources only: runs once a non-empty table's parquet has landed (never on a skip; an error ends the run). CTG refreshes the NBA roster seed with it |
 | `has_backfill`, `backfill_end_week`, `modes`, `default_mode`, `render_request_body`, `verify_fn`, `renew_auth` | FP-only extras (default off) |
 
 `build_source_cli(source)` returns a real `click.Group` bound at module level

@@ -307,7 +307,8 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
 
   The `ctg-fetch` job (NBA, Cleaning the Glass) runs weekly on prod, Mondays
   November through April: it snapshots the regular-season player tables to
-  `src/sportstradamus/data/player_data/NBA/cleaningtheglass/{season}/{date}/`.
+  `src/sportstradamus/data/player_data/NBA/cleaningtheglass/{season}/{date}/` and
+  rewrites that season's `nba_players_<season>.csv` roster seed in place.
   Needs a session cookie in `creds/keys.json` (see `docs/cleaningtheglass.md`)
   and `HEALTHCHECK_URL_CTG_FETCH` set so a failed run surfaces as an alert.
 

@@ -7,6 +7,7 @@ parquet lands at the ``{season}/{date}/`` path.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 
 import pandas as pd
@@ -18,6 +19,7 @@ from sportstradamus.collectors.baseballsavant.cli import savant_fetch
 from sportstradamus.collectors.catalog import EndpointSpec, save_catalog
 from sportstradamus.collectors.cleaningtheglass.cli import ctg_fetch
 from sportstradamus.collectors.cli import Source, build_source_cli
+from sportstradamus.collectors.runner import fetch_and_write_one
 from sportstradamus.collectors.tabular import dated_path_for, parse_tabular_response
 
 
@@ -95,6 +97,28 @@ def test_dated_run_writes_parquet(tmp_path, monkeypatch):
     landed = tmp_path / "player_data/NBA/testsrc/2025/2026-01-15/usage.parquet"
     assert landed.is_file()
     assert list(pd.read_parquet(landed)["usg"]) == [0.3]
+
+
+def test_after_write_runs_for_a_fresh_non_empty_table_only(tmp_path):
+    seen = []
+
+    def write(name, rows):
+        fetch_and_write_one(
+            _spec(name),
+            path_for=lambda spec: tmp_path / f"{spec.name}.parquet",
+            fetch_one=lambda _spec: (rows, None),
+            transform=lambda body, **_kw: pd.DataFrame(body),
+            log=logging.getLogger("test"),
+            season=2025,
+            week=0,
+            after_write=lambda spec, df, season: seen.append((spec.name, len(df), season)),
+        )
+
+    write("player_full", [{"usg": 0.3}])
+    write("player_empty", [])
+    write("player_full", [{"usg": 0.3}])
+
+    assert seen == [("player_full", 1, 2025)]
 
 
 def test_ctg_has_refresh_auth_savant_does_not():

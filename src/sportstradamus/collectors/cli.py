@@ -19,6 +19,7 @@ import click
 
 from sportstradamus.collectors import commands, commands_dated
 from sportstradamus.collectors.auth import AuthFields, ResolvedAuth, read_auth
+from sportstradamus.collectors.runner import AfterWrite
 
 
 @dataclass
@@ -58,6 +59,9 @@ class Source:
     # cumulative season-to-date sources stamped by capture date (Cleaning the
     # Glass, Baseball Savant); these skip --week / --mode / --backfill.
     period_kind: str = "week"
+    # Date sources only: ``after_write(spec, df, season)`` runs after a non-empty table's
+    # parquet is written (never on a skip), to refresh a file kept outside the snapshots.
+    after_write: AfterWrite | None = None
 
     def client(self, *, inter_request_sleep_s: float | None = None) -> Any:
         resolved = (

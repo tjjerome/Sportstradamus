@@ -8,6 +8,10 @@ CTG has no table endpoint: ``/stats/players`` is an HTML page whose inline scrip
 table to ``vuePlayers(...)`` as JSON, and the page's CSV button builds its file in the browser
 from that data. See ``docs/cleaningtheglass.md`` for capturing the cookie and what each tool
 holds.
+
+After the player table is written, ``after_write`` also rebuilds the season's NBA roster seed,
+``player_data/NBA/nba_players_<season>.csv``, in the layout of that CSV export. ``StatsNBA``
+reads the file as its player seed.
 """
 
 from __future__ import annotations
@@ -16,17 +20,21 @@ import importlib.resources as pkg_resources
 import json
 import re
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
+from math import floor
 from pathlib import Path
 
+import click
 import pandas as pd
 
 from sportstradamus import data
+from sportstradamus.collectors import tabular
 from sportstradamus.collectors.auth import AuthFields, ResolvedAuth
 from sportstradamus.collectors.catalog import EndpointSpec
 from sportstradamus.collectors.cli import Source
-from sportstradamus.collectors.tabular import dated_path_for
 from sportstradamus.collectors.transport import CollectorAuthError, CookieClient
+from sportstradamus.helpers.io import _atomic_write_csv
 
 CATALOG_PATH = Path(str(pkg_resources.files(data) / "config" / "cleaningtheglass_endpoints.json"))
 
@@ -50,6 +58,17 @@ _TABLE_KEY_COL = {
 
 # Whitespace and commas up to the start of the next call argument; no match at the closing paren.
 _NEXT_ARG = re.compile(r"[\s,]*(?=[^\s,)])")
+
+# The stats in CTG's own player CSV export, after Player/Age/Team/Pos/MIN/MPG, as
+# (label, table column, scale, decimals, suffix). Each is preceded by its "<label> Rank",
+# the position percentile on a 0-100 scale.
+_SEED_STATS = (
+    ("Usage", "usage", 100, 1, "%"),
+    ("PSA", "psa", 1, 1, ""),
+    ("AST%", "ast_perc", 100, 1, "%"),
+    ("AST:Usg", "ast_usage_ratio", 1, 2, ""),
+    ("TOV%", "tov_perc", 100, 1, "%"),
+)
 
 
 def _make_client(resolved: ResolvedAuth, inter_request_sleep_s: float | None) -> CookieClient:
@@ -112,15 +131,53 @@ def _parse_page(html: str, *, spec: EndpointSpec, **_context) -> pd.DataFrame:
     )
 
 
+def _fixed(value: float, decimals: int) -> str:
+    """Round half up, as CTG's export does (26.25 reads 26.3; Python's format() gives 26.2)."""
+    return str(Decimal(value).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP))
+
+
+def _roster_seed(stats: pd.DataFrame) -> pd.DataFrame:
+    """The player table in the format of CTG's own CSV export, which StatsNBA reads as its seed.
+
+    The export floors minutes and rounds every other figure half up, ranks included.
+    """
+    seed = pd.DataFrame(
+        {
+            "Player": stats["name"],
+            "Age": [_fixed(age, 1) for age in stats["age"]],
+            "Team": stats["team_name"],
+            "Pos": stats["pos_category"].str.capitalize(),
+            "MIN": (stats["seconds_played"] // 60).astype(int),
+            "MPG": [_fixed(mpg, 1) for mpg in stats["mpg"]],
+        }
+    )
+    for label, column, scale, decimals, suffix in _SEED_STATS:
+        seed[f"{label} Rank"] = [floor(100 * ptile + 0.5) for ptile in stats[f"ptile_{column}"]]
+        seed[label] = [_fixed(value * scale, decimals) + suffix for value in stats[column]]
+    return seed
+
+
+def _write_roster_seed(spec: EndpointSpec, table: pd.DataFrame, season: int) -> None:
+    """Rewrite the season's NBA roster seed from the player table, where StatsNBA reads it."""
+    if spec.name != "player_stats":
+        return
+    season_label = f"{season}-{(season + 1) % 100:02d}"
+    path = tabular.PLAYER_DATA_BASE / "NBA" / f"nba_players_{season_label}.csv"
+    seed = _roster_seed(table)
+    _atomic_write_csv(seed, path)
+    click.echo(f"  roster seed: wrote {len(seed)} rows -> {path}", err=True)
+
+
 CTG_SOURCE = Source(
     name="ctg-fetch",
     help="Snapshot Cleaning the Glass NBA advanced tables to disk.",
     catalog_path=CATALOG_PATH,
     make_client=_make_client,
     default_context=_default_context,
-    path_for=partial(dated_path_for, league="NBA", source_dir="cleaningtheglass"),
+    path_for=partial(tabular.dated_path_for, league="NBA", source_dir="cleaningtheglass"),
     dispatch=_dispatch,
     transform=_parse_page,
+    after_write=_write_roster_seed,
     report_prefix="ctg_fetch",
     auth_fields=AuthFields(
         cookie="cleaningtheglass_cookie",
