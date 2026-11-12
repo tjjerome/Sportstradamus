@@ -157,9 +157,9 @@ def test_due_only_within_two_hours_of_an_nba_tip():
     assert lc.due([nba], now) and not lc.due([nhl], now) and not lc.due([late], now)
 
 
-def _nba_run(monkeypatch, tmp_path, tip: str, status: int = 200) -> tuple[list, list]:
-    """Stub the ledger, stats.nba.com and the injury report; return the URLs and report calls."""
-    requested, reports = [], []
+def _nba_run(monkeypatch, tmp_path, tip: str, status: int = 200) -> list:
+    """Stub the ledger and stats.nba.com; return the URLs requested."""
+    requested = []
 
     def fake_get(url, **_):
         requested.append(url)
@@ -173,12 +173,11 @@ def _nba_run(monkeypatch, tmp_path, tip: str, status: int = 200) -> tuple[list, 
         lc, "read_upcoming_events", lambda: [{"league": "NBA", "commence_time": tip}]
     )
     monkeypatch.setattr(lc.requests, "get", fake_get)
-    monkeypatch.setattr(lc, "capture_injury_report", reports.append)
-    return requested, reports
+    return requested
 
 
 def test_nba_capture_reads_the_eastern_day_while_a_tip_is_due(monkeypatch, tmp_path):
-    requested, reports = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z")
+    requested = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z")
 
     lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
 
@@ -186,32 +185,25 @@ def test_nba_capture_reads_the_eastern_day_while_a_tip_is_due(monkeypatch, tmp_p
     (written,) = tmp_path.rglob("*.parquet")
     assert written.relative_to(tmp_path).as_posix() == "NBA/date=2026-10-29/013007.parquet"
     assert (pd.read_parquet(written)["polled_at"] == _NBA_SCORED_AT).all()
-    assert reports == [_NBA_SCORED_AT]
 
 
-def test_nba_capture_without_a_tip_due_stores_only_the_injury_report(monkeypatch, tmp_path):
-    """No lineup request outside the window; with the NBA not live, no report either."""
-    requested, reports = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T04:30:00Z")
-
+def test_nba_capture_without_a_tip_due_or_the_nba_live_makes_no_request(monkeypatch, tmp_path):
+    """No lineup request outside the window, nor with a tip due but the NBA not live."""
+    requested = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T04:30:00Z")
     lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
+    assert not requested
+
+    requested = _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z")
     lc.capture_lineups({"MLB": SimpleNamespace(upcoming_games={})}, _NBA_SCORED_AT)
-
     assert not requested and not any(tmp_path.rglob("*.parquet"))
-    assert reports == [_NBA_SCORED_AT]
 
 
-def test_nba_lineups_and_injury_report_fail_apart(monkeypatch, tmp_path, caplog):
-    """A refused lineup fetch still lets the report run; the report's alarm is logged, not raised."""
+def test_nba_lineup_failure_is_logged_not_raised(monkeypatch, tmp_path, caplog):
+    """A refused lineup fetch is an ERROR in the log, never the run's exception."""
     _nba_run(monkeypatch, tmp_path, tip="2026-10-29T02:30:00Z", status=500)
-
-    def alarm(scored_at):
-        raise RuntimeError("NBA injury report: nothing posted with an NBA game on the ledger")
-
-    monkeypatch.setattr(lc, "capture_injury_report", alarm)
 
     with caplog.at_level(logging.ERROR, logger="log"):
         lc.capture_lineups({"NBA": None}, _NBA_SCORED_AT)
 
     assert not any(tmp_path.rglob("*.parquet"))
     assert "NBA lineup capture not written" in caplog.text
-    assert "NBA injury report not captured" in caplog.text

@@ -1,4 +1,4 @@
-"""Per-run capture of the starters each live league names for its next games, and the NBA's news.
+"""Per-run capture of the starters each live league names for its next games.
 
 ``prophecize`` updates every live league before it scores, and the update reads the schedule:
 ``StatsMLB.upcoming_games`` holds today's probable pitchers and the batting orders posted so far,
@@ -11,8 +11,7 @@ doubleheader's second game carries a "2" suffix. No request: the update already 
 The NBA update names no starters, so with the NBA live a run reads stats.nba.com's daily lineups
 (starters, actives, inactives) into the same tree, one row per listed player, while a tip is
 within ``DUE_WINDOW``. Their own ``timestamp`` is unreliable (the probes found stale values) and
-stays only as ``source_timestamp``. The run also stores the newest official injury report
-(``collectors.nba_injury_report``). Licence: NBA.com terms (the class nba-api already reads).
+stays only as ``source_timestamp``. Licence: NBA.com terms (the class nba-api already reads).
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
-from sportstradamus.collectors.nba_injury_report import capture_injury_report
 from sportstradamus.helpers.io import (
     LINEUP_CAPTURE_DIR,
     read_upcoming_events,
@@ -146,7 +144,7 @@ def _nba_lineups(scored_at: pd.Timestamp) -> pd.DataFrame:
 
 
 def capture_lineups(stats: dict[str, Stats], scored_at: pd.Timestamp) -> None:
-    """Write each live league's starters, one parquet per league, and the NBA injury report.
+    """Write each live league's starters, one parquet per league.
 
     A league absent from ``stats`` (out of season, or its update failed) or with no game ahead
     writes nothing.
@@ -166,9 +164,3 @@ def capture_lineups(stats: dict[str, Stats], scored_at: pd.Timestamp) -> None:
                 write_capture_parquet(rows, LINEUP_CAPTURE_DIR / league, scored_at)
         except Exception:
             logger.exception(f"{league} lineup capture not written")
-    if "NBA" in stats:
-        # Apart from the lineups: the report lives on another host, so it fails on its own.
-        try:
-            capture_injury_report(scored_at)
-        except Exception:
-            logger.exception("NBA injury report not captured")

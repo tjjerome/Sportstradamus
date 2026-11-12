@@ -40,7 +40,6 @@ src/sportstradamus/collectors/
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
   underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
   lineup_capture.py  per-run MLB / NHL starters from the live leagues' `Stats` + NBA daily lineups, written from `prophecize`
-  nba_injury_report.py official NBA injury-report PDF, parsed; called from `lineup_capture.py`
 ```
 
 A source is a `Source` dataclass (`cli.py`) — **data and callables, not a
@@ -208,7 +207,7 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
 
 ## Forward capture collectors
 
-Five captures store, at decision time, what the polls already see and the parse
+Four captures store, at decision time, what the polls already see and the parse
 drops: the inputs of the two pre-registered reads in
 [handoffs/model_improvement_track.md](handoffs/model_improvement_track.md) §6.10,
 **T2a**, the news guard (a line's suspension or a teammate's move to Out /
@@ -223,7 +222,6 @@ a `Source`: the Underdog captures are a seam inside `get_ud`, the rest one call 
 |---|---|---|---|
 | Underdog per poll | every `prophecize` run, `get_ud(capture_dir=UNDERDOG_CAPTURE_DIR)`; no extra request | `underdog_capture/lines/date=<UTC date>/HHMMSS.parquet`, `underdog_capture/matches/…` | `collectors/underdog_capture.py` |
 | Underdog pill entry counts | every `prophecize` run, the same capture, last in `get_ud`; ~70 requests | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_capture.py` |
-| NBA official injury report | every `prophecize` run with the NBA live, `capture_lineups`; up to eight requests | `nba_injury/reports/date=<ET date>/<stamp>.parquet`; the PDF at `nba_injury/pdf/<stamp>.pdf` | `collectors/nba_injury_report.py` |
 | NBA daily lineups | every `prophecize` run with the NBA live, `capture_lineups`; one request, only while an NBA event in `upcoming_events.json` commences within 2 h | `lineups/NBA/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
 | MLB / NHL starters | every `prophecize` run, `capture_lineups` right after the leagues update; no extra request | `lineups/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
 
@@ -252,21 +250,6 @@ the line states are on disk before they start. A pill that answers empty is name
 others still land; nothing in the capture fails the run or costs the board its
 offers.
 
-**NBA official injury report** (`collectors/nba_injury_report.py`). The league
-posts a PDF every quarter hour (ET) at a URL that carries the stamp; a run walks
-the last eight quarter-hours newest first and stores the first that answers,
-and a stamp already on disk ends the walk. `pypdf` yields one text line per table
-row: `[date] [time] [matchup] [team] Last, First Status Reason`, where date, time,
-matchup and team carry forward to the rows below them. The only non-player data
-lines end in `NOT YET SUBMITTED` (a team that has not filed); they carry the
-game's date, time and matchup, which the parser carries forward without emitting
-a row. A report spans two game dates, so `game_date` is a column and the
-partition is the report's date; `report_stamp` is the publication time and
-`fetched_at` the storing run's `Scored At`. An empty probe window while an NBA game
-sits on `upcoming_events.json` raises, because the origin answers 403 for a block
-exactly as for a missing stamp (Ops, below); with no NBA game on the ledger the
-same empty window is one INFO line.
-
 **NBA daily lineups** (`collectors/lineup_capture.py`). The NBA update names no
 starters, so the run reads `stats.nba.com`'s `00_daily_lineups_<YYYYMMDD>.json`
 for the Eastern date, flattened to one row per listed player on both teams
@@ -274,8 +257,8 @@ for the Eastern date, flattened to one row per listed player on both teams
 unreliable (the probes found stale values), so each row carries the run's
 `Scored At` in `polled_at` and keeps the source's in `source_timestamp`. Lineups
 post about half an hour before tip, so a run outside the 2 h window makes no
-request. Both NBA captures run only with the NBA live, and a failed lineup read
-costs neither the injury report nor the board.
+request. It runs only with the NBA live, and a failed read costs neither another
+league's capture nor the board.
 
 **MLB / NHL starters** (`collectors/lineup_capture.py`). The update `prophecize`
 runs on each live league already reads each team's next game: MLB's probable
@@ -290,19 +273,16 @@ out of season, whose update failed or with no game ahead writes nothing; one
 league's failed capture is logged and costs neither the others nor the board.
 
 **The decision-time join.** A leg's decision time is its `Scored At`; join each
-capture to the latest one at or before it (`polled_at`; for the injury report
-`fetched_at`, not `report_stamp`: a report posted late carries a stamp before runs
-that never saw it). This is `<=`, not the strict `<` of the dated snapshots above:
+capture to the latest one at or before it (`polled_at`). This is `<=`, not the strict `<` of the dated snapshots above:
 a capture is the state at a moment, never a table that may already fold the game
 in. Every capture a `prophecize` run writes carries that run's `Scored At` in that
-column, and every table but the report is named by it, so `<=` picks the leg's own
+column, and every file is named by it, so `<=` picks the leg's own
 run. Underdog files written before 2026-11-11 carry their own clock instead,
 minutes after their run's `Scored At` (their `polled_at` matches no history
 stamp): a reader assigns each to the run whose `Scored At` is the latest before it.
 
 **Ops.** No capture has a cron line or `fetch` command of its own: all ride the
-`prophecize` job ([OPERATIONS.md](OPERATIONS.md)). A capture that fails, the
-injury report's in-season alarm included, is an ERROR with its traceback in the
+`prophecize` job ([OPERATIONS.md](OPERATIONS.md)). A capture that fails is an ERROR with its traceback in the
 run's log; it never fails the run, so no healthcheck sees it.
 `scripts/sync_from_prod.sh` pulls `data/runtime` whole, so the captures reach the
 dev box with the rest of it; `sync_to_prod.sh` never sends them.

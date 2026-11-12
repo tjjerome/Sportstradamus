@@ -90,8 +90,7 @@ feed points at for its per-line entry counts (`entry_counts/`, ~70 requests afte
 the board's own, under a 90 s budget) and refreshes the lineup-status decode. Each run
 also stores, under `data/runtime/lineups/<league>/`, the MLB and NHL starters its league
 updates read (no extra request) and, with the NBA live, stats.nba.com's daily lineups while a
-tip is within 2 h, plus the newest official NBA injury report
-(`data/runtime/nba_injury/`). [data_collectors.md](data_collectors.md) (Forward
+tip is within 2 h. [data_collectors.md](data_collectors.md) (Forward
 capture collectors) covers what each file holds, how the T2a / T2b reads join it
 and how a failure surfaces.
 `scripts/sync_from_prod.sh` carries the directories down with the rest of
