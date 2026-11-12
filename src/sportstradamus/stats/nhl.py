@@ -205,14 +205,11 @@ class StatsNHL(Stats):
         """
         super().load()
         if not self.gamelog.empty:
+            names = self.gamelog["playerName"]
             spellings = {
-                name: remove_accents(name)
-                for name in self.gamelog["playerName"].unique()
-                if isinstance(name, str)
+                name: remove_accents(name) for name in names.unique() if isinstance(name, str)
             }
-            self.gamelog["playerName"] = self.gamelog["playerName"].map(
-                lambda name: spellings.get(name, name)
-            )
+            self.gamelog["playerName"] = names.map(lambda name: spellings.get(name, name))
         for roster in self.players.values():
             for row in roster.values():
                 if isinstance(row.get("playerName"), str):
