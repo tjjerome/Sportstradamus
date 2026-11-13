@@ -131,6 +131,9 @@ def _nhl_injured_reserve(year: int) -> pd.DataFrame:
         transactions += reply["transactions"]
         if reply["pageIndex"] >= reply["pageCount"]:
             break
+    # A new calendar year's first days can hold no injured-reserve move yet.
+    if not any(_IR_MOVE.search(move["description"]) for move in transactions):
+        return pd.DataFrame(columns=list(_IR_DTYPES)).astype(_IR_DTYPES)
     feed = pd.json_normalize(transactions).rename(columns={"team.abbreviation": "team"})
     clauses = feed["description"].str.extractall(_IR_MOVE)
     clauses["action"] = clauses.groupby(level=0)["action"].ffill().str.capitalize()
@@ -204,8 +207,10 @@ def injury_history(leagues: tuple[str, ...], seasons: tuple[int, ...]) -> None:
             written[f"{league}/{season}"] = len(frame)
         if league == "NHL":
             moves = _nhl_injured_reserve(season)
-            _atomic_write_parquet(
-                moves, PLAYER_DATA_BASE / "NHL" / "injured_reserve" / f"{season}.parquet"
-            )
+            # An empty year, or a blank reply, never overwrites a year already stored.
+            if not moves.empty:
+                _atomic_write_parquet(
+                    moves, PLAYER_DATA_BASE / "NHL" / "injured_reserve" / f"{season}.parquet"
+                )
             written[f"NHL-IR/{season}"] = len(moves)
     click.echo("injury-history: " + " ".join(f"{name}={rows}" for name, rows in written.items()))

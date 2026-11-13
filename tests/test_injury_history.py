@@ -6,6 +6,7 @@ import json
 from datetime import date
 
 import pandas as pd
+import pytest
 import requests
 from click.testing import CliRunner
 
@@ -361,6 +362,39 @@ def test_injured_reserve_reads_every_page_into_day_stamped_rows(monkeypatch, tmp
     assert list(moves.dtypes.items()) == list(ih._IR_DTYPES.items())
     stamps = moves[["date", "team"]].drop_duplicates().values.tolist()
     assert stamps == [[pd.Timestamp("2026-11-12"), "WPG"], [pd.Timestamp("2026-10-12"), "PIT"]]
+
+
+@pytest.mark.parametrize(
+    "transactions",
+    [
+        [],
+        [
+            {
+                "date": "2027-01-01T08:00Z",
+                "description": "Recalled F Brendan Brisson from Toronto (AHL).",
+                "team": {"abbreviation": "TOR"},
+            }
+        ],
+    ],
+    ids=["no-transactions", "no-injured-reserve-move"],
+)
+def test_a_year_without_injured_reserve_moves_keeps_the_stored_file(
+    monkeypatch, tmp_path, transactions
+):
+    stored = tmp_path / "NHL" / "injured_reserve" / "2027.parquet"
+    stored.parent.mkdir(parents=True)
+    stored.write_bytes(b"kept")
+    monkeypatch.setitem(
+        globals(), "_ESPN_PAGES", [{"pageIndex": 1, "pageCount": 1, "transactions": transactions}]
+    )
+
+    result, _ = _pull(monkeypatch, tmp_path, ["--league", "NHL", "--season", "2027"])
+
+    assert stored.read_bytes() == b"kept"
+    assert result.stdout.strip() == f"injury-history: NHL/2027={_ABSENCE_ROWS} NHL-IR/2027=0"
+    moves = ih._nhl_injured_reserve(2027)
+    assert moves.empty
+    assert list(moves.dtypes.items()) == list(ih._IR_DTYPES.items())
 
 
 def test_default_seasons_run_through_each_leagues_current_season(monkeypatch, tmp_path):
