@@ -46,7 +46,8 @@ src/sportstradamus/collectors/
   weather_capture.py per-run game-window forecasts for NFL and MLB, written from `prophecize`
   weather_history.py `fetch weather-history`: archived forecasts for games already played (dev-side)
   injury_capture.py  per-run ESPN injury lists for all five leagues, written from `prophecize`
-  injury_history.py  `fetch injury-history`: NFL weekly injury reports + MLB injured-list moves (dev-side)
+  injury_history.py  `fetch injury-history`: every league's injury history, one parquet per season (dev-side)
+  game_absences.py   who sat each game in our gamelogs: NBA / WNBA inactive and did-not-play lists, NHL scratches
 ```
 
 A source is a `Source` dataclass (`cli.py`) — **data and callables, not a
@@ -346,14 +347,29 @@ on the dev box beside the weekly `meditate`, give the model build the past:
   hourly limit, stops at `--max-cost` (8,000 by default, leaving the production
   captures room on the shared IP) and resumes from its file: rerun it daily until
   `--dry-run` plans nothing.
-- **`fetch injury-history`** (`collectors/injury_history.py`). Per season,
-  nflverse's weekly NFL injury reports as delivered
-  (`player_data/NFL/injuries/<season>.parquet`; `date_modified` only through
-  2024, and each week keeps a player's final status) and MLB's injured-list moves
-  from the statsapi transactions feed, parsed into action, list length and injury
-  (`player_data/MLB/injuries/<season>.parquet`; activations naming no list drop).
-  Each run rewrites the seasons it covers. `sync_to_prod.sh` carries the NFL files
-  up with the rest of `player_data/NFL`; nothing on production reads them.
+- **`fetch injury-history`** (`collectors/injury_history.py`). One parquet per
+  league and season at `player_data/<league>/injuries/<season>.parquet`:
+  - NFL: nflverse's weekly injury reports as delivered (`date_modified` only
+    through 2024, and each week keeps a player's final status).
+  - MLB: injured-list moves from the statsapi transactions feed, parsed into
+    action, list length and injury (activations naming no list drop).
+  - NBA, WNBA and NHL (`collectors/game_absences.py`): for every game in the
+    league's gamelog, the league's own list of who did not play, by league id.
+    NBA: the inactive list (no reason given) plus the reason for an active player
+    who sat (`DNP - Coach's Decision`, `DNP - Injury/Illness`). WNBA: the same
+    two lists; the inactive list came back empty for the 2021 and 2025 games
+    checked, whose box scores carry every rostered player with a reason
+    (`DND - Injury/Illness`, `NWT - Not With Team`), and lists players in 2026.
+    NHL: the scratches. These record who sat, not the pregame status.
+  - NHL scratches never name a player on injured reserve, so NHL also gets ESPN's
+    injured-reserve moves (`player_data/NHL/injured_reserve/<year>.parquet`, by
+    calendar year, names without ids).
+
+  NFL, MLB and the injured-reserve files are rewritten whole each run. The
+  per-game lists skip games already stored, so a rerun resumes and a weekly run
+  fetches only new games; a game where nobody sat leaves no row and is asked
+  again. `sync_to_prod.sh` carries the NFL files up with the rest of
+  `player_data/NFL`; nothing on production reads any of them.
 
 ## Recipe: add a new source
 
