@@ -2,7 +2,8 @@
 
 A dev-side pull run by hand beside the weekly ``meditate``; the model-build lane derives
 injury features from these files. The NFL, MLB and NHL injured-reserve files are re-pulled
-and overwritten every run, since the current season changes week to week.
+and overwritten every run, since the current season changes week to week; a pull that finds
+no injured-reserve move writes nothing, so a blank reply never overwrites a stored year.
 
 NFL is nflverse's weekly injury report with practice statuses, one row per (season, week,
 team, gsis_id), written as delivered. The 2022-2024 files carry ``date_modified`` (UTC; a
@@ -132,7 +133,7 @@ def _nhl_injured_reserve(year: int) -> pd.DataFrame:
         if reply["pageIndex"] >= reply["pageCount"]:
             break
     # A new calendar year's first days can hold no injured-reserve move yet.
-    if not any(_IR_MOVE.search(move["description"]) for move in transactions):
+    if not any(_IR_MOVE.search(transaction["description"]) for transaction in transactions):
         return pd.DataFrame(columns=list(_IR_DTYPES)).astype(_IR_DTYPES)
     feed = pd.json_normalize(transactions).rename(columns={"team.abbreviation": "team"})
     clauses = feed["description"].str.extractall(_IR_MOVE)
