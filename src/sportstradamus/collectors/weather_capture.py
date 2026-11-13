@@ -43,7 +43,7 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 HORIZON = pd.Timedelta(days=7)
 # Forecast hours start at 00:00 UTC today, so the window of a game kicking off a full HORIZON
 # after a late run ends inside day nine. Nine days of eight variables still bill one call per
-# location: Open-Meteo bills locations x max(1, variables / 10 x days / 14).
+# location: Open-Meteo bills locations x max(1, variables / 10 x max(1, days / 14)).
 FORECAST_DAYS = 9
 # The shared rows between the run's stamp and each hour's lead from it (NaN for a dome's row),
 # pinned so a league's files read together.
