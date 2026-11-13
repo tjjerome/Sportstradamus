@@ -1,0 +1,13 @@
+Usage: sportstradamus fetch weather-history [OPTIONS]
+
+  Store the archived pre-game forecast of NFL and MLB games already played.
+
+Options:
+  --league [nfl|mlb]  League to backfill; repeatable. Defaults to both.
+  --season INTEGER    Season to backfill; repeatable. Defaults to 2022 through
+                      the current year.
+  --max-cost FLOAT    Stop once the run has spent this many Open-Meteo calls.
+                      [default: 8000.0]
+  --dry-run           Print the plan and its cost; request nothing from Open-
+                      Meteo.
+  --help              Show this message and exit.

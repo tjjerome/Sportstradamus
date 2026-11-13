@@ -71,6 +71,8 @@ cli.add_command(
             "ctg": "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch",
             "savant": "sportstradamus.collectors.baseballsavant.cli:savant_fetch",
             "headshots": "sportstradamus.collectors.headshots:headshots",
+            "weather-history": "sportstradamus.collectors.weather_history:weather_history",
+            "injury-history": "sportstradamus.collectors.injury_history:injury_history",
         },
     )
 )
