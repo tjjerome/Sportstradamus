@@ -15,9 +15,10 @@ thin package under it. This document is the canonical description of the
 framework and the recipe for adding a fourth source. The per-source specifics —
 where to get the cookie, which endpoints to register — live in
 [fantasypoints.md](fantasypoints.md), [cleaningtheglass.md](cleaningtheglass.md),
-and [baseballsavant.md](baseballsavant.md). Beside the framework sit a plain
-command, `fetch headshots`, and the forward captures each `prophecize` run writes
-of what the polls already see for the T2a / T2b reads (their own section below).
+and [baseballsavant.md](baseballsavant.md). Beside the framework sit three plain
+commands, `fetch headshots` and the two history pulls (`fetch weather-history`,
+`fetch injury-history`), and the forward captures each `prophecize` run writes
+(their own sections below).
 
 ## Architecture
 
@@ -40,6 +41,11 @@ src/sportstradamus/collectors/
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
   underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
   lineup_capture.py  per-run MLB / NHL starters from the live leagues' `Stats` + NBA daily lineups, written from `prophecize`
+  weather.py         venue table, schedule parsers and kickoff-window rows shared by the two weather modules below
+  weather_capture.py per-run game-window forecasts for NFL and MLB, written from `prophecize`
+  weather_history.py `fetch weather-history`: archived forecasts for games already played (dev-side)
+  injury_capture.py  per-run ESPN injury lists for all five leagues, written from `prophecize`
+  injury_history.py  `fetch injury-history`: NFL weekly injury reports + MLB injured-list moves (dev-side)
 ```
 
 A source is a `Source` dataclass (`cli.py`) — **data and callables, not a
@@ -208,16 +214,18 @@ matrix cache — no forced retrain, no `feature_filter.json` edit.
 
 ## Forward capture collectors
 
-Four captures store, at decision time, what the polls already see and the parse
-drops: the inputs of the two pre-registered reads in
+Six captures store, at decision time, what a run could know and no source keeps.
+The Underdog and lineup captures hold the inputs of the two pre-registered reads in
 [handoffs/model_improvement_track.md](handoffs/model_improvement_track.md) §6.10,
 **T2a**, the news guard (a line's suspension or a teammate's move to Out /
 Doubtful before the decision), and **T2b**, popularity (the lobby's
-`entry_count`). The bars, sample sizes and read dates live there and are not
-repeated here. Nothing in these files changes a served number: no `Stats` hook
-reads them, the dashboard never does, and only `prophecize` writes them. None is
-a `Source`: the Underdog captures are a seam inside `get_ud`, the rest one call in
-`prophecize` (`capture_lineups`) right after the leagues update.
+`entry_count`); the bars, sample sizes and read dates live there and are not
+repeated here. The weather and injury captures hold candidate model inputs, with
+the history pulls below as their training-side counterparts. Nothing in these
+files changes a served number: no `Stats` hook reads them, the dashboard never
+does, and only `prophecize` writes them. None is a `Source`: the Underdog captures
+are a seam inside `get_ud`, the rest calls in `prophecize` (`capture_lineups`,
+`capture_weather`, `capture_injuries`) right after the leagues update.
 
 | Capture | Trigger | Files under `data/runtime/` | Schema (pinned in the module) |
 |---|---|---|---|
@@ -225,6 +233,8 @@ a `Source`: the Underdog captures are a seam inside `get_ud`, the rest one call 
 | Underdog pill entry counts | every `prophecize` run, the same capture, last in `get_ud`; ~70 requests | `underdog_capture/entry_counts/date=<UTC date>/HHMMSS.parquet`; `underdog_capture/lineup_statuses.json` | `collectors/underdog_capture.py` |
 | NBA daily lineups | every `prophecize` run with the NBA live, `capture_lineups`; one request, only while an NBA event in `upcoming_events.json` commences within 2 h | `lineups/NBA/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
 | MLB / NHL starters | every `prophecize` run, `capture_lineups` right after the leagues update; no extra request | `lineups/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/lineup_capture.py` |
+| Game-window weather | every `prophecize` run with NFL or MLB live, `capture_weather`; one Open-Meteo request per league, MLB adds one statsapi schedule request | `weather/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/weather_capture.py` |
+| Injury lists | every `prophecize` run, all five leagues in season or not, `capture_injuries`; one ESPN request per league | `injuries/<league>/date=<UTC date>/HHMMSS.parquet` | `collectors/injury_capture.py` |
 
 **Underdog per poll** (`collectors/underdog_capture.py`). Every line of the feed
 and of each modeled league's lobby read, the suspended and live ones the parser
@@ -273,6 +283,34 @@ empty; an order not yet posted has no `batter` rows. `team` is the
 out of season, whose update failed or with no game ahead writes nothing; one
 league's failed capture is logged and costs neither the others nor the board.
 
+**Game-window weather** (`collectors/weather_capture.py`, shared pieces in
+`collectors/weather.py`). For every NFL and MLB game kicking off in the next seven
+days, Open-Meteo's forecast for the hours from one before kickoff to four after:
+temperature, wind speed, direction and gusts, precipitation and its probability,
+humidity and snowfall, one row per game and hour with `lead_hours` from the run to
+that hour. NFL games come from the schedule the update already fetched
+(`StatsNFL.schedule`), MLB's from one statsapi schedule read. The venue table
+`data/config/venues.json` (coordinates, roof class, MLB field azimuth) alone
+decides the roof, because nflverse calls some open neutral sites domes and leaves
+retractable roofs blank until kickoff; each row keeps the schedule's own label
+(nflverse `roof`, statsapi `weather.condition`) in `schedule_label`. A dome game
+gets one row without weather and costs no request; a retractable roof is
+forecast like an open one, its state unknown before kickoff. A venue missing from
+the table is a WARNING and its games get no row. The weather model is pinned to
+`gfs_global` (why, and what its archive lacks: the `weather.py` docstring).
+Open-Meteo's free tier allows 10,000 calls a day per IP and bills a request one
+call per location at this size; each run logs the request's cost
+(`X-RateLimit-Cost`).
+
+**Injury lists** (`collectors/injury_capture.py`). ESPN's injury list for each
+league, every run, in season or not, since preseason injuries matter on opening
+day: one row per listed player with the row's status, injury type, body part,
+side, expected return and fantasy status, and the time ESPN last updated the
+item. ESPN keeps no history, so these files are the only record of who was out
+when. NFL rows whose status is `Active` are news items, not injuries, and are
+dropped. ESPN ids and names are not the league ids the gamelogs use: a reader
+resolves them.
+
 **The decision-time join.** A leg's decision time is its `Scored At`; join each
 capture to the latest one at or before it (`polled_at`). This is `<=`, not the strict `<` of the dated snapshots above:
 a capture is the state at a moment, never a table that may already fold the game
@@ -287,6 +325,34 @@ stamp): a reader assigns each to the run whose `Scored At` is the latest before 
 run's log; it never fails the run, so no healthcheck sees it.
 `scripts/sync_from_prod.sh` pulls `data/runtime` whole, so the captures reach the
 dev box with the rest of it; `sync_to_prod.sh` never sends them.
+
+## History pulls
+
+The captures start the day they ship, so two plain `fetch` commands, run by hand
+on the dev box beside the weekly `meditate`, give the model build the past:
+
+- **`fetch weather-history`** (`collectors/weather_history.py`). For every NFL and
+  MLB game played two days ago or more outside a dome, the forecast as it stood
+  before the game, through the capture's venue table and kickoff windows, to
+  `data/leagues/<league>/weather_history.parquet` with `lead_days` and `source`.
+  Seasons from 2024 read Open-Meteo's Previous Runs archive, each hour as forecast
+  0 to 7 days before it; 2022 and 2023 the Historical Forecast, lead 0 only.
+  Neither archive keeps precipitation probability, and snowfall starts
+  2024-12-05. `schedule_label` here is a game-time fact (nflverse's roof after the
+  game, statsapi's game-time condition), never a decision-time input. Open-Meteo
+  bills any span up to 14 days as 14, so each venue's games batch into spans; the
+  whole 2022–26 plan is about 8,300 calls. The command paces itself under the
+  hourly limit, stops at `--max-cost` (8,000 by default, leaving the production
+  captures room on the shared IP) and resumes from its file: rerun it daily until
+  `--dry-run` plans nothing.
+- **`fetch injury-history`** (`collectors/injury_history.py`). Per season,
+  nflverse's weekly NFL injury reports as delivered
+  (`player_data/NFL/injuries/<season>.parquet`; `date_modified` only through
+  2024, and each week keeps a player's final status) and MLB's injured-list moves
+  from the statsapi transactions feed, parsed into action, list length and injury
+  (`player_data/MLB/injuries/<season>.parquet`; activations naming no list drop).
+  Each run rewrites the seasons it covers. `sync_to_prod.sh` carries the NFL files
+  up with the rest of `player_data/NFL`; nothing on production reads them.
 
 ## Recipe: add a new source
 

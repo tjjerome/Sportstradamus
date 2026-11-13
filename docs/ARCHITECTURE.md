@@ -165,10 +165,15 @@ for cookie/bearer authenticated sources, plus one subpackage per source:
 `baseballsavant/` (`fetch savant`). Each writes period-keyed snapshots — by game
 week for FP, by date for the other two — that `stats/` loaders fold into
 features. Beside them sit modules that are not a `Source`: `headshots.py`
-(`fetch headshots`) fills the dashboard's player-headshot cache, and
-`underdog_capture.py` and `lineup_capture.py`, written from
-each `prophecize` run, store what the polls already see for the T2a / T2b reads, as
-parquet under `data/runtime/` the dashboard never reads. Canonical guide: [docs/data_collectors.md](data_collectors.md).
+(`fetch headshots`) fills the dashboard's player-headshot cache;
+`underdog_capture.py`, `lineup_capture.py`, `weather_capture.py` and
+`injury_capture.py`, written from each `prophecize` run, store what the run could
+know (line states and starters for the T2a / T2b reads, game-window forecasts and
+injury lists for the model build) as parquet under `data/runtime/` the dashboard
+never reads; and `weather_history.py` (`fetch weather-history`, sharing
+`weather.py` and the venue table `data/config/venues.json` with the capture) and
+`injury_history.py` (`fetch injury-history`) pull the training-side history
+dev-side. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 ### `dashboard/` — Streamlit dashboard
 
@@ -287,7 +292,8 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Price a cell's book leg from the sportsbook rungs instead of the decode | `stat_meta.json` `book_leg: "rung"` per cell (the owner flips it after the X3 read; default `"quote"`) — `prediction/book_quotes.py:apply_rung_book_leg` through `Archive.get_ladder_rungs`; `docs/ship_gate.md`, "The rung book leg" |
 | Grade the sportsbooks' lean at the posted line against the apps (X2) | `sportstradamus admin books-lean` (`scripts/books_lean.py`) — the model-free paper test (X2, closed 2026-11-11; kept for a hand read), every look appended to `data/training/books_lean_looks.parquet`; a report, never a serving rule |
 | Check that serving feeds a model the features it trained on | `sportstradamus admin feature-parity` (`scripts/feature_parity.py`) — re-scores the serve-time feature log through the model file each row names (the served pickle or its `data/models/prior/` copy), compares each logged row with its training-matrix row feature by feature and by the model's own probability, flags a cell whose difference has a root mean square above one percentage point at the lower end of its player-clustered 95% interval, ranks cells by that RMS as served times their settled live legs, and lists settled cells and dates the log missed; `--fixed-file` scores every logged row through the served pickle instead, and `--versions` adds the paired same-leg difference between model versions. Dev-side and read-only; a diagnostic, never a gate |
-| Capture what the polls see for the T2a / T2b reads | `collectors/underdog_capture.py` (per prophecize poll: line states, pill entry counts), `collectors/lineup_capture.py` (per prophecize run: MLB / NHL / NBA starters); parquet under `data/runtime/`, never read by the dashboard |
+| Capture what a run could know | `collectors/underdog_capture.py` (per prophecize poll: line states, pill entry counts), `collectors/lineup_capture.py` (per prophecize run: MLB / NHL / NBA starters), `collectors/weather_capture.py` (per run: NFL / MLB game-window forecasts), `collectors/injury_capture.py` (per run: ESPN injury lists, all leagues); parquet under `data/runtime/`, never read by the dashboard |
+| Pull weather or injury history for training | `sportstradamus fetch weather-history` (`collectors/weather_history.py`: archived forecasts for played games, `data/leagues/<league>/weather_history.parquet`), `sportstradamus fetch injury-history` (`collectors/injury_history.py`: `player_data/{NFL,MLB}/injuries/<season>.parquet`); dev-side |
 | Read archived / removed code | `src/deprecated/` (reintroduction protocol in its README) |
 
 ---

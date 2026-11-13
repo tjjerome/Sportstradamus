@@ -90,8 +90,11 @@ feed points at for its per-line entry counts (`entry_counts/`, ~70 requests afte
 the board's own, under a 90 s budget) and refreshes the lineup-status decode. Each run
 also stores, under `data/runtime/lineups/<league>/`, the MLB and NHL starters its league
 updates read (no extra request) and, with the NBA live, stats.nba.com's daily lineups while a
-tip is within 2 h. [data_collectors.md](data_collectors.md) (Forward
-capture collectors) covers what each file holds, how the T2a / T2b reads join it
+tip is within 2 h; under `data/runtime/weather/<league>/`, Open-Meteo's forecast for each
+NFL and MLB game of the next seven days (one request per league; MLB adds a statsapi
+schedule read); and under `data/runtime/injuries/<league>/`, ESPN's injury list for all
+five leagues (one request each). [data_collectors.md](data_collectors.md) (Forward
+capture collectors) covers what each file holds, how a reader joins it
 and how a failure surfaces.
 `scripts/sync_from_prod.sh` carries the directories down with the rest of
 `data/runtime` (update mode, nothing to add).
@@ -116,6 +119,11 @@ Couplings to keep in sync:
   the captures wait there, and the next tick that gets it archives them with
   their fetch time. Deleting that file loses the captures not yet archived and
   lets a game still in its window be fetched, and paid for, again.
+- Open-Meteo's free tier is 10,000 calls a day per IP, and the dev and prod boxes
+  share the home IP. `prophecize`'s weather capture bills about one call per open
+  or retractable venue with a game in the next week (12 a run on an NFL week, so
+  ~160 a day), and `fetch weather-history` stops at its `--max-cost` (8,000); keep
+  the two under the cap if either grows.
 - The headshot cache is per-box and gitignored, so `headshots` runs on the dev box
   and the prod box independently and is deliberately absent from `sync_to_prod.sh`'s
   `COLLECTOR_RELS` — don't "fix" that omission by adding it.
@@ -169,6 +177,9 @@ model files and test sets a retrain keeps stay on the box that trained them
 each other's models and serving artifacts.
 `savant-fetch` is a `run_job.sh` case, so scheduling it (with
 `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible. See [data_collectors.md](data_collectors.md).
+The two history pulls, `fetch weather-history` and `fetch injury-history`, are
+dev-side too and have no cron line or `run_job.sh` case: run them by hand beside
+`meditate` ([data_collectors.md](data_collectors.md), History pulls).
 
 `ctg-fetch` (NBA) runs on prod like `fp-fetch`. Cleaning the Glass's regular-season
 tables stop changing after April, so the line covers November through April;
