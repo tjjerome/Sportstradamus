@@ -307,8 +307,10 @@ def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]
 
     monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None, scored_at=None: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
-    # Like get_ud's, the lineup capture would write into the developer's data/runtime.
+    # Like get_ud's, the captures would write into the developer's data/runtime.
     monkeypatch.setattr(prediction_cli, "capture_lineups", lambda stats, scored_at: None)
+    monkeypatch.setattr(prediction_cli, "capture_weather", lambda stats, scored_at: None)
+    monkeypatch.setattr(prediction_cli, "capture_injuries", lambda scored_at: None)
 
     calls: dict[str, list] = {"offers": [], "corr": [], "context": [], "stories": []}
 

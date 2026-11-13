@@ -125,7 +125,7 @@ def test_a_failed_constructor_or_first_load_is_held_to_its_own_league(monkeypatc
 # The names ``main`` writes or deletes through, matched by prefix rather than listed:
 # this suite runs in the developer's checkout, where a writer added to ``main`` later
 # and missed here would replace a real snapshot with this slate's empty frame.
-_WRITER_PREFIXES = ("write_", "_write_", "upsert_", "trim_", "prune_", "snapshot_")
+_WRITER_PREFIXES = ("write_", "_write_", "upsert_", "trim_", "prune_", "snapshot_", "capture_")
 
 
 # No offers, under the columns ``main`` reads before it checks a platform's frame for rows.
