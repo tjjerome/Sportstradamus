@@ -11,12 +11,16 @@ NBA and WNBA read two endpoints a game from stats.nba.com and stats.wnba.com. Bo
 reason, so injury, a G League two-way, personal leave and suspension all land there.
 BoxScoreTraditionalV3's players with a ``comment`` were in the box score and did not play; the
 status is the comment as delivered ("DNP - Coach's Decision", "DNP - Injury/Illness",
-"DND - Injury/Illness", "NWT - Not With Team"). Many WNBA games leave the inactive list empty
-(2021: 128 of 209), their box scores listing every rostered player, and some 2026-27 NBA box
-scores list the inactive players themselves, with the reason ("Inactive - Injury/Illness",
-"Inactive - G League - Two-Way"), and leave the list empty. stats.wnba.com stops answering a
-process after about 600 requests (300 games) and answers a new one at once: stop a cold WNBA
-backfill when it stalls and rerun it, since a run resumes from its file.
+"DND - Injury/Illness", "NWT - Not With Team").
+
+``inactives`` does not always hold a game's inactive players. Many WNBA games leave it empty
+(2021: 128 of 209) and list every rostered player in the box score. In some 2026-27 NBA games the
+box score lists the inactive players themselves, with a comment giving the reason
+("Inactive - Injury/Illness", "Inactive - G League - Two-Way"), and ``inactives`` is empty.
+
+stats.wnba.com stops answering a process after about 600 requests (300 games) and answers a new
+process at once: stop a cold WNBA backfill when it stalls and rerun it, since a run resumes from
+its file.
 
 NHL reads api-web.nhle.com's gamecenter right rail: each team's scratches, status ``"Scratch"``,
 the active-roster players who did not dress. A player on injured reserve is off the active roster
