@@ -240,6 +240,7 @@ class StatsNFL(Stats):
 
     def __init__(self):
         """Initialize the StatsNFL class."""
+        # style: allow-length — a flat run of column lists and config declarations, no logic.
         super().__init__()
         self.season_start = datetime(2026, 9, 10).date()
         cols = [
@@ -379,6 +380,9 @@ class StatsNFL(Stats):
         ]
 
         self.teamlog = pd.DataFrame(columns=team_cols)
+        # Every game of the season as _update fetched it. Empty until one runs: a live league
+        # whose update window is shut is scored without an update.
+        self.schedule = pd.DataFrame()
         self.stat_types = {
             "passing": [
                 "completion percentage over expected",
@@ -560,6 +564,7 @@ class StatsNFL(Stats):
         nfl_data = self._fetch_player_stats()
         snaps = self._fetch_snap_counts()
         sched = self._fetch_schedule()
+        self.schedule = sched
         self._compute_upcoming_games(sched)
         if sched.empty:
             # A new row takes its opponent and game from the schedule. Every run fetches the
