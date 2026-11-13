@@ -1,12 +1,19 @@
 Usage: sportstradamus fetch injury-history [OPTIONS]
 
-  Re-pull NFL injury reports and MLB injured-list moves, one parquet per season.
+  Pull every league's injury history, one parquet per season.
+
+  NFL injury reports, MLB injured-list moves and ESPN's NHL injured-reserve
+  moves are re-pulled whole; the NBA, WNBA and NHL per-game absence lists fetch
+  only games not yet stored. The NHL injured-reserve file for a season holds
+  that calendar year.
 
   The NFL default stops at nflreadpy's current season, not the calendar year:
   nflverse has no file for a season until its injury reports start in September.
 
 Options:
-  --league [nfl|mlb]  League to pull; repeatable. Defaults to both.
-  --season INTEGER    Season to pull; repeatable. Defaults to 2022 through the
-                      current one.
-  --help              Show this message and exit.
+  --league [nfl|mlb|nba|wnba|nhl]
+                                  League to pull; repeatable. Defaults to every
+                                  league.
+  --season INTEGER                Season to pull; repeatable. Defaults to 2022
+                                  through the current one.
+  --help                          Show this message and exit.

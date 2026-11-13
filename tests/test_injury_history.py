@@ -1,4 +1,4 @@
-"""Injury history pull: MLB injured-list parsing and the per-season parquet writes."""
+"""Injury history pull: MLB and NHL transaction parsing and the per-season parquet writes."""
 
 from __future__ import annotations
 
@@ -115,25 +115,157 @@ _NFL_REPORT = pd.DataFrame(
     }
 )
 
+_IR, _LTIR = "injured reserve", "long-term injured reserve"
+
+# Real descriptions from ESPN's 2023 and 2026 NHL transaction replies, each with the moves it
+# parses to as (action, list, position, player_name).
+_NHL_MOVES = [
+    (
+        "Recalled D Henry Thrun from Manitoba (AHL). Placed D Dylan DeMelo on injured reserve.",
+        [("Placed", _IR, "D", "Dylan DeMelo")],
+    ),
+    # A match from "Placed" must stop at the sentence end, not run on to "injured reserve".
+    (
+        "Placed F Chase Stillman on Waivers. Activated D Jacob Bernard-Docker from injured reserve.",
+        [("Activated", _IR, "D", "Jacob Bernard-Docker")],
+    ),
+    (
+        "Reinstated D Cam York from injured reserve. Placed D Rasmus Ristolainen on injured"
+        " reserve, retroactive to Oct. 24. Recalled F Jacob Gaucher from Lehigh Valley (AHL).",
+        [("Reinstated", _IR, "D", "Cam York"), ("Placed", _IR, "D", "Rasmus Ristolainen")],
+    ),
+    (
+        "Recalled D Dennis Gilbert from Rochester (AHL). Placed G Alex Lyon and D Olen Zellweger"
+        " on injured reserve. Signed D Louis Crevier to a four-year contract. Transferred F"
+        " Matthew Savoie to long-term injured reserve.",
+        [
+            ("Placed", _IR, "G", "Alex Lyon"),
+            ("Placed", _IR, "D", "Olen Zellweger"),
+            ("Transferred", _LTIR, "F", "Matthew Savoie"),
+        ],
+    ),
+    (
+        "Reassigned C Roger McQueen and C Cruz Lucius to San Diego (AHL). Recalled D Noah Warren,"
+        " D Ian Mitchell and D Tristan Luneau from San Diego. Placed D Drew Helleson on injured"
+        " reserve. Moved RW Troy Terry from the non-roster list to long-term injured reserve.",
+        [("Placed", _IR, "D", "Drew Helleson"), ("Moved", _LTIR, "RW", "Troy Terry")],
+    ),
+    (
+        "Assigned C Zach Aston-Reese to Grand Rapids (AHL). Reassigned F Jonatan Berggren to Grand"
+        " Rapids. Activated C J.T. Compher and LW Klim Kostin from injured reserve.",
+        [("Activated", _IR, "C", "J.T. Compher"), ("Activated", _IR, "LW", "Klim Kostin")],
+    ),
+    (
+        "Recalled F Rutger McGroarty from Wilkes-Barre/Scranton (AHL). Placed D Jack St. Ivany on"
+        " injured reserve.",
+        [("Placed", _IR, "D", "Jack St. Ivany")],
+    ),
+    ("Activated from injured reserve.", []),
+    (
+        "Reinstated Fs Owen Tippett and Travis Konecny from injured reserve.",
+        [("Reinstated", _IR, "F", "Owen Tippett"), ("Reinstated", _IR, "F", "Travis Konecny")],
+    ),
+    (
+        "Placed C Ben Kindel, C Blake Lizotte, RW Justin Brazeau and D Ryan Graves on injured"
+        " reserve.",
+        [
+            ("Placed", _IR, "C", "Ben Kindel"),
+            ("Placed", _IR, "C", "Blake Lizotte"),
+            ("Placed", _IR, "RW", "Justin Brazeau"),
+            ("Placed", _IR, "D", "Ryan Graves"),
+        ],
+    ),
+    (
+        "Placed D Rasmus Sandin on long-term injured reserve and D Matt Roy on injured reserve."
+        " Recalled D Justin Holl from Hershey (AHL).",
+        [("Placed", _LTIR, "D", "Rasmus Sandin"), ("Placed", _IR, "D", "Matt Roy")],
+    ),
+    (
+        "Reinstated D Jacob Bryson from injured reserve and placed G Ukko-Pekka Luukkonen on"
+        " injured reserve.",
+        [("Reinstated", _IR, "D", "Jacob Bryson"), ("Placed", _IR, "G", "Ukko-Pekka Luukkonen")],
+    ),
+    (
+        "Recalled Conor Geekie from Syracuse (AHL). Placed Dominic James on injured reserve.",
+        [("Placed", _IR, None, "Dominic James")],
+    ),
+    (
+        "Recalled C Brayden Yager from Manitoba (AHL). Placed D Josh Morrissey on injured reserve"
+        " and RW Walker Duehr on waivers.",
+        [("Placed", _IR, "D", "Josh Morrissey")],
+    ),
+    (
+        "Activated LW Dylan Holloway off long-term injured reserve and reassigned him to"
+        " Bakersfield (AHL).",
+        [("Activated", _LTIR, "LW", "Dylan Holloway")],
+    ),
+    (
+        "Recalled D Louis Crevier from Rockford (AHL). Reinstated D Jarred Tinordi to the active"
+        " roster from injured reserve. Assigned Ds Wyatt Kaiser and Isaak Phillips to Rockford.",
+        [("Reinstated", _IR, "D", "Jarred Tinordi")],
+    ),
+    (
+        "Activated RW/C Mackie Samoskevich from injured reserve. Placed RW Jacob Melanson on"
+        " injured reserve.",
+        [("Activated", _IR, "RW/C", "Mackie Samoskevich"), ("Placed", _IR, "RW", "Jacob Melanson")],
+    ),
+    (
+        "Activated D Matt Benning from injured reserve and C Nico Sturm from non-roster injured"
+        " reserve.",
+        [
+            ("Activated", _IR, "D", "Matt Benning"),
+            ("Activated", "non-roster injured reserve", "C", "Nico Sturm"),
+        ],
+    ),
+]
+
+
+def _espn_page(index: int, stamp: str, team: str, moves: list) -> dict:
+    """One page of ESPN's two-page reply, every transaction stamped ``stamp`` for ``team``."""
+    transactions = [
+        {"date": stamp, "description": text, "team": {"abbreviation": team}} for text, _ in moves
+    ]
+    return {"pageIndex": index, "pageCount": 2, "transactions": transactions}
+
+
+_HALF = len(_NHL_MOVES) // 2
+_ESPN_PAGES = [
+    _espn_page(1, "2026-11-12T08:00Z", "WPG", _NHL_MOVES[:_HALF]),
+    _espn_page(2, "2026-10-12T07:00Z", "PIT", _NHL_MOVES[_HALF:]),
+]
+
+# The row count the game_absences stub reports holding.
+_ABSENCE_ROWS = 812
+
 
 def _stub_sources(monkeypatch, tmp_path) -> dict[str, list]:
-    """Serve ``_FEED`` and ``_NFL_REPORT`` and write under ``tmp_path``; return the requests."""
-    requested: dict[str, list] = {"MLB": [], "NFL": []}
+    """Serve the fixtures, stub game_absences and write under ``tmp_path``; return the calls."""
+    requested: dict[str, list] = {"MLB": [], "NFL": [], "ESPN": [], "absences": []}
 
     def fake_get(url, **_):
-        requested["MLB"].append(url)
+        if url.startswith("https://site.api.espn.com/"):
+            requested["ESPN"].append(url)
+            reply = _ESPN_PAGES[int(url.rsplit("page=", 1)[1]) - 1]
+        else:
+            requested["MLB"].append(url)
+            reply = _FEED
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps(_FEED).encode()
+        response._content = json.dumps(reply).encode()
         return response
 
     def fake_import_injuries(years):
         requested["NFL"].extend(years)
         return _NFL_REPORT.copy()
 
+    def fake_update_season(league, season, path):
+        requested["absences"].append((league, season, path))
+        return _ABSENCE_ROWS
+
     monkeypatch.setattr(ih, "PLAYER_DATA_BASE", tmp_path)
     monkeypatch.setattr(ih.requests, "get", fake_get)
     monkeypatch.setattr(ih.nfl, "import_injuries", fake_import_injuries)
+    monkeypatch.setattr(ih.game_absences, "update_season", fake_update_season)
     return requested
 
 
@@ -175,11 +307,60 @@ def test_command_writes_one_parquet_per_league_season(monkeypatch, tmp_path):
 
     assert requested["MLB"] == [ih._MLB_TRANSACTIONS_URL.format(season=2025)]
     assert requested["NFL"] == [2025]
+    assert requested["ESPN"] == requested["absences"] == []
     mlb = pd.read_parquet(tmp_path / "MLB" / "injuries" / "2025.parquet")
     assert (mlb.dtypes[["player_id", "team_id", "list_days"]] == "Int64").all()
     nfl = pd.read_parquet(tmp_path / "NFL" / "injuries" / "2025.parquet")
     pd.testing.assert_frame_equal(nfl, _NFL_REPORT)
     assert result.stdout.strip() == f"injury-history: MLB/2025={len(_IL_MOVES) + 2} NFL/2025=2"
+
+
+def test_per_game_leagues_resume_in_game_absences_and_nhl_adds_injured_reserve(
+    monkeypatch, tmp_path
+):
+    leagues = ("NBA", "WNBA", "NHL")
+    result, requested = _pull(
+        monkeypatch,
+        tmp_path,
+        ["--league", "nba", "--league", "WNBA", "--league", "NHL", "--season", "2025"],
+    )
+
+    assert requested["absences"] == [
+        (league, 2025, tmp_path / league / "injuries" / "2025.parquet") for league in leagues
+    ]
+    # The stub writes nothing, so any file there would be the command overwriting a resumed pull.
+    assert not any((tmp_path / league / "injuries").exists() for league in leagues)
+    assert requested["ESPN"] == [ih._NHL_TRANSACTIONS_URL.format(year=2025, page=p) for p in (1, 2)]
+    assert requested["MLB"] == requested["NFL"] == []
+    ir_rows = sum(len(moves) for _, moves in _NHL_MOVES)
+    assert result.stdout.strip() == (
+        f"injury-history: NBA/2025={_ABSENCE_ROWS} WNBA/2025={_ABSENCE_ROWS}"
+        f" NHL/2025={_ABSENCE_ROWS} NHL-IR/2025={ir_rows}"
+    )
+
+
+def _nhl_2026(monkeypatch, tmp_path) -> tuple[pd.DataFrame, dict[str, list]]:
+    _, requested = _pull(monkeypatch, tmp_path, ["--league", "NHL", "--season", "2026"])
+    return pd.read_parquet(tmp_path / "NHL" / "injured_reserve" / "2026.parquet"), requested
+
+
+def test_injured_reserve_clauses_parse_to_one_row_per_player(monkeypatch, tmp_path):
+    moves, _ = _nhl_2026(monkeypatch, tmp_path)
+
+    expected = pd.DataFrame(
+        [(text, *move) for text, parsed in _NHL_MOVES for move in parsed],
+        columns=["description", "action", "list", "position", "player_name"],
+    ).astype("string")
+    pd.testing.assert_frame_equal(moves[expected.columns], expected)
+
+
+def test_injured_reserve_reads_every_page_into_day_stamped_rows(monkeypatch, tmp_path):
+    moves, requested = _nhl_2026(monkeypatch, tmp_path)
+
+    assert requested["ESPN"] == [ih._NHL_TRANSACTIONS_URL.format(year=2026, page=p) for p in (1, 2)]
+    assert list(moves.dtypes.items()) == list(ih._IR_DTYPES.items())
+    stamps = moves[["date", "team"]].drop_duplicates().values.tolist()
+    assert stamps == [[pd.Timestamp("2026-11-12"), "WPG"], [pd.Timestamp("2026-10-12"), "PIT"]]
 
 
 def test_default_seasons_run_through_each_leagues_current_season(monkeypatch, tmp_path):
@@ -194,7 +375,14 @@ def test_default_seasons_run_through_each_leagues_current_season(monkeypatch, tm
 
     _, requested = _pull(monkeypatch, tmp_path, [])
 
+    seasons = (2022, 2023, 2024)
     assert requested["NFL"] == [2022, 2023]
-    assert requested["MLB"] == [
-        ih._MLB_TRANSACTIONS_URL.format(season=s) for s in (2022, 2023, 2024)
+    assert requested["MLB"] == [ih._MLB_TRANSACTIONS_URL.format(season=s) for s in seasons]
+    assert requested["absences"] == [
+        (league, s, tmp_path / league / "injuries" / f"{s}.parquet")
+        for league in ("NBA", "WNBA", "NHL")
+        for s in seasons
+    ]
+    assert requested["ESPN"] == [
+        ih._NHL_TRANSACTIONS_URL.format(year=s, page=p) for s in seasons for p in (1, 2)
     ]
