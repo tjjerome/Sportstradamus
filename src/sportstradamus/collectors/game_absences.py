@@ -27,7 +27,6 @@ a decision saw. Ids are the leagues' own: NBA and WNBA ``personId`` is the gamel
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from pathlib import Path
 
 import pandas as pd
@@ -35,8 +34,7 @@ import requests
 from nba_api.stats.endpoints import BoxScoreSummaryV3, BoxScoreTraditionalV3
 from tqdm import tqdm
 
-from sportstradamus import data
-from sportstradamus.helpers.io import _atomic_write_parquet, read_parquet_safe
+from sportstradamus.helpers.io import _atomic_write_parquet, _gamelog_paths, read_parquet_safe
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.nba_client import NBA_HOST, WNBA_HOST, NBAStatsError, StatsHost, fetch
@@ -55,14 +53,13 @@ ABSENCE_DTYPES = {
 # Each league reads its own host: WNBA calls spend stats.wnba.com's rate budget, not the NBA's.
 _HOSTS = {"NBA": NBA_HOST, "WNBA": WNBA_HOST}
 _RIGHT_RAIL_URL = "https://api-web.nhle.com/v1/gamecenter/{game_id}/right-rail"
-_LEAGUES_DIR = pkg_resources.files(data) / "leagues"
 # One absent player: (team, player_id, player_name, status), the file's columns after the game's.
 _Absence = tuple[str, int, str, str]
 
 
 def _games(league: str, season: int) -> pd.DataFrame:
     """The season's gamelog games by date: ``game_id``, ``game_date``, and NHL ``away``/``home``."""
-    path = _LEAGUES_DIR / league.lower() / "gamelog.parquet"
+    path = _gamelog_paths(league)["gamelog"]
     if league == "NHL":
         log = pd.read_parquet(path, columns=["gameId", "gameDate", "team", "opponent", "home"])
         # An NHL game id leads with its season's start year: 2025020103 -> 2025.

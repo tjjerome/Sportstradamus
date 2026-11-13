@@ -99,7 +99,9 @@ def _gamelog(monkeypatch, tmp_path, league: str, rows: list[tuple]) -> None:
         columns = ["GAME_ID", "GAME_DATE", "PLAYER_ID"]
     (tmp_path / league.lower()).mkdir(exist_ok=True)
     pd.DataFrame(rows, columns=columns).to_parquet(tmp_path / league.lower() / "gamelog.parquet")
-    monkeypatch.setattr(ga, "_LEAGUES_DIR", tmp_path)
+    monkeypatch.setattr(
+        ga, "_gamelog_paths", lambda lg: {"gamelog": tmp_path / lg.lower() / "gamelog.parquet"}
+    )
 
 
 def _replies(box_scores: dict) -> dict[str, dict]:
