@@ -60,6 +60,16 @@ WEATHER_DTYPES: dict[str, str] = {
 # 2 h 40 min, so four hours holds overtime, extra innings or a short delay).
 HOURS_BEFORE_KICKOFF = 1
 HOURS_AFTER_KICKOFF = 4
+# statsapi's schedule query for mlb_games: regular season and every postseason round, with the
+# game's weather label, cut to the fields mlb_games reads. Callers add the dates or the season.
+MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
+MLB_SCHEDULE_PARAMS = {
+    "sportId": 1,
+    "gameTypes": "R,F,D,L,W",
+    "hydrate": "weather",
+    "fields": "dates,games,gamePk,gameDate,status,detailedState,startTimeTBD,venue,id,weather,"
+    "condition",
+}
 # statsapi states of a game that will not be played at its listed time.
 _UNPLAYED_STATES = ("Postponed", "Cancelled")
 # nflverse gives gametime in US Eastern.
