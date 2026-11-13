@@ -40,6 +40,7 @@ src/sportstradamus/collectors/
   baseballsavant/    SAVANT_SOURCE (public Scrape, date-keyed)
   headshots.py       `fetch headshots` player-headshot cache (a plain command, not a Source)
   underdog_capture.py  per-poll Underdog line states + pill entry counts, written from `get_ud(capture_dir=…)`
+  capture.py         capture_league: the per-league store step lineup_, weather_ and injury_capture share
   lineup_capture.py  per-run MLB / NHL starters from the live leagues' `Stats` + NBA daily lineups, written from `prophecize`
   weather.py         venue table, schedule parsers and kickoff-window rows shared by the two weather modules below
   weather_capture.py per-run game-window forecasts for NFL and MLB, written from `prophecize`

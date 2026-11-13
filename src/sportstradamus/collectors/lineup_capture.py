@@ -17,19 +17,16 @@ stays only as ``source_timestamp``. Licence: NBA.com terms (the class nba-api al
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 
-from sportstradamus.helpers.io import (
-    LINEUP_CAPTURE_DIR,
-    read_upcoming_events,
-    write_capture_parquet,
-)
+from sportstradamus.collectors.capture import capture_league
+from sportstradamus.helpers.io import LINEUP_CAPTURE_DIR, read_upcoming_events
 from sportstradamus.helpers.scraping import CAPTURE_TIMEOUT_S
-from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.nba_client import NBA_STATS_HEADERS
 
 if TYPE_CHECKING:
@@ -143,6 +140,12 @@ def _nba_lineups(scored_at: pd.Timestamp) -> pd.DataFrame:
     return nba_lineup_rows(response.json(), scored_at)
 
 
+def _league_lineups(league: str, stats: dict[str, Stats], scored_at: pd.Timestamp) -> pd.DataFrame:
+    if league == "NBA":
+        return _nba_lineups(scored_at)
+    return lineup_rows(league, stats[league].upcoming_games, scored_at)
+
+
 def capture_lineups(stats: dict[str, Stats], scored_at: pd.Timestamp) -> None:
     """Write each live league's starters, one parquet per league.
 
@@ -150,17 +153,6 @@ def capture_lineups(stats: dict[str, Stats], scored_at: pd.Timestamp) -> None:
     writes nothing.
     """
     for league in LINEUP_LEAGUES:
-        if league not in stats:
-            continue
-        # Diagnostics: nothing that goes wrong in a capture may cost the board, or another
-        # capture, its run.
-        try:
-            rows = (
-                _nba_lineups(scored_at)
-                if league == "NBA"
-                else lineup_rows(league, stats[league].upcoming_games, scored_at)
-            )
-            if not rows.empty:
-                write_capture_parquet(rows, LINEUP_CAPTURE_DIR / league, scored_at)
-        except Exception:
-            logger.exception(f"{league} lineup capture not written")
+        if league in stats:
+            build = partial(_league_lineups, league, stats, scored_at)
+            capture_league(league, "lineup", build, LINEUP_CAPTURE_DIR, scored_at)

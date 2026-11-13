@@ -170,7 +170,8 @@ features. Beside them sit modules that are not a `Source`: `headshots.py`
 `injury_capture.py`, written from each `prophecize` run, store what the run could
 know (line states and starters for the T2a / T2b reads, game-window forecasts and
 injury lists for the model build) as parquet under `data/runtime/` the dashboard
-never reads; and `weather_history.py` (`fetch weather-history`, sharing
+never reads (the last three store each league through `capture.py:capture_league`);
+and `weather_history.py` (`fetch weather-history`, sharing
 `weather.py` and the venue table `data/config/venues.json` with the capture) and
 `injury_history.py` (`fetch injury-history`) pull the training-side history
 dev-side. Canonical guide: [docs/data_collectors.md](data_collectors.md).

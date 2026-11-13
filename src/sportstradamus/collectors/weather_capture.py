@@ -13,11 +13,13 @@ archive lacks: :mod:`sportstradamus.collectors.weather`.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import requests
 
+from sportstradamus.collectors.capture import capture_league
 from sportstradamus.collectors.weather import (
     HOURLY_VARS,
     MLB_SCHEDULE_PARAMS,
@@ -29,7 +31,7 @@ from sportstradamus.collectors.weather import (
     request_params,
     window_rows,
 )
-from sportstradamus.helpers.io import WEATHER_CAPTURE_DIR, write_capture_parquet
+from sportstradamus.helpers.io import WEATHER_CAPTURE_DIR
 from sportstradamus.helpers.scraping import CAPTURE_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
@@ -110,13 +112,6 @@ def capture_weather(stats: dict[str, Stats], scored_at: pd.Timestamp) -> None:
     ``HORIZON`` writes nothing.
     """
     for league in WEATHER_LEAGUES:
-        if league not in stats:
-            continue
-        # Diagnostics: nothing that goes wrong in a capture may cost the board, or the other
-        # league, its run.
-        try:
-            rows = _league_rows(league, stats, scored_at)
-            if not rows.empty:
-                write_capture_parquet(rows, WEATHER_CAPTURE_DIR / league, scored_at)
-        except Exception:
-            logger.exception(f"{league} weather capture not written")
+        if league in stats:
+            build = partial(_league_rows, league, stats, scored_at)
+            capture_league(league, "weather", build, WEATHER_CAPTURE_DIR, scored_at)

@@ -15,13 +15,14 @@ resolver.
 from __future__ import annotations
 
 import re
+from functools import partial
 
 import pandas as pd
 import requests
 
-from sportstradamus.helpers.io import INJURY_CAPTURE_DIR, write_capture_parquet
+from sportstradamus.collectors.capture import capture_league
+from sportstradamus.helpers.io import INJURY_CAPTURE_DIR
 from sportstradamus.helpers.scraping import CAPTURE_TIMEOUT_S
-from sportstradamus.spiderLogger import logger
 
 INJURY_FEEDS = {
     "NFL": "football/nfl",
@@ -91,19 +92,17 @@ def injury_rows(payload: dict, polled_at: pd.Timestamp) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(INJURY_DTYPES)).astype(INJURY_DTYPES)
 
 
+def _fetch_injuries(feed: str, polled_at: pd.Timestamp) -> pd.DataFrame:
+    response = requests.get(INJURIES_URL.format(feed=feed), timeout=CAPTURE_TIMEOUT_S)
+    response.raise_for_status()
+    return injury_rows(response.json(), polled_at)
+
+
 def capture_injuries(scored_at: pd.Timestamp) -> None:
     """Write every league's injury report, one parquet per league.
 
     A league whose feed lists nobody writes nothing.
     """
     for league, feed in INJURY_FEEDS.items():
-        # Diagnostics: nothing that goes wrong in a capture may cost the board, or another
-        # league, its run.
-        try:
-            response = requests.get(INJURIES_URL.format(feed=feed), timeout=CAPTURE_TIMEOUT_S)
-            response.raise_for_status()
-            rows = injury_rows(response.json(), scored_at)
-            if not rows.empty:
-                write_capture_parquet(rows, INJURY_CAPTURE_DIR / league, scored_at)
-        except Exception:
-            logger.exception(f"{league} injury capture not written")
+        build = partial(_fetch_injuries, feed, scored_at)
+        capture_league(league, "injury", build, INJURY_CAPTURE_DIR, scored_at)
