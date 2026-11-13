@@ -353,14 +353,11 @@ on the dev box beside the weekly `meditate`, give the model build the past:
     through 2024, and each week keeps a player's final status).
   - MLB: injured-list moves from the statsapi transactions feed, parsed into
     action, list length and injury (activations naming no list drop).
-  - NBA, WNBA and NHL (`collectors/game_absences.py`): for every game in the
-    league's gamelog, the league's own list of who did not play, by league id.
-    NBA: the inactive list (no reason given) plus the reason for an active player
-    who sat (`DNP - Coach's Decision`, `DNP - Injury/Illness`). WNBA: the same
-    two lists; the inactive list came back empty for the 2021 and 2025 games
-    checked, whose box scores carry every rostered player with a reason
-    (`DND - Injury/Illness`, `NWT - Not With Team`), and lists players in 2026.
-    NHL: the scratches. These record who sat, not the pregame status.
+  - NBA, WNBA and NHL (`collectors/game_absences.py`, whose docstring says what
+    each league's list holds): for every game in the league's gamelog, the
+    league's own list of who did not play, by league id (NBA and WNBA box-score
+    inactives and not-played reasons, NHL scratches). These record who sat, not
+    the pregame status.
   - NHL scratches never name a player on injured reserve, so NHL also gets ESPN's
     injured-reserve moves (`player_data/NHL/injured_reserve/<year>.parquet`, by
     calendar year, names without ids).
