@@ -362,8 +362,9 @@ on the dev box beside the weekly `meditate`, give the model build the past:
     injured-reserve moves (`player_data/NHL/injured_reserve/<year>.parquet`, by
     calendar year, names without ids).
 
-  NFL, MLB and the injured-reserve files are rewritten whole each run. The
-  per-game lists skip games already stored, so a rerun resumes and a weekly run
+  NFL, MLB and the injured-reserve files are rewritten whole each run, except
+  that a pull finding no injured-reserve move writes nothing (a missing year
+  file means no moves). The per-game lists skip games already stored, so a rerun resumes and a weekly run
   fetches only new games; a game where nobody sat leaves no row and is asked
   again. `sync_to_prod.sh` carries the NFL files up with the rest of
   `player_data/NFL`; nothing on production reads any of them.
