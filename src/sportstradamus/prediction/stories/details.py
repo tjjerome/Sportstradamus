@@ -248,7 +248,9 @@ def _market_detail_rows(
         market_file_slug(league, stat),
         importances,
         exclude=exclude | set(vol_by_pos.values()) | {stat},
-        available=set(gl.columns),
+        # A ranked feature can strip to a text column ("Player position" -> position), which
+        # has no recent mean to show.
+        available=set(gl.select_dtypes(["number", "bool"]).columns),
     )
     cohort_stats = vol_present + ranked
     means = {s: _recent_means(gl, cols, s) for s in cohort_stats}

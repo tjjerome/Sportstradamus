@@ -454,6 +454,42 @@ def test_build_offer_details_reads_importances_under_the_cells_file_slug(
     assert [entry["stat"] for entry in json.loads(out.loc[0, "other_stats"])] == ["shots"]
 
 
+def test_build_offer_details_skips_text_columns_the_importances_rank():
+    """``Player position`` strips to the gamelog's ``position``, a text column: ranked first for
+    NFL fantasy points on 2026-11-14, its mean raised and failed every prophecize run."""
+    offers = pd.DataFrame(
+        [
+            {
+                "League": "NFL",
+                "Date": "2026-06-15",
+                "Player": "Catcher",
+                "Market": "fantasy points underdog",
+                "Opponent": "DAL",
+                "Position": "WR1",
+                "Stat": "fantasy points underdog",
+            }
+        ]
+    )
+    gamelog = _nfl_gamelog().assign(
+        position=["QB", "QB", "WR", "WR"], snaps=[60.0, 58.0, 50.0, 48.0]
+    )
+    league_data = {
+        "NFL": {
+            "comp_pairs": pd.DataFrame(columns=["player", "comp"]),
+            "gamelog": gamelog,
+            "cols": _COLS,
+            "volume_stat": "",
+        }
+    }
+    importances = pd.DataFrame(
+        {"NFL_fantasy-points-underdog": {"Player position": 9.0, "Player snaps short": 3.0}}
+    )
+
+    out = build_offer_details(offers, league_data, importances, exclude=set(), today=_TODAY)
+
+    assert [entry["stat"] for entry in json.loads(out.loc[0, "other_stats"])] == ["snaps"]
+
+
 def test_build_offer_details_empty_safe():
     out = build_offer_details(pd.DataFrame(), {}, _importances(), exclude=set(), today=_TODAY)
     assert list(out.columns) == [
