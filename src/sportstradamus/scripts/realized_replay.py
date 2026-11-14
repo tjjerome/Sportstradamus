@@ -1,4 +1,4 @@
-"""The offline realized-money replay: the live recommendation rule on held-out rows at market lines.
+"""The offline realized-money replay: the live rule on held-out rows at posted rungs and market lines.
 
 The ``posted`` scope prices each dump's rows at the Underdog and Sleeper rungs the archive ladder
 held for them (``tail_pricing.price_cell``, the dump's own pickle from ``--models-dir``), keeps the
@@ -46,11 +46,10 @@ from sportstradamus.helpers.io import (
 from sportstradamus.helpers.training_quotes import AUTHENTIC, PICKEM
 from sportstradamus.prediction.offer_records import _MAX_CONFIDENCE, UNQUOTED_BOOK_DISAGREEMENT_MAX
 from sportstradamus.scripts.tail_information import key_rng
-from sportstradamus.scripts.tail_pricing import SERVED_MODELS_DIR, open_archive
+from sportstradamus.scripts.tail_pricing import SERVED_MODELS_DIR, open_archive, price_dumps
 from sportstradamus.scripts.tail_scorecard import (
-    _DEFAULT_ARCHIVE,
+    DEFAULT_ARCHIVE,
     TEST_SETS_DIR,
-    price_dumps,
     replay_live_rule,
     with_live_sides,
 )
@@ -197,16 +196,22 @@ def cohort(offers: pd.DataFrame, rng: np.random.Generator) -> dict:
     }
 
 
-def live_recommended(
-    history: pd.DataFrame, since: pd.Timestamp, until: pd.Timestamp | None
+def _recommended_even_picks(
+    offers: pd.DataFrame, since: pd.Timestamp, until: pd.Timestamp | None
 ) -> pd.DataFrame:
-    """The live record's recommended even-pick legs in the window, with the archive cell key."""
-    offers = realized.settled_offers(history)
+    """The recommended legs paying ``LIVE_PAYOUT_BAND`` dated in ``[since, until)``."""
     dates = pd.to_datetime(offers["Date"])
     keep = offers["Recommended"] & offers["Payout"].between(*LIVE_PAYOUT_BAND) & (dates >= since)
     if until is not None:
         keep &= dates < until
-    offers = offers[keep]
+    return offers[keep]
+
+
+def live_recommended(
+    history: pd.DataFrame, since: pd.Timestamp, until: pd.Timestamp | None
+) -> pd.DataFrame:
+    """The live record's recommended even-pick legs in the window, with the archive cell key."""
+    offers = _recommended_even_picks(realized.settled_offers(history), since, until)
     return offers.assign(
         cell=[
             archive_market(lg, mk)
@@ -263,13 +268,7 @@ def posted_legs(
         ],
         ignore_index=True,
     )
-    dates = pd.to_datetime(replayed["Date"])
-    keep = (
-        replayed["Recommended"] & replayed["Payout"].between(*LIVE_PAYOUT_BAND) & (dates >= since)
-    )
-    if until is not None:
-        keep &= dates < until
-    return _keyed(replayed[keep]), rows.drop_duplicates(_ROW_KEY)
+    return _keyed(_recommended_even_picks(replayed, since, until)), rows.drop_duplicates(_ROW_KEY)
 
 
 def posted_table(legs: pd.DataFrame, rows: pd.DataFrame, live: pd.DataFrame) -> pd.DataFrame:
@@ -418,7 +417,7 @@ def _echo_report(table: pd.DataFrame) -> None:
 @click.option(
     "--archive",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=_DEFAULT_ARCHIVE,
+    default=DEFAULT_ARCHIVE,
     help="Odds archive whose ladder prices the posted scope, opened read-only (default: "
     "$SPORTSTRADAMUS_ARCHIVE_DB or archive/archive.duckdb).",
 )
@@ -467,7 +466,7 @@ def main(
     out: Path,
     parquet: Path,
 ) -> None:
-    """Replay the live recommendation rule on held-out market-line rows and read it against live."""
+    """Replay the live rule on held-out rows at posted rungs and market lines; read it against live."""
     before, since = pd.Timestamp(offline_before), pd.Timestamp(live_since)
     until = pd.Timestamp(live_until) if live_until else None
     wanted = {lg.upper() for lg in leagues}

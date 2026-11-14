@@ -30,7 +30,6 @@ import os
 from pathlib import Path
 
 import click
-import duckdb
 import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss
@@ -50,16 +49,15 @@ from sportstradamus.scripts.tail_information import DAY_RESAMPLES, information_t
 from sportstradamus.scripts.tail_pricing import (
     SCORED_PLATFORMS,
     SERVED_MODELS_DIR,
-    CellExcludedError,
     open_archive,
-    price_cell,
+    price_dumps,
 )
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.graduation import DESCRIPTIVE_MIN_SELECTED
 from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
 
 TEST_SETS_DIR = Path(str(pkg_resources.files(data) / "test_sets"))
-_DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
+DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
 _DEFAULT_OUT = Path("/tmp/tail_scorecard.csv")
 
 # Posted payout as the archive encoded it x stored price: 1 on a one-sided rung, at most
@@ -186,28 +184,6 @@ def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         for side, p in price.items()
     }
     return rungs.assign(**boosts, **{"One Sided": one_sided}), overround
-
-
-def price_dumps(
-    paths: list[Path], con: duckdb.DuckDBPyConnection, start: str, models_dir: Path
-) -> tuple[pd.DataFrame, dict[str, dict], list[dict], list[pd.DataFrame], dict[str, str]]:
-    """Every dump's rows priced at the ladder rungs they had (``price_cell``), from ``start`` on.
-
-    Returns the scored cells' rungs (empty when none scored), each cell's pickle knobs,
-    diagnostics row and information rows, and the reason each other cell sat out.
-    """
-    priced, knobs, cells, information, excluded = [], {}, [], [], {}
-    for path in tqdm(paths, desc="pricing cells"):
-        try:
-            cell_rungs, knobs[path.stem], diag, info = price_cell(path, con, start, models_dir)
-        except CellExcludedError as exc:
-            excluded[path.stem] = str(exc)
-            continue
-        priced.append(cell_rungs)
-        cells.append(diag)
-        information.append(info)
-    rungs = pd.concat(priced, ignore_index=True) if priced else pd.DataFrame()
-    return rungs, knobs, cells, information, excluded
 
 
 def with_live_sides(
@@ -484,7 +460,7 @@ def _print_tables(
 @click.option(
     "--archive",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=_DEFAULT_ARCHIVE,
+    default=DEFAULT_ARCHIVE,
     help="Odds archive, opened read-only (default: $SPORTSTRADAMUS_ARCHIVE_DB or "
     "archive/archive.duckdb).",
 )

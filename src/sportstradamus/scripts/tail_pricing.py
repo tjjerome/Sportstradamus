@@ -17,6 +17,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
@@ -325,3 +326,25 @@ def price_cell(
         diag,
         info.assign(cell=path.stem, League=league),
     )
+
+
+def price_dumps(
+    paths: list[Path], con: duckdb.DuckDBPyConnection, start: str, models_dir: Path
+) -> tuple[pd.DataFrame, dict[str, dict], list[dict], list[pd.DataFrame], dict[str, str]]:
+    """Every dump's rows priced at the ladder rungs they had (``price_cell``), from ``start`` on.
+
+    Returns the scored cells' rungs (empty when none scored), each cell's pickle knobs,
+    diagnostics row and information rows, and the reason each other cell sat out.
+    """
+    priced, knobs, cells, information, excluded = [], {}, [], [], {}
+    for path in tqdm(paths, desc="pricing cells"):
+        try:
+            cell_rungs, knobs[path.stem], diag, info = price_cell(path, con, start, models_dir)
+        except CellExcludedError as exc:
+            excluded[path.stem] = str(exc)
+            continue
+        priced.append(cell_rungs)
+        cells.append(diag)
+        information.append(info)
+    rungs = pd.concat(priced, ignore_index=True) if priced else pd.DataFrame()
+    return rungs, knobs, cells, information, excluded
