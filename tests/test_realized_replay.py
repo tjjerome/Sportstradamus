@@ -148,13 +148,86 @@ def test_l2_flag_needs_the_floors_and_reads_the_gap_form():
     assert l2["l2_flag"] is False
 
 
-def test_tolerance_rows_need_the_live_floor():
+def test_tolerance_rows_are_the_posted_league_rows_over_the_live_floor():
     table = pd.DataFrame(
         {
-            "scope": ["league", "l2", "l2", "l2"],
-            "league": ["NBA", "NBA", "WNBA", "NHL"],
-            "live_n": [500, 500, 26, rr.LIVE_MIN_LEGS],
-            "gap_delta": [0.1, 0.2, 0.3, 0.4],
+            "scope": ["l2", "posted", "posted", "posted", "posted"],
+            "league": ["NBA", "NBA", "NBA", "WNBA", "NHL"],
+            "market": ["", "", "PTS", "", ""],
+            "live_n": [500, 500, 500, 26, rr.LIVE_MIN_LEGS],
+            "gap_delta": [0.1, 0.2, 0.3, 0.4, 0.5],
         }
     )
-    assert list(rr.tolerance_rows(table)["league"]) == ["NBA", "NHL"]
+    tolerance = rr.tolerance_rows(table)
+    assert list(tolerance["league"]) == ["NBA", "NHL"]
+    assert list(tolerance["gap_delta"]) == [0.2, 0.5]
+
+
+def test_still_posted_keeps_each_props_rungs_from_its_own_last_poll():
+    # Rows out of time order, two rungs at prop x's last poll, and prop y (Sleeper, same player
+    # and date) polled hours earlier: a global latest stamp would drop y, and taking each prop's
+    # last row would keep one of x's two live rungs and could keep the stale one.
+    last = pd.Timestamp("2026-11-01 23:30")
+    rungs = pd.DataFrame(
+        {
+            "League": "NBA",
+            "Market": "PTS",
+            "Player": "x",
+            "Date": "2026-11-01",
+            "Platform": ["Underdog", "Sleeper", "Underdog", "Underdog", "Underdog"],
+            "Line": [21.5, 20.5, 19.5, 20.5, 22.5],
+            "last_poll": [
+                last,
+                pd.Timestamp("2026-11-01 17:30"),
+                pd.Timestamp("2026-11-01 20:30"),
+                last - pd.Timedelta(minutes=2),
+                pd.Timestamp("2026-11-01 14:30"),
+            ],
+        }
+    )
+    assert rr.still_posted(rungs).tolist() == [True, True, False, True, False]
+
+
+def _posted_leg(player: str, market: str, date, version: str, hit: bool) -> dict:
+    return {
+        "League": "NBA",
+        "Market": market,
+        "Player": player,
+        "Date": date,
+        "Model Version": version,
+        "Recommended": True,
+        "Win Prob": 0.60,
+        "Hit": hit,
+        "Unit": 0.83 if hit else -1.0,
+    }
+
+
+def test_posted_table_reads_live_legs_on_the_priced_rows_only():
+    rows = pd.DataFrame(
+        {
+            "League": "NBA",
+            "cell": "PTS",
+            "Player": ["a", "b"],
+            "Date": "2026-11-01",
+            "version": "v2",
+        }
+    )
+    legs = pd.DataFrame([_posted_leg("a", "PTS", "2026-11-01", "v2", True)]).assign(cell="PTS")
+    # a: priced, read by v2. b: priced, read by the older v1. c: never priced. a's REB leg sits on
+    # a row the dumps do not hold (a join on player and date alone would count it). Live dates
+    # arrive as timestamps, the priced rows as day strings.
+    live = pd.DataFrame(
+        [
+            _posted_leg("a", "PTS", pd.Timestamp("2026-11-01"), "v2", True),
+            _posted_leg("b", "PTS", pd.Timestamp("2026-11-01"), "v1", False),
+            _posted_leg("c", "PTS", pd.Timestamp("2026-11-01"), "v2", True),
+            _posted_leg("a", "REB", pd.Timestamp("2026-11-01"), "v2", True),
+        ]
+    )
+    table = rr.posted_table(legs, rows, live).set_index("market")
+    assert list(table.index) == ["", "PTS"]
+    assert (table["scope"] == "posted").all()
+    assert table["n"].tolist() == [1, 1]
+    assert table["live_n"].tolist() == [2, 2]
+    assert table["live_same_version"].tolist() == [0.5, 0.5]
+    assert table["live_hit"].tolist() == [0.5, 0.5]

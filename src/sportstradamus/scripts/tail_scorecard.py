@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 
 import click
+import duckdb
 import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss
@@ -48,6 +49,7 @@ from sportstradamus.realized import cohort_summary, settled_offers
 from sportstradamus.scripts.tail_information import DAY_RESAMPLES, information_table, key_rng
 from sportstradamus.scripts.tail_pricing import (
     SCORED_PLATFORMS,
+    SERVED_MODELS_DIR,
     CellExcludedError,
     open_archive,
     price_cell,
@@ -184,6 +186,37 @@ def side_boosts(rungs: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         for side, p in price.items()
     }
     return rungs.assign(**boosts, **{"One Sided": one_sided}), overround
+
+
+def price_dumps(
+    paths: list[Path], con: duckdb.DuckDBPyConnection, start: str, models_dir: Path
+) -> tuple[pd.DataFrame, dict[str, dict], list[dict], list[pd.DataFrame], dict[str, str]]:
+    """Every dump's rows priced at the ladder rungs they had (``price_cell``), from ``start`` on.
+
+    Returns the scored cells' rungs (empty when none scored), each cell's pickle knobs,
+    diagnostics row and information rows, and the reason each other cell sat out.
+    """
+    priced, knobs, cells, information, excluded = [], {}, [], [], {}
+    for path in tqdm(paths, desc="pricing cells"):
+        try:
+            cell_rungs, knobs[path.stem], diag, info = price_cell(path, con, start, models_dir)
+        except CellExcludedError as exc:
+            excluded[path.stem] = str(exc)
+            continue
+        priced.append(cell_rungs)
+        cells.append(diag)
+        information.append(info)
+    rungs = pd.concat(priced, ignore_index=True) if priced else pd.DataFrame()
+    return rungs, knobs, cells, information, excluded
+
+
+def with_live_sides(
+    rungs: pd.DataFrame, history: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Each rung's side and raw boost as history scored it, then both sides' boosts (``side_boosts``)."""
+    live_sides = history.drop_duplicates(_RUNG_KEY)[[*_RUNG_KEY, "Bet", "Boost"]]
+    live_sides = live_sides.rename(columns={"Bet": "Live Bet", "Boost": "Live Boost"})
+    return side_boosts(rungs.merge(live_sides, on=_RUNG_KEY, how="left"))
 
 
 def replay_live_rule(rungs: pd.DataFrame, p_over: pd.Series, knobs: dict) -> pd.DataFrame:
@@ -491,16 +524,7 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
         {"platforms": list(SCORED_PLATFORMS)},
     ).fetchone()[0]
     start = str(first_rung_date)
-    priced, knobs, cells, informative, excluded = [], {}, [], [], {}
-    for path in tqdm(paths, desc="pricing cells"):
-        try:
-            cell_rungs, knobs[path.stem], diag, info = price_cell(path, con, start)
-        except CellExcludedError as exc:
-            excluded[path.stem] = str(exc)
-            continue
-        priced.append(cell_rungs)
-        cells.append(diag)
-        informative.append(info)
+    rungs, knobs, cells, informative, excluded = price_dumps(paths, con, start, SERVED_MODELS_DIR)
     con.close()
     skipped = pd.DataFrame(
         {
@@ -514,16 +538,13 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
         print(f"excluded {cell}: {reason}")
     # A league before its season (every test row older than the first ladder rung) scores
     # nothing; the sidecar keeps its other leagues' rows.
-    if not priced:
+    if rungs.empty:
         skipped.to_csv(out, index=False)
         print(f"no cell scored; wrote {out}")
         return
 
     history = _history_since(start)
-    live_sides = history.drop_duplicates(_RUNG_KEY)[[*_RUNG_KEY, "Bet", "Boost"]]
-    live_sides = live_sides.rename(columns={"Bet": "Live Bet", "Boost": "Live Boost"})
-    rungs = pd.concat(priced, ignore_index=True).merge(live_sides, on=_RUNG_KEY, how="left")
-    rungs, overround = side_boosts(rungs)
+    rungs, overround = with_live_sides(rungs, history)
 
     # finalize_records warns on every slate it trims, which offline is nearly all of them.
     logger.setLevel(logging.ERROR)

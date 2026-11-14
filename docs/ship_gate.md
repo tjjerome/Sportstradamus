@@ -252,16 +252,31 @@ tail scorecard: never a gate, and nothing in it demotes or withholds a cell.
 
 ### The realized replay and the L2 column (report only)
 
-`sportstradamus admin realized-replay` runs the live recommendation rule
-(`realized.recommended`, the Receipts ledger's) over each cell's held-out rows at market lines —
-pick'em rows and sportsbook rows within .06 of even, never a synthetic or EV-derived line, and never
-a pick'em row the live board itself drops (the unquoted-disagreement gate) — at the 1.83 even pick,
-and reads each cell and league against the live record's recommended even-pick legs
-(`data/training/realized_replay.parquet`; `gap = read − hit`, the sign of `live_gap_per_cell.parquet`).
-`gap_delta` is the tolerance: how far the replay reads from live per league, read on the `l2` rows
-over leagues with at least 100 live recommended even-pick legs (`LIVE_MIN_LEGS`). A release gate
-may read this file only once that tolerance is stated and met and the cell order matches live (owner
-2026-10-30, [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); today it is a report.
+`sportstradamus admin realized-replay` reads offline recommended legs against the live record's
+recommended even-pick legs, per cell and league (`data/training/realized_replay.parquet`;
+`gap = read − hit`, the sign of `live_gap_per_cell.parquet`; `gap_delta` = offline gap − live gap).
+
+Its `posted` scope is the one the tolerance reads. Each dump row is priced at the Underdog and
+Sleeper rungs the archive ladder held for it, by the dump's own pickle (`--models-dir`); only the
+rungs a prop still held at its last poll count, because a rung the app had moved off was gone from
+the board, and its line had usually moved toward the model (keeping such rungs doubled NFL legs and
+lifted their hit from .537 to .583 on 2026-11-13); the live board's rule (`finalize_records`, then
+`realized.settled_offers`) picks the legs; the recommended legs paying 1.80 to 1.90 inside the live
+window are read against the live legs on the same player-dates. `live_same_version` is the share of
+those live legs the dump's own pickle read. A held-out dump always predates its version's serving,
+so against live it reads two model versions and its `gap_delta` mixes the replay's skew with version
+drift (share 0); a forward dump, a version scoring the dates it served, reads like for like and
+reproduced live within .013 per league in the live-gap-2 lane's forward read (2026-11-13).
+The tolerance is `gap_delta` within .03 on `posted` league rows with at least 100 live legs
+(`LIVE_MIN_LEGS`) and a same-version share of 1. A release gate may read this file only once that
+tolerance is met and the cell order matches live (owner 2026-10-30,
+[handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); today it is a report.
+
+The `cell`, `league` and `l2` scopes are the first replay, kept until L2's pre-registered read below
+ends: the live recommendation rule (`realized.recommended`) over each cell's held-out rows dated
+before `--offline-before` at market lines — pick'em rows and sportsbook rows within .06 of even, never
+a synthetic or EV-derived line, and never a pick'em row the live board itself drops (the
+unquoted-disagreement gate) — at the 1.83 even pick.
 
 The `l2` rows are the league-level gap form the market-centre brief froze: near-even sportsbook rows
 plus pick'em rows of cells whose test over-rate sits in [.40, .60], the recommended tail, floors of

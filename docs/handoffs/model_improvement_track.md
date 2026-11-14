@@ -1854,11 +1854,18 @@ the code before relying on the list.
 
 **Dispatch `research-analyst` before** (CLAUDE.md research-first; the research-gate hook
 enforces the file-level cases): any §6.6 family/distribution change; any §6.5 blend-structure
-change or training-time dispersion regularizer; §6.6 hierarchical/TabPFN escalation; the
-§6.6-flagged feature items C-3 / B-5 / L-3 (D-4 brief-note level); **any §6.10 (WS-1) change to a
-live serving distribution or its dispersion — not the sizing/selection config, which is a plain
-knob**; any hole below before betting the plan on it. Plain knobs (normalization slug, loss choice,
-ordinary features, Kelly/selection config) need no brief. The four 2026-07-07 rework briefs —
+change or training-time dispersion regularizer; §6.6 hierarchical/TabPFN escalation; **any §6.10
+(WS-1) change to a live serving distribution or its dispersion — not the sizing/selection config,
+which is a plain knob**; any hole below before betting the plan on it. Plain knobs (normalization
+slug, loss choice, Kelly/selection config) need no brief. **Features need none either** (owner
+2026-11-12: "The model build should have full authority to change model features to give the trees
+the best performance possible using the data we've collected."): any feature in any cell may be
+added, dropped, transformed, re-encoded, constrained or pruned for held-out performance, with
+[gbdt_feature_engineering.md](../gbdt_feature_engineering.md) as the standing brief. That covers the
+§6.6 feature items (C-3, B-5, L-3, D-4); a killed verdict closes an edge claim, not a feature. The
+grant leaves the families, dispersion, blend, book leg, serving rules, gate thresholds, `shipped`
+flips and the learner where they are. If the hook stops a feature edit, the waiver line cites the
+guide and this grant. The four 2026-07-07 rework briefs —
 `researcher_count_family` (R1), `researcher_continuous_family` (R2),
 [`researcher_copula_stage0.md`](../archive/researcher_copula_stage0.md) and
 `researcher_sweep_ux_versioning` — discharged the gate for WS-3's two families, the copula, and the
@@ -2166,6 +2173,10 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-11-14 · **Part B (feature audit) push 1: the replay's `posted` scope; the feature grant in
+  §8.2.** Dumps priced at the posted rungs by their own pickle read 3.9 / 3.5 / 2.5 pp (NBA / NFL /
+  NHL) optimistic on the served held-out dumps, all cross-version (`live_same_version` 0); the
+  tolerance waits on a same-version forward read ([ship_gate.md](../ship_gate.md)).
 - 2026-11-11 · **Owner decisions on the implementation lane's asks: X1 KILL, X2 closed, NHL shots
   and assists on the rung book leg; the forward captures ride prophecize.** X1 takes the one-sided
   reading (no learner lane) and X2 closes on X3's live evidence with look 1 as its finding (§3.4);
@@ -2287,22 +2298,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   g4 pit_ks 0.0415, g1 ci_hi 0.0004, BSS +0.023 at w=0.9) on the ±8 dispersion skew cap
   (`5beb11f2`; routing protocol §8.2 #0a). Rushing yards + interceptions shipped the day
   prior; NFL 19/20, passing yards the sole withheld cell.
-- 2026-08-25 (3) · **NFL tds SHIPS — the mean corrector moved to the fused side of the pool**
-  ([mean_corrector_stage_order.md](../archive/mean_corrector_stage_order.md), lane closed). One
-  rule, no per-cell branching: fit and apply the `MEAN_STAGE` corrector on the *fused served* mean,
-  after fusion and before the dispersion and temperature fits. `posthoc.correct_fused_mean` is the
-  single entry point both training and `model_prob` call, and it corrects `(1−π)·base`, which closes
-  `[[posthoc_mean_miscontracted_on_gated]]` by construction. Full HPO on matrix `7918c1b8`:
-  `g6_citl_ci_hi` 0.8983 → **1.0956**, `g4_pit_ks` 0.0431 → **0.0242**, `g5_ece_debiased`
-  0.0179 → **0.0083**, `g1` and BSS flat, `roc_auc` 0.7119, fusion haircut 0.855 → 1.281.
-  Pinned `NegBin`/`isotonic_mean`/`crps`/`nll`, `shipped: devel`. Controls: NFL passing tds, NBA
-  BLST, NBA FG3M, WNBA FG3M all retain `ship`; the four `w = 1` cells reproduce every gate value
-  bit-identically. **MLB hits allowed drops Gate 4** (0.0323 → 0.0540) — `isotonic_mean` is a step
-  function, and post-fusion its plateaus *are* the served mean (`Blended_EV` distinct 1066 → 20),
-  which clumps the randomized PIT on a continuous family; count families discretize anyway and all
-  three improved. Re-cornered in-band. Also chased and **cleared**: the book-leg gate asymmetry
-  between the archive (native `under_prob`, `ev` its gated derivative) and `training_quotes` (which
-  inverts ungated) is not a defect — gating the training inversion clamps 90% of MLB home runs /
-  76% of NHL goals / 48% of NBA BLK quotes, because books price under-probabilities *below* the
-  population zero rate, and the residual is not a uniform `(1−π)` deflation (`Σ book_ev / Σ Result`
-  runs 0.28–1.94 across gated cells with no `(1−π)` pattern). No change made.

@@ -26,7 +26,7 @@ from sportstradamus.helpers import (
     get_odds,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING, DecodedParams, predictive_std
-from sportstradamus.helpers.io import model_pickle_path, resolve_model_version
+from sportstradamus.helpers.io import MODELS_DIR, model_pickle_path, resolve_model_version
 from sportstradamus.helpers.training_quotes import AUTHENTIC, DFS_PLATFORM_BOOKS
 from sportstradamus.scripts.tail_information import information_rows
 from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY
@@ -39,6 +39,9 @@ from sportstradamus.training.posthoc import (
 
 # The DFS boards the live recommender prices; the other DFS books never post a leg here.
 SCORED_PLATFORMS = ("Underdog", "Sleeper")
+
+# The served pickles, as a filesystem path a sandbox run's models directory can stand in for.
+SERVED_MODELS_DIR = Path(str(MODELS_DIR))
 
 # What re-serving a test row and its information test need: the shared columns, then each
 # family's model-only fusion inputs. A dump without them predates the shape persist.
@@ -243,14 +246,18 @@ def reconstruction_error(rows: pd.DataFrame, knobs: dict) -> float:
 
 
 def price_cell(
-    path: Path, con: duckdb.DuckDBPyConnection, start: str
+    path: Path,
+    con: duckdb.DuckDBPyConnection,
+    start: str,
+    models_dir: Path = SERVED_MODELS_DIR,
 ) -> tuple[pd.DataFrame, dict, dict, pd.DataFrame]:
     """One cell's test rows priced at every ladder rung they had, under both conventions.
 
     Returns the rung rows (the test row's columns, then the rung's platform, line, stored
     price, last poll, sportsbook coverage and consensus, each convention's over-price and
     the served mean and SD), the pickle knobs, the cell's window test-row count and
-    reconstruction error, and its information-test rows.
+    reconstruction error, and its information-test rows. The cell's pickle is read from
+    ``models_dir`` (a sandbox run's own models beside its own dumps).
 
     Raises:
         CellExcludedError: no pickle, an unreplayed family, a test set without the model-only
@@ -258,7 +265,7 @@ def price_cell(
     """
     league, slug = path.stem.split("_", 1)
     market = slug.replace("-", " ")
-    pickle_path = model_pickle_path(league, market)
+    pickle_path = models_dir / model_pickle_path(league, market).name
     try:
         with pickle_path.open("rb") as infile:
             filedict = pickle.load(infile)

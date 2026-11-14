@@ -321,8 +321,14 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      lane"): the replay and L2 landed as `admin realized-replay` (push I 9250c5e2, 10-31) and read 1
      is NOT representative — the replay reads 2.9 pp (NBA), 7.7 pp (NFL) and 4.5 pp (NHL) more
      optimistic than live (`gap_delta`), every live recommended hit sits below .5464 (NBA .508, NFL
-     .509, NHL .545) while the L2 flag clears NFL and NHL, so making it read within .03 of live per
-     league is the model-build lane's first job and no release gate reads it; forward capture is live
+     .509, NHL .545) while the L2 flag clears NFL and NHL. The model-build lane's fix, the `posted`
+     scope ([ship_gate.md](../ship_gate.md) "The realized replay"), prices each dump at the posted
+     rungs with its own pickle: on the served held-out dumps over 10-09 to 11-09 it reads 3.9 pp
+     (NBA), 3.5 pp (NFL) and 2.5 pp (NHL) optimistic (the old scopes 4.2, 7.5 and 5.1 pp), and none
+     of those live legs came from the dump's own version, so what remains mixes in version drift; a
+     forward read (each served version on the dates it served) came within 1.3 pp per league (lane,
+     11-13). No release gate reads the replay until that same-version read runs through the command;
+     forward capture is live
      from push II (81c1ed33, 11-06) and since 11-11 rides every prophecize run at the run's Scored At
      (Underdog line states, match and per-line entry counts, MLB and NHL lineups, and since the
      owner's go 11-11 the NBA lineups; T2a at 300 flagged legs, T2b at 5,000); X2
