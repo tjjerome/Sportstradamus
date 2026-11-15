@@ -1480,14 +1480,13 @@ class Stats:
         player_df = self._roster_player_df(season)
 
         if date < datetime.today().date():
-            old_player_df = self._gamelog_on(date).loc[
-                lambda frame: frame[self.log_strings["player"]].isin(list(players)),
-                [
-                    self.log_strings["player"],
-                    self.log_strings["team"],
-                    self.log_strings["position"],
-                ],
+            player_col = self.log_strings["player"]
+            played = self._gamelog_on(date)[
+                [player_col, self.log_strings["team"], self.log_strings["position"]]
             ]
+            # Offers and the roster carry accent-free names; the NBA gamelog stores raw ones.
+            played = played.assign(**{player_col: played[player_col].map(remove_accents)})
+            old_player_df = played.loc[played[player_col].isin(list(players))]
             # Left: the gamelog row proves the player took the field, so the roster only
             # contributes attributes. An inner merge dropped every player absent from the
             # roster on the day the matrix was built from every past gameday.

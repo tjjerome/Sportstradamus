@@ -15,13 +15,16 @@ the roster's on an upcoming one -- rather than the roster alone.
 The NHL's roster rows carry a text attribute (``shootsCatches``). A player who played without a
 roster row has none, and the rank must still come out: ranking every column at once compared
 that text with the filled-in zero and raised on 486 of the 570 game days since 2024-02-10.
+
+The NBA gamelog stores raw names ("Nikola Jokić") while offers, the roster and the profiles carry
+accent-free ones; a past gameday matched raw gave those players no depth, so no training row.
 """
 
 from datetime import date, datetime
 
 import pandas as pd
 
-from sportstradamus.stats import StatsNFL, StatsNHL
+from sportstradamus.stats import StatsNBA, StatsNFL, StatsNHL
 from sportstradamus.stats import nfl as nfl_module
 from sportstradamus.stats.nfl import NFL_FANTASY_COMPONENTS, NFL_FANTASY_RECEPTION_POINTS
 from sportstradamus.training.component_cells import _fantasy_weights
@@ -99,6 +102,32 @@ def test_historical_gameday_ranks_a_player_whose_roster_row_lacks_a_text_attribu
     )
 
     assert stats.playerProfile["depth"].to_dict() == {"Rostered Center": 1, "Unrostered Center": 2}
+
+
+def test_historical_nba_gameday_ranks_a_player_whose_gamelog_name_has_an_accent():
+    stats = StatsNBA()
+    gameday = date(2025, 12, 7)
+    stats.gamelog = pd.DataFrame(
+        {
+            "PLAYER_NAME": ["Nikola Jokić", "Jamal Murray"],
+            "TEAM_ABBREVIATION": ["DEN", "DEN"],
+            "POS": ["C", "P"],
+            "GAME_DATE": [gameday.isoformat()] * 2,
+        }
+    )
+    stats.players = {
+        "2025-26": {"DEN": {"Nikola Jokic": {"POS": "C"}, "Jamal Murray": {"POS": "P"}}}
+    }
+    stats.playerProfile = pd.DataFrame(
+        {"MIN short": [36.0, 34.0], "USG_PCT short": [0.30, 0.27]},
+        index=["Nikola Jokic", "Jamal Murray"],
+    )
+    stats.profile_market = lambda market, date=None: None
+
+    stats.get_depth([{"Player": "Nikola Jokic"}, {"Player": "Jamal Murray"}], gameday)
+
+    assert stats.playerProfile["depth"].to_dict() == {"Nikola Jokic": 1, "Jamal Murray": 1}
+    assert stats.playerProfile.loc["Nikola Jokic", "position"] == stats.positions.index("C") + 1
 
 
 def test_upcoming_gameday_still_needs_the_roster():
