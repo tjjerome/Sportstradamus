@@ -1147,8 +1147,8 @@ class StatsNBA(Stats):
             included_games.add((game["PLAYER_ID"], game["GAME_ID"]))
             game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
             team_abbr = game["TEAM_ABBREVIATION"]
-            adv_game = adv_idx.get((game["PLAYER_ID"], game["GAME_ID"]))
-            usg_game = usg_idx.get((game["PLAYER_ID"], game["GAME_ID"]))
+            adv_game = adv_idx.get((game["PLAYER_ID"], game["GAME_ID"]), {})
+            usg_game = usg_idx.get((game["PLAYER_ID"], game["GAME_ID"]), {})
 
             self.players[self.season].setdefault(team_abbr, {})
             existing_pos = (
@@ -1172,9 +1172,7 @@ class StatsNBA(Stats):
 
             self._compute_derived_player_stats(game)
             # The Advanced and Usage rows carry the raw name; offers and the roster key by this one.
-            game.update(
-                {**(adv_game or {}), **(usg_game or {}), "PLAYER_NAME": game["PLAYER_NAME"]}
-            )
+            game.update({**adv_game, **usg_game, "PLAYER_NAME": game["PLAYER_NAME"]})
             nba_df.append(game)
         return nba_df
 
