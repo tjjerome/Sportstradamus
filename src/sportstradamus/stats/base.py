@@ -578,19 +578,17 @@ class Stats:
         """
         reuse = self.league == "NHL" and self.snapshot_only_rebuild
         key = (id(self.gamelog), len(self.gamelog), self.log_strings["date"], target_date)
-        if (
-            not reuse
-            or self._snapshot_gameday_cache is None
-            or self._snapshot_gameday_cache[0] != key
-        ):
+        cached = self._snapshot_gameday_cache
+        if not reuse or cached is None or cached[0] != key:
             player_col = self.log_strings["player"]
             frame = self.gamelog.loc[self._gamelog_dates() == pd.Timestamp(target_date)]
             frame = frame.assign(**{player_col: frame[player_col].map(remove_accents)})
             if not reuse:
                 return frame
-            self._snapshot_gameday_cache = (key, frame)
+            cached = (key, frame)
+            self._snapshot_gameday_cache = cached
         # Callers may replace the index; keep the cached frame structurally immutable.
-        return self._snapshot_gameday_cache[1].copy(deep=False)
+        return cached[1].copy(deep=False)
 
     def _normalized_gamelog_players(self) -> pd.Series:
         """Return accent-normalized NHL player names for an immutable cold rebuild."""

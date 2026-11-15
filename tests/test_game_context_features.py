@@ -105,14 +105,13 @@ def test_historical_game_context_keys_an_accented_gamelog_name_as_offers_do():
         ]
     )
     offered = {"Nikola Jokic": "DEN", "Lebron James": "LAL"}
+    opposing = {"Nikola Jokic": "LAL", "Lebron James": "DEN"}
     frame = pd.DataFrame(index=list(offered))
 
-    out, teams, opponents, _ = stats._game_context(
-        frame, [], "PTS", GAMEDAY, offered, {"Nikola Jokic": "LAL", "Lebron James": "DEN"}
-    )
+    out, teams, opponents, _ = stats._game_context(frame, [], "PTS", GAMEDAY, offered, opposing)
 
     assert teams == offered
-    assert opponents == {"Nikola Jokic": "LAL", "Lebron James": "DEN"}
+    assert opponents == opposing
     assert out.loc["Nikola Jokic", ["Total", "OppTotal", "Moneyline"]].tolist() == [
         118.0,
         112.0,
