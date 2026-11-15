@@ -571,14 +571,23 @@ class Stats:
         return self._normalized_log_dates(self.teamlog, cache_name="teamlog")
 
     def _gamelog_on(self, target_date: date) -> pd.DataFrame:
-        """Return one historical gameday, reusing it within an NHL cold rebuild."""
-        if self.league != "NHL" or not self.snapshot_only_rebuild:
-            return self.gamelog.loc[self._gamelog_dates() == pd.Timestamp(target_date)]
+        """Return one historical gameday, reusing it within an NHL cold rebuild.
 
-        date_column = self.log_strings["date"]
-        key = (id(self.gamelog), len(self.gamelog), date_column, target_date)
-        if self._snapshot_gameday_cache is None or self._snapshot_gameday_cache[0] != key:
+        Its names are accent-free, as offers, the roster and the short gamelog carry them: the
+        NBA gamelog stores raw ones ("Nikola Jokić"), which match no offer.
+        """
+        reuse = self.league == "NHL" and self.snapshot_only_rebuild
+        key = (id(self.gamelog), len(self.gamelog), self.log_strings["date"], target_date)
+        if (
+            not reuse
+            or self._snapshot_gameday_cache is None
+            or self._snapshot_gameday_cache[0] != key
+        ):
+            player_col = self.log_strings["player"]
             frame = self.gamelog.loc[self._gamelog_dates() == pd.Timestamp(target_date)]
+            frame = frame.assign(**{player_col: frame[player_col].map(remove_accents)})
+            if not reuse:
+                return frame
             self._snapshot_gameday_cache = (key, frame)
         # Callers may replace the index; keep the cached frame structurally immutable.
         return self._snapshot_gameday_cache[1].copy(deep=False)
@@ -1480,13 +1489,14 @@ class Stats:
         player_df = self._roster_player_df(season)
 
         if date < datetime.today().date():
-            player_col = self.log_strings["player"]
-            played = self._gamelog_on(date)[
-                [player_col, self.log_strings["team"], self.log_strings["position"]]
+            old_player_df = self._gamelog_on(date).loc[
+                lambda frame: frame[self.log_strings["player"]].isin(list(players)),
+                [
+                    self.log_strings["player"],
+                    self.log_strings["team"],
+                    self.log_strings["position"],
+                ],
             ]
-            # Offers and the roster carry accent-free names; the NBA gamelog stores raw ones.
-            played = played.assign(**{player_col: played[player_col].map(remove_accents)})
-            old_player_df = played.loc[played[player_col].isin(list(players))]
             # Left: the gamelog row proves the player took the field, so the roster only
             # contributes attributes. An inner merge dropped every player absent from the
             # roster on the day the matrix was built from every past gameday.

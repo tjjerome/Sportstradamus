@@ -77,6 +77,49 @@ def test_spread_gametotal_are_exact_combinations_of_the_two_totals():
         assert out.loc[player, "GameTotal"] == total + opp
 
 
+def test_historical_game_context_keys_an_accented_gamelog_name_as_offers_do():
+    """The NBA gamelog stores raw names; offers, the roster and the profiles use accent-free ones."""
+    stats = StatsNBA()
+    ls = stats.log_strings
+    game = {ls["date"]: GAMEDAY.isoformat(), ls["game"]: "0022400001"}
+    stats.gamelog = pd.DataFrame(
+        [
+            {
+                **game,
+                ls["player"]: "Nikola Jokić",
+                ls["team"]: "DEN",
+                ls["opponent"]: "LAL",
+                ls["home"]: True,
+                "moneyline": -150.0,
+                "totals": 118.0,
+            },
+            {
+                **game,
+                ls["player"]: "LeBron James",
+                ls["team"]: "LAL",
+                ls["opponent"]: "DEN",
+                ls["home"]: False,
+                "moneyline": 130.0,
+                "totals": 112.0,
+            },
+        ]
+    )
+    offered = {"Nikola Jokic": "DEN", "Lebron James": "LAL"}
+    frame = pd.DataFrame(index=list(offered))
+
+    out, teams, opponents, _ = stats._game_context(
+        frame, [], "PTS", GAMEDAY, offered, {"Nikola Jokic": "LAL", "Lebron James": "DEN"}
+    )
+
+    assert teams == offered
+    assert opponents == {"Nikola Jokic": "LAL", "Lebron James": "DEN"}
+    assert out.loc["Nikola Jokic", ["Total", "OppTotal", "Moneyline"]].tolist() == [
+        118.0,
+        112.0,
+        -150.0,
+    ]
+
+
 def test_blowout_flag_matches_threshold_on_both_sides():
     out = _game_context_historical()
     thr = _BLOWOUT_SPREAD_THRESHOLD["NBA"]
