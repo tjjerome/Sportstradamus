@@ -36,7 +36,7 @@ OPPONENT = {"AAA": "BBB", "BBB": "AAA", "CCC": "DDD", "DDD": "CCC"}
 
 @pytest.fixture(autouse=True)
 def _no_absence_columns(monkeypatch):
-    """These pins cover the game-script columns; the absence hook reads gamelog columns they omit."""
+    """These pins cover game-script columns; the absence hook needs gamelog columns they omit."""
     monkeypatch.setattr(StatsNBA, "_availability_context", Stats._availability_context)
 
 

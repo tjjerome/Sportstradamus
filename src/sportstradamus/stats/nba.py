@@ -1161,7 +1161,6 @@ class StatsNBA(Stats):
         return nba_df
 
     def _canonicalize_team_abbrevs(self, df):
-        """Map alternate team codes (:data:`_TEAM_ABBR_FIXUPS`) to their canonical forms."""
         team, opp = self.log_strings["team"], self.log_strings["opponent"]
         df[team] = df[team].replace(_TEAM_ABBR_FIXUPS)
         df[opp] = df[opp].replace(_TEAM_ABBR_FIXUPS)
