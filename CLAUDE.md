@@ -414,13 +414,16 @@ wins; a cell without one gets the data-driven pick in `training/pipeline.py`):
 **Player Comparables**: z-scored profiles → weighted BallTree KNN → comp outcomes as
 features. Weights optimized via `src/sportstradamus/scripts/optimize_comp_weights.py`.
 
-**Feature selection**: None at training time. Per the 2026-05-27 no-filter rewire
-(researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 — tree ensembles
-statistically tie FS-filtered vs no-FS across 960 XGBoost experiments), every cell
-trains on the full unfiltered candidate set returned by
-`Stats.get_stat_columns(market)` (Common + per-league Common + ALL player/team/defense
-profile columns, ~440 features per NFL cell). `feature_filter.json` still ships the
-`Common`/`Always` buckets for shared/locked-in lists but `Filtered` is gone.
+**Feature selection**: Per cell. A cell with a `Selected` list in `feature_filter.json`
+trains on that list: a held-out pruning that passed the pipeline's own chain (Part B,
+2026-11; `tests/golden/test_feature_filter_selected.py` pins that a list keeps the columns
+training reads by name). Every other cell trains on the full unfiltered candidate set
+returned by `Stats.get_stat_columns(market)` (Common + per-league Common + ALL
+player/team/defense profile columns, ~440 features per NFL cell), per the 2026-05-27
+no-filter rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 — tree
+ensembles statistically tie FS-filtered vs no-FS across 960 XGBoost experiments). The
+matrix keeps every column either way. `feature_filter.json` also ships the
+`Common`/`Always` buckets; `Filtered` is gone.
 `training/shap.py:compute_market_importance` runs after each cell trains, writing
 per-cell |SHAP| + corr to `feature_importances.csv` / `feature_correlations.csv` for
 drift monitoring only — those CSVs no longer drive selection.
@@ -505,7 +508,7 @@ production data.
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/book_decode.json` | **Committed.** The I6d decode table: per migrated archive block (league, market, layer, block) whether the training read re-decodes, keeps or drops its book rows. Written by `scripts/fit_book_decode.py` under `docs/handoffs/i6d-decode-preregistration.md`; applied by `helpers/book_levelling.py` |
-| `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
+| `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists, and per-cell `Selected` training lists (a cell without one trains on the full candidate set). The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
 | `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |

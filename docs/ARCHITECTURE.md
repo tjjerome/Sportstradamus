@@ -419,6 +419,7 @@ order:
     `prior_models.keep_prior_model` sets aside the served file and test set it replaces;
     `report()` then rebuilds `model_stats.parquet` and computes the ship gates
 
-There is no feature selection at training time: every cell trains on the full
-candidate set returned by `Stats.get_stat_columns(market)`. `training/shap.py`
+A cell with a `Selected` list in `feature_filter.json` trains on that list (a
+held-out pruning that passed the pipeline's own chain); every other cell trains on the
+full candidate set returned by `Stats.get_stat_columns(market)`. `training/shap.py`
 runs after each fit for drift monitoring only.

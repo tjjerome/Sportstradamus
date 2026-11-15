@@ -2282,13 +2282,14 @@ class Stats:
     def get_stat_columns(self, market):
         """Return the candidate feature columns for ``market``.
 
-        Returns the full unfiltered candidate set: Common + league Common +
+        A cell with a ``Selected`` list in ``feature_filter.json`` trains on that list: a
+        held-out pruning that passed the pipeline's own chain (docs/gbdt_feature_engineering.md).
+        Every other cell gets the full unfiltered candidate set: Common + league Common +
         all playerProfile, teamProfile, and defenseProfile columns. The
         Filtered SHAP-ranked bucket was removed in the 2026-05-27 no-filter
         rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 —
         tree ensembles statistically tie FS-filtered vs no-FS across 960
-        XGBoost experiments). ``feature_filter.json`` still ships the Common /
-        Always buckets; the Filtered bucket is gone from disk.
+        XGBoost experiments).
         """
         league_filter = feature_filter.get(self.league, {})
         self.base_profile()
@@ -2308,7 +2309,8 @@ class Stats:
                 ["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"]
             )
 
-        return sorted(set(cols))
+        selected = league_filter.get("Selected", {}).get(market)
+        return sorted(selected if selected is not None else set(cols))
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Hook: restrict per-gameday training rows to positions eligible for ``market``.
