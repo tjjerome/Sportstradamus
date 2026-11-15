@@ -1,9 +1,9 @@
-"""Pin ``stats.availability``: the NBA absence readers and the features built from them.
+"""Pin the NBA absence lists: ``stats.availability``'s readers and features, and their refresh.
 
 Every fixture sets a trap a naive build falls into: gamelog rows out of date order, New Orleans
 spelled NOP on the official lists, a game-time DNP, a player with too few games, a traded player
-whose last gamelog team is not the list's, an older ESPN capture with a later clock, and an absent
-player with a gamelog row on the game date itself.
+whose last gamelog team is not the list's, an older ESPN capture with a later clock, an absent
+player with a gamelog row on the game date itself, and a refresh whose changed payload raises.
 """
 
 from __future__ import annotations
