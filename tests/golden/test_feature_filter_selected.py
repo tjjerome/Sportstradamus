@@ -10,11 +10,10 @@ the lookup and the columns training reads by name.
 
 import pytest
 
-from sportstradamus.helpers import feature_filter
+from sportstradamus.helpers import feature_filter, stat_meta
 from sportstradamus.stats import StatsNFL
 from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS, get_target_normalization
 from sportstradamus.training.pipeline import _SEEDING_REQUIRED_COLUMNS
-from sportstradamus.training.ship_config import STAT_META_PATH, load_stat_meta
 
 SELECTED = [
     (league, market, columns)
@@ -28,7 +27,7 @@ SELECTED = [
     ("league", "market", "columns"), SELECTED, ids=[f"{lg} {mk}" for lg, mk, _ in SELECTED]
 )
 def test_a_selected_list_holds_every_column_training_reads_by_name(league, market, columns):
-    slug = load_stat_meta(STAT_META_PATH)[league][market].get("target_normalization")
+    slug = stat_meta[league][market]["target_normalization"]
     read_by_name = {*_SEEDING_REQUIRED_COLUMNS, "Home"}
     # ratio_projvol's denominator is carried in from the matrix whatever the list holds.
     if slug in TARGET_NORMALIZATION_SLUGS and slug != "ratio_projvol":

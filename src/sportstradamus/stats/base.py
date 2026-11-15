@@ -2284,12 +2284,10 @@ class Stats:
 
         A cell with a ``Selected`` list in ``feature_filter.json`` trains on that list: a
         held-out pruning that passed the pipeline's own chain (docs/gbdt_feature_engineering.md).
-        Every other cell gets the full unfiltered candidate set: Common + league Common +
-        all playerProfile, teamProfile, and defenseProfile columns. The
-        Filtered SHAP-ranked bucket was removed in the 2026-05-27 no-filter
-        rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 —
-        tree ensembles statistically tie FS-filtered vs no-FS across 960
-        XGBoost experiments).
+        Every other cell gets the full unfiltered candidate set (Common + league Common + all
+        playerProfile, teamProfile, and defenseProfile columns), per the 2026-05-27 no-filter
+        rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 — tree ensembles
+        statistically tie FS-filtered vs no-FS across 960 XGBoost experiments).
         """
         league_filter = feature_filter.get(self.league, {})
         self.base_profile()

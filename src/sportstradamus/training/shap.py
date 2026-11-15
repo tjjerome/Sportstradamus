@@ -1,12 +1,10 @@
 """Post-training SHAP importance diagnostics.
 
 After the 2026-05-27 no-filter rewire, this module no longer drives feature
-selection — ``get_stat_columns`` returns a cell's ``Selected`` list from
-``feature_filter.json`` when it has one and the full candidate set otherwise.
-The remaining job is drift monitoring: compute |SHAP| per
-feature on the held-out test set after each model trains and stash the result
-in ``data/training/feature_importances.csv`` so the dashboard can show
-importance trends over time.
+selection — ``Stats.get_stat_columns`` owns it. The remaining job is drift
+monitoring: compute |SHAP| per feature on the held-out test set after each
+model trains and stash the result in ``data/training/feature_importances.csv``
+so the dashboard can show importance trends over time.
 """
 
 import importlib.resources as pkg_resources
