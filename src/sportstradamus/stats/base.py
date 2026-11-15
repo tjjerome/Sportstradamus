@@ -1697,6 +1697,7 @@ class Stats:
         self._schedule_context(stats, date, teams)
         self._playoff_flag(stats, date, teams)
         self._series_context(stats, date, teams, opponents)
+        self._availability_context(stats, date, teams, opponents)
         return stats, teams, opponents, pitchers
 
     def _h2h_features(self, stats, market, opponents, pitchers):
@@ -1721,6 +1722,14 @@ class Stats:
         NFL overrides this to emit the Weekday feature (game date day-of-week) from
         the gamelog (historical) or ``upcoming_games`` (upcoming). Called at the end
         of :meth:`_game_context` so it shares the same date branch.
+        """
+
+    def _availability_context(self, stats, date, teams, opponents):
+        """Hook: attach who sits out each row's game. No-op on base.
+
+        StatsNBA overrides this with the absence columns of
+        :mod:`sportstradamus.stats.availability`. Called at the end of :meth:`_game_context`
+        so it shares the same date branch and the rebound ``teams`` / ``opponents``.
         """
 
     def _playoff_flag(self, stats, date, teams):

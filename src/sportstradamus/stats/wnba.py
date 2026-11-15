@@ -432,3 +432,8 @@ class StatsWNBA(StatsNBA):
 
     def _join_fp_team_features(self, date):
         return None, None
+
+    # WNBA's absences are unscreened, so the hook falls back to the base no-op instead of
+    # inheriting StatsNBA's absence columns.
+    def _availability_context(self, stats, date, teams, opponents):
+        pass

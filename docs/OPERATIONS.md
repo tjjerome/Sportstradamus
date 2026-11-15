@@ -179,7 +179,9 @@ each other's models and serving artifacts.
 `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible. See [data_collectors.md](data_collectors.md).
 The two history pulls, `fetch weather-history` and `fetch injury-history`, are
 dev-side too and have no cron line or `run_job.sh` case: run them by hand beside
-`meditate` ([data_collectors.md](data_collectors.md), History pulls).
+`meditate` ([data_collectors.md](data_collectors.md), History pulls). The one exception
+rides an existing job: NBA's gamelog update refreshes the current season's per-game
+absence lists on every `prophecize`.
 
 `ctg-fetch` (NBA) runs on prod like `fp-fetch`. Cleaning the Glass's regular-season
 tables stop changing after April, so the line covers November through April;

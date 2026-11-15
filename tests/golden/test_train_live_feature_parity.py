@@ -9,26 +9,31 @@ and is identical across the two paths -- except ``_game_context``, which branche
 ``date < datetime.today().date()``:
 
 * historical (training) branch -- reads ``Home`` / ``Moneyline`` / ``Total`` from the
-  realized gamelog row for ``D``;
-* upcoming (serving) branch -- reads ``Home`` from ``self.upcoming_games`` and
-  ``Moneyline`` / ``Total`` from ``archive.get_moneyline`` / ``archive.get_total``.
+  realized gamelog row for ``D``, and (StatsNBA's ``_availability_context``, at its end)
+  who sits out from the official per-game absence lists;
+* upcoming (serving) branch -- reads ``Home`` from ``self.upcoming_games``,
+  ``Moneyline`` / ``Total`` from ``archive.get_moneyline`` / ``archive.get_total``, and
+  who sits out ``D`` from the newest ESPN injury report (the official lists for the
+  games before it).
 
 The gamelog's ``moneyline`` / ``totals`` are baked from that same archive as of 15:00
 UTC on the game date, while serving reads the newest quote for today's game. With the
 two stubbed equal, the invariant under test is *archive-baked-at-train ==
-archive-read-at-serve*. This is the "edit both branches" risk that every game-context
-feature carries (``docs/handoffs/model_improvement_track.md`` §6.3.1, §7.2 step 2);
-the doc gates all later feature work behind this harness existing.
+archive-read-at-serve*; likewise the official list and ESPN's report name the same
+players out on ``D``, so the absence columns must agree. This is the "edit both
+branches" risk that every game-context feature carries
+(``docs/handoffs/model_improvement_track.md`` §6.3.1, §7.2 step 2); the doc gates all
+later feature work behind this harness existing.
 
 The test drives the real ``StatsNBA.get_stats`` twice on one synthetic gameday,
 flipping **only** that branch (real today ``> D`` vs a frozen today ``== D``), and
 asserts the shared feature surface (``get_stat_columns``) matches. Synthetic gamelog
-data, a stubbed archive, pre-seeded comps, and an injected depth keep it fast,
-deterministic, and free of network / DuckDB -- each of those is branch-*independent*
-state shared by both arms, so none can mask the branch divergence under test. The
-``inf`` handling is covered by the no-inf assertion: training
-(``get_training_matrix``) and the model's serving path (``match_offers``) both end
-``fillna(0).replace([inf,-inf],0)``, but the book fallback (``book_fallback_prob``)
+data, a stubbed archive, absence sources written under ``tmp_path``, pre-seeded comps,
+and an injected depth keep it fast, deterministic, and free of network / DuckDB -- each
+of those is branch-*independent* state shared by both arms, so none can mask the branch
+divergence under test. The ``inf`` handling is covered by the no-inf assertion:
+training (``get_training_matrix``) and the model's serving path (``match_offers``) both
+end ``fillna(0).replace([inf,-inf],0)``, but the book fallback (``book_fallback_prob``)
 joins its features after ``fillna(0)`` only, so a shared column that can be ``inf``
 would diverge there, and the gate forbids one.
 """
@@ -37,19 +42,43 @@ from __future__ import annotations
 
 import datetime as dt
 from datetime import date
+from functools import partial
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.stats import StatsNBA, base
+from sportstradamus.stats import StatsNBA, availability, base, nba
 
 MARKET = "PTS"
 GAMEDAY = date(2025, 12, 1)  # after the NBA season_start; far in the past vs real today
 TEAMS = ("AAA", "BBB")
-PLAYERS = {f"Player {i}": (TEAMS[0] if i < 5 else TEAMS[1]) for i in range(10)}
+# Player 6's gamelog name keeps its accent, as some real ones do: ESPN's report reaches his
+# gamelog id only through the accent-free spelling.
+PLAYERS = {
+    ("Plàyer 6" if i == 6 else f"Player {i}"): (TEAMS[0] if i < 5 else TEAMS[1]) for i in range(10)
+}
+PLAYER_IDS = {player: 1000 + i for i, player in enumerate(PLAYERS)}
 POSITIONS = ("P", "C", "F", "W", "B")
 GAMES_BACK = 15
+
+# Who sits, as (days before GAMEDAY, team, player, official list status). Training reads the
+# official list; serving reads it for the earlier days and ESPN's report for GAMEDAY, which
+# names the same players. Each source also lists one player its reader drops: the official
+# list a game-time DNP, ESPN a Day-To-Day.
+OFFICIAL_LIST = [
+    (0, "AAA", "Player 1", "Inactive - Injury/Illness"),
+    (0, "BBB", "Plàyer 6", "Inactive"),
+    (0, "AAA", "Player 3", "DNP - Coach's Decision"),
+    (1, "AAA", "Player 2", "Inactive"),
+    (4, "BBB", "Player 7", "Inactive"),
+]
+ESPN_REPORT = [
+    ("AAA", "Player 1", "Out"),
+    ("BBB", "Plàyer 6", "Suspension"),
+    ("AAA", "Player 3", "Day-To-Day"),
+]
 
 # Per-team game context baked into the synthetic gamelog. The stubbed archive and
 # upcoming_games must echo these exactly, so the two _game_context branches agree.
@@ -67,9 +96,10 @@ def _opponent(team: str) -> str:
 def _build_logs(stat_types: list[str], team_stat_types: list[str]):
     """Synthetic NBA gamelog + teamlog covering ``GAMES_BACK`` days up to ``GAMEDAY``.
 
-    Columns follow ``StatsNBA.log_strings`` plus the per-cell stat-type panels and the
-    archive-baked ``moneyline`` / ``totals``. Values are deterministic (seeded RNG);
-    only their *parity across the two branches* matters, never their realism.
+    Columns follow ``StatsNBA.log_strings`` plus the per-cell stat-type panels, the
+    archive-baked ``moneyline`` / ``totals``, and the ``PLAYER_ID`` and ``AST`` / ``REB`` /
+    ``FGA`` the absence weights read. Values are deterministic (seeded RNG); only their
+    *parity across the two branches* matters, never their realism.
     """
     rng = np.random.default_rng(0)
     game_dates = [GAMEDAY - dt.timedelta(days=k) for k in range(GAMES_BACK, -1, -1)]
@@ -81,6 +111,7 @@ def _build_logs(stat_types: list[str], team_stat_types: list[str]):
             row = {
                 "GAME_ID": f"{gd.isoformat()}_{team}",
                 "GAME_DATE": gd.isoformat(),
+                "PLAYER_ID": PLAYER_IDS[player],
                 "PLAYER_NAME": player,
                 "MIN": float(rng.uniform(15, 35)),
                 "USG_PCT": float(rng.uniform(0.1, 0.3)),
@@ -90,6 +121,9 @@ def _build_logs(stat_types: list[str], team_stat_types: list[str]):
                 "HOME": TEAM_HOME[team],
                 "WL": "W",
                 "PTS": float(rng.uniform(5, 30)),
+                "AST": float(rng.uniform(0, 10)),
+                "REB": float(rng.uniform(0, 12)),
+                "FGA": float(rng.uniform(3, 20)),
                 "AGE": 25.0,
                 "moneyline": TEAM_MONEYLINE[team],
                 "totals": TEAM_TOTAL[team],
@@ -157,10 +191,31 @@ def _seed_comps(stats: StatsNBA) -> None:
     stats._comps_by_week[key] = comps
 
 
+def _write_absence_sources(lists_base: Path, capture_dir: Path) -> None:
+    """Store ``OFFICIAL_LIST`` and ``ESPN_REPORT`` as their readers find them on disk."""
+    lists = pd.DataFrame(
+        [
+            (pd.Timestamp(GAMEDAY - dt.timedelta(days=days)), team, PLAYER_IDS[player], status)
+            for days, team, player, status in OFFICIAL_LIST
+        ],
+        columns=["game_date", "team", "player_id", "status"],
+    )
+    # Lists are filed by season start year, and GAMEDAY falls in 2025-26.
+    lists_path = lists_base / "NBA" / "injuries" / "2025.parquet"
+    lists_path.parent.mkdir(parents=True)
+    lists.to_parquet(lists_path, index=False)
+    report_path = capture_dir / "NBA" / f"date={GAMEDAY.isoformat()}" / "120000.parquet"
+    report_path.parent.mkdir(parents=True)
+    pd.DataFrame(ESPN_REPORT, columns=["team", "name", "status"]).to_parquet(
+        report_path, index=False
+    )
+
+
 @pytest.fixture
-def primed_stats(monkeypatch) -> tuple[StatsNBA, list[str]]:
+def primed_stats(monkeypatch, tmp_path) -> tuple[StatsNBA, list[str]]:
     """A ``StatsNBA`` (with synthetic logs) and its ``get_stat_columns``, both arms ready.
 
+    Points the absence readers at ``OFFICIAL_LIST`` and ``ESPN_REPORT`` under ``tmp_path``.
     Fetches ``get_stat_columns`` first (it refreshes the base profile at *today*),
     then establishes the profile at ``GAMEDAY`` and injects ``depth`` -- normally set
     by the external ``get_depth`` volume step that gates ``_join_profiles``. The
@@ -169,6 +224,14 @@ def primed_stats(monkeypatch) -> tuple[StatsNBA, list[str]]:
     the arms -- which is why the column list is resolved here, not in the test.
     """
     monkeypatch.setattr(base, "archive", _StubArchive())
+    lists_base, capture_dir = tmp_path / "player_data", tmp_path / "injury_capture"
+    _write_absence_sources(lists_base, capture_dir)
+    monkeypatch.setattr(
+        availability, "official_absences", partial(availability.official_absences, base=lists_base)
+    )
+    monkeypatch.setattr(
+        availability, "espn_absences", partial(availability.espn_absences, capture_dir=capture_dir)
+    )
     stats = StatsNBA()
     player_stat_types, team_stat_types = stats._profile_stat_types()
     stats.gamelog, stats.teamlog = _build_logs(player_stat_types, team_stat_types)
@@ -204,8 +267,10 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     train = stats.get_stats(MARKET, offers, GAMEDAY)
     assert not train.empty, "synthetic historical arm produced no rows"
 
-    # Serving arm: freeze today == GAMEDAY -> _game_context upcoming branch.
-    monkeypatch.setattr(base, "datetime", _FrozenDatetime)
+    # Serving arm: freeze today == GAMEDAY -> _game_context upcoming branch, and the same
+    # branch in StatsNBA's absence hook, which reads today in stats/nba.py.
+    for module in (base, nba):
+        monkeypatch.setattr(module, "datetime", _FrozenDatetime)
     live = stats.get_stats(MARKET, offers, GAMEDAY)
     assert not live.empty, "synthetic upcoming arm produced no rows"
 
@@ -287,6 +352,14 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
             atol=1e-9,
             equal_nan=True,
         ), f"M-1 feature branch divergence on {col}"
+
+    # The absence columns (StatsNBA's hook at the end of _game_context): the official list
+    # (training) and ESPN's report (serving) name the same players out on GAMEDAY. Every
+    # column is non-zero somewhere, so none can agree by being empty in both arms.
+    absence = list(availability.AVAILABILITY_COLUMNS)
+    assert set(absence) <= set(shared), "absence columns missing from the shared surface"
+    pd.testing.assert_frame_equal(train[absence], live[absence])
+    assert (train[absence] != 0).any().all(), "an absence column is zero on every row"
 
     # parity-surface extension point: a future feature batch that adds a per-gameday
     # column (or a new _game_context lookup / volume-dispatch surface) extends the

@@ -311,7 +311,9 @@ side, expected return and fantasy status, and the time ESPN last updated the
 item. ESPN keeps no history, so these files are the only record of who was out
 when. NFL rows whose status is `Active` are news items, not injuries, and are
 dropped. ESPN ids and names are not the league ids the gamelogs use: a reader
-resolves them.
+resolves them. The model reads NBA's at serving (`stats/availability.py`): the newest file's
+`Out` and `Suspension` players, matched to gamelog ids by accent-stripped name, ESPN's team
+codes mapped to the gamelog's.
 
 **The decision-time join.** A leg's decision time is its `Scored At`; join each
 capture to the latest one at or before it (`polled_at`). This is `<=`, not the strict `<` of the dated snapshots above:
@@ -367,7 +369,11 @@ on the dev box beside the weekly `meditate`, give the model build the past:
   file means no moves). The per-game lists skip games already stored, so a rerun resumes and a weekly run
   fetches only new games; a game where nobody sat leaves no row and is asked
   again. `sync_to_prod.sh` carries the NFL files up with the rest of
-  `player_data/NFL`; nothing on production reads any of them.
+  `player_data/NFL`. NBA's per-game lists feed the model (`stats/availability.py`: absent
+  teammates and opponents in training, the player's own recent absences at serving too), so
+  NBA's gamelog update (`StatsNBA._update`, each `prophecize` and `meditate`) refreshes the
+  current season's file as well: two stats.nba.com requests per new game. Nothing on
+  production reads the other leagues' files.
 
 ## Recipe: add a new source
 

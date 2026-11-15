@@ -317,7 +317,18 @@
             "Player comps mean",
             "Player comps z",
             "Defense comp n",
-            "Defense comp distance"
+            "Defense comp distance",
+            "avail team out min",
+            "avail team out pts",
+            "avail team out ast",
+            "avail team out reb",
+            "avail team out fga",
+            "avail team out top min",
+            "avail opp out min",
+            "avail opp out pts",
+            "avail opp out top min",
+            "avail own missed10",
+            "avail own back"
         ],
         "Always": {
             "_default": []

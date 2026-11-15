@@ -95,6 +95,7 @@ Sportstradamus/
 | `nhl.py` | `StatsNHL(Stats)` — NHL; `nhl_position_policy.py` holds the fail-closed training-market position policy |
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |
 | `collector_snapshots.py` | Date-keyed snapshot loader for the collector framework (CTG / Savant) |
+| `availability.py` | NBA absence features: each row's absent teammates and opponents, weighted by their recent minutes, points, assists, rebounds and attempts, and the player's own recent absences. Training reads the official per-game lists, serving the newest ESPN injury capture |
 | `model_dependencies.py` | Versioned, serving-independent model dependencies for matrix reconstruction |
 | `live.py` | `load_live_leagues`: the one loader `prophecize` and `bet pickem` score through. A live league whose gamelog update raises sits the run out |
 | `__init__.py` | Re-exports the five league classes and `load_live_leagues` |
@@ -174,7 +175,7 @@ never reads (the last three store each league through `capture.py:capture_league
 and `weather_history.py` (`fetch weather-history`, sharing
 `weather.py` and the venue table `data/config/venues.json` with the capture) and
 `injury_history.py` (`fetch injury-history`, with `game_absences.py`'s per-game
-NBA / WNBA / NHL lists) pull the training-side history dev-side. Canonical guide: [docs/data_collectors.md](data_collectors.md).
+NBA / WNBA / NHL lists) pull the training-side history dev-side; NBA's gamelog update also keeps its current season's per-game lists fresh, since `stats/availability.py` reads them at serving. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 ### `dashboard/` — Streamlit dashboard
 

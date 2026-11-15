@@ -3,6 +3,7 @@
 import importlib.resources as pkg_resources
 import json
 from datetime import date, datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 
 import nba_api.stats.endpoints as nba
@@ -12,10 +13,12 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.collectors import game_absences
+from sportstradamus.collectors.tabular import PLAYER_DATA_BASE
 from sportstradamus.helpers import combo_props, remove_accents, stat_cv, stat_dist
 from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nba_client
+from sportstradamus.stats import availability, nba_client
 from sportstradamus.stats.base import (
     GAMELOG_RETENTION_DAYS,
     ComboSpec,
@@ -28,6 +31,16 @@ from sportstradamus.stats.nba_client import NBAStatsError
 
 # Days since last fetch beyond which play-in and playoff logs are re-pulled (off-season catch-up)
 _CATCHUP_THRESHOLD_DAYS: int = 150
+
+# Other feeds' codes for the gamelog's teams (ESPN's GS, UTAH, WSH, ...; the league's NOP).
+_TEAM_ABBR_FIXUPS = {
+    "UTAH": "UTA",
+    "NOP": "NO",
+    "GS": "GSW",
+    "NY": "NYK",
+    "SA": "SAS",
+    "WSH": "WAS",
+}
 
 # Cleaning the Glass publishes a season's player export only after games are played,
 # so a new season starts on the newest earlier file until the real one is dropped in.
@@ -502,6 +515,58 @@ class StatsNBA(Stats):
         )
         return team, None
 
+    # Cached for the process: meditate and prophecize first read it after update() (and
+    # meditate's trim_gamelog), and the gamelog and this season's lists stay put from then on.
+    @cached_property
+    def _absence_inputs(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, int]]:
+        """Official absences, player weights, team games and ids by accent-free name, in order.
+
+        Team games are the gamelog's (team, date) pairs; an id's name is its latest row's.
+        """
+        team_games = pd.DataFrame(
+            {"team": self.gamelog["TEAM_ABBREVIATION"], "date": self._gamelog_dates()}
+        ).drop_duplicates()
+        latest = self.gamelog.drop_duplicates("PLAYER_ID", keep="last")
+        player_ids = dict(
+            zip(latest["PLAYER_NAME"].map(remove_accents), latest["PLAYER_ID"], strict=True)
+        )
+        return (
+            availability.official_absences("NBA", _TEAM_ABBR_FIXUPS),
+            availability.player_weights(self.gamelog),
+            team_games,
+            player_ids,
+        )
+
+    def _availability_context(self, stats, date, teams, opponents):
+        """NBA hook: the absence columns of :mod:`sportstradamus.stats.availability`.
+
+        Training reads the official lists; serving reads them for the earlier games and the
+        newest ESPN injury report for the game itself.
+        """
+        official, weights, team_games, player_ids = self._absence_inputs
+        game_day = pd.Timestamp(date).as_unit("ns")
+        if date < datetime.today().date():
+            absences = official
+        else:
+            # The report covers the game itself: a list already stored for it would count twice.
+            reported = availability.espn_absences("NBA", _TEAM_ABBR_FIXUPS, player_ids)
+            absences = pd.concat(
+                [official.loc[official["date"] < game_day], reported.assign(date=game_day)],
+                ignore_index=True,
+            )
+        rows = pd.DataFrame(
+            {
+                "team": stats.index.map(teams),
+                "opponent": stats.index.map(opponents),
+                "date": game_day,
+                "player_id": stats.index.map(player_ids),
+            },
+            index=stats.index,
+        )
+        stats[list(availability.AVAILABILITY_COLUMNS)] = availability.availability_features(
+            rows, absences, weights, team_games
+        )
+
     def _player_seasons_through(self, target_game_date: date) -> dict:
         """Merge ``self.players`` seasons whose key is ``<=`` ``target_game_date``'s season.
 
@@ -683,6 +748,12 @@ class StatsNBA(Stats):
             )
 
         write_gamelog("nba", self.gamelog, self.teamlog, self.players)
+        # Serving's own-absence columns read this season's lists, so every update extends
+        # them; update_season finds the new games in the gamelog file written just above.
+        season = int(self.season[:4])
+        game_absences.update_season(
+            "NBA", season, PLAYER_DATA_BASE / "NBA" / "injuries" / f"{season}.parquet"
+        )
 
     def _resolve_pos_from_history(self, player):
         """First valid POS for ``player`` scanning seasons newest-first, else None."""
@@ -1090,11 +1161,10 @@ class StatsNBA(Stats):
         return nba_df
 
     def _canonicalize_team_abbrevs(self, df):
-        """Map alternate team codes (UTAH/NOP/GS/NY/SA) to their canonical forms."""
-        fixups = {"UTAH": "UTA", "NOP": "NO", "GS": "GSW", "NY": "NYK", "SA": "SAS"}
+        """Map alternate team codes (:data:`_TEAM_ABBR_FIXUPS`) to their canonical forms."""
         team, opp = self.log_strings["team"], self.log_strings["opponent"]
-        df[team] = df[team].replace(fixups)
-        df[opp] = df[opp].replace(fixups)
+        df[team] = df[team].replace(_TEAM_ABBR_FIXUPS)
+        df[opp] = df[opp].replace(_TEAM_ABBR_FIXUPS)
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
         """Predict minutes and normalize projections against the team-game minute budget.

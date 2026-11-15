@@ -34,6 +34,12 @@ PLAYER_TEAM = {"P1": "AAA", "P2": "BBB", "P3": "CCC", "P4": "DDD"}
 OPPONENT = {"AAA": "BBB", "BBB": "AAA", "CCC": "DDD", "DDD": "CCC"}
 
 
+@pytest.fixture(autouse=True)
+def _no_absence_columns(monkeypatch):
+    """These pins cover the game-script columns; the absence hook reads gamelog columns they omit."""
+    monkeypatch.setattr(StatsNBA, "_availability_context", Stats._availability_context)
+
+
 def _game_context_historical() -> pd.DataFrame:
     stats = StatsNBA()
     ls = stats.log_strings
