@@ -16,8 +16,9 @@ The NHL's roster rows carry a text attribute (``shootsCatches``). A player who p
 roster row has none, and the rank must still come out: ranking every column at once compared
 that text with the filled-in zero and raised on 486 of the 570 game days since 2024-02-10.
 
-The NBA gamelog stores raw names ("Nikola Jokić") while offers, the roster and the profiles carry
-accent-free ones; a past gameday matched raw gave those players no depth, so no training row.
+NBA rows stored before mid-November 2026 hold raw names ("Nikola Jokić") while offers, the roster
+and the profiles carry accent-free ones; a past gameday matched raw gave those players no depth, so
+no training row.
 """
 
 from datetime import date, datetime

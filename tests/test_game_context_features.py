@@ -78,7 +78,9 @@ def test_spread_gametotal_are_exact_combinations_of_the_two_totals():
 
 
 def test_historical_game_context_keys_an_accented_gamelog_name_as_offers_do():
-    """The NBA gamelog stores raw names; offers, the roster and the profiles use accent-free ones."""
+    """NBA rows stored before mid-November 2026 hold raw names; offers, the roster and the profiles
+    use accent-free ones.
+    """
     stats = StatsNBA()
     ls = stats.log_strings
     game = {ls["date"]: GAMEDAY.isoformat(), ls["game"]: "0022400001"}
