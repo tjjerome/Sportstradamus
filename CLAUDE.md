@@ -508,7 +508,7 @@ production data.
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/book_decode.json` | **Committed.** The I6d decode table: per migrated archive block (league, market, layer, block) whether the training read re-decodes, keeps or drops its book rows. Written by `scripts/fit_book_decode.py` under `docs/handoffs/i6d-decode-preregistration.md`; applied by `helpers/book_levelling.py` |
-| `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists, and per-cell `Selected` training lists (a cell without one trains on the full candidate set). The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire |
+| `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists, and per-cell `Selected` training lists (see Feature selection above). The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
 | `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |
