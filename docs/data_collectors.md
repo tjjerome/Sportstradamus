@@ -372,7 +372,9 @@ on the dev box beside the weekly `meditate`, give the model build the past:
   `player_data/NFL`. NBA's per-game lists feed the model (`stats/availability.py`: absent
   teammates and opponents in training, the player's own recent absences at serving too), so
   NBA's gamelog update (`StatsNBA._update`, each `prophecize` and `meditate`) refreshes the
-  current season's file as well: two stats.nba.com requests per new game. Nothing on
+  current season's file as well: two stats.nba.com requests per new game, under a two-minute
+  budget that also stops at the first failed game. A backlog drains over the next runs, and a
+  failed refresh leaves the lists a run behind without costing NBA its board. Nothing on
   production reads the other leagues' files.
 
 ## Recipe: add a new source

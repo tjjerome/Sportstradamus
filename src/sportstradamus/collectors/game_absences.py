@@ -3,8 +3,9 @@
 The gamelogs hold only players who played, so an absence cannot be read off a missing row.
 :func:`update_season` asks the league about each of a season's gamelog games and stores one row
 per absent player, one parquet per (league, season); ``fetch injury-history`` runs it dev-side,
-weekly. The file is the record: a run asks only for games it does not hold. A game where nobody
-sat leaves no row, so every run asks for it again.
+weekly, and NBA's gamelog update runs it for the current season under a time budget. The file is
+the record: a run asks only for games it does not hold. A game where nobody sat leaves no row, so
+every run asks for it again.
 
 NBA and WNBA read two endpoints a game from stats.nba.com and stats.wnba.com. BoxScoreSummaryV3's
 ``inactives`` are the players left off the active list, status ``"Inactive"``; the list gives no
@@ -36,6 +37,7 @@ a decision saw. Ids are the leagues' own: NBA and WNBA ``personId`` is the gamel
 from __future__ import annotations
 
 from pathlib import Path
+from time import monotonic
 
 import pandas as pd
 import requests
@@ -124,17 +126,22 @@ def _nhl_scratches(game_id: str, away: str, home: str) -> list[_Absence]:
     ]
 
 
-def update_season(league: str, season: int, path: Path) -> int:
+def update_season(league: str, season: int, path: Path, budget_s: float | None = None) -> int:
     """Fetch the season's not-yet-stored games, write ``path``, return the rows it holds.
 
     A game whose request fails after its retries is logged and left out, so the next run asks for
     it again. Any other error stops the run, with what it fetched already written.
+
+    ``budget_s`` bounds a run that a board waits on: once that many seconds have passed it starts
+    no game, and its first failed game stops it, since a failed request's retries cost minutes and
+    the host is likely down. The games it leaves are the next run's.
     """
     stored = read_parquet_safe(path).reindex(columns=list(ABSENCE_DTYPES)).astype(ABSENCE_DTYPES)
     games = _games(league, season)
     pending = games[~games["game_id"].isin(stored["game_id"])]
     rows: list[tuple] = []
-    failed = 0
+    failed = asked = 0
+    started = monotonic()
     try:
         for game in tqdm(
             pending.itertuples(index=False),
@@ -143,6 +150,9 @@ def update_season(league: str, season: int, path: Path) -> int:
             unit="game",
             leave=False,
         ):
+            if budget_s is not None and monotonic() - started > budget_s:
+                break
+            asked += 1
             try:
                 if league == "NHL":
                     absences = _nhl_scratches(game.game_id, game.away, game.home)
@@ -151,6 +161,8 @@ def update_season(league: str, season: int, path: Path) -> int:
             except (NBAStatsError, requests.RequestException) as exc:
                 failed += 1
                 logger.warning(f"{league} game {game.game_id} absences not fetched: {exc}")
+                if budget_s is not None:
+                    break
                 continue
             rows += [(game.game_id, game.game_date, *absence) for absence in absences]
     finally:
@@ -161,5 +173,10 @@ def update_season(league: str, season: int, path: Path) -> int:
     if failed:
         logger.warning(
             f"{league} {season}: {failed} of {len(pending)} games not fetched; rerun to retry them"
+        )
+    if asked < len(pending):
+        logger.warning(
+            f"{league} {season}: stopped after {asked} of {len(pending)} games; "
+            "the next run asks for the rest"
         )
     return len(frame)

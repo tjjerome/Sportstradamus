@@ -332,6 +332,42 @@ def test_a_game_whose_fetch_gives_up_is_logged_and_left_for_the_next_run(
     assert _games_asked(asked) == ["0022400190"]
 
 
+def test_a_budgeted_run_stops_at_its_first_failed_game(monkeypatch, tmp_path, caplog):
+    """A board waits on a budgeted run: one failure means the host is likely down, and every
+    further game would spend its own retries."""
+    games = [game_id for game_id, *_ in _WEEK]
+    _gamelog(monkeypatch, tmp_path, "NBA", _WEEK)
+    asked = _stub_fetch(
+        monkeypatch,
+        dict.fromkeys(games, _IND_AT_CHA),
+        raises={"0022400190": NBAStatsError("BoxScoreSummaryV3 failed after 5 attempts")},
+    )
+    path = tmp_path / "absences.parquet"
+
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert ga.update_season("NBA", 2024, path, budget_s=120.0) == 5
+
+    assert _games_asked(asked) == ["0022400184", "0022400190"]
+    assert pd.read_parquet(path)["game_id"].unique().tolist() == ["0022400184"]
+    assert "NBA 2024: stopped after 2 of 3 games; the next run asks for the rest" in caplog.text
+
+
+def test_a_budgeted_run_starts_no_game_once_its_budget_is_spent(monkeypatch, tmp_path, caplog):
+    """The clock reads at the start and before each game: the second game starts 200 s in."""
+    games = [game_id for game_id, *_ in _WEEK]
+    _gamelog(monkeypatch, tmp_path, "NBA", _WEEK)
+    asked = _stub_fetch(monkeypatch, dict.fromkeys(games, _IND_AT_CHA))
+    clock = iter([0.0, 0.0, 200.0])
+    monkeypatch.setattr(ga, "monotonic", lambda: next(clock))
+    path = tmp_path / "absences.parquet"
+
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert ga.update_season("NBA", 2024, path, budget_s=120.0) == 5
+
+    assert _games_asked(asked) == ["0022400184"]
+    assert "NBA 2024: stopped after 1 of 3 games; the next run asks for the rest" in caplog.text
+
+
 def test_a_game_the_right_rail_refuses_is_left_for_the_next_run(monkeypatch, tmp_path):
     """The rerun asks for the refused game alone: stored NHL ids match the gamelog's as strings."""
     _gamelog(monkeypatch, tmp_path, "NHL", [_FLA, _WPG])

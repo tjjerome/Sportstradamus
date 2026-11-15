@@ -32,6 +32,10 @@ from sportstradamus.stats.nba_client import NBAStatsError
 # Days since last fetch beyond which play-in and playoff logs are re-pulled (off-season catch-up)
 _CATCHUP_THRESHOLD_DAYS: int = 150
 
+# Seconds an update may spend on the absence lists, which prophecize's board waits on: about 60
+# games at ~2 s a game, four nights of slates. A longer backlog drains over the next runs.
+_ABSENCE_REFRESH_BUDGET_S: float = 120.0
+
 # Other feeds' codes for the gamelog's teams (ESPN's GS, UTAH, WSH, ...; the league's NOP).
 _TEAM_ABBR_FIXUPS = {
     "UTAH": "UTA",
@@ -750,10 +754,18 @@ class StatsNBA(Stats):
         write_gamelog("nba", self.gamelog, self.teamlog, self.players)
         # Serving's own-absence columns read this season's lists, so every update extends
         # them; update_season finds the new games in the gamelog file written just above.
+        # The gamelog is already written: a refresh that fails, a changed payload included,
+        # leaves the lists a run behind and must not cost NBA its board.
         season = int(self.season[:4])
-        game_absences.update_season(
-            "NBA", season, PLAYER_DATA_BASE / "NBA" / "injuries" / f"{season}.parquet"
-        )
+        try:
+            game_absences.update_season(
+                "NBA",
+                season,
+                PLAYER_DATA_BASE / "NBA" / "injuries" / f"{season}.parquet",
+                budget_s=_ABSENCE_REFRESH_BUDGET_S,
+            )
+        except Exception:
+            logger.exception("NBA absence lists not refreshed this run")
 
     def _resolve_pos_from_history(self, player):
         """First valid POS for ``player`` scanning seasons newest-first, else None."""
