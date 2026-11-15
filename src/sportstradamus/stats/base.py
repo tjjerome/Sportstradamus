@@ -2419,6 +2419,11 @@ class Stats:
         gamelog = self.gamelog.drop_duplicates(
             subset=[self.log_strings["game"], self.log_strings["player"]], keep="last"
         ).copy()
+        # get_stats keys its rows by the short gamelog's accent-free names, as serving's offers
+        # are; the NBA gamelog stores raw ones, and "Nikola Jokić" would get no training row.
+        gamelog[self.log_strings["player"]] = gamelog[self.log_strings["player"]].map(
+            remove_accents
+        )
         gamelog[self.log_strings["date"]] = pd.to_datetime(
             gamelog[self.log_strings["date"]]
         ).dt.date

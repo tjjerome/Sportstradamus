@@ -3,7 +3,18 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from sportstradamus.helpers import remove_accents
 from sportstradamus.stats.base import Stats
+
+LOG_STRINGS = {
+    "game": "game",
+    "player": "player",
+    "date": "date",
+    "team": "team",
+    "opponent": "opponent",
+    "home": "home",
+    "usage": "usage",
+}
 
 
 def test_training_matrix_skips_gameday_without_reconstructable_stats():
@@ -25,15 +36,7 @@ def test_training_matrix_skips_gameday_without_reconstructable_stats():
         gamelog=gamelog,
         usage_stat="usage",
         volume_stats=[],
-        log_strings={
-            "game": "game",
-            "player": "player",
-            "date": "date",
-            "team": "team",
-            "opponent": "opponent",
-            "home": "home",
-            "usage": "usage",
-        },
+        log_strings=LOG_STRINGS,
         preflight_training_dependencies=lambda _market: None,
         _market_position_filter=lambda frame, _market: frame,
         _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
@@ -43,3 +46,44 @@ def test_training_matrix_skips_gameday_without_reconstructable_stats():
     rebuilt = Stats.get_training_matrix(fake, "market", cutoff_date=date(2024, 1, 1))
 
     assert rebuilt.empty
+
+
+def test_training_matrix_keeps_a_player_whose_gamelog_name_has_an_accent():
+    """get_stats keys its rows by the short gamelog's accent-free names, as serving does."""
+    game_date = date(2024, 9, 8)
+    gamelog = pd.DataFrame(
+        {
+            "game": ["g1", "g1"],
+            "player": ["Nikola Jokić", "Plain Name"],
+            "date": [game_date, game_date],
+            "team": ["AAA", "BBB"],
+            "opponent": ["BBB", "AAA"],
+            "home": [True, False],
+            "usage": [30, 30],
+            "market": [25, 10],
+        }
+    )
+    short_log_names = set(gamelog["player"].map(remove_accents))
+
+    def get_stats(_market, offers, _game_date):
+        names = [offer["Player"] for offer in offers if offer["Player"] in short_log_names]
+        return pd.DataFrame({"Home": [True] * len(names)}, index=names)
+
+    fake = SimpleNamespace(
+        league="NBA",
+        gamelog=gamelog,
+        usage_stat="usage",
+        volume_stats=[],
+        log_strings=LOG_STRINGS,
+        preflight_training_dependencies=lambda _market: None,
+        _market_position_filter=lambda frame, _market: frame,
+        _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
+        get_stats=get_stats,
+        resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
+            {"Archived": True}, index=stats.index
+        ),
+    )
+
+    rebuilt = Stats.get_training_matrix(fake, "market", cutoff_date=date(2024, 1, 1))
+
+    assert rebuilt.set_index("Player")["Result"].to_dict() == {"Nikola Jokic": 25, "Plain Name": 10}
