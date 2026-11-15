@@ -8,11 +8,15 @@ player with a gamelog row on the game date itself.
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import pytest
 
+from sportstradamus.collectors import game_absences
 from sportstradamus.collectors.game_absences import ABSENCE_DTYPES
 from sportstradamus.collectors.injury_capture import INJURY_DTYPES
+from sportstradamus.stats import StatsNBA, nba
 from sportstradamus.stats.availability import (
     AVAILABILITY_COLUMNS,
     availability_features,
@@ -284,3 +288,23 @@ def test_a_game_seen_only_as_the_opponent_still_orders_its_teams_games():
 
     # NO's 01-13 game is its previous one on 01-14, and player 10 sat it.
     assert features.loc[1, ["avail own missed10", "avail own back"]].tolist() == [1.0, 1.0]
+
+
+def test_a_failed_list_refresh_is_logged_and_never_raised(monkeypatch, caplog):
+    """NBA's update ends with the refresh, after its gamelog is written: a changed payload must
+    leave the lists a run behind, not take NBA off the board."""
+    calls = []
+
+    def broken_update_season(league, season, path, budget_s):
+        calls.append((league, season, path.name, budget_s))
+        raise KeyError("boxScoreSummary")
+
+    monkeypatch.setattr(game_absences, "update_season", broken_update_season)
+    stats = StatsNBA()
+    stats.season = "2026-27"
+
+    with caplog.at_level(logging.ERROR, logger="log"):
+        stats._refresh_absence_lists()
+
+    assert calls == [("NBA", 2026, "2026.parquet", nba._ABSENCE_REFRESH_BUDGET_S)]
+    assert "NBA absence lists not refreshed this run" in caplog.text
