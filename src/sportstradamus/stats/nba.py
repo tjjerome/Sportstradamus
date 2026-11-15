@@ -1171,10 +1171,10 @@ class StatsNBA(Stats):
                     game["OPP"] = team
 
             self._compute_derived_player_stats(game)
-            if adv_game:
-                game.update(adv_game)
-            if usg_game:
-                game.update(usg_game)
+            # The Advanced and Usage rows carry the raw name; offers and the roster key by this one.
+            game.update(
+                {**(adv_game or {}), **(usg_game or {}), "PLAYER_NAME": game["PLAYER_NAME"]}
+            )
             nba_df.append(game)
         return nba_df
 

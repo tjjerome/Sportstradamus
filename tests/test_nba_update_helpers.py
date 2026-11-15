@@ -3,8 +3,8 @@
 ``update`` itself is a network-bound fetch orchestrator with no automated
 coverage; decomposing it for complexity moved the arithmetic into small pure
 helpers, which these tests pin with synthetic inputs. The instance is built via
-``__new__`` to skip ``__init__``'s file I/O — each helper touches only
-``log_strings``, ``positions``, or ``teamlog``.
+``__new__`` to skip ``__init__``'s file I/O; each test sets the few attributes its
+helper reads.
 """
 
 import pandas as pd
@@ -168,3 +168,28 @@ def test_resolve_pos_from_history_skips_invalid():
         "2023-24": {"BOS": {"Jayson Tatum": {"POS": 0}}},
     }
     assert stats._resolve_pos_from_history("Jayson Tatum") == "F"
+
+
+def test_assembled_row_keeps_the_accent_free_name_the_endpoint_rows_carry_raw():
+    """Offers, the roster and profiles key by accent-free names; the endpoints send raw ones."""
+    stats = _stats()
+    stats.season = "2025-26"
+    stats.gamelog = pd.DataFrame(columns=["PLAYER_ID", "GAME_ID"])
+    stats.players = {"2025-26": {"DEN": {"Nikola Jokic": {"POS": "C"}}}}
+    key = (203999, "0022500001")
+    raw = {
+        "PLAYER_ID": key[0],
+        "GAME_ID": key[1],
+        "PLAYER_NAME": "Nikola Jokić",
+        "TEAM_ABBREVIATION": "DEN",
+    }
+    box_score = {"PTS": 30, "REB": 12, "AST": 10, "BLK": 1, "STL": 2, "TOV": 3, "FTM": 6}
+    shots = {"FGA": 20, "FG3A": 4, "BLKA": 1, "OREB": 3, "DREB": 9}
+    game = {**raw, **box_score, **shots, "MIN": 36, "MATCHUP": "DEN vs. LAL"}
+
+    (row,) = stats._assemble_player_rows(
+        [game], {key: {**raw, "OFF_RATING": 125.0}}, {key: {**raw, "USG_PCT": 0.31}}, {}
+    )
+
+    assert row["PLAYER_NAME"] == "Nikola Jokic"
+    assert (row["POS"], row["OPP"], row["OFF_RATING"], row["USG_PCT"]) == ("C", "LAL", 125.0, 0.31)

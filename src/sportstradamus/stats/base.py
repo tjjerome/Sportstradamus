@@ -573,8 +573,9 @@ class Stats:
     def _gamelog_on(self, target_date: date) -> pd.DataFrame:
         """Return one historical gameday, reusing it within an NHL cold rebuild.
 
-        Its names are accent-free, as offers, the roster and the short gamelog carry them: the
-        NBA gamelog stores raw ones ("Nikola Jokić"), which match no offer.
+        Its names are accent-free, as offers, the roster and the short gamelog carry them: an NBA
+        gamelog written before mid-November 2026 holds raw ones ("Nikola Jokić"), which match no
+        offer.
         """
         reuse = self.league == "NHL" and self.snapshot_only_rebuild
         key = (id(self.gamelog), len(self.gamelog), self.log_strings["date"], target_date)
@@ -2427,7 +2428,8 @@ class Stats:
             subset=[self.log_strings["game"], self.log_strings["player"]], keep="last"
         ).copy()
         # get_stats keys its rows by the short gamelog's accent-free names, as serving's offers
-        # are; the NBA gamelog stores raw ones, and "Nikola Jokić" would get no training row.
+        # are; an NBA gamelog written before mid-November 2026 holds raw ones, and "Nikola Jokić"
+        # would get no training row.
         gamelog[self.log_strings["player"]] = gamelog[self.log_strings["player"]].map(
             remove_accents
         )
