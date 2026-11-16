@@ -293,12 +293,11 @@ def weather_history(
 ) -> None:
     """Store the archived pre-game forecast of NFL and MLB games already played."""
     stored = {league: _stored(league) for league in leagues or _LEAGUES}
-    planned = {}
-    for league, rows in stored.items():
+    plan, domes = [], {}
+    for league in stored:
         default = range(_FIRST_SEASON[league], date.today().year + 1)
-        planned[league] = _plan(league, list(seasons or default), rows)
-    plan = [request for league_plan, _ in planned.values() for request in league_plan]
-    domes = {league: games for league, (_, games) in planned.items()}
+        league_plan, domes[league] = _plan(league, list(seasons or default), stored[league])
+        plan.extend(league_plan)
     if dry_run:
         _echo_plan(plan, domes)
         return

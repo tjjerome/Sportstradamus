@@ -13,8 +13,8 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from sportstradamus.collectors.weather import WEATHER_DTYPES
 from sportstradamus.collectors.weather_capture import CAPTURE_DTYPES
+from sportstradamus.collectors.weather_history import _DTYPES as HISTORY_DTYPES
 from sportstradamus.helpers.io import write_capture_parquet
 from sportstradamus.stats import Stats, StatsMLB, StatsNFL, base, weather_features
 from sportstradamus.stats.mlb import _build_mlb_upcoming_games
@@ -24,8 +24,6 @@ from sportstradamus.stats.weather_features import (
     history_weather,
 )
 
-# As collectors/weather_history.py stores them.
-HISTORY_DTYPES = {**WEATHER_DTYPES, "lead_days": "Int64", "source": "string"}
 # A fixture row's fields; every other column is set per file.
 FIELDS = [
     "game_id",
