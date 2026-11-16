@@ -253,6 +253,23 @@ def _zscore_within_player(df: pd.DataFrame, player_col: str, market: str) -> pd.
     return ((df[market] - groups.transform("mean")) / std).fillna(0)
 
 
+def _opening_day(day: date, season_start: date, game_dates: pd.Series) -> date:
+    """The opening day of the season ``day`` falls in.
+
+    ``season_start``, the opener a class holds, while ``day`` is at most ``SEASON_MAX_DAYS``
+    past it, so serving and the current season never scan the gamelog. Otherwise (a training
+    row of an earlier season) the latest season start in ``game_dates`` on or before ``day``:
+    the log's first game day, or one after more than ``odds_budget.OFFSEASON_GAP_DAYS``
+    without a game.
+    """
+    if 0 <= (day - season_start).days <= SEASON_MAX_DAYS:
+        return season_start
+    days = pd.to_datetime(game_dates.drop_duplicates()).dt.normalize().sort_values()
+    gaps = days.diff()
+    starts = days[gaps.isna() | (gaps > pd.Timedelta(days=odds_budget.OFFSEASON_GAP_DAYS))]
+    return starts[starts <= pd.Timestamp(day)].iloc[-1].date()
+
+
 # Substrings that mark an MLB market as pitcher-side ("earned runs allowed",
 # "pitches thrown", "1st inning allowed", ...) rather than batter-side. Shared
 # by every MLB pitcher/batter branch point across base.py and mlb.py.
@@ -1647,7 +1664,9 @@ class Stats:
         stats["STDYr"] = playergames.groupby(player_col)[market].std()
         last_date = pd.to_datetime(playergames.groupby(player_col)[self.log_strings["date"]].last())
         stats["DaysOff"] = (pd.Timestamp(date) - last_date).dt.days
-        stats["DaysIntoSeason"] = (date - self.season_start).days
+        stats["DaysIntoSeason"] = (
+            date - _opening_day(date, self.season_start, self.gamelog[self.log_strings["date"]])
+        ).days
         stats["GamesPlayed"] = playergames.groupby(player_col)[market].count()
         zero_counts = playergames.loc[playergames[market] == 0].groupby(player_col).size()
         stats["ZeroYr"] = zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]

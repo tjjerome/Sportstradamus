@@ -112,10 +112,6 @@ ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/
 _LIVE_DAY_WINDOW = 6
 _HIST_DAY_WINDOW = 1
 
-# Longer than any in-season break (about four weeks, for an Olympics), shorter than
-# any off-season (about fifteen, the NHL's): a wider gap between games is a new season.
-_OFF_SEASON_GAP_DAYS = 60
-
 # Markets whose main line has left the `us` region entirely: the only books still
 # quoting them (fliff, ballybet, betparx, hardrockbet, espnbet) sit in `us2`, so a
 # us-only request archives nothing and the cell silently loses its book. Billing is
@@ -192,14 +188,16 @@ def _is_opening_night(tier: str, last_game: str | None, next_game: datetime) -> 
     A league whose feed emptied over a mid-season break comes back tiered
     preseason, exactly as one approaching opening night, so the tier alone
     cannot tell them apart: the next game must also fall more than
-    ``_OFF_SEASON_GAP_DAYS`` after the last one seen. A league never seen
+    ``odds_budget.OFFSEASON_GAP_DAYS`` after the last one seen. A league never seen
     with a past game is taken at its tier.
     """
     if tier != "preseason":
         return False
     if last_game is None:
         return True
-    return next_game - datetime.fromisoformat(last_game) > timedelta(days=_OFF_SEASON_GAP_DAYS)
+    return next_game - datetime.fromisoformat(last_game) > timedelta(
+        days=odds_budget.OFFSEASON_GAP_DAYS
+    )
 
 
 def _league_activity_record(prev, commences, now):

@@ -96,6 +96,10 @@ _ACTIVITY_STALE_DAYS = 3
 # Legacy pre-season update window, kept as the activity-snapshot fallback.
 _SEASON_START_LEAD_DAYS = 7
 
+# Longer than any in-season break (35 days, the WNBA's 2021 Olympic break), shorter than any
+# off-season (about 100 days, the NHL's): a wider gap between games starts a new season.
+OFFSEASON_GAP_DAYS = 60
+
 # Operator override for `league_is_live`: comma-separated league keys to keep
 # out of the offer loops regardless of what the feed says. Set on the cron line
 # (nothing to deploy, nothing to unwind) while a league's models are unfit to

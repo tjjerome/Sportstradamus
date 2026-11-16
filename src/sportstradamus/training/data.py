@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.training_quotes import SYNTHETIC
-from sportstradamus.stats.base import SEASON_MAX_DAYS
 
 # Quantile bounds for the line clip when archived data is sparse.
 _LINE_CLIP_LOW: float = 0.05
@@ -65,18 +64,6 @@ def _histogram_weights(
     for lower_edge, weight in zip(bins[:-1], diff, strict=True):
         p[values >= lower_edge] = weight
     return p / np.sum(p)
-
-
-def _rebase_days_into_season(M: pd.DataFrame) -> pd.DataFrame:
-    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > SEASON_MAX_DAYS):
-        M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
-            M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
-        )
-        M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"] = (
-            M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"]
-            - M.loc[M["DaysIntoSeason"] > SEASON_MAX_DAYS, "DaysIntoSeason"].min()
-        )
-    return M
 
 
 def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int, new_mask) -> pd.DataFrame:
@@ -160,8 +147,6 @@ def trim_matrix(
         if stable_keys:
             M = M.sort_values(stable_keys, kind="stable").reset_index(drop=True)
         rng = np.random.default_rng(seed)
-
-    M = _rebase_days_into_season(M)
 
     archived_mask = M["Archived"] == 1
     n_archived = archived_mask.sum()
