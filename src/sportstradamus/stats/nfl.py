@@ -690,8 +690,8 @@ class StatsNFL(Stats):
     def _compute_upcoming_games(self, sched):
         upcoming_games = sched.loc[
             pd.to_datetime(sched["gameday"]).dt.date >= datetime.today().date(),
-            ["gameday", "away_team", "home_team", "week"],
-        ]
+            ["gameday", "away_team", "home_team", "week", "game_id"],
+        ].rename(columns={"game_id": "Game ID"})
         if not upcoming_games.empty:
             # Playoff games run past the regular-season schedule (week 19+).
             upcoming_games["playoff"] = upcoming_games["week"] > NFL_REGULAR_SEASON_WEEKS
@@ -703,7 +703,7 @@ class StatsNFL(Stats):
             self.upcoming_games = (
                 upcoming_games.groupby("Team")
                 .apply(lambda x: x.head(1))
-                .droplevel(1)[["Opponent", "Home", "gameday", "playoff"]]
+                .droplevel(1)[["Opponent", "Home", "gameday", "playoff", "Game ID"]]
                 .to_dict(orient="index")
             )
 

@@ -87,6 +87,7 @@ def _builder_before_later_days(mlb_games, mlb_teams):
                 "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
                 "Playoff": playoff,
                 "game type": game["game_type"],
+                "Game ID": str(game["game_id"]),
             }
             home_entry = {
                 "Pitcher": text.remove_accents(game["home_probable_pitcher"]),
@@ -96,6 +97,7 @@ def _builder_before_later_days(mlb_games, mlb_teams):
                 "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
                 "Playoff": playoff,
                 "game type": game["game_type"],
+                "Game ID": str(game["game_id"]),
             }
             suffix = "" if game["game_num"] == 1 else str(game["game_num"])
             mlb_upcoming_games[awayTeam + suffix] = away_entry
@@ -146,6 +148,7 @@ def test_a_later_dated_game_is_listed_by_day_only_with_no_box_score_request(
             "Batting Order": [],
             "Playoff": True,
             "game type": "D",
+            "Game ID": "7",
         },
         ("BOS", _TOMORROW): {
             "Pitcher": "Home Arm",
@@ -155,6 +158,7 @@ def test_a_later_dated_game_is_listed_by_day_only_with_no_box_score_request(
             "Batting Order": [],
             "Playoff": True,
             "game type": "D",
+            "Game ID": "7",
         },
     }
 

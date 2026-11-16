@@ -285,6 +285,7 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
                 "Batting Order": away_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
+                "Game ID": str(game["game_id"]),
             }
             home_entry = {
                 "Pitcher": remove_accents(game["home_probable_pitcher"]),
@@ -294,6 +295,7 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams, today):
                 "Batting Order": home_order,
                 "Playoff": playoff,
                 "game type": game["game_type"],
+                "Game ID": str(game["game_id"]),
             }
             suffix = "" if game["game_num"] == 1 else str(game["game_num"])
             for team, entry in ((awayTeam + suffix, away_entry), (homeTeam + suffix, home_entry)):

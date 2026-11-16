@@ -7,7 +7,7 @@ import pickle
 import warnings
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
-from functools import partial
+from functools import cached_property, partial
 from pathlib import Path
 
 import line_profiler
@@ -16,6 +16,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.collectors.weather_capture import WEATHER_LEAGUES
 from sportstradamus.helpers import (
     LazyArchive,
     Scrape,
@@ -50,6 +51,7 @@ from sportstradamus.helpers.training_quotes import (
     resolve_training_quote,
 )
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats import weather_features
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE, load_model_dependency
 
@@ -1702,6 +1704,7 @@ class Stats:
 
             teams = todays_games[self.log_strings["team"]].to_dict()
             opponents = todays_games[self.log_strings["opponent"]].to_dict()
+            game_ids = todays_games[self.log_strings["game"]].astype(str)
             team_total = todays_games.groupby(self.log_strings["team"])["totals"].first()
             stats["OppTotal"] = pd.Series(opponents).map(team_total)
             if self.league == "MLB":
@@ -1709,6 +1712,7 @@ class Stats:
         else:
             dates = earliest_game_dates(offers)
             games = {x: self.upcoming_game(teams[x], dates[x]) for x in stats.index}
+            game_ids = {x: games[x].get("Game ID") for x in stats.index}
             if self.league == "MLB":
                 pitchers = {x: games[x].get("Opponent Pitcher") for x in stats.index}
 
@@ -1734,6 +1738,7 @@ class Stats:
         self._playoff_flag(stats, date, teams)
         self._series_context(stats, date, teams, opponents)
         self._availability_context(stats, date, teams, opponents)
+        self._weather_context(stats, date, game_ids)
         return stats, teams, opponents, pitchers
 
     def _h2h_features(self, stats, market, opponents, pitchers):
@@ -1767,6 +1772,28 @@ class Stats:
         :mod:`sportstradamus.stats.availability`. Called at the end of :meth:`_game_context`
         so it shares the same date branch and the rebound ``teams`` / ``opponents``.
         """
+
+    # Cached for the process: the stored history stays put through a meditate run, and a
+    # prophecize run writes its capture before it scores.
+    @cached_property
+    def _weather_history(self) -> pd.DataFrame:
+        return weather_features.history_weather(self.league)
+
+    @cached_property
+    def _weather_forecast(self) -> pd.DataFrame:
+        return weather_features.forecast_weather(self.league)
+
+    def _weather_context(self, stats, date, game_ids):
+        """Attach the forecast around each row's game, NFL and MLB only (the rest play indoors).
+
+        ``game_ids`` maps each row's player to his game's id as text. Training reads the stored
+        forecast history, serving the newest capture
+        (:mod:`sportstradamus.stats.weather_features`); a game neither holds gets NaN.
+        """
+        if self.league not in WEATHER_LEAGUES:
+            return
+        table = self._weather_history if date < datetime.today().date() else self._weather_forecast
+        stats[list(table.columns)] = table.reindex(stats.index.map(game_ids)).to_numpy()
 
     def _playoff_flag(self, stats, date, teams):
         """Flag postseason games via the native game-ID season-type code.

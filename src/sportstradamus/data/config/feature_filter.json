@@ -53,7 +53,16 @@
             "Player comps mean",
             "Player comps z",
             "Defense comp n",
-            "Defense comp distance"
+            "Defense comp distance",
+            "weather wind",
+            "weather gust",
+            "weather temp",
+            "weather precip",
+            "weather snow",
+            "weather humidity",
+            "weather lead",
+            "weather indoor",
+            "weather retractable"
         ],
         "Always": {
             "_default": [],
@@ -405,7 +414,16 @@
                 "Team yards_per_pass",
                 "Total",
                 "Weekday",
-                "ZeroYr"
+                "ZeroYr",
+                "weather gust",
+                "weather humidity",
+                "weather indoor",
+                "weather lead",
+                "weather precip",
+                "weather retractable",
+                "weather snow",
+                "weather temp",
+                "weather wind"
             ],
             "sacks taken": [
                 "Avg1",
@@ -674,7 +692,16 @@
                 "Team yards_per_pass",
                 "Total",
                 "Weekday",
-                "ZeroYr"
+                "ZeroYr",
+                "weather gust",
+                "weather humidity",
+                "weather indoor",
+                "weather lead",
+                "weather precip",
+                "weather retractable",
+                "weather snow",
+                "weather temp",
+                "weather wind"
             ]
         }
     },
@@ -785,7 +812,17 @@
             "Player comps mean",
             "Player comps z",
             "Defense comp n",
-            "Defense comp distance"
+            "Defense comp distance",
+            "weather wind",
+            "weather gust",
+            "weather temp",
+            "weather precip",
+            "weather snow",
+            "weather humidity",
+            "weather lead",
+            "weather indoor",
+            "weather retractable",
+            "weather wind out"
         ],
         "Always": {
             "_default": []

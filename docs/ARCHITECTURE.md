@@ -96,6 +96,7 @@ Sportstradamus/
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |
 | `collector_snapshots.py` | Date-keyed snapshot loader for the collector framework (CTG / Savant) |
 | `availability.py` | NBA absence features: each row's absent teammates and opponents, weighted by their recent minutes, points, assists, rebounds and attempts, and the player's own recent absences. Training reads the official per-game lists, serving the newest ESPN injury capture |
+| `weather_features.py` | NFL and MLB weather features: wind, gusts, temperature, precipitation, snow and humidity over the hours around kickoff, the forecast's lead, indoor and retractable-roof flags, and MLB's wind toward centre field. Training reads the stored forecast history (the one-day lead where stored), serving the newest weather capture |
 | `model_dependencies.py` | Versioned, serving-independent model dependencies for matrix reconstruction |
 | `live.py` | `load_live_leagues`: the one loader `prophecize` and `bet pickem` score through. A live league whose gamelog update raises sits the run out |
 | `__init__.py` | Re-exports the five league classes and `load_live_leagues` |
