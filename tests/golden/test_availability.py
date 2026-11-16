@@ -3,7 +3,8 @@
 Every fixture sets a trap a naive build falls into: gamelog rows out of date order, New Orleans
 spelled NOP on the official lists, a game-time DNP, a player with too few games, a traded player
 whose last gamelog team is not the list's, an older ESPN capture with a later clock, an absent
-player with a gamelog row on the game date itself, and a refresh whose changed payload raises.
+player with a gamelog row on the game date itself, a game a list names a player in (it counts 0
+in his weights), and a refresh whose changed payload raises.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from sportstradamus.stats.availability import (
     AVAILABILITY_COLUMNS,
     availability_features,
     espn_absences,
+    listed_games,
     official_absences,
     player_weights,
 )
@@ -51,6 +53,7 @@ ABSENT_PLAYER_GAMES = [
 # LAL every other day from 12-30, BOS on 01-08, 01-10 and 01-12.
 OFFICIAL_LISTS = [
     ("2026-01-13", "NOP", 1, "Inactive - Injury/Illness"),
+    ("2026-01-09", "NOP", 1, "Inactive - Injury/Illness"),
     ("2026-01-13", "NOP", 2, "Inactive - G League - Two-Way"),
     ("2026-01-13", "NOP", 5, "DND - Injury/Illness"),
     # Player 3 played his games for BOS: the list's team counts, not his last gamelog team.
@@ -98,6 +101,10 @@ def _write_capture(capture_dir, day, clock, rows):
     report.to_parquet(path, index=False)
 
 
+def _no_lists() -> pd.DataFrame:
+    return pd.DataFrame({"player_id": pd.Series(dtype="int64"), "date": pd.Series(dtype="M8[ns]")})
+
+
 def test_player_weights_roll_each_players_last_15_games_in_date_order():
     days = pd.date_range("2026-01-01", periods=16)
     # Player 7 plays 16 days running, his MIN the day's number; player 8 plays twice.
@@ -118,7 +125,7 @@ def test_player_weights_roll_each_players_last_15_games_in_date_order():
         ]
     )
 
-    weights = player_weights(gamelog)
+    weights = player_weights(gamelog, _no_lists())
 
     # Player 8 never reaches 3 games. Player 7's game n >= 3 means his games 1..n, (n + 1) / 2,
     # until game 16, whose 15-game window drops game 1: (2 + ... + 16) / 15 = 9.
@@ -129,6 +136,51 @@ def test_player_weights_roll_each_players_last_15_games_in_date_order():
     assert weights["MIN"].tolist() == expected_min
     assert weights["PTS"].tolist() == [2 * minutes for minutes in expected_min]
     assert weights[["AST", "REB", "FGA"]].drop_duplicates().to_numpy().tolist() == [[1, 5, 10]]
+
+
+def test_a_game_a_list_names_a_player_in_counts_zero_in_his_weights(tmp_path):
+    # Player 7 starts and sits two games (one inactive, one coach's decision); player 9, a
+    # two-way, is listed four times and plays once. The gamelog's dates are text, out of order,
+    # and one list names player 7 on a night he played, as two stored NBA lists do.
+    gamelog = pd.DataFrame(
+        [
+            (9, "2026-01-06", 5, 2, 0, 1, 2),
+            (7, "2026-01-06", 30, 20, 4, 6, 15),
+            (7, "2026-01-02", 30, 20, 4, 6, 15),
+            (7, "2026-01-01", 30, 20, 4, 6, 15),
+            (7, "2026-01-03", 30, 20, 4, 6, 15),
+        ],
+        columns=["PLAYER_ID", "GAME_DATE", "MIN", "PTS", "AST", "REB", "FGA"],
+    )
+    _write_lists(
+        tmp_path,
+        2025,
+        [
+            ("2026-01-06", "NOP", 7, "DNP - Coach's Decision"),
+            ("2026-01-05", "NOP", 7, "DNP - Coach's Decision"),
+            ("2026-01-04", "NOP", 7, "Inactive - Injury/Illness"),
+            *[
+                (f"2026-01-0{day}", "NOP", 9, "Inactive - G League - Two-Way")
+                for day in (2, 3, 4, 5)
+            ],
+        ],
+    )
+
+    weights = player_weights(gamelog, listed_games("NBA", base=tmp_path))
+
+    # Player 7: 30 a game over 01-01..01-03, then 90 / 4, 90 / 5 and, his 01-06 game played,
+    # 120 / 6. Player 9 reaches 3 games on 01-04 with three zeros, then 5 / 5 on 01-06.
+    expected = pd.DataFrame(
+        {
+            "PLAYER_ID": [7, 7, 9, 7, 9, 7, 9],
+            "GAME_DATE": pd.to_datetime(
+                ["2026-01-03", *["2026-01-04"] * 2, *["2026-01-05"] * 2, *["2026-01-06"] * 2]
+            ),
+            "MIN": [30.0, 22.5, 0.0, 18.0, 0.0, 20.0, 1.0],
+        }
+    )
+    pd.testing.assert_frame_equal(weights[["PLAYER_ID", "GAME_DATE", "MIN"]], expected)
+    assert weights["PTS"].tolist() == [20.0, 15.0, 0.0, 12.0, 0.0, 80 / 6, 0.4]
 
 
 def test_official_absences_keep_pregame_statuses_in_gamelog_codes(tmp_path):
@@ -230,19 +282,21 @@ def test_availability_features_by_hand(tmp_path, upcoming):
     features = availability_features(
         rows,
         official_absences("NBA", TEAM_CODES, base=tmp_path),
-        player_weights(gamelog),
+        player_weights(gamelog, listed_games("NBA", base=tmp_path)),
         pd.DataFrame(schedule, columns=["team", "date"]),
     )
 
-    # Weights are means over games strictly before 01-13 (player 1's 01-13 row is left out):
-    #   player 1: MIN (28 + 30 + 32) / 3 = 30, PTS (18 + 20 + 22) / 3 = 20, AST 5, REB 4, FGA 15
+    # Weights are means over games strictly before 01-13 (player 1's 01-13 row is left out), a
+    # listed game counting 0:
+    #   player 1: sat 01-09, so MIN (0 + 28 + 30 + 32) / 4 = 22.5, PTS 60 / 4 = 15, AST 3.75,
+    #     REB 3, FGA 11.25
     #   player 5: MIN 10, PTS 4, AST 1, REB 3, FGA 3
     #   player 2: two games, so 0 throughout
     #   player 3: MIN 20, PTS 10, AST 2, REB 6, FGA 8, from his BOS games
-    # NO out (players 1, 2, 5): MIN 30 + 0 + 10 = 40, PTS 20 + 4 = 24, AST 5 + 1 = 6,
-    #   REB 4 + 3 = 7, FGA 15 + 3 = 18, top MIN 30.
+    # NO out (players 1, 2, 5): MIN 22.5 + 0 + 10 = 32.5, PTS 15 + 4 = 19, AST 3.75 + 1 = 4.75,
+    #   REB 3 + 3 = 6, FGA 11.25 + 3 = 14.25, top MIN 22.5.
     # LAL out: player 3 alone, since player 4's DNP was decided in game: 20, 10, 2, 6, 8, top 20.
-    no_out = [40.0, 24.0, 6.0, 7.0, 18.0, 30.0]
+    no_out = [32.5, 19.0, 4.75, 6.0, 14.25, 22.5]
     lal_out = [20.0, 10.0, 2.0, 6.0, 8.0, 20.0]
     # Own: 01-13 is NO's 13th game, so NO's previous 10 run 01-03 to 01-12.
     #   Ten: 01-03 and 01-12 count; 01-02 is 11 games back, 01-07 a DNP. 2 missed, back.
@@ -253,8 +307,8 @@ def test_availability_features_by_hand(tmp_path, upcoming):
         [
             [*no_out, 20.0, 10.0, 20.0, 2.0, 1.0],
             [*no_out, 20.0, 10.0, 20.0, 1.0, 0.0],
-            [*lal_out, 40.0, 24.0, 30.0, 2.0, 1.0],
-            [*lal_out, 40.0, 24.0, 30.0, 0.0, 0.0],
+            [*lal_out, 32.5, 19.0, 22.5, 2.0, 1.0],
+            [*lal_out, 32.5, 19.0, 22.5, 0.0, 0.0],
             [0.0] * len(AVAILABILITY_COLUMNS),
         ],
         index=rows.index,
@@ -281,7 +335,8 @@ def test_a_game_seen_only_as_the_opponent_still_orders_its_teams_games():
         pd.DataFrame(
             ABSENT_PLAYER_GAMES,
             columns=["PLAYER_ID", "GAME_DATE", "MIN", "PTS", "AST", "REB", "FGA"],
-        )
+        ),
+        _no_lists(),
     )
 
     features = availability_features(rows, absences, weights, team_games)

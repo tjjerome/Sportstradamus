@@ -5,9 +5,11 @@ keeping only the absences a decision before tip could know; serving reads the ne
 capture (:mod:`sportstradamus.collectors.injury_capture`). An absence keeps its source's team,
 mapped to the gamelog's codes, never the player's last gamelog team: a traded player's is stale.
 
-An absent player weighs in at his own means over his games strictly before the game date.
-:func:`availability_features` sums those per team game and counts the row player's own absences
-over his team's previous games.
+An absent player weighs in at his means per game over his latest games strictly before the game
+date, a game an official list names him in counting 0: two-way and end-of-bench players, inactive
+most regular-season nights and on no playoff list, weigh near 0 in both, as does a player out for
+weeks. :func:`availability_features` sums those per team game and counts the row player's own
+absences over his team's previous games.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ _ESPN_OUT_STATUSES = ("Out", "Suspension")
 # list has no date: the caller gives it its upcoming game's.
 _ABSENCE_DTYPES = {"team": "object", "date": "datetime64[ns]", "player_id": "int64"}
 _ESPN_DTYPES = {"team": "object", "player_id": "int64"}
+_LISTED_DTYPES = {"player_id": "int64", "date": "datetime64[ns]"}
 
 
 def official_absences(
@@ -66,16 +69,7 @@ def official_absences(
         ``team`` (through ``team_codes``), ``date`` (datetime64[ns], midnight) and ``player_id``
         (int64); no rows when no list is stored.
     """
-    paths = sorted((base / league / "injuries").glob("*.parquet"))
-    if not paths:
-        return pd.DataFrame(columns=list(_ABSENCE_DTYPES)).astype(_ABSENCE_DTYPES)
-    lists = pd.concat(
-        (
-            pd.read_parquet(path, columns=["game_date", "team", "player_id", "status"])
-            for path in paths
-        ),
-        ignore_index=True,
-    )
+    lists = _stored_lists(league, base, ["game_date", "team", "player_id", "status"])
     known = lists.loc[~lists["status"].isin(_GAME_TIME_STATUSES)]
     absences = pd.DataFrame(
         {
@@ -85,6 +79,26 @@ def official_absences(
         }
     )
     return absences.astype(_ABSENCE_DTYPES).reset_index(drop=True)
+
+
+def listed_games(league: str, base: Path = PLAYER_DATA_BASE) -> pd.DataFrame:
+    """Every game a stored official list of ``league`` names a player in, whatever his status.
+
+    Returns:
+        ``player_id`` (int64) and ``date`` (datetime64[ns], midnight); no rows when no list is
+        stored.
+    """
+    lists = _stored_lists(league, base, ["game_date", "player_id"])
+    return pd.DataFrame({"player_id": lists["player_id"], "date": lists["game_date"]}).astype(
+        _LISTED_DTYPES
+    )
+
+
+def _stored_lists(league: str, base: Path, columns: list[str]) -> pd.DataFrame:
+    paths = sorted((base / league / "injuries").glob("*.parquet"))
+    if not paths:
+        return pd.DataFrame(columns=columns)
+    return pd.concat((pd.read_parquet(path, columns=columns) for path in paths), ignore_index=True)
 
 
 def espn_absences(
@@ -116,22 +130,30 @@ def espn_absences(
     return listed.dropna(subset=["player_id"]).astype(_ESPN_DTYPES).reset_index(drop=True)
 
 
-def player_weights(gamelog: pd.DataFrame) -> pd.DataFrame:
-    """Each player's means over his last games up to and including each game.
+def player_weights(gamelog: pd.DataFrame, listed: pd.DataFrame) -> pd.DataFrame:
+    """Each player's means per game over his last games up to and including each game.
 
-    A mean covers his latest ``_WEIGHT_WINDOW`` games; a game with fewer than
+    His games are those he played and those ``listed`` names him in, which count 0 for every
+    stat. A mean covers his latest ``_WEIGHT_WINDOW`` games; a game with fewer than
     ``_MIN_WEIGHT_GAMES`` games behind it, itself included, has no row.
 
     Args:
         gamelog: The NBA gamelog, rows in any order; ``GAME_DATE`` may be text.
+        listed: :func:`listed_games`; a game the gamelog also holds counts as played.
 
     Returns:
         ``PLAYER_ID``, ``GAME_DATE`` (datetime64) and the means of ``MIN``, ``PTS``, ``AST``,
         ``REB`` and ``FGA``, sorted by ``GAME_DATE`` for an as-of lookup.
     """
+    played = gamelog[["PLAYER_ID", "GAME_DATE", *_WEIGHT_STATS]].assign(
+        GAME_DATE=lambda log: pd.to_datetime(log["GAME_DATE"])
+    )
+    sat = listed.rename(columns={"player_id": "PLAYER_ID", "date": "GAME_DATE"}).assign(
+        **dict.fromkeys(_WEIGHT_STATS, 0.0)
+    )
     games = (
-        gamelog[["PLAYER_ID", "GAME_DATE", *_WEIGHT_STATS]]
-        .assign(GAME_DATE=lambda log: pd.to_datetime(log["GAME_DATE"]))
+        pd.concat([played, sat])
+        .drop_duplicates(["PLAYER_ID", "GAME_DATE"])
         .sort_values(["PLAYER_ID", "GAME_DATE"], ignore_index=True)
     )
     means = (

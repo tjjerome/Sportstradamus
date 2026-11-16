@@ -537,7 +537,7 @@ class StatsNBA(Stats):
         )
         return (
             availability.official_absences("NBA", _TEAM_ABBR_FIXUPS),
-            availability.player_weights(self.gamelog),
+            availability.player_weights(self.gamelog, availability.listed_games("NBA")),
             team_games,
             player_ids,
         )
