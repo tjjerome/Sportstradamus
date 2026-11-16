@@ -648,6 +648,8 @@ def meditate(
             continue
         click.echo(f"[{lg_name}] loading cached gamelogs...")
         struct.load()
+        if full_rebuild:
+            struct.adopt_feed_opener()
         if not deterministic and not full_rebuild and frozen_matrix_dir is None:
             click.echo(f"[{lg_name}] updating from league API...")
             struct.update()

@@ -10,14 +10,17 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 from click import UsageError
+from click.testing import CliRunner
 
+from sportstradamus.helpers import odds_budget
+from sportstradamus.stats.base import Stats
 from sportstradamus.stats.mlb import StatsMLB
 from sportstradamus.stats.model_dependencies import (
     DEPENDENCY_NAMESPACE,
     load_model_dependency,
 )
 from sportstradamus.training import pipeline
-from sportstradamus.training.cli import _validate_mode_flags
+from sportstradamus.training.cli import _validate_mode_flags, meditate
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.lineage import validate_matrix_manifest, write_matrix_manifest
 from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix
@@ -216,6 +219,54 @@ def test_full_rebuild_rejects_canonical_matrix_root():
             matrix_output=canonical_root,
             dependency_root=Path("/tmp/dependencies"),
         )
+
+
+class _ConstantStartNHL(Stats):
+    def __init__(self):
+        super().__init__()
+        self.league = "NHL"
+        self.season_start = date(2025, 10, 7)
+
+    def load(self):
+        pass
+
+    def trim_gamelog(self):
+        pass
+
+
+def test_full_rebuild_counts_from_the_feed_opener_serving_adopted(tmp_path, monkeypatch):
+    # 2026-11-15: an NHL rebuild counted DaysIntoSeason from the 2025-10-07 constant, not the
+    # 2026-09-29 opener, putting this season's rows at 56..101 where serving counts 0..47.
+    opener = date(2026, 9, 29)
+    monkeypatch.setattr(odds_budget, "season_opener", lambda league: opener)
+    monkeypatch.setattr("sportstradamus.training.cli.StatsNHL", _ConstantStartNHL)
+    # Off the live ship config: a withheld cell would prune its real model pickle.
+    monkeypatch.setattr("sportstradamus.training.cli.load_ship_config", lambda *, branch: {})
+    # meditate sets this for a rebuild; setting it here restores the environment afterwards.
+    monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_READ_ONLY", "1")
+    season_starts = []
+
+    def record_season_start(_league, _market, stat_data, *_args, **_kwargs):
+        season_starts.append(stat_data.season_start)
+
+    monkeypatch.setattr("sportstradamus.training.cli.train_market", record_season_start)
+
+    result = CliRunner().invoke(
+        meditate,
+        [
+            "--league",
+            "NHL",
+            "--full-rebuild",
+            "--matrix-only",
+            "--matrix-output",
+            str(tmp_path),
+            "--market",
+            "goals",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert season_starts == [opener]
 
 
 def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):

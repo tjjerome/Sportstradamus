@@ -1,11 +1,13 @@
 """Pins for the ``Stats.update`` season gate and season-opener adoption.
 
 ``base.Stats.update`` wraps every league's ``_update`` behind
-``odds_budget.update_window_open`` and, when the activity feed has observed
-an opening night that starts a new season, adopts it as ``season_start``
-before fetching (unless ``SPORTSTRADAMUS_FORCE_UPDATE`` pins manual control
-for replay tools). A feed opener inside the season already held was captured
-mid-season and is ignored. The ``_set_season_start`` hook keeps NBA's
+``odds_budget.update_window_open`` and calls ``adopt_feed_opener`` before
+fetching: when the activity feed has observed an opening night that starts a
+new season, it becomes ``season_start`` (unless ``SPORTSTRADAMUS_FORCE_UPDATE``
+pins manual control for replay tools). A feed opener inside the season already
+held was captured mid-season and is ignored. ``meditate --full-rebuild`` skips
+``update`` and calls ``adopt_feed_opener`` right after ``load``, so adoption
+needs no open window. The ``_set_season_start`` hook keeps NBA's
 ``"2025-26"`` season string and WNBA's season year derived from whatever date
 is adopted. ``_full_clean_due`` is the one rule the five leagues' updates read
 for when the clean pass over the whole gamelog runs.
@@ -118,6 +120,19 @@ def test_force_env_pins_manual_season_start(gates) -> None:
     s.update()
     assert s.update_ran
     assert s.season_start == date(2021, 9, 9)
+
+
+def test_adopt_feed_opener_needs_no_open_window_and_keeps_the_force_pin(gates) -> None:
+    gates.setattr(odds_budget, "update_window_open", lambda league, season_start: False)
+    gates.setattr(odds_budget, "season_opener", lambda league: _FEED_OPENER)
+    s = _FakeLeague()
+    s.adopt_feed_opener()
+    assert s.season_start == _FEED_OPENER
+
+    gates.setenv("SPORTSTRADAMUS_FORCE_UPDATE", "1")
+    pinned = _FakeLeague()
+    pinned.adopt_feed_opener()
+    assert pinned.season_start == _CONSTANT_START
 
 
 def test_nba_season_string_derives_from_season_start() -> None:

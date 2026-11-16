@@ -283,7 +283,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `LIVE_BLEND_FLOOR`, `LIVE_BLEND_FULL` |
 | Change the Optuna hyperparameter search | `training/hyperparams.py` → `run_hyper_opt` |
 | Change how distributions blend with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
-| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when it falls more than 300 days after the `Stats{League}.season_start` constant ([OPERATIONS.md](OPERATIONS.md)) |
+| Update the season start date for a league | Usually nothing: `Stats.adopt_feed_opener` (run by `Stats.update` and by `meditate --full-rebuild`) adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when it falls more than 300 days after the `Stats{League}.season_start` constant ([OPERATIONS.md](OPERATIONS.md)) |
 | Run a `Stats.update()` in the offseason | `SPORTSTRADAMUS_FORCE_UPDATE=1` — bypasses the season window (`helpers/odds_budget.py:update_window_open`) |
 | Refresh the per-cell SHAP diagnostic CSVs | `training/shap.py:see_features` — diagnostics only; training uses the full unfiltered candidate feature set |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/config/book_weights.json` |

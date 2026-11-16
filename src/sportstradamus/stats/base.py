@@ -634,6 +634,28 @@ class Stats:
         """
         self.season_start = day
 
+    def adopt_feed_opener(self) -> None:
+        """Move ``season_start`` to the feed's opening night when that opens a new season.
+
+        When the activity feed has observed an opening night
+        (:func:`odds_budget.season_opener`) more than ``SEASON_MAX_DAYS``
+        after the season start held, it opens a new season and is adopted —
+        season-year API params and ``DaysIntoSeason`` then track the real
+        calendar without an annual code edit. A nearer one falls inside the
+        season already held and is ignored: it was captured mid-season, when
+        a league came back from a break. ``SPORTSTRADAMUS_FORCE_UPDATE=1``
+        pins ``season_start``, so replay tools keep manual control.
+
+        :meth:`update` calls it before fetching. ``meditate --full-rebuild``
+        skips ``update`` and calls it after :meth:`load`, so rebuilt rows count
+        ``DaysIntoSeason`` from the same opener served rows do.
+        """
+        if os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
+            return
+        opener = odds_budget.season_opener(self.league)
+        if opener is not None and (opener - self.season_start).days > SEASON_MAX_DAYS:
+            self._set_season_start(opener)
+
     def update(self):
         """Fetch new game data from the league API and append to ``self.gamelog``.
 
@@ -641,24 +663,13 @@ class Stats:
         before the next scheduled game to 10 days after the last one, per
         the feed-derived :func:`odds_budget.update_window_open`. Set
         ``SPORTSTRADAMUS_FORCE_UPDATE=1`` to run an offseason update anyway
-        (full rebuilds, historical backfills); the bypass also pins
-        ``season_start``, so replay tools keep manual control.
-
-        When the activity feed has observed an opening night
-        (:func:`odds_budget.season_opener`) more than ``SEASON_MAX_DAYS``
-        after the season start held, it opens a new season and is adopted
-        before fetching — season-year API params and ``DaysIntoSeason`` then
-        track the real calendar without an annual code edit. A nearer one
-        falls inside the season already held and is ignored: it was captured
-        mid-season, when a league came back from a break.
+        (full rebuilds, historical backfills). Inside the window it adopts
+        the feed's season opener (:meth:`adopt_feed_opener`) before fetching.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):
             logger.info(f"{self.league} update skipped: outside season window")
             return
-        if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
-            opener = odds_budget.season_opener(self.league)
-            if opener is not None and (opener - self.season_start).days > SEASON_MAX_DAYS:
-                self._set_season_start(opener)
+        self.adopt_feed_opener()
         self._update()
 
     def _update(self):
