@@ -1,6 +1,6 @@
 {
   "NFL": {
-    "Acrisure Stadium": {"lat": 40.447, "lon": -80.016, "roof": "open", "aliases": []},
+    "Acrisure Stadium": {"lat": 40.447, "lon": -80.016, "roof": "open", "aliases": ["Heinz Field"]},
     "Allegiant Stadium": {"lat": 36.091, "lon": -115.184, "roof": "dome", "aliases": []},
     "Allianz Arena": {"lat": 48.219, "lon": 11.625, "roof": "open", "aliases": ["FC Bayern Munich Stadium"]},
     "Arena Corinthians": {"lat": -23.545, "lon": -46.474, "roof": "open", "aliases": []},
@@ -31,7 +31,7 @@
     "Nissan Stadium": {"lat": 36.166, "lon": -86.771, "roof": "open", "aliases": []},
     "Northwest Stadium": {"lat": 38.908, "lon": -76.864, "roof": "open", "aliases": ["FedExField"]},
     "NRG Stadium": {"lat": 29.685, "lon": -95.411, "roof": "retractable", "aliases": ["Reliant Stadium"]},
-    "Paycor Stadium": {"lat": 39.095, "lon": -84.516, "roof": "open", "aliases": []},
+    "Paycor Stadium": {"lat": 39.095, "lon": -84.516, "roof": "open", "aliases": ["Paul Brown Stadium"]},
     "Raymond James Stadium": {"lat": 27.976, "lon": -82.503, "roof": "open", "aliases": []},
     "SoFi Stadium": {"lat": 33.953, "lon": -118.339, "roof": "dome", "aliases": []},
     "Soldier Field": {"lat": 41.862, "lon": -87.617, "roof": "open", "aliases": []},
