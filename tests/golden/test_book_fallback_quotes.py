@@ -225,6 +225,41 @@ def test_book_quote_keeps_its_price_and_takes_the_sum_shape(archive, monkeypatch
     assert over != pytest.approx(marginal, abs=1e-3)
 
 
+def test_component_sum_beside_a_fitted_double_poisson_quote_serves_both(archive, monkeypatch):
+    """A component sum has no fitted dispersion; batched with a quote that has one, both serve.
+
+    NBA RA, 11-16: in a Double Poisson cell with a fitted book shape, the sum's NaN dispersion
+    left the batch's grid no span and the whole market went unscored.
+    """
+    _patch_cell(monkeypatch, "DPO", 0.5)
+    # The fitted dispersion reads helpers.config's own tables, not model_prob's: without these
+    # two the direct quote has no phi either, and the test passes without the fix.
+    monkeypatch.setitem(config.stat_dist[_LEAGUE], _MARKET, "DPO")
+    monkeypatch.setitem(config.stat_meta[_LEAGUE], _MARKET, {"book_shape": {"a": 0.8, "b": 1.1}})
+    monkeypatch.setitem(book_quotes.combo_props, _MARKET, ["A", "B"])
+    _insert_components(archive, "Combo Guy")
+    _insert_odds(archive, "Star Guard", "fanduel", 0.55, 24.5)
+    _insert_odds(archive, "Star Guard", "draftkings", 0.55, 24.5)
+
+    records = mp.book_fallback_prob(
+        [_offer("Combo Guy", 25.5), _offer("Star Guard", 24.5)],
+        _LEAGUE,
+        _MARKET,
+        "Underdog",
+        _StubStats(),
+        _PASS_DATE,
+    )
+    alone = mp.book_fallback_prob(
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(), _PASS_DATE
+    )
+
+    by_player = {r["Player"]: r for r in records}
+    assert set(by_player) == {"Combo Guy", "Star Guard"}
+    assert by_player["Star Guard"]["Market Prob"] == pytest.approx(0.55, abs=1e-4)
+    # The sum prices off its own CDF, whatever shares its batch.
+    assert by_player["Combo Guy"]["Market Prob"] == pytest.approx(alone[0]["Market Prob"], abs=1e-9)
+
+
 def test_component_only_dfs_support_never_serves(archive, monkeypatch):
     """One platform-only component sinks the whole sum, not just its own term.
 

@@ -238,19 +238,23 @@ def price_offers_at_quotes(
             "r": offer_df.index.map({p: v.r for p, v in priced.items()}).to_numpy(float)
         }
     lines = offer_df["Line"].to_numpy(dtype=float)
-    over = 1 - get_odds(
-        lines,
-        offer_df["Market Projection"].to_numpy(dtype=float),
-        dist,
-        cv=cv,
-        step=step,
-        **shape_kwargs,
-    )
-    if combo_cdfs:
-        over = [
-            1.0 - combo_cdfs[player](line) if player in combo_cdfs else marginal
-            for player, line, marginal in zip(offer_df.index, lines, over, strict=True)
-        ]
+    # A component sum carries no fitted shape: left in the batch, its NaN phi leaves the Double
+    # Poisson grid no span and sinks the whole market (NBA RA, 11-16).
+    marginal = ~offer_df.index.isin(list(combo_cdfs))
+    over = np.empty(len(offer_df))
+    if marginal.any():
+        over[marginal] = 1 - get_odds(
+            lines[marginal],
+            offer_df["Market Projection"].to_numpy(dtype=float)[marginal],
+            dist,
+            cv=cv,
+            step=step,
+            **{name: values[marginal] for name, values in shape_kwargs.items()},
+        )
+    over[~marginal] = [
+        1.0 - combo_cdfs[player](line)
+        for player, line in zip(offer_df.index[~marginal], lines[~marginal], strict=True)
+    ]
     offer_df["Market EV"] = over
 
 
