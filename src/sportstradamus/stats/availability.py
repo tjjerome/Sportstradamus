@@ -7,9 +7,9 @@ mapped to the gamelog's codes, never the player's last gamelog team: a traded pl
 
 An absent player weighs in at his means per game over his latest games strictly before the game
 date, a game an official list names him in counting 0: two-way and end-of-bench players, inactive
-most regular-season nights and on no playoff list, weigh near 0 in both, as does a player out for
-weeks. :func:`availability_features` sums those per team game and counts the row player's own
-absences over his team's previous games.
+most regular-season nights and on no playoff list, weigh near 0 in either phase, as does a player
+out for weeks. :func:`availability_features` sums those per team game and counts the row player's
+own absences over his team's previous games.
 """
 
 from __future__ import annotations

@@ -61,19 +61,17 @@ class _Unread:
         pytest.param(_OPENERS[1], date(2026, 1, 15), _OPENERS[2], id="stale-held-start"),
     ],
 )
-def test_a_day_outside_the_held_season_counts_from_its_gamelog_opener(
-    held, day, opener, as_type
-) -> None:
+def test_a_day_outside_the_held_season_counts_from_its_gamelog_opener(held, day, opener, as_type):
     assert _opening_day(day, held, _gamelog(as_type)["GAME_DATE"]) == opener
 
 
-def test_a_day_in_the_held_season_keeps_the_held_start_without_reading_the_log() -> None:
+def test_a_day_in_the_held_season_keeps_the_held_start_without_reading_the_log():
     # Hand-set a week before the log's first game of the season, which must not replace it.
     held = date(2025, 9, 30)
     assert _opening_day(date(2026, 6, 1), held, _Unread()) == held
 
 
-def test_a_past_season_row_counts_from_its_own_opener() -> None:
+def test_a_past_season_row_counts_from_its_own_opener():
     stats = Stats()
     stats.log_strings = {"player": "PLAYER", "date": "GAME_DATE"}
     stats.season_start = _OPENERS[2]

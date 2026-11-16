@@ -1664,9 +1664,8 @@ class Stats:
         stats["STDYr"] = playergames.groupby(player_col)[market].std()
         last_date = pd.to_datetime(playergames.groupby(player_col)[self.log_strings["date"]].last())
         stats["DaysOff"] = (pd.Timestamp(date) - last_date).dt.days
-        stats["DaysIntoSeason"] = (
-            date - _opening_day(date, self.season_start, self.gamelog[self.log_strings["date"]])
-        ).days
+        opener = _opening_day(date, self.season_start, self.gamelog[self.log_strings["date"]])
+        stats["DaysIntoSeason"] = (date - opener).days
         stats["GamesPlayed"] = playergames.groupby(player_col)[market].count()
         zero_counts = playergames.loc[playergames[market] == 0].groupby(player_col).size()
         stats["ZeroYr"] = zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]

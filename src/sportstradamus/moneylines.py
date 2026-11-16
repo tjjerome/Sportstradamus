@@ -195,9 +195,8 @@ def _is_opening_night(tier: str, last_game: str | None, next_game: datetime) -> 
         return False
     if last_game is None:
         return True
-    return next_game - datetime.fromisoformat(last_game) > timedelta(
-        days=odds_budget.OFFSEASON_GAP_DAYS
-    )
+    gap = next_game - datetime.fromisoformat(last_game)
+    return gap > timedelta(days=odds_budget.OFFSEASON_GAP_DAYS)
 
 
 def _league_activity_record(prev, commences, now):
