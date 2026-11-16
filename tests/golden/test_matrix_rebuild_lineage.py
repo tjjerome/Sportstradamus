@@ -240,8 +240,10 @@ def test_full_rebuild_counts_from_the_feed_opener_serving_adopted(tmp_path, monk
     opener = date(2026, 9, 29)
     monkeypatch.setattr(odds_budget, "season_opener", lambda league: opener)
     monkeypatch.setattr("sportstradamus.training.cli.StatsNHL", _ConstantStartNHL)
-    # Off the live ship config: a withheld cell would prune its real model pickle.
+    # Off the live ship config and stat_meta: a withheld cell would prune its real model
+    # pickle, and a structural posthoc refuses --matrix-only.
     monkeypatch.setattr("sportstradamus.training.cli.load_ship_config", lambda *, branch: {})
+    monkeypatch.setattr("sportstradamus.training.cli.load_stat_meta", lambda _path: {})
     # meditate sets this for a rebuild; setting it here restores the environment afterwards.
     monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_READ_ONLY", "1")
     season_starts = []

@@ -656,14 +656,14 @@ class Stats:
         if opener is not None and (opener - self.season_start).days > SEASON_MAX_DAYS:
             self._set_season_start(opener)
 
-    def update(self):
+    def update(self) -> None:
         """Fetch new game data from the league API and append to ``self.gamelog``.
 
         Skipped outside the league's season window — open from 10 days
         before the next scheduled game to 10 days after the last one, per
         the feed-derived :func:`odds_budget.update_window_open`. Set
         ``SPORTSTRADAMUS_FORCE_UPDATE=1`` to run an offseason update anyway
-        (full rebuilds, historical backfills). Inside the window it adopts
+        (gamelog rebuilds, historical backfills). Inside the window it adopts
         the feed's season opener (:meth:`adopt_feed_opener`) before fetching.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):

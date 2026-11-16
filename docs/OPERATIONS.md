@@ -19,8 +19,9 @@ League activity — which leagues `confer` polls and `prophecize`/`meditate` upd
 is derived automatically from the Odds API events feed, so season starts and ends
 need no manual edits. The feed's opening night is captured once a season, when a
 league comes back from an off-season (more than 60 days between games), and is kept
-through breaks and idle spells. `Stats.update` adopts it as the season start only
-when it falls more than 300 days after the hand-set `season_start` constant in the
+through breaks and idle spells. `Stats.adopt_feed_opener` (run by `Stats.update`, and by
+`meditate --full-rebuild` after `load()`) adopts it as the season start only when it
+falls more than 300 days after the hand-set `season_start` constant in the
 Stats class: a nearer one was captured inside the season the constant already
 names, and the constant stands. To force a gamelog update in the offseason, set
 `SPORTSTRADAMUS_FORCE_UPDATE=1`.
