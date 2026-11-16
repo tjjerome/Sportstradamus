@@ -47,8 +47,7 @@ from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 
 _LEAGUES = ("NFL", "MLB", *game_absences.ABSENCE_LEAGUES)
 
-# Oldest season pulled by default; the weather backfill starts there too, so both histories
-# cover the same games.
+# Oldest season pulled by default; MLB's weather backfill starts there too (NFL's in 2021).
 _FIRST_SEASON = 2022
 
 # One request per calendar year (~17,000 rows). sportId 1 is the major leagues.

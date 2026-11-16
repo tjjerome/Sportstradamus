@@ -222,12 +222,13 @@ The Underdog and lineup captures hold the inputs of the two pre-registered reads
 **T2a**, the news guard (a line's suspension or a teammate's move to Out /
 Doubtful before the decision), and **T2b**, popularity (the lobby's
 `entry_count`); the bars, sample sizes and read dates live there and are not
-repeated here. The weather and injury captures hold candidate model inputs, with
-the history pulls below as their training-side counterparts. Nothing in these
-files changes a served number: no `Stats` hook reads them, the dashboard never
-does, and only `prophecize` writes them. None is a `Source`: the Underdog captures
-are a seam inside `get_ud`, the rest calls in `prophecize` (`capture_lineups`,
-`capture_weather`, `capture_injuries`) right after the leagues update.
+repeated here. The weather and injury captures hold model inputs, with the
+history pulls below as their training-side counterparts; their sections name the
+readers. The Underdog and lineup files change no served number. The dashboard
+never reads any of these files, and only `prophecize` writes them. None is a
+`Source`: the Underdog captures are a seam inside `get_ud`, the rest calls in
+`prophecize` (`capture_lineups`, `capture_weather`, `capture_injuries`) right
+after the leagues update.
 
 | Capture | Trigger | Files under `data/runtime/` | Schema (pinned in the module) |
 |---|---|---|---|
@@ -302,7 +303,8 @@ the table is a WARNING and its games get no row. The weather model is pinned to
 `gfs_global` (why, and what its archive lacks: the `weather.py` docstring).
 Open-Meteo's free tier allows 10,000 calls a day per IP and bills a request one
 call per location at this size; each run logs the request's cost
-(`X-RateLimit-Cost`).
+(`X-RateLimit-Cost`). The model reads the newest file at serving
+(`stats/weather_features.py`, `forecast_weather`).
 
 **Injury lists** (`collectors/injury_capture.py`). ESPN's injury list for each
 league, every run, in season or not, since preseason injuries matter on opening
@@ -336,16 +338,22 @@ The captures start the day they ship, so two plain `fetch` commands, run by hand
 on the dev box beside the weekly `meditate`, give the model build the past:
 
 - **`fetch weather-history`** (`collectors/weather_history.py`). For every NFL and
-  MLB game played two days ago or more outside a dome, the forecast as it stood
-  before the game, through the capture's venue table and kickoff windows, to
-  `data/leagues/<league>/weather_history.parquet` with `lead_days` and `source`.
-  Seasons from 2024 read Open-Meteo's Previous Runs archive, each hour as forecast
-  0 to 7 days before it; 2022 and 2023 the Historical Forecast, lead 0 only.
+  MLB game played two days ago or more, the forecast as it stood before the game,
+  through the capture's venue table and kickoff windows, to
+  `data/leagues/<league>/weather_history.parquet` with `lead_days` and `source`;
+  training reads it (`stats/weather_features.py`, `history_weather`). A dome game
+  gets the capture's one row, no weather and no lead, without a request, so the
+  file tells a dome from a game not yet fetched; `--dry-run` counts these rows
+  apart from the requests. Seasons from 2024 read Open-Meteo's Previous Runs
+  archive, each hour as forecast 0 to 7 days before it; earlier seasons the
+  Historical Forecast, lead 0 only. That archive starts 2021-06, so the NFL
+  starts at 2021 and MLB, whose 2021 season opened in April, at 2022.
   Neither archive keeps precipitation probability, and snowfall starts
   2024-12-05. `schedule_label` here is a game-time fact (nflverse's roof after the
   game, statsapi's game-time condition), never a decision-time input. Open-Meteo
   bills any span up to 14 days as 14, so each venue's games batch into spans; the
-  whole 2022–26 plan is about 8,300 calls. The command paces itself under the
+  2022–26 plan was about 8,300 calls, and NFL 2021 adds about 120 (the stored
+  2022 NFL games, replanned, bill 120). The command paces itself under the
   hourly limit, stops at `--max-cost` (8,000 by default, leaving the production
   captures room on the shared IP) and resumes from its file: rerun it daily until
   `--dry-run` plans nothing.

@@ -11,7 +11,7 @@ import requests
 from click.testing import CliRunner
 
 from sportstradamus.collectors import weather_history as wh
-from sportstradamus.collectors.weather import MLB_SCHEDULE_URL, VENUES
+from sportstradamus.collectors.weather import MLB_SCHEDULE_URL, MODEL, VENUES
 
 # The hourly variables the archives keep: precipitation_probability is the live forecast's alone.
 _ARCHIVED = [
@@ -243,8 +243,9 @@ def test_each_season_reads_its_archive_over_every_utc_date_its_window_touches(
     assert result.stdout.strip() == "weather-history: 3 requests, cost 12.2, new rows NFL=102"
 
 
-def test_games_younger_than_two_days_and_dome_games_are_not_requested(monkeypatch, tmp_path):
-    """And a league with nothing to fetch (the NFL here, no games) writes no file."""
+def test_games_younger_than_two_days_get_no_row_and_dome_games_no_request(monkeypatch, tmp_path):
+    """Game 3 is at Tropicana Field. A league with nothing to add (the NFL, no games) writes no
+    file."""
     now = pd.Timestamp.now("UTC").tz_localize(None).floor("h")
     payload = _mlb_payload(
         (1, 17, now - pd.Timedelta(days=3)),
@@ -257,8 +258,49 @@ def test_games_younger_than_two_days_and_dome_games_are_not_requested(monkeypatc
 
     assert asked["statsapi"] == [now.year]
     assert [call["latitude"] for call in asked["open_meteo"]] == [str(VENUES["MLB"]["17"]["lat"])]
-    assert set(_stored(tmp_path, "mlb")["game_id"]) == {"1"}
+    assert set(_stored(tmp_path, "mlb")["game_id"]) == {"1", "3"}
     assert not (tmp_path / "nfl").exists()
+
+
+def test_a_dome_game_gets_its_one_row_without_a_request_and_only_once(monkeypatch, tmp_path):
+    """Each dome row carries its season's source, which a rerun's done-set reads."""
+    schedule = _nfl_schedule(
+        (2023, "2023_02_SEA_DET", "2023-09-17", "13:00", "dome", "Ford Field"),
+        (2025, "2025_02_ATL_MIN", "2025-09-14", "20:20", "dome", "U.S. Bank Stadium"),
+        _WEEK_2[1],
+    )
+    asked = _stub(monkeypatch, tmp_path, nfl=schedule)
+
+    first = _run(["--league", "NFL", "--season", "2023", "--season", "2025"])
+    second = _run(["--league", "NFL", "--season", "2023", "--season", "2025"])
+
+    assert [call["latitude"] for call in asked["open_meteo"]] == [
+        str(VENUES["NFL"]["Lambeau Field"]["lat"])
+    ]
+    rows = _stored(tmp_path)
+    assert list(rows.dtypes.astype(str).items()) == list(wh._DTYPES.items())
+    assert rows.groupby("game_id").size().to_dict() == {
+        "2023_02_SEA_DET": 1,
+        "2025_02_ATL_MIN": 1,
+        "2025_02_WAS_GB": 48,
+    }
+    domes = rows[rows["roof"] == "dome"].set_index("game_id")
+    assert domes["source"].to_dict() == {
+        "2023_02_SEA_DET": "historical_forecast",
+        "2025_02_ATL_MIN": "previous_runs",
+    }
+    assert (
+        domes[["forecast_hour", "lead_days", *_ARCHIVED, "precipitation_probability"]]
+        .isna()
+        .all(axis=None)
+    )
+    assert domes["kickoff"].tolist() == [
+        pd.Timestamp("2023-09-17 17:00"),
+        pd.Timestamp("2025-09-15 00:20"),
+    ]
+    assert (domes["model"] == MODEL).all()
+    assert first.stdout.strip() == "weather-history: 1 requests, cost 7.5, new rows NFL=50"
+    assert second.stdout.strip() == "weather-history: 0 requests, cost 0.0, new rows NFL=0"
 
 
 @pytest.mark.parametrize("max_cost", ["10", "15"])
@@ -334,8 +376,10 @@ def test_a_failed_schedule_read_stops_the_run_before_open_meteo(monkeypatch, tmp
 
 
 def test_dry_run_prints_the_plan_and_requests_nothing_from_open_meteo(monkeypatch, tmp_path):
-    """Defaults: both leagues, 2022 through the current year."""
+    """Defaults: both leagues, the NFL from 2021 and MLB from 2022 through the current year. A
+    dome game (Ford Field, Tropicana Field) is counted apart: it costs no request."""
     schedule = _nfl_schedule(
+        (2021, "2021_02_GB_DET", "2021-09-20", "20:15", "dome", "Ford Field"),
         (2023, "2023_02_CHI_GB", "2023-09-17", "13:00", "outdoors", "Lambeau Field"),
         *_WEEK_2[1:],
     )
@@ -343,18 +387,21 @@ def test_dry_run_prints_the_plan_and_requests_nothing_from_open_meteo(monkeypatc
         *(
             (pk, 17, pd.Timestamp(f"2024-06-{day:02d} 18:20"))
             for pk, day in [(1, 7), (2, 8), (3, 9)]
-        )
+        ),
+        (4, 12, pd.Timestamp("2024-06-10 23:10")),
     )
     asked = _stub(monkeypatch, tmp_path, nfl=schedule, mlb={2024: homestand})
 
     result = _run(["--dry-run"])
 
-    seasons = list(range(2022, date.today().year + 1))
-    assert asked["nflverse"] == [seasons]
-    assert asked["statsapi"] == seasons
+    this_year = date.today().year
+    assert asked["nflverse"] == [list(range(2021, this_year + 1))]
+    assert asked["statsapi"] == list(range(2022, this_year + 1))
     assert asked["open_meteo"] == []
     assert not list(tmp_path.rglob("*.parquet"))
     assert result.stdout.splitlines() == [
+        "NFL 2021 historical_forecast: 1 dome rows, no request",
+        "MLB 2024 previous_runs: 1 dome rows, no request",
         "NFL 2023 historical_forecast: 1 games, 1 requests, cost 1.0",
         "NFL 2025 previous_runs: 2 games, 2 requests, cost 11.2",
         "MLB 2024 previous_runs: 3 games, 1 requests, cost 5.6",

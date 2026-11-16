@@ -4,10 +4,11 @@ Usage: sportstradamus fetch weather-history [OPTIONS]
 
 Options:
   --league [nfl|mlb]  League to backfill; repeatable. Defaults to both.
-  --season INTEGER    Season to backfill; repeatable. Defaults to 2022 through
-                      the current year.
+  --season INTEGER    Season to backfill; repeatable. Defaults to each league's
+                      first season (NFL 2021, MLB 2022) through the current
+                      year.
   --max-cost FLOAT    Stop once the run has spent this many Open-Meteo calls.
                       [default: 8000.0]
-  --dry-run           Print the plan and its cost; request nothing from Open-
-                      Meteo.
+  --dry-run           Print the plan, its cost and the dome rows; request
+                      nothing from Open-Meteo.
   --help              Show this message and exit.

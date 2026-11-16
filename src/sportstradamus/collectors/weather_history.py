@@ -1,15 +1,17 @@
 """Archived pre-game forecasts of NFL and MLB games already played, to train weather features on.
 
 ``sportstradamus fetch weather-history``, a dev-side backfill run by hand, stores for each game
-that kicked off two days ago or more outside a dome the forecast that existed before it: the
-per-run capture's rows (:mod:`weather`) plus ``lead_days`` and ``source``, one file per league at
-``data/leagues/<league>/weather_history.parquet``.
+that kicked off two days ago or more the forecast that existed before it: the per-run capture's
+rows (:mod:`weather`) plus ``lead_days`` and ``source``, one file per league at
+``data/leagues/<league>/weather_history.parquet``. A dome game gets the capture's one row, no
+weather and ``lead_days`` NA, without a request, so the file tells a dome from a game not fetched.
 
 Seasons from 2024 read Open-Meteo's Previous Runs archive, each hour as forecast 0 to 7 days
-before it (``lead_days``; every lead from 2024-01-25); 2022 and 2023 the Historical Forecast,
-lead 0 only. Neither keeps ``precipitation_probability`` (stored NaN); ``snowfall`` is NaN before
-2024-12-05. ``schedule_label`` is a game-time fact here (nflverse's roof after the game,
-statsapi's game-time condition) and must not feed a decision-time feature.
+before it (``lead_days``; every lead from 2024-01-25); earlier seasons the Historical Forecast,
+lead 0 only, from NFL 2021 and MLB 2022. Neither keeps ``precipitation_probability`` (stored
+NaN); ``snowfall`` is NaN before 2024-12-05. ``schedule_label`` is a game-time fact here
+(nflverse's roof after the game, statsapi's game-time condition) and must not feed a
+decision-time feature.
 
 A run paces itself under Open-Meteo's hourly limit, stops once it has spent ``--max-cost`` calls
 (a free IP gets 10,000 a day) and on a 429 writes what it holds and exits. The file is the
@@ -38,9 +40,11 @@ from sportstradamus.helpers.io import _atomic_write_parquet
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 
 _LEAGUES = ("NFL", "MLB")
-# The first season the Historical Forecast archive covers whole (it starts 2021-06); the injury
-# history starts there too, so both cover the same games.
-_FIRST_SEASON = 2022
+# Each league's first season the Historical Forecast archive (from 2021-06) holds whole.
+_FIRST_SEASON = {
+    "NFL": 2021,  # kicks off in September
+    "MLB": 2022,  # 2021 opened in April, before the archive
+}
 # Seasons from this one read the Previous Runs archive; earlier ones the Historical Forecast.
 _PREVIOUS_RUNS_FROM = 2024
 # The Previous Runs archive keeps each hour as forecast up to seven days before it.
@@ -122,7 +126,7 @@ def _spans(days: list[date], variables: int) -> list[list[date]]:
 
 
 def _games(league: str, seasons: list[int]) -> pd.DataFrame:
-    """The league's games of ``seasons`` played ``_SETTLE`` ago or more outside a dome.
+    """The league's games of ``seasons`` played ``_SETTLE`` ago or more.
 
     Each carries its season, its archive and the first and last UTC dates its window touches.
     """
@@ -145,7 +149,7 @@ def _games(league: str, seasons: list[int]) -> pd.DataFrame:
         [games.assign(season=season) for season, games in by_season.items()], ignore_index=True
     )
     settled = pd.Timestamp.now("UTC").tz_localize(None) - _SETTLE
-    games = games[(games["kickoff"] <= settled) & (games["roof"] != "dome")]
+    games = games[games["kickoff"] <= settled]
     previous_runs = games["season"] >= _PREVIOUS_RUNS_FROM
     return games.assign(
         source=np.where(previous_runs, "previous_runs", "historical_forecast"),
@@ -154,21 +158,28 @@ def _games(league: str, seasons: list[int]) -> pd.DataFrame:
     )
 
 
-def _plan(league: str, seasons: list[int], stored: pd.DataFrame) -> list[_Request]:
-    """The requests for every game without stored rows from its source, per season and venue."""
+def _plan(
+    league: str, seasons: list[int], stored: pd.DataFrame
+) -> tuple[list[_Request], pd.DataFrame]:
+    """What a run adds for the league's games without stored rows from their source.
+
+    The games outside a dome make the requests, per season and venue; the dome games come back
+    as they are, their one row needing no request.
+    """
     games = _games(league, seasons)
     done = set(zip(stored["game_id"], stored["source"], strict=True))
     missing = games.loc[
         [key not in done for key in zip(games["game_id"], games["source"], strict=True)]
     ]
+    dome = missing["roof"] == "dome"
     plan = []
-    for (season, source, _), venue_games in missing.groupby(["season", "source", "venue"]):
+    for (season, source, _), venue_games in missing[~dome].groupby(["season", "source", "venue"]):
         variables = len(_VARIABLES[source])
         for start, end in _spans([*venue_games["first_day"], *venue_games["last_day"]], variables):
             inside = venue_games[venue_games["first_day"].between(start, end)]
             cost = _cost(variables, start, end)
             plan.append(_Request(league, season, source, start, end, inside, cost))
-    return plan
+    return plan, missing[dome]
 
 
 def _by_lead(hourly: pd.DataFrame) -> pd.DataFrame:
@@ -207,6 +218,16 @@ def _fetch(request: _Request) -> tuple[pd.DataFrame, float]:
     return rows[list(_DTYPES)].astype(_DTYPES), billed
 
 
+def _dome_rows(games: pd.DataFrame) -> pd.DataFrame:
+    """Each dome game's one row as :func:`weather.window_rows` builds it, typed like the file's."""
+    # window_rows joins on forecast_hour, which must be typed even with no forecast to join.
+    no_forecast = pd.DataFrame(columns=["venue", "forecast_hour"]).astype(
+        {"venue": "string", "forecast_hour": "datetime64[ns]"}
+    )
+    rows = weather.window_rows(games, no_forecast).merge(games[["game_id", "source"]], on="game_id")
+    return rows.reindex(columns=list(_DTYPES)).astype(_DTYPES)
+
+
 def _stored(league: str) -> pd.DataFrame:
     try:
         return pd.read_parquet(_history_path(league))
@@ -223,7 +244,10 @@ def _flush(stored: dict[str, pd.DataFrame], held: dict[str, list[pd.DataFrame]])
             frames.clear()
 
 
-def _echo_plan(plan: list[_Request]) -> None:
+def _echo_plan(plan: list[_Request], domes: dict[str, pd.DataFrame]) -> None:
+    for league, games in domes.items():
+        for (season, source), count in games.groupby(["season", "source"]).size().items():
+            click.echo(f"{league} {season} {source}: {count} dome rows, no request")
     summary = pd.DataFrame(
         [(r.league, r.season, r.source, len(r.games), r.cost) for r in plan],
         columns=["league", "season", "source", "games", "cost"],
@@ -249,7 +273,9 @@ def _echo_plan(plan: list[_Request]) -> None:
     "seasons",
     multiple=True,
     type=int,
-    help=f"Season to backfill; repeatable. Defaults to {_FIRST_SEASON} through the current year.",
+    help="Season to backfill; repeatable. Defaults to each league's first season ("
+    + ", ".join(f"{league} {season}" for league, season in _FIRST_SEASON.items())
+    + ") through the current year.",
 )
 @click.option(
     "--max-cost",
@@ -258,20 +284,26 @@ def _echo_plan(plan: list[_Request]) -> None:
     help="Stop once the run has spent this many Open-Meteo calls.",
 )
 @click.option(
-    "--dry-run", is_flag=True, help="Print the plan and its cost; request nothing from Open-Meteo."
+    "--dry-run",
+    is_flag=True,
+    help="Print the plan, its cost and the dome rows; request nothing from Open-Meteo.",
 )
 def weather_history(
     leagues: tuple[str, ...], seasons: tuple[int, ...], max_cost: float, dry_run: bool
 ) -> None:
     """Store the archived pre-game forecast of NFL and MLB games already played."""
-    seasons = list(seasons or range(_FIRST_SEASON, date.today().year + 1))
     stored = {league: _stored(league) for league in leagues or _LEAGUES}
-    plan = [request for league in stored for request in _plan(league, seasons, stored[league])]
+    planned = {}
+    for league, rows in stored.items():
+        default = range(_FIRST_SEASON[league], date.today().year + 1)
+        planned[league] = _plan(league, list(seasons or default), rows)
+    plan = [request for league_plan, _ in planned.values() for request in league_plan]
+    domes = {league: games for league, (_, games) in planned.items()}
     if dry_run:
-        _echo_plan(plan)
+        _echo_plan(plan, domes)
         return
-    held: dict[str, list[pd.DataFrame]] = {league: [] for league in stored}
-    added = dict.fromkeys(stored, 0)
+    held = {league: [_dome_rows(games)] if len(games) else [] for league, games in domes.items()}
+    added = {league: len(games) for league, games in domes.items()}
     made, spent, stopped = 0, 0.0, ""
     try:
         for request in tqdm(plan, desc="weather history", unit="request"):

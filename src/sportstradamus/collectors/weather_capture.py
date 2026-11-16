@@ -7,8 +7,10 @@ table, the schedule's own label and each hour's lead from the run, at
 (UTC). A retractable roof's state is unknown before kickoff, so it is forecast like an open one;
 a dome gets its one row and no forecast. Budget: one Open-Meteo request per league, billed about
 one call per venue, and for MLB one statsapi schedule request (the NFL's schedule comes with its
-update). Nothing reads these files yet; the model build will. The pinned model and what its
-archive lacks: :mod:`sportstradamus.collectors.weather`.
+update). Serving reads the newest file through
+:func:`sportstradamus.stats.weather_features.forecast_weather`; training reads the backfill,
+:mod:`sportstradamus.collectors.weather_history`, instead. The pinned model and what its archive
+lacks: :mod:`sportstradamus.collectors.weather`.
 """
 
 from __future__ import annotations
