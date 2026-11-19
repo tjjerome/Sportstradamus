@@ -154,6 +154,29 @@ These conventions pair with the hooks in `.claude/hooks/`.
   at a push — offer to capture any durable, non-obvious, repeatable lesson to the
   memory dir in the standard format. Do not force a memory from every session.
 
+## Judging model changes
+
+* **The priced population is the validation set.** Keep or kill a candidate (a
+  feature, a row rule, a fit change, a data source) by its error on held-out rows
+  that match what we price live: props an app or sportsbook actually posted, at the
+  posted line. The realized replay's `posted` rungs are that set exactly
+  ([docs/ship_gate.md](docs/ship_gate.md), "The realized replay"); where the archive
+  ladder holds no rungs, use held-out rows whose `QuoteAuthenticity` is `pickem` or
+  `authentic`. Stand-in (`synthetic`) and `derived` lines are never priced, so a
+  number over all held-out rows is a diagnostic, not a verdict. Report the mean
+  error and the probability at the line (Brier) with intervals that resample whole
+  game dates.
+* **Agreement with the line is information, not a verdict.** Edge starts with
+  representing the line accurately. Never discard a candidate because it moves the
+  model toward the book ("hygiene", "it learns what the line knows"), and never keep
+  one because it moves away; only its error on the priced population decides.
+* **Older verdicts predate this rule.** Many keep/kill calls made before it were
+  judged on all held-out rows, on the offline gates, on what a candidate adds beyond
+  the book, or on the recommended legs alone. Treat such a verdict as unverified:
+  re-judge it on the priced population before building on it or citing it to rule a
+  candidate out. [docs/gbdt_feature_study.md](docs/gbdt_feature_study.md) §15 lists
+  the most exposed.
+
 ## Hard rules — these caused the last major refactor
 
 The codebase was refactored from several 1,000–7,000 line monoliths into packages.
