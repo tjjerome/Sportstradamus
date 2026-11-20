@@ -42,6 +42,7 @@ from sportstradamus.scripts.realized_replay import still_posted
 from sportstradamus.scripts.tail_information import key_rng
 from sportstradamus.scripts.tail_pricing import (
     CellExcludedError,
+    dump_paths,
     load_cell,
     open_archive,
     price_dumps,
@@ -216,11 +217,8 @@ def _verdict(scope: pd.DataFrame) -> str:
 def judge(table: pd.DataFrame) -> pd.DataFrame:
     """``scope_table`` rows with each league's primary statistic flagged and every verdict.
 
-    The primary is ``p2_dbrier`` where the league's pooled P2 rungs span ``MIN_DATES`` game
-    dates, else ``p1_dmse``; a cell reads its league's primary. A scope's verdict is NEUTRAL
-    under ``MIN_DATES`` dates in its primary's rows, else KILL when any ``JUDGED``
-    statistic spanning ``MIN_DATES`` dates has its interval wholly above zero, KEEP when the
-    primary's lies wholly below zero, NEUTRAL otherwise.
+    A league's pooled (``ALL``) P2 dates pick its primary; each cell reads that primary on its
+    own rows. The verdict rule is the module docstring's.
     """
     pooled_p2 = table[table["cell"].eq(POOLED) & table["statistic"].eq("p2_dbrier")]
     p2_dates = table["league"].map(pooled_p2.set_index("league")["n_dates"])
@@ -270,11 +268,7 @@ def _posted(
 
 
 def _dump_cells(dumps: Path, leagues: set[str]) -> set[str]:
-    return {
-        path.stem
-        for path in dumps.glob("*.csv")
-        if not leagues or path.stem.split("_", 1)[0] in leagues
-    }
+    return {path.stem for path in dump_paths(dumps, leagues)}
 
 
 _DIRECTORY = click.Path(exists=True, file_okay=False, path_type=Path)
@@ -372,9 +366,9 @@ def main(
         raise click.ClickException("no cell both arms can serve")
     p1_frames = []
     for cell in scored:
-        rows, split = p1_rows(candidate[cell], baseline[cell], classes)
-        if split:
-            click.echo(f"{cell}: dropped {split} rows whose Line differs across the arms")
+        rows, dropped = p1_rows(candidate[cell], baseline[cell], classes)
+        if dropped:
+            click.echo(f"{cell}: dropped {dropped} rows whose Line differs across the arms")
         p1_frames.append(rows.assign(League=cell.split("_", 1)[0], cell=cell))
     p1 = pd.concat(p1_frames, ignore_index=True)
     p2 = (

@@ -46,7 +46,12 @@ from sportstradamus.helpers.io import (
 from sportstradamus.helpers.training_quotes import AUTHENTIC, PICKEM
 from sportstradamus.prediction.offer_records import _MAX_CONFIDENCE, UNQUOTED_BOOK_DISAGREEMENT_MAX
 from sportstradamus.scripts.tail_information import key_rng
-from sportstradamus.scripts.tail_pricing import SERVED_MODELS_DIR, open_archive, price_dumps
+from sportstradamus.scripts.tail_pricing import (
+    SERVED_MODELS_DIR,
+    dump_paths,
+    open_archive,
+    price_dumps,
+)
 from sportstradamus.scripts.tail_scorecard import (
     DEFAULT_ARCHIVE,
     TEST_SETS_DIR,
@@ -469,12 +474,7 @@ def main(
     """Replay the live rule on held-out rows at posted rungs and market lines; read it against live."""
     before, since = pd.Timestamp(offline_before), pd.Timestamp(live_since)
     until = pd.Timestamp(live_until) if live_until else None
-    wanted = {lg.upper() for lg in leagues}
-    paths = [
-        path
-        for path in sorted(test_sets_dir.glob("*.csv"))
-        if not wanted or path.stem.split("_", 1)[0] in wanted
-    ]
+    paths = dump_paths(test_sets_dir, {lg.upper() for lg in leagues})
     history = read_history()
     live = live_recommended(history, since, until)
     offline, skipped = load_offline(paths, before)

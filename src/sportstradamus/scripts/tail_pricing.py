@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import pickle
+from collections.abc import Collection
 from pathlib import Path
 
 import duckdb
@@ -255,6 +256,18 @@ def serve_live(rows: pd.DataFrame, knobs: dict) -> tuple[np.ndarray, np.ndarray,
     authentic = rows["QuoteAuthenticity"].eq(AUTHENTIC)
     book = rows["Book_EV"].where(authentic, rows["EV"]).to_numpy(float)
     return serve(rows, knobs, np.full(len(rows), knobs["weight"]), book)
+
+
+def dump_paths(directory: Path, leagues: Collection[str]) -> list[Path]:
+    """The ``{LEAGUE}_{market}.csv`` dumps in ``directory``, sorted.
+
+    An empty ``leagues`` keeps every league's dumps; otherwise only the named leagues'.
+    """
+    return sorted(
+        path
+        for path in directory.glob("*.csv")
+        if not leagues or path.stem.split("_", 1)[0] in leagues
+    )
 
 
 def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.DataFrame, dict, float]:

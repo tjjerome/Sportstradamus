@@ -2,6 +2,7 @@
 
 import dataclasses
 import importlib.resources as pkg_resources
+import itertools
 import os.path
 import pickle
 import warnings
@@ -446,8 +447,8 @@ def fetch_upcoming_games(
     """Map each team to its next matchup, and to each matchup by day, from the league schedule.
 
     Reads ``ScheduleLeagueV2``, which lists every game of the season. The broadcast
-    schedule read before it listed televised games only, so most home teams were served
-    as away. Shared by the NBA and WNBA ``update`` paths; ``season`` is the endpoint's
+    schedule endpoint lists televised games only, so most home teams would be served as
+    away. Shared by the NBA and WNBA ``update`` paths; ``season`` is the endpoint's
     (``"2026-27"`` for the NBA, the year for the WNBA). Returns
     ``{team_abbr: {"Opponent": str, "Home": bool}}`` for each team's first game from
     ``today`` through the look-ahead window, then the same entries for every game in the
@@ -472,7 +473,7 @@ def fetch_upcoming_games(
     upcoming_games: dict[str, dict] = {}
     games_by_date: dict[tuple[str, str], dict] = {}
     # Game days come in date order, so the first game a team is seen in is its next one.
-    for game in (game for game_day in game_days for game in game_day["games"]):
+    for game in itertools.chain.from_iterable(game_day["games"] for game_day in game_days):
         day = game["gameDateEst"][:10]
         home, away = game["homeTeam"]["teamTricode"], game["awayTeam"]["teamTricode"]
         # A knockout game names no teams until its bracket settles (NBA Cup placeholders).

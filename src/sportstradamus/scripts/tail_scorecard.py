@@ -49,6 +49,7 @@ from sportstradamus.scripts.tail_information import DAY_RESAMPLES, information_t
 from sportstradamus.scripts.tail_pricing import (
     SCORED_PLATFORMS,
     SERVED_MODELS_DIR,
+    dump_paths,
     open_archive,
     price_dumps,
 )
@@ -485,11 +486,7 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
     league and overall beside the live gap over the same window, then the information test,
     and writes every scope and split to OUT and one row per cell to PARQUET.
     """
-    paths = sorted(
-        path
-        for path in TEST_SETS_DIR.glob("*.csv")
-        if not leagues or path.stem.split("_", 1)[0] in leagues
-    )
+    paths = dump_paths(TEST_SETS_DIR, leagues)
     if not paths:
         raise click.BadParameter(
             f"no test set for league {', '.join(leagues) or '(any)'}", param_hint="--league"
