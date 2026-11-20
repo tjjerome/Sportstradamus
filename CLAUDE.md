@@ -470,7 +470,7 @@ same numbers are browseable from VSCode without a parquet viewer; the
 parquet is authoritative on disagreement and is the only file readers
 consult.
 
-**Column groups** (one row per cell, ~124 columns):
+**Column groups** (one row per cell, ~127 columns):
 
 | Group | Columns | Owner |
 |---|---|---|
@@ -481,6 +481,7 @@ consult.
 | Discrimination | `roc_auc` (↑), `accuracy` (↑), `precision_over` (↑), `precision_under` (↑), `prediction_std` | `meditate` |
 | Over rates | `predicted_over_rate`, `empirical_over_rate`, `over_pct_ev_gt` (↑), `over_pct_ev_lt` (↓) | `meditate` |
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
+| Plain baseline (report-only) | `plain_mse_ratio` (a plain LightGBM squared-error fit's test MSE over the model's own mean's; below 1 the plain fit wins), `plain_mse_ratio_priced` (the same on `pickem` / `authentic` rows), `plain_rounds`; the dump's `Plain` column holds its mean (`training/plain_baseline.py`) | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight`, `n_authentic_validation` (sportsbook-priced validation rows; `pickem` DFS-only rows excluded), `n_blend_fit_clusters` (rows and distinct clusters behind the weight fit; below the cluster floor `model_weight` is 1.0 and the skill / Kelly columns are NaN) | `meditate` |
 | Book level (report-only) | `book_citl_offline` (mean book P(over) − outcome on the test half's sportsbook rows), `book_citl_native` / `_redecoded` / `_ladder` and `book_share_*` (the same, split by the quote's I6d levelling class) | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
