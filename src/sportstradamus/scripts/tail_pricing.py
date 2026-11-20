@@ -246,27 +246,32 @@ def reconstruction_error(rows: pd.DataFrame, knobs: dict) -> float:
     return float(np.max(np.abs(rebuilt - rows["P"].to_numpy(float))))
 
 
-def price_cell(
-    path: Path,
-    con: duckdb.DuckDBPyConnection,
-    start: str,
-    models_dir: Path = SERVED_MODELS_DIR,
-) -> tuple[pd.DataFrame, dict, dict, pd.DataFrame]:
-    """One cell's test rows priced at every ladder rung they had, under both conventions.
+def serve_live(rows: pd.DataFrame, knobs: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``serve`` under the serving convention, at each row's ``Line``.
 
-    Returns the rung rows (the test row's columns, then the rung's platform, line, stored
-    price, last poll, sportsbook coverage and consensus, each convention's over-price and
-    the served mean and SD), the pickle knobs, the cell's window test-row count and
-    reconstruction error, and its information-test rows. The cell's pickle is read from
-    ``models_dir`` (a sandbox run's own models beside its own dumps).
+    Serving blends every row at the pickle's weight, against ``Book_EV`` on authentic rows
+    and the model's own ``EV`` on the rest (no sportsbook mean to pull toward).
+    """
+    authentic = rows["QuoteAuthenticity"].eq(AUTHENTIC)
+    book = rows["Book_EV"].where(authentic, rows["EV"]).to_numpy(float)
+    return serve(rows, knobs, np.full(len(rows), knobs["weight"]), book)
+
+
+def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.DataFrame, dict, float]:
+    """A dump's test rows and its pickle's serving knobs, checked to rebuild the dump's own ``P``.
+
+    The pickle is read from ``models_dir`` (a sandbox run's own models beside its own dumps).
+
+    Returns:
+        The rows (``_TEST_COLUMNS`` and the family's model-only columns), the knobs with the
+        ``model_version`` serving stamps on the cell's legs, and the reconstruction error.
 
     Raises:
         CellExcludedError: no pickle, an unreplayed family, a test set without the model-only
-            columns, a structural strategy, a failed reconstruction, or no rung.
+            columns, a structural strategy, or a failed reconstruction.
     """
     league, slug = path.stem.split("_", 1)
-    market = slug.replace("-", " ")
-    pickle_path = models_dir / model_pickle_path(league, market).name
+    pickle_path = models_dir / model_pickle_path(league, slug.replace("-", " ")).name
     try:
         with pickle_path.open("rb") as infile:
             filedict = pickle.load(infile)
@@ -289,7 +294,29 @@ def price_cell(
     error = reconstruction_error(rows, knobs)
     if not error <= RECONSTRUCTION_TOL:
         raise CellExcludedError(f"reconstruction max |dP| {error:.1e} > {RECONSTRUCTION_TOL:.0e}")
+    return rows, knobs, error
 
+
+def price_cell(
+    path: Path,
+    con: duckdb.DuckDBPyConnection,
+    start: str,
+    models_dir: Path = SERVED_MODELS_DIR,
+) -> tuple[pd.DataFrame, dict, dict, pd.DataFrame]:
+    """One cell's test rows priced at every ladder rung they had, under both conventions.
+
+    Returns the rung rows (the test row's columns, then the rung's platform, line, stored
+    price, last poll, sportsbook coverage and consensus, each convention's over-price and
+    the served mean and SD), the pickle knobs, the cell's window test-row count and
+    reconstruction error, and its information-test rows. The cell's pickle is read from
+    ``models_dir`` (``load_cell``).
+
+    Raises:
+        CellExcludedError: ``load_cell``'s reasons, or no rung.
+    """
+    league, slug = path.stem.split("_", 1)
+    market = slug.replace("-", " ")
+    rows, knobs, error = load_cell(path, models_dir)
     rows = rows[rows["Date"] >= start].reset_index(drop=True)
     keys = pd.DataFrame(
         {
@@ -309,15 +336,11 @@ def price_cell(
         ],
         axis=1,
     )
-    authentic = priced["QuoteAuthenticity"].eq(AUTHENTIC)
-    serving_book = priced["Book_EV"].where(authentic, priced["EV"]).to_numpy(float)
-    priced["p_serving"], priced["Projection"], priced["served_sd"] = serve(
-        priced, knobs, np.full(len(priced), knobs["weight"]), serving_book
-    )
+    priced["p_serving"], priced["Projection"], priced["served_sd"] = serve_live(priced, knobs)
     priced["p_training"] = serve(
         priced, knobs, _training_weight(priced, knobs), priced["Book_EV"].to_numpy(float)
     )[0]
-    priced["Market Projection"] = priced["Book_EV"].where(authentic)
+    priced["Market Projection"] = priced["Book_EV"].where(priced["QuoteAuthenticity"].eq(AUTHENTIC))
     diag = {"cell": path.stem, "League": league, "test_rows": len(rows), "recon_err": error}
     info = information_rows(con, league, market, rows, found)
     return (

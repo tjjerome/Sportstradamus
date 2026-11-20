@@ -1,0 +1,33 @@
+Usage: sportstradamus ship priced [OPTIONS]
+
+  Judge a candidate against a baseline on the rows we price: KEEP, KILL or
+  NEUTRAL.
+
+  P1 is the held-out rows an app or sportsbook priced, at their own line; P2 the
+  Underdog and Sleeper rungs still posted at the prop's last poll. Each arm
+  reads its own served probability and mean. Candidate minus baseline, negative
+  better, with 95 % intervals over whole game dates: p1_dmse (% of the cell's
+  baseline MSE), p1_dbrier and p2_dbrier (1e-4, pushes dropped), toward_book
+  (points closer to the book's P; information only). A league's primary is
+  p2_dbrier when its rungs span 20 game dates, else p1_dmse.
+
+Options:
+  --candidate-test-sets DIRECTORY
+                                  The candidate's {LEAGUE}_{market}.csv dumps.
+                                  [required]
+  --candidate-models DIRECTORY    The candidate's own pickles.  [required]
+  --baseline-test-sets DIRECTORY  The baseline's dumps (with --baseline-models).
+  --baseline-models DIRECTORY     The baseline's own pickles.
+  --baseline-book                 Judge against the sportsbook instead (P(over)
+                                  1 - Odds, mean Book_EV) on authentic P1 rows,
+                                  with no P2: for the cells production serves at
+                                  the book consensus.
+  --archive FILE                  Odds archive whose ladder prices P2, opened
+                                  read-only (required unless --baseline-book).
+  --start [%Y-%m-%d]              Score rows dated from this day.  [required]
+  --league TEXT                   Score only these leagues (repeatable).
+  --out FILE                      One row per league, cell (ALL: the league's
+                                  cells pooled) and statistic.  [default:
+                                  /tmp/priced_score.csv]
+  --seed INTEGER                  Bootstrap seed.  [default: 1729]
+  --help                          Show this message and exit.

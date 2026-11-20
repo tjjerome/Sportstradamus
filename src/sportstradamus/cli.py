@@ -85,6 +85,7 @@ cli.add_command(
             "scorecard": "sportstradamus.training.scorecard:main",
             "graduation": "sportstradamus.scripts.check_graduation:main",
             "config": "sportstradamus.scripts.generate_ship_config:main",
+            "priced": "sportstradamus.scripts.priced_score:main",
             "sweep": "sportstradamus.training.model_strategy.sweep:main",
         },
     )
