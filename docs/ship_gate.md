@@ -26,7 +26,7 @@ ground truth:
 the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-10-23._
+_Last updated: 2026-11-20._
 
 ---
 
@@ -286,6 +286,33 @@ claimed mean plus the one-sided 90 % lower bound of `hit − read`) and
 pre-registered read: over six league-windows (two 30-day windows each for NBA, NFL, NHL, run with
 `--live-since`/`--live-until`) the flag agrees with live's side of .5464 in ≥ 5 of 6 and the gaps sit
 within .03 in ≥ 4 of 6; killed at ≤ 3 of 6 or misses > .05 in ≥ 3 of 6. Never a gate.
+
+### The priced-row verdict (`ship priced`)
+
+`sportstradamus ship priced` (`scripts/priced_score.py`) judges a candidate against a baseline on
+the priced population (CLAUDE.md, "Judging model changes"). P1 is each cell's dump rows whose
+`QuoteAuthenticity` is `pickem` or `authentic`, at their own `Line`; P2 is the Underdog and Sleeper
+rungs a prop still held at its last poll, the `posted` scope's selection above. Each arm reads its
+own served probability and mean (its dumps re-served through its own pickles, `--*-models`). Per
+row, candidate minus baseline, negative better: `p1_dmse` (squared error of the served mean, in % of
+the row's cell's baseline MSE, so cells pool), `p1_dbrier` and `p2_dbrier` (Brier at the line,
+×10⁻⁴, pushes dropped), and `toward_book` (information only). Intervals: 95 %, 500 resamples of
+whole game dates. A league's primary statistic is `p2_dbrier` when its rungs span 20 game dates,
+else `p1_dmse`; each cell reads its league's primary on its own rows. KEEP: the primary's interval
+lies wholly below zero and no other statistic's wholly above. KILL: any statistic's lies wholly
+above. NEUTRAL otherwise, and always when the primary spans fewer than 20 dates; a statistic over
+fewer than 20 dates is reported and never judged (a date bootstrap that thin runs narrow).
+`--baseline-book` judges against the sportsbook (P = 1 − `Odds`, mean `Book_EV`, authentic rows)
+for cells production serves at the consensus.
+
+The arms. Candidate and control are refit at the same cut with the served parameters
+(`meditate --params-from`, `--frozen-matrix-dir` on the matrix pinned before the cut,
+`--artifact-output`), the control on the matrix before the change, so refit noise cancels; both
+score the same rows. A forward window starts the day after the served version's matrix build; a
+league whose window spans fewer than 20 dates is judged on the held-out test half, the forward
+rows as a check. A bar read on the window that selected a candidate is optimistic: success is
+claimed on later dates only. The live-gap-2 lane sends by league on KEEP
+([handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5).
 
 ### The rung book leg (`book_leg: "rung"`, X3)
 

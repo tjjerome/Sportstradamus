@@ -351,6 +351,13 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
   6. The dated reads of §6: the writer-fix read (no new exact-.5 rows) on dev after the 11-02 sync,
      the Monday tail scorecards, I6g NHL about 11-03 to 11-05, the Gate-2 30-day read 11-17. Each fix
      ships as it is proven; a version then holds four weeks for its live verdict.
+  7. Part C (2026-11-20 →; state in the lane folder's `partc/STATE.md`): the
+     [GBDT feature study](../gbdt_feature_study.md)'s fixes and inputs, the mean fit, and the two
+     §15 re-judgings, each judged by `ship priced` ([ship_gate.md](../ship_gate.md) "The priced-row
+     verdict"). A league sends once, on KEEP: each retrained cell that passes the gates, whose own
+     primary is not KILL, and that reads no worse than what production serves now (its served
+     pickle, or the book for a pulled cell). The owner moved training's book quote to each game's
+     start minus one hour (2026-11-20; its own push), so every league rebuilds before its send.
 
 ## 6. Live reads: what each verdict needs
 
