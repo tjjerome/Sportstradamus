@@ -208,6 +208,8 @@ def _table(*scopes: tuple[str, str, int, float, float]) -> pd.DataFrame:
         ([("p1_dmse", 25, -2.0, -0.5), ("toward_book", 25, 0.5, 1.0)], "KEEP"),
         # Too few dates in the primary's rows decide nothing, a would-be KILL included.
         ([("p1_dmse", ps.MIN_DATES - 1, 0.5, 2.0)], THIN),
+        # Nor does a thin kill statistic beside a primary that spans enough dates.
+        ([("p1_dmse", 25, -2.0, -0.5), ("p2_dbrier", ps.MIN_DATES - 1, 0.5, 3.0)], "KEEP"),
     ],
 )
 def test_league_verdict_truth_table(scopes, verdict):

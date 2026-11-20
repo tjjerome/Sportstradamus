@@ -23,8 +23,8 @@ Statistics, candidate minus baseline, each a mean over rows with a 95 % interval
 The verdict, fixed before any read: a league's primary statistic is ``p2_dbrier`` when its
 P2 rungs span ``MIN_DATES`` game dates, else ``p1_dmse``, and each cell reads its league's
 primary on its own rows. A scope whose primary spans fewer dates is NEUTRAL. Otherwise it is
-KILL when any judged statistic's interval lies wholly above zero, KEEP when the primary's
-lies wholly below, and NEUTRAL else.
+KILL when any judged statistic spanning ``MIN_DATES`` dates has its interval wholly above
+zero, KEEP when the primary's lies wholly below, and NEUTRAL else.
 """
 
 from __future__ import annotations
@@ -206,7 +206,9 @@ def _verdict(scope: pd.DataFrame) -> str:
     lead = scope[scope["primary"]]
     if lead.empty or lead["n_dates"].iat[0] < MIN_DATES:
         return f"NEUTRAL (fewer than {MIN_DATES} dates)"
-    if scope.loc[scope["statistic"].isin(JUDGED), "lo"].gt(0).any():
+    # A thin statistic's narrow interval would kill on noise, so it is reported, never judged.
+    judged = scope["statistic"].isin(JUDGED) & scope["n_dates"].ge(MIN_DATES)
+    if scope.loc[judged, "lo"].gt(0).any():
         return "KILL"
     return "KEEP" if lead["hi"].iat[0] < 0 else "NEUTRAL"
 
@@ -217,8 +219,8 @@ def judge(table: pd.DataFrame) -> pd.DataFrame:
     The primary is ``p2_dbrier`` where the league's pooled P2 rungs span ``MIN_DATES`` game
     dates, else ``p1_dmse``; a cell reads its league's primary. A scope's verdict is NEUTRAL
     under ``MIN_DATES`` dates in its primary's rows, else KILL when any ``JUDGED``
-    statistic's interval lies wholly above zero, KEEP when the primary's lies wholly below
-    zero, NEUTRAL otherwise.
+    statistic spanning ``MIN_DATES`` dates has its interval wholly above zero, KEEP when the
+    primary's lies wholly below zero, NEUTRAL otherwise.
     """
     pooled_p2 = table[table["cell"].eq(POOLED) & table["statistic"].eq("p2_dbrier")]
     p2_dates = table["league"].map(pooled_p2.set_index("league")["n_dates"])
