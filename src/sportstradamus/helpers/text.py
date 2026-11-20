@@ -33,11 +33,11 @@ MLB_FINISHED_STATES = MLB_FINAL_BOX_SCORE_STATES | {
     "Forfeit",
 }
 
-# Team abbreviation corrections applied by both DFS scrapers. PDX→POR makes
-# Portland's WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept
-# for Sleeper's wire format only — abbreviations.json now emits POR, so nothing
-# writes PDX into the archive; it used to, and every archived Portland total read
-# back as the league default.
+# Team abbreviation corrections applied by both DFS scrapers and the NBA/WNBA schedule
+# read (stats.base.fetch_upcoming_games), whose tricodes NOP and PDX need them. PDX→POR
+# makes Portland's WNBA team match the NBA code (Sleeper and the WNBA schedule use the
+# airport code PDX). abbreviations.json now emits POR, so nothing writes PDX into the
+# archive; it used to, and every archived Portland total read back as the league default.
 ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI", "PDX": "POR"}
 
 

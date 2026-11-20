@@ -13,11 +13,13 @@ from pathlib import Path
 import line_profiler
 import numpy as np
 import pandas as pd
+from nba_api.stats.endpoints import scheduleleaguev2
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.collectors.weather_capture import WEATHER_LEAGUES
 from sportstradamus.helpers import (
+    ABBR_MAP,
     LazyArchive,
     Scrape,
     book_weights,
@@ -51,9 +53,10 @@ from sportstradamus.helpers.training_quotes import (
     resolve_training_quote,
 )
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import weather_features
+from sportstradamus.stats import nba_client, weather_features
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE, load_model_dependency
+from sportstradamus.stats.nba_client import NBAStatsError
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
 # ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
@@ -119,6 +122,13 @@ SEASON_MAX_DAYS: int = 300
 # Three days covers today + tomorrow + day-after so late-night runs don't miss
 # next-day tip-offs, and an offer dated a day or two ahead finds its own game.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
+
+# The LeagueID and stats host each league's schedule is read from. WNBA goes to its own host
+# so the call spends that host's rate budget, not the NBA's (stats/nba_client.py).
+_SCHEDULE_SOURCES: dict[str, tuple[str, nba_client.StatsHost]] = {
+    "NBA": ("00", nba_client.NBA_HOST),
+    "WNBA": ("10", nba_client.WNBA_HOST),
+}
 
 # A "blowout" is a game lopsided enough to suppress a starter's volume. Each
 # threshold is the |implied spread| (own minus opponent implied total, league
@@ -431,47 +441,48 @@ def scale_team_volume_to_budget(
 
 
 def fetch_upcoming_games(
-    league_id: str, season: str | int, today: date
+    league: str, season: str | int, today: date
 ) -> tuple[dict[str, dict], dict[tuple[str, str], dict]]:
-    """Map each team to its next matchup, and to each matchup by day, from stats.nba.com.
+    """Map each team to its next matchup, and to each matchup by day, from the league schedule.
 
-    Scrapes the ``internationalbroadcasterschedule`` endpoint for ``today`` and
-    the next two days. Shared by the NBA and WNBA ``update`` paths, which differ
-    only in ``league_id`` ("00" vs "10") and the ``season`` value interpolated
-    into the URL. Returns ``{team_abbr: {"Opponent": str, "Home": bool}}`` keyed
-    by the first date a team is seen, then the same entries for every game seen,
-    keyed ``(team_abbr, "YYYY-MM-DD")`` by the day asked for.
+    Reads ``ScheduleLeagueV2``, which lists every game of the season. The broadcast
+    schedule read before it listed televised games only, so most home teams were served
+    as away. Shared by the NBA and WNBA ``update`` paths; ``season`` is the endpoint's
+    (``"2026-27"`` for the NBA, the year for the WNBA). Returns
+    ``{team_abbr: {"Opponent": str, "Home": bool}}`` for each team's first game from
+    ``today`` through the look-ahead window, then the same entries for every game in the
+    window, keyed ``(team_abbr, "YYYY-MM-DD")`` by the game's US Eastern date. Teams carry
+    the offers' codes (``ABBR_MAP``: the schedule's NOP and PDX are our NO and POR).
 
-    ``Scrape.get`` swallows network errors and returns ``{}`` on exhausted
-    retries, so an unavailable endpoint surfaces here as a ``KeyError`` while
-    indexing the empty response; that and the sibling ``IndexError`` /
-    ``TypeError`` from a malformed payload yield empty mappings. This is the
-    historical bare-except behavior, narrowed to the exceptions the block can
-    actually raise (§ E722).
+    A fetch that fails every retry leaves both maps empty, so the league's rows read as
+    away games instead of the league dropping off the board.
     """
+    league_id, host = _SCHEDULE_SOURCES[league]
+    try:
+        game_days = nba_client.fetch(
+            scheduleleaguev2.ScheduleLeagueV2, host=host, league_id=league_id, season=season
+        ).get_dict()["leagueSchedule"]["gameDates"]
+    except NBAStatsError:
+        logger.warning(f"{league} schedule unavailable: every {league} row reads as away")
+        return {}, {}
+
+    window = {
+        (today + timedelta(days=offset)).isoformat() for offset in range(_SCHEDULE_LOOKAHEAD_DAYS)
+    }
     upcoming_games: dict[str, dict] = {}
     games_by_date: dict[tuple[str, str], dict] = {}
-    try:
-        ug_res = []
-        for offset in range(_SCHEDULE_LOOKAHEAD_DAYS):
-            day = today + timedelta(days=offset)
-            ug_url = (
-                "https://stats.nba.com/stats/internationalbroadcasterschedule"
-                f"?LeagueID={league_id}&Season={season}&RegionID=1"
-                f"&Date={day.strftime('%m/%d/%Y')}&EST=Y"
-            )
-            day_games = scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
-            ug_res.extend((day.isoformat(), game) for game in day_games)
-
-        for day, game in ug_res:
-            away = {"Opponent": game["htAbbreviation"], "Home": False}
-            home = {"Opponent": game["vtAbbreviation"], "Home": True}
-            games_by_date[game["vtAbbreviation"], day] = away
-            games_by_date[game["htAbbreviation"], day] = home
-            upcoming_games.setdefault(game["vtAbbreviation"], away)
-            upcoming_games.setdefault(game["htAbbreviation"], home)
-    except (KeyError, IndexError, TypeError):
-        pass
+    # Game days come in date order, so the first game a team is seen in is its next one.
+    for game in (game for game_day in game_days for game in game_day["games"]):
+        day = game["gameDateEst"][:10]
+        home, away = game["homeTeam"]["teamTricode"], game["awayTeam"]["teamTricode"]
+        # A knockout game names no teams until its bracket settles (NBA Cup placeholders).
+        if day not in window or not (home and away):
+            continue
+        home, away = ABBR_MAP.get(home, home), ABBR_MAP.get(away, away)
+        games_by_date[home, day] = {"Opponent": away, "Home": True}
+        games_by_date[away, day] = {"Opponent": home, "Home": False}
+        upcoming_games.setdefault(home, games_by_date[home, day])
+        upcoming_games.setdefault(away, games_by_date[away, day])
     return upcoming_games, games_by_date
 
 

@@ -1,140 +1,127 @@
-"""Characterization test for the shared NBA/WNBA upcoming-games schedule scrape.
+"""The NBA/WNBA schedule read behind serve-time ``Home``: ``fetch_upcoming_games``.
 
-`fetch_upcoming_games` was extracted from a per-league block that lived
-near-byte-identical in StatsNBA.update and StatsWNBA.update (differing only in
-LeagueID 00 vs 10 and the season value). This test pins it against a verbatim
-reference copy of that block across a recorded internationalbroadcasterschedule
-response, the dedup precedence (first date seen wins), and the endpoint-failure
-path (``Scrape.get`` returns ``{}`` on exhausted retries, so indexing raises
-``KeyError`` and the loop yields no games). The reference keeps the old broad
-``except Exception`` so the narrowed ``(KeyError, IndexError, TypeError)`` catch
-in the extracted helper is proven equivalent on the realistic failure shape.
-
-The helper returns that next-game map first and, second, every game it saw under
-its own day: a later-dated offer reads its own game there.
+It reads ``ScheduleLeagueV2``, which lists every game of the season, through
+``nba_client.fetch``. The broadcast schedule it replaced listed televised games only, so
+most home teams were served as away. The stub answers in the live response's shape,
+trimmed to the keys the read uses: ``leagueSchedule.gameDates[].games[]``, each game with
+its US Eastern ``gameDateEst`` and each side's ``teamTricode``. Nothing here touches the
+network.
 """
 
-from copy import deepcopy
-from datetime import date, timedelta
-from urllib.parse import parse_qs, urlparse
+import logging
+from datetime import date
+from types import SimpleNamespace
 
 import pytest
+from nba_api.stats.endpoints import scheduleleaguev2
 
-from sportstradamus.stats import base
+from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import fetch_upcoming_games
+from sportstradamus.stats.nba_client import NBAStatsError
 
-_TODAY = date(2024, 12, 1)
-
-
-def _payload(games):
-    return {"resultSets": [{}, {"CompleteGameList": games}]}
+_TODAY = date(2026, 11, 20)
 
 
-def _old_inline(league_id, season, today):
-    """Verbatim copy of the pre-consolidation NBA/WNBA upcoming-games block."""
-    upcoming_games = {}
-    try:
-        ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID={league_id}&Season={season}&RegionID=1&Date={today.strftime('%m/%d/%Y')}&EST=Y"
-
-        ug_res = base.scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
-
-        next_day = today + timedelta(days=1)
-        ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID={league_id}&Season={season}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-        ug_res.extend(base.scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-        next_day = next_day + timedelta(days=1)
-        ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID={league_id}&Season={season}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-        ug_res.extend(base.scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-        for game in ug_res:
-            if game["vtAbbreviation"] not in upcoming_games:
-                upcoming_games[game["vtAbbreviation"]] = {
-                    "Opponent": game["htAbbreviation"],
-                    "Home": False,
-                }
-            if game["htAbbreviation"] not in upcoming_games:
-                upcoming_games[game["htAbbreviation"]] = {
-                    "Opponent": game["vtAbbreviation"],
-                    "Home": True,
-                }
-
-    except Exception:
-        pass
-    return upcoming_games
-
-
-def _install_scraper(monkeypatch, payloads_by_date):
-    """Stateless url->payload stub so the helper and the reference agree.
-
-    Each request gets its own copy, as a real one does: the reference extends the
-    first day's game list in place, which would leave later days' games in it.
-    """
-
-    def _get(url, *args, **kwargs):
-        date_str = parse_qs(urlparse(url).query)["Date"][0]
-        return deepcopy(payloads_by_date.get(date_str, {}))
-
-    monkeypatch.setattr(base.scraper, "get", _get)
-
-
-# BOS appears on date0 as away and date1 as home: first-seen (date0) must win.
-_RECORDED = {
-    "12/01/2024": _payload([{"vtAbbreviation": "BOS", "htAbbreviation": "NYK"}]),
-    "12/02/2024": _payload([{"vtAbbreviation": "LAL", "htAbbreviation": "BOS"}]),
-    "12/03/2024": _payload([{"vtAbbreviation": "MIA", "htAbbreviation": "LAL"}]),
-}
-
-_EXPECTED = {
-    "BOS": {"Opponent": "NYK", "Home": False},
-    "NYK": {"Opponent": "BOS", "Home": True},
-    "LAL": {"Opponent": "BOS", "Home": False},
-    "MIA": {"Opponent": "LAL", "Home": False},
-}
-
-
-@pytest.mark.parametrize(
-    ("league_id", "season"),
-    [("00", "2024"), ("10", 2024)],  # NBA passes a str slice, WNBA an int year
-)
-def test_matches_reference_and_expected(monkeypatch, league_id, season):
-    _install_scraper(monkeypatch, _RECORDED)
-    upcoming, _ = fetch_upcoming_games(league_id, season, _TODAY)
-    assert upcoming == _EXPECTED
-    assert upcoming == _old_inline(league_id, season, _TODAY)
-
-
-def test_every_game_is_also_listed_under_its_own_day(monkeypatch):
-    """BOS and LAL play twice in the window: the next-game map holds only their first."""
-    _install_scraper(monkeypatch, _RECORDED)
-    _, by_date = fetch_upcoming_games("00", "2024", _TODAY)
-    assert by_date == {
-        ("BOS", "2024-12-01"): {"Opponent": "NYK", "Home": False},
-        ("NYK", "2024-12-01"): {"Opponent": "BOS", "Home": True},
-        ("LAL", "2024-12-02"): {"Opponent": "BOS", "Home": False},
-        ("BOS", "2024-12-02"): {"Opponent": "LAL", "Home": True},
-        ("MIA", "2024-12-03"): {"Opponent": "LAL", "Home": False},
-        ("LAL", "2024-12-03"): {"Opponent": "MIA", "Home": True},
+def _game(day: str, away: str | None, home: str | None) -> dict:
+    return {
+        "gameDateEst": f"{day}T00:00:00Z",
+        "awayTeam": {"teamTricode": away},
+        "homeTeam": {"teamTricode": home},
     }
 
 
-def test_endpoint_failure_yields_empty(monkeypatch):
-    # Scrape.get returns {} after exhausting retries -> ["resultSets"] KeyErrors.
-    _install_scraper(monkeypatch, {})
-    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})
-    assert _old_inline("00", "2024", _TODAY) == {}
+def _schedule(*games: dict) -> dict:
+    """The live payload: each day's games grouped under it, days in date order."""
+    days: dict[str, list[dict]] = {}
+    for game in games:
+        days.setdefault(game["gameDateEst"][:10], []).append(game)
+    return {"leagueSchedule": {"gameDates": [{"games": games} for games in days.values()]}}
 
 
-def test_partial_fetch_failure_yields_empty(monkeypatch):
-    # First date succeeds, second returns {}: mid-fetch KeyError aborts before the
-    # game loop, so no games are recorded -- matching the old single-try block.
-    partial = {"12/01/2024": _RECORDED["12/01/2024"]}
-    _install_scraper(monkeypatch, partial)
-    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})
-    assert _old_inline("00", "2024", _TODAY) == {}
+# Yesterday and the day after the window bracket its three days. OKC plays twice inside it,
+# New Orleans comes as the schedule's NOP, and an NBA Cup placeholder names no teams yet.
+_NBA_SCHEDULE = _schedule(
+    _game("2026-11-19", "BOS", "NYK"),
+    _game("2026-11-20", "NOP", "OKC"),
+    _game("2026-11-21", "LAL", "BOS"),
+    _game("2026-11-22", "OKC", "MIA"),
+    _game("2026-11-22", None, None),
+    _game("2026-11-23", "LAL", "OKC"),
+)
+# Portland comes as the schedule's PDX.
+_WNBA_SCHEDULE = _schedule(_game("2026-11-20", "PDX", "SEA"))
 
 
-def test_empty_game_list_yields_empty(monkeypatch):
-    _install_scraper(monkeypatch, dict.fromkeys(_RECORDED, _payload([])))
-    assert fetch_upcoming_games("00", "2024", _TODAY) == ({}, {})
+@pytest.fixture
+def schedule_calls(monkeypatch) -> list[tuple]:
+    """Answer ``nba_client.fetch`` with the asked league's schedule; record each call."""
+    calls = []
+    payloads = {"00": _NBA_SCHEDULE, "10": _WNBA_SCHEDULE}
+
+    def fetch(endpoint_cls, *, host, **params):
+        calls.append((endpoint_cls, host, params))
+        return SimpleNamespace(get_dict=lambda: payloads[params["league_id"]])
+
+    monkeypatch.setattr(nba_client, "fetch", fetch)
+    return calls
+
+
+def test_every_game_in_the_window_lists_both_teams(schedule_calls):
+    _, by_date = fetch_upcoming_games("NBA", "2026-27", _TODAY)
+
+    assert by_date == {
+        ("OKC", "2026-11-20"): {"Opponent": "NO", "Home": True},
+        ("NO", "2026-11-20"): {"Opponent": "OKC", "Home": False},
+        ("BOS", "2026-11-21"): {"Opponent": "LAL", "Home": True},
+        ("LAL", "2026-11-21"): {"Opponent": "BOS", "Home": False},
+        ("MIA", "2026-11-22"): {"Opponent": "OKC", "Home": True},
+        ("OKC", "2026-11-22"): {"Opponent": "MIA", "Home": False},
+    }
+
+
+def test_a_teams_first_game_in_the_window_is_its_next_game(schedule_calls):
+    upcoming, _ = fetch_upcoming_games("NBA", "2026-27", _TODAY)
+
+    # OKC's home game today wins over its road game in two days; BOS and LAL keep their
+    # game inside the window, not yesterday's or the one past it.
+    assert upcoming == {
+        "OKC": {"Opponent": "NO", "Home": True},
+        "NO": {"Opponent": "OKC", "Home": False},
+        "BOS": {"Opponent": "LAL", "Home": True},
+        "LAL": {"Opponent": "BOS", "Home": False},
+        "MIA": {"Opponent": "OKC", "Home": True},
+    }
+
+
+@pytest.mark.parametrize(
+    ("league", "season", "league_id", "host"),
+    [("NBA", "2026-27", "00", nba_client.NBA_HOST), ("WNBA", 2026, "10", nba_client.WNBA_HOST)],
+)
+def test_each_league_reads_its_own_schedule_on_its_own_host(
+    schedule_calls, league, season, league_id, host
+):
+    fetch_upcoming_games(league, season, _TODAY)
+
+    assert schedule_calls == [
+        (scheduleleaguev2.ScheduleLeagueV2, host, {"league_id": league_id, "season": season})
+    ]
+
+
+def test_wnba_teams_carry_the_offers_codes(schedule_calls):
+    upcoming, _ = fetch_upcoming_games("WNBA", 2026, _TODAY)
+
+    assert upcoming == {
+        "SEA": {"Opponent": "POR", "Home": True},
+        "POR": {"Opponent": "SEA", "Home": False},
+    }
+
+
+def test_failed_fetch_leaves_both_maps_empty(monkeypatch, caplog):
+    def fail(*_args, **_kwargs):
+        raise NBAStatsError("ScheduleLeagueV2 failed after 5 attempts")
+
+    monkeypatch.setattr(nba_client, "fetch", fail)
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert fetch_upcoming_games("NBA", "2026-27", _TODAY) == ({}, {})
+
+    assert "NBA schedule unavailable" in caplog.text
