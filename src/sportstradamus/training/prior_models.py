@@ -11,20 +11,43 @@ set. The copies are flat files, not per-version folders: one glob per folder pru
 shared name joins a test set to its pickle, and no ``*.csv`` glob matches a ``.csv.gz``. Nothing
 serves from either ``prior/``, and ``scripts/sync_to_prod.sh`` sends neither, so the copies stay
 on the box that trained them.
+
+A withheld cell stops training, so :func:`retire_test_set` moves its last test set into the same
+``prior/`` rather than leave it among the current dumps.
 """
 
 import gzip
+import importlib.resources as pkg_resources
 import pickle
 import shutil
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sportstradamus.helpers.io import MODELS_DIR, resolve_model_version
+from sportstradamus import data
+from sportstradamus.helpers.io import (
+    MODELS_DIR,
+    VOLUME_STATS,
+    market_file_slug,
+    model_pickle_path,
+    resolve_model_version,
+)
 
 # Days a superseded model file and its test set are kept: a season, so each served
 # Model Version can be re-scored offline with its own model file and its own test set.
 PRIOR_MODEL_RETENTION_DAYS = 400
+# Stamp for a test set kept after its model file is gone: the CSV's own modification time in UTC.
+# The date leads, as in a model version, so a cell's copies still sort by date; ``mtime`` in the
+# middle field says the stamp came from the file, not a model.
+MTIME_STAMP_FORMAT = "%Y%m%d.mtime.%H%M%S"
+
+
+def _gzip_to_prior(test_set_path: Path, stamp: str) -> None:
+    prior_dir = test_set_path.parent / "prior"
+    prior_dir.mkdir(exist_ok=True)
+    kept = prior_dir / f"{test_set_path.stem}__{stamp}.csv.gz"
+    with test_set_path.open("rb") as infile, gzip.open(kept, "wb") as outfile:
+        shutil.copyfileobj(infile, outfile)
 
 
 def keep_prior_model(model_path: Path, test_set_path: Path) -> None:
@@ -56,13 +79,42 @@ def keep_prior_model(model_path: Path, test_set_path: Path) -> None:
     model_prior_dir = model_path.parent / "prior"
     model_prior_dir.mkdir(exist_ok=True)
     shutil.copyfile(model_path, model_prior_dir / f"{model_path.stem}__{version}.mdl")
-    test_set_prior_dir = test_set_path.parent / "prior"
     if test_set_path.is_file():
-        test_set_prior_dir.mkdir(exist_ok=True)
-        kept_test_set = test_set_prior_dir / f"{test_set_path.stem}__{version}.csv.gz"
-        with test_set_path.open("rb") as infile, gzip.open(kept_test_set, "wb") as outfile:
-            shutil.copyfileobj(infile, outfile)
+        _gzip_to_prior(test_set_path, version)
     cutoff = time.time() - timedelta(days=PRIOR_MODEL_RETENTION_DAYS).total_seconds()
+    test_set_prior_dir = test_set_path.parent / "prior"
     for prior in [*model_prior_dir.glob("*.mdl"), *test_set_prior_dir.glob("*.csv.gz")]:
         if prior.stat().st_mtime < cutoff:
             prior.unlink()
+
+
+def retire_test_set(league: str, market: str) -> bool:
+    """Move a withheld cell's test set out of ``data/test_sets/`` into its ``prior/``, gzipped.
+
+    ``meditate`` no longer trains the cell, so its last test set would sit among the fresh dumps
+    and any reader that globs ``test_sets/*.csv`` would mix eras. While the cell's model file is
+    still on disk, :func:`keep_prior_model` keeps the pair under the model's version stamp, so
+    call this before ``prune_model_pickle`` deletes the model. Once the model is gone, the copy
+    is stamped from the CSV's own modification time (:data:`MTIME_STAMP_FORMAT`).
+
+    A volume denominator (``VOLUME_STATS``) keeps its test set: ``prune_model_pickle`` keeps its
+    model on disk, and the test set stays that model's pair for ``report`` and the next
+    retrain's :func:`keep_prior_model`.
+
+    Returns:
+        ``True`` if a test set left ``data/test_sets/``.
+    """
+    if market in VOLUME_STATS[league]:
+        return False
+    model_path = model_pickle_path(league, market)
+    test_set_path = Path(str(pkg_resources.files(data) / "test_sets")) / (
+        f"{market_file_slug(league, market)}.csv"
+    )
+    if model_path.is_file():
+        keep_prior_model(model_path, test_set_path)
+    elif test_set_path.is_file():
+        modified = datetime.fromtimestamp(test_set_path.stat().st_mtime, UTC)
+        _gzip_to_prior(test_set_path, modified.strftime(MTIME_STAMP_FORMAT))
+    retired = test_set_path.is_file()
+    test_set_path.unlink(missing_ok=True)
+    return retired

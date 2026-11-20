@@ -6,7 +6,9 @@ outgoing test set to ``test_sets/prior/``, both under the ``Model Version`` it s
 legs. These pins hold what the offline re-serve depends on: one prior model and test set per
 version stamp (through a confirm walk's retries too), a test-set copy that holds the outgoing
 CSV, nothing kept for a first save or a sandbox output, a prune that counts from the day a model
-was superseded, and a ``prior/`` directory the served-model scan never reads.
+was superseded, and a ``prior/`` directory the served-model scan never reads. A withheld cell's
+test set leaves ``test_sets/`` for the same ``prior/``, stamped by its model while one is on disk
+and by the file's own date once none is, except a volume denominator's, whose model stays served.
 """
 
 from __future__ import annotations
@@ -18,12 +20,13 @@ import os
 import pickle
 import shutil
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import io as helpers_io
 from sportstradamus.helpers.io import resolve_model_version
 from sportstradamus.training import pipeline as pipe
 from sportstradamus.training import prior_models
@@ -35,14 +38,17 @@ report_module = importlib.import_module("sportstradamus.training.report")
 
 OUTGOING = "20260917.none.aaaaaaaa"
 INCOMING = "20260924.none.bbbbbbbb"
+WITHHELD_CSV = b"P,Result\n0.4,1.0\n"
 
 
 @pytest.fixture
 def models_dir(monkeypatch, tmp_path):
     """``tmp_path/models`` as the canonical models dir, for the save site and the store alike."""
-    # pipeline and report resolve the package data dir through this at call time.
+    # pipeline, report and retire_test_set resolve the package data dir through this at call time.
     monkeypatch.setattr(pkg_resources, "files", lambda _package: tmp_path)
     monkeypatch.setattr(prior_models, "MODELS_DIR", tmp_path / "models")
+    # model_pickle_path, which retire_test_set finds the served model through, reads its own.
+    monkeypatch.setattr(helpers_io, "MODELS_DIR", tmp_path / "models")
     (tmp_path / "models").mkdir()
     return tmp_path / "models"
 
@@ -210,6 +216,54 @@ def test_confirm_walk_retries_keep_one_file_per_version_stamp(models_dir, tmp_pa
     assert kept == [f"NBA_PTS__{OUTGOING}.mdl"]
     kept_test_sets = [path.name for path in (test_set.parent / "prior").iterdir()]
     assert kept_test_sets == [f"NBA_PTS__{OUTGOING}.csv.gz"]
+
+
+def _dump_test_set(models_dir, cell: str):
+    test_set = models_dir.parent / "test_sets" / f"{cell}.csv"
+    test_set.parent.mkdir()
+    test_set.write_bytes(WITHHELD_CSV)
+    return test_set
+
+
+def test_withheld_test_set_leaves_under_its_model_version(models_dir):
+    served = models_dir / "NBA_PTS.mdl"
+    served.write_bytes(pickle.dumps({"model_version": OUTGOING}))
+    test_set = _dump_test_set(models_dir, "NBA_PTS")
+
+    assert prior_models.retire_test_set("NBA", "PTS")
+
+    assert not test_set.exists()
+    kept = list((test_set.parent / "prior").iterdir())
+    assert [path.name for path in kept] == [f"NBA_PTS__{OUTGOING}.csv.gz"]
+    assert gzip.decompress(kept[0].read_bytes()) == WITHHELD_CSV
+    # Its model keeps the same stamp; deleting the served file is prune_model_pickle's job.
+    assert [path.name for path in (models_dir / "prior").iterdir()] == [f"NBA_PTS__{OUTGOING}.mdl"]
+    assert served.is_file()
+
+
+def test_withheld_test_set_without_a_model_is_stamped_by_its_own_date(models_dir):
+    test_set = _dump_test_set(models_dir, "NBA_PTS")
+    written = datetime(2026, 10, 18, 14, 30, 12, tzinfo=UTC).timestamp()
+    os.utime(test_set, (written, written))
+
+    assert prior_models.retire_test_set("NBA", "PTS")
+
+    assert not test_set.exists()
+    kept = list((test_set.parent / "prior").iterdir())
+    assert [path.name for path in kept] == ["NBA_PTS__20261018.mtime.143012.csv.gz"]
+    assert gzip.decompress(kept[0].read_bytes()) == WITHHELD_CSV
+    assert not (models_dir / "prior").exists()
+
+
+def test_withheld_volume_denominator_keeps_its_test_set(models_dir):
+    # NBA MIN projects the league's other cells' volume, so its model stays on disk and served.
+    (models_dir / "NBA_MIN.mdl").write_bytes(pickle.dumps({"model_version": OUTGOING}))
+    test_set = _dump_test_set(models_dir, "NBA_MIN")
+
+    assert not prior_models.retire_test_set("NBA", "MIN")
+
+    assert test_set.read_bytes() == WITHHELD_CSV
+    assert not list(models_dir.parent.rglob("prior"))
 
 
 def test_report_reads_served_models_only(models_dir, monkeypatch):

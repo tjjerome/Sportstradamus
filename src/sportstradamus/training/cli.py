@@ -34,6 +34,7 @@ from sportstradamus.training.pipeline import (
     train_market,
 )
 from sportstradamus.training.posthoc import POSTHOC_SLUGS, STRUCTURAL_STAGE
+from sportstradamus.training.prior_models import retire_test_set
 from sportstradamus.training.report import report
 from sportstradamus.training.scorecard import _SHIP_GATES
 from sportstradamus.training.ship_config import (
@@ -601,7 +602,7 @@ def meditate(
 
     # Per-cell ship config (data/config/stat_meta.json) governs which markets
     # train with which strategy and which are withheld (matrix kept warm,
-    # training skipped, pickle pruned).
+    # training skipped, pickle pruned, test set moved to test_sets/prior/).
     # Validated here so a bad entry fails before the expensive gamelog loads
     # below. Deterministic A/B runs ignore it: they target an explicit
     # --market with an explicit --target-normalization and must never mutate
@@ -738,10 +739,14 @@ def meditate(
                         dependency_root=dependency_root,
                         dependency_namespace=dependency_namespace,
                     )
+                    # Before the prune: the outgoing pickle stamps the kept test set.
+                    retired = retire_test_set(lg, market)
                     pruned = prune_model_pickle(lg, market)
                     click.echo(
                         f"[{lg}] {market}: withheld — matrix refreshed, "
-                        f"{'pruned pickle' if pruned else 'no pickle pruned'}, skipped training"
+                        f"{'pruned pickle' if pruned else 'no pickle pruned'}, "
+                        f"{'test set moved to prior/' if retired else 'no test set moved'}, "
+                        "skipped training"
                     )
                     continue
             if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:

@@ -1,6 +1,6 @@
 """Golden guards for distribution-aware normalization at the meditate boundary."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from click.testing import CliRunner
@@ -91,10 +91,14 @@ def test_cli_target_normalization_matches_effective_family_contract(
 
 
 @pytest.mark.parametrize(
-    ("pruned", "phrase"), [(True, "pruned pickle"), (False, "no pickle pruned")]
+    ("found", "phrases"),
+    [
+        (True, ("pruned pickle", "test set moved to prior/")),
+        (False, ("no pickle pruned", "no test set moved")),
+    ],
 )
 def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(
-    monkeypatch, tmp_path, pruned, phrase
+    monkeypatch, tmp_path, found, phrases
 ):
     """A withheld cell (no bypass) still builds its matrix — only the fit is skipped."""
     train_market = _scaffold_meditate(
@@ -103,8 +107,11 @@ def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(
         configured_target=WITHHELD,
         cell_meta={"dist": "DPO", "shipped": "withheld"},
     )
-    prune = MagicMock(return_value=pruned)
-    monkeypatch.setattr(training_cli, "prune_model_pickle", prune)
+    cleanup = MagicMock()
+    cleanup.retire.return_value = found
+    cleanup.prune.return_value = found
+    monkeypatch.setattr(training_cli, "retire_test_set", cleanup.retire)
+    monkeypatch.setattr(training_cli, "prune_model_pickle", cleanup.prune)
 
     result = CliRunner().invoke(
         training_cli.meditate, ["--league", "NFL", "--market", "passing tds"]
@@ -114,6 +121,11 @@ def test_cli_withheld_cell_refreshes_matrix_prunes_pickle_skips_training(
     train_market.assert_called_once()
     assert train_market.call_args.kwargs["matrix_only"] is True
     assert "target_normalization" not in train_market.call_args.kwargs
-    prune.assert_called_once_with("NFL", "passing tds")
+    # The outgoing pickle stamps the kept test set, so the test set moves before the prune.
+    assert cleanup.mock_calls == [
+        call.retire("NFL", "passing tds"),
+        call.prune("NFL", "passing tds"),
+    ]
     assert "withheld — matrix refreshed" in result.output
-    assert phrase in result.output
+    for phrase in phrases:
+        assert phrase in result.output
