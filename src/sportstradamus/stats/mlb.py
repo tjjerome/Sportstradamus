@@ -372,6 +372,11 @@ class StatsMLB(Stats):
         # update() replaces this with the probable-pitcher table; empty keeps
         # quote-time team lookups safe on load()-only instances.
         self.upcoming_games = {}
+        # Where get_depth's last upcoming call took each player's slot: "posted" (his game's
+        # batting order) or "fallback" (his modal recent slot). The feature log records it, so
+        # the slot can be trained on rows whose serve-time lineup is known; it stays off
+        # playerProfile, whose columns can become model inputs.
+        self.lineup_source: dict[str, str] = {}
         self._sp_win_curve = None  # lazy (a, b) SP-win logit map; () = use the bucket table
 
     def _join_fp_player_features(self, date):
@@ -1603,11 +1608,13 @@ class StatsMLB(Stats):
         else:
             dates = earliest_game_dates(offers)
             depth = {}
+            self.lineup_source = {}
             for player in list(players):
                 order = self.upcoming_game(teams[player], dates[player]).get("Batting Order", [])
 
                 if player in order:
                     depth[player] = order.index(player) + 1
+                    self.lineup_source[player] = "posted"
                 else:
                     mode = self.short_gamelog.loc[
                         self.short_gamelog["playerName"] == player, "battingOrder"
@@ -1616,5 +1623,6 @@ class StatsMLB(Stats):
                         continue
 
                     depth[player] = int(mode.iloc[-1])
+                    self.lineup_source[player] = "fallback"
 
             self.playerProfile["depth"] = depth

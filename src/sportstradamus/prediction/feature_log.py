@@ -26,6 +26,10 @@ pickle, the committed ``stat_meta`` book shapes and the offer's line:
 * The model's per-player outputs before the book blend or any offer line: the raw
   distribution parameters and their decoded ``Projection`` / ``Model *`` columns.
 * ``Opponent Pitcher`` (MLB only): the probable starter the features were built on.
+* ``Lineup Source`` (MLB only): where ``StatsMLB.get_depth`` took the player's batting
+  slot, ``posted`` (his game's posted order) or ``fallback`` (his usual slot); blank when
+  he had neither. The game log keeps only the realized slot, so this is the record of
+  which served rows knew the lineup.
 """
 
 from __future__ import annotations
@@ -81,7 +85,8 @@ def upsert_feature_log(
         platform: DFS platform the offers came from.
         offers: The market's raw offers. They give each player's game date (his
             earliest, as in ``model_prob``) and, for MLB, team.
-        stat_data: The league's ``Stats``, read only for MLB's probable pitchers.
+        stat_data: The league's ``Stats``, read only for MLB's probable pitchers and
+            lineup sources.
         player_stats: Player-indexed frame fed to the model, with the book-leg columns
             ``model_prob`` adds.
         prob_params: Player-indexed model outputs, raw and decoded.
@@ -119,6 +124,7 @@ def upsert_feature_log(
             )
             for player in rows.index
         ]
+        rows["Lineup Source"] = [stat_data.lineup_source.get(player) for player in rows.index]
     rows = rows.join(player_stats).join(prob_params).dropna(subset=["Date"])
 
     slug = market_file_slug(league, market)

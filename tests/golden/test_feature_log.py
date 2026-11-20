@@ -31,7 +31,7 @@ from sportstradamus.prediction.feature_log import (
     upsert_feature_log,
 )
 from sportstradamus.scripts import feature_parity
-from sportstradamus.stats.base import Stats
+from sportstradamus.stats.mlb import StatsMLB
 
 # The package __init__ re-exports the model_prob *function*, shadowing the submodule.
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
@@ -182,7 +182,7 @@ def test_book_leg_columns_follow_each_rows_quote(log_dir):
 
 def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_team(log_dir):
     offers = [*_offers(["A"], team="NYY"), *_offers(["B"], team="SEA")]
-    upcoming = Stats()
+    upcoming = StatsMLB()
     upcoming.upcoming_games = {"NYY": {"Opponent Pitcher": "Logan Gilbert"}}
     _upsert(
         _features({"A": 1.0, "B": 2.0}),
@@ -208,7 +208,7 @@ def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_own_game_date(log_dir):
         *_offers(["B"], date=tomorrow, team="NYY"),
         *_offers(["C"], date=tomorrow, team="SEA"),
     ]
-    schedule = Stats()
+    schedule = StatsMLB()
     schedule.upcoming_games = {"NYY": {"Opponent Pitcher": "Today Arm"}}
     schedule.upcoming_games_by_date = {
         ("NYY", _DATE): {"Opponent Pitcher": "Today Arm"},
@@ -226,6 +226,38 @@ def test_mlb_rows_carry_the_probable_pitcher_of_the_legs_own_game_date(log_dir):
     assert _read(log_dir, "MLB_hits")["Opponent Pitcher"].tolist() == ["Today Arm"]
     later = _read(log_dir, "MLB_hits", date=tomorrow).set_index("Player")["Opponent Pitcher"]
     assert later.to_dict() == {"B": "Tomorrow Arm", "C": "Sea Arm"}
+
+
+def test_mlb_rows_carry_where_get_depth_took_the_batting_slot(log_dir):
+    """A hitter in his game's posted order is ``posted`` and one placed at his usual slot
+    ``fallback``; a hitter with neither gets no slot and a blank source.
+    """
+    # get_depth reads a posted lineup only for a game from today on.
+    game_date = datetime.date(2099, 7, 1)
+    stats = StatsMLB()
+    # A profile already built for the date, so get_depth's base_profile keeps it.
+    stats.profile_latest_date = game_date
+    stats.playerProfile = pd.DataFrame(index=["Posted", "Usual", "New"])
+    stats.short_gamelog = pd.DataFrame({"playerName": ["Usual"] * 3, "battingOrder": [6, 6, 2]})
+    stats.upcoming_games = {"NYY": {"Batting Order": ["Leadoff", "Posted"]}}
+    offers = _offers(["Posted", "Usual", "New"], date=game_date.isoformat(), team="NYY")
+
+    stats.get_depth(offers, game_date)
+    _upsert(
+        _features({"Posted": 1.0, "Usual": 2.0, "New": 3.0}),
+        league="MLB",
+        market="hits",
+        offers=offers,
+        stat_data=stats,
+    )
+
+    assert stats.playerProfile["depth"].dropna().to_dict() == {"Posted": 2, "Usual": 6}
+    logged = _read(log_dir, "MLB_hits", date=game_date.isoformat()).set_index("Player")
+    assert logged["Lineup Source"].to_dict() == {
+        "Posted": "posted",
+        "Usual": "fallback",
+        "New": None,
+    }
 
 
 def test_prune_removes_only_partitions_past_retention(log_dir):
