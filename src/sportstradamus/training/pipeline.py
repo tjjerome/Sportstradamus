@@ -109,6 +109,7 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     validate_strategy_selection,
 )
+from sportstradamus.training.plain_baseline import fit_plain_baseline
 from sportstradamus.training.prior_models import keep_prior_model
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
@@ -2603,6 +2604,7 @@ def _step_persist_artifacts(
     prob_params: pd.DataFrame,
     decoded: dict,
     weighted_mean: np.ndarray,
+    plain_mean: np.ndarray,
     y_proba_filt: np.ndarray,
     y_proba_raw: np.ndarray,
     dist: str,
@@ -2652,6 +2654,9 @@ def _step_persist_artifacts(
     # (1/2/3/6) read that. The served shape columns below retain their separately
     # calibrated dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
+    # training/plain_baseline.py's squared-error mean, for offline reads beside EV; nothing
+    # serves, calibrates or gates on it.
+    X_test["Plain"] = plain_mean
     # Pre-blend probe inputs: with the book base mean and the model-only shape in absolute
     # EV space, an offline pass re-runs fused_loc at any weight instead of inverting the
     # served pool. _stage_family_shape_columns stays the served-shape contract.
@@ -5128,6 +5133,12 @@ def train_market(
             "training_cutoff": pd.to_datetime(M["Date"]).max().date().isoformat(),
             "matrix_sha256": matrix_hash,
         }
+    # Zero-adjusted families keep the gate out of EV; reapplied, EV is the model's own mean of
+    # the zero-inclusive outcome, the scale the plain regression predicts on.
+    plain = fit_plain_baseline(
+        splits, M["Date"], _zero_inflated_outcome_mean(decoded["ev"], dist, decoded["gate_test"])
+    )
+    filedict["diagnostics"].update(plain.diagnostics)
 
     _step_persist_artifacts(
         filedict=filedict,
@@ -5135,6 +5146,7 @@ def train_market(
         prob_params=prob_params,
         decoded=decoded,
         weighted_mean=served_weighted_mean,
+        plain_mean=plain.predictions,
         y_proba_filt=y_proba_filt,
         y_proba_raw=y_proba_raw,
         dist=dist,

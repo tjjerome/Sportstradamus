@@ -115,6 +115,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     sources = ["book_direct", "book_redecoded"] * (reps - 1) + ["book_direct", "neutral_fallback"]
     book_ev = np.tile(SERVED_MEAN, reps)
     served_mean = book_ev + 0.5
+    plain_mean = book_ev + 0.25
     preblend_r = np.tile(PREBLEND_R, reps)
     splits = {
         "X_test": pd.DataFrame({"MeanYr": np.tile([3.0, 8.0], reps)}, index=index),
@@ -159,6 +160,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         prob_params=pd.concat([_raw_params()] * reps).set_axis(index),
         decoded={"ev": np.tile([2.0, 7.0], reps), "r": preblend_r},
         weighted_mean=served_mean,
+        plain_mean=plain_mean,
         y_proba_filt=np.column_stack([1.0 - model_over, model_over]),
         y_proba_raw=np.column_stack([1.0 - model_over, model_over]),
         dist="NegBin",
@@ -185,6 +187,8 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     assert not np.array_equal(persisted["Book_EV"], persisted["EV"])
     np.testing.assert_allclose(persisted["R_model"], preblend_r)
     assert not np.array_equal(persisted["R_model"], persisted["R"])
+    # The plain baseline's mean rides beside EV for offline reads.
+    np.testing.assert_allclose(persisted["Plain"], plain_mean)
     assert persisted["QuoteAuthenticity"].tolist() == authenticity
     assert persisted["QuoteSource"].tolist() == sources
     brier_inputs = _brier_inputs(persisted)

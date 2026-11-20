@@ -60,6 +60,7 @@ def _save_model(model_version: str, *, deterministic=False, artifact_output=None
         prob_params=pd.DataFrame({"concentration": [2.0, 3.0]}),
         decoded={"ev": np.array([2.0, 7.0])},
         weighted_mean=np.array([2.2, 7.4]),
+        plain_mean=np.array([2.1, 7.2]),
         y_proba_filt=np.full((2, 2), 0.5),
         y_proba_raw=np.full((2, 2), 0.5),
         dist="Gamma",

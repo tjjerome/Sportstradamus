@@ -81,6 +81,9 @@ def _make_model(*, with_book: bool = True, brier: float = 0.197) -> dict:
             "model_ev": 220.0,
             "mean_line": 215.0,
             "result_mean": 218.0,
+            "plain_mse_ratio": 0.97,
+            "plain_mse_ratio_priced": 0.98,
+            "plain_rounds": 612,
         },
         "params": {
             "opt_rounds": 100,
@@ -139,6 +142,9 @@ def test_writes_one_row_per_cell(patched_paths):
     assert row["historical_zero_rate"] == pytest.approx(0.01)
     assert row["hp_rounds"] == pytest.approx(100)
     assert row["hp_leaves"] == pytest.approx(31)
+    assert row["plain_mse_ratio"] == pytest.approx(0.97)
+    assert row["plain_mse_ratio_priced"] == pytest.approx(0.98)
+    assert row["plain_rounds"] == pytest.approx(612)
     # Ship-gate columns are populated by training.scorecard.compute_gates;
     # at write time they're NaN / pd.NA.
     assert math.isnan(row["ece_equal_mass"])
@@ -176,6 +182,18 @@ def test_missing_book_baseline_nans(patched_paths):
     assert math.isnan(row["kelly_shrinkage"])
     # Model-side metrics still populate.
     assert row["brier_model"] == pytest.approx(0.197)
+
+
+def test_pickle_trained_before_the_plain_baseline_reads_nan(patched_paths):
+    """Every pickle on disk before the plain baseline lacks its keys; report must not choke."""
+    model = _make_model()
+    for key in ("plain_mse_ratio", "plain_mse_ratio_priced", "plain_rounds"):
+        del model["diagnostics"][key]
+    write_model_stats({"NFL": {"m": model}}, {}, {})
+    row = pd.read_parquet(patched_paths[0]).iloc[0]
+    assert math.isnan(row["plain_mse_ratio"])
+    assert math.isnan(row["plain_mse_ratio_priced"])
+    assert math.isnan(row["plain_rounds"])
 
 
 def test_default_shipped_is_withheld(patched_paths):

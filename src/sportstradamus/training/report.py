@@ -268,6 +268,10 @@ def _wide_row(
         "mean_ev_diff": _diag("ev_minus_line"),
         "median_ev_diff": _diag("median_ev_diff"),
         "frac_ev_gt_line": _diag("frac_ev_gt_line"),
+        # Plain baseline (training/plain_baseline.py); NaN for a pickle trained before it.
+        "plain_mse_ratio": _diag("plain_mse_ratio"),
+        "plain_mse_ratio_priced": _diag("plain_mse_ratio_priced"),
+        "plain_rounds": _diag("plain_rounds"),
         # Kelly & blending
         "kelly_shrinkage": _safe_float(metrics_block.get("kelly_shrinkage")),
         "model_weight": _diag("model_weight"),
