@@ -30,7 +30,12 @@ from sportstradamus.stats.base import (
     scraper,
 )
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
-from sportstradamus.stats.nhl_reports import WINDOW_DAYS, fill_report_columns, game_player_key
+from sportstradamus.stats.nhl_reports import (
+    REPORT_COLUMNS,
+    WINDOW_DAYS,
+    fill_report_columns,
+    game_player_key,
+)
 
 # DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
 # are carried as separate shots/blocked components because those are distinct book
@@ -83,6 +88,15 @@ SEASON_SUM_COLUMNS = {
     "reboundsAgainst": "OnIce_A_rebounds",
     "xReboundsAgainst": "OnIce_A_xRebounds",
 }
+# Per-game counts a skater profile also reads per 60 minutes on ice, as Shot60 reads shots.
+_PER_60_COUNTS = (
+    "shotAttempts",
+    "xGoals",
+    "powerPlayTimeOnIce",
+    "shortHandedTimeOnIce",
+    "faceOffsTaken",
+    "powerPlayShots",
+)
 # The season summary a comp profile mirrors counts regular-season games only.
 _REGULAR_SEASON_GAME_TYPE: int = 2
 # Props are posted on regular-season (02) and playoff (03) games. The schedule also lists
@@ -160,6 +174,9 @@ class StatsNHL(Stats):
                 "Blk60",
                 "Hit60",
                 "Ast60",
+                *_PER_60_COUNTS,
+                *(f"{count}60" for count in _PER_60_COUNTS),
+                "powerPlayShare",
             ],
             "goalie": ["SV", "SOE", "goalsAgainst", "Freeze", "Rebound", "RG"],
         }
@@ -247,6 +264,21 @@ class StatsNHL(Stats):
         allowed = allowed_nhl_positions(market)
         position = gamelog[self.log_strings["position"]].astype("string")
         return gamelog.loc[position.isin(allowed)].copy()
+
+    def window_short_logs(self, date):
+        """The base window, with each ``_PER_60_COUNTS`` count per 60 minutes on ice.
+
+        Rated here from the stored counts, so a training row and a served one read one
+        definition, and a count the stats service filled after its game was logged is rated
+        too. A gamelog the service has not filled yet holds no ``REPORT_COLUMNS``; they read
+        blank, so the profile keeps the same columns before the fill and after it.
+        """
+        super().window_short_logs(date)
+        window = self.short_gamelog.reindex(
+            columns=self.short_gamelog.columns.union(REPORT_COLUMNS, sort=False)
+        )
+        per_60 = window[list(_PER_60_COUNTS)].mul(60).div(window["timeOnIce"], axis=0)
+        self.short_gamelog = window.join(per_60.add_suffix("60"))
 
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.
