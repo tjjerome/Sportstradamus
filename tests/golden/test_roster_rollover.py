@@ -216,7 +216,7 @@ def test_a_blocked_nhl_roster_pull_keeps_the_rows_the_season_holds(monkeypatch):
     monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: None)
     stats = StatsNHL()
     stats.season_start = date.today() - timedelta(days=30)
-    stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerName", "team"])
+    stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerId", "playerName", "team"])
     stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
     season = stats.season_start.year
     held = {8470001: {"playerName": "A", "team": "TOR", "position": "C"}}
@@ -243,7 +243,13 @@ def test_a_blocked_nhl_roster_pull_fails_the_update_once_the_season_has_games(
     stats.season_start = date.today() - timedelta(days=days_since_opening_night)
     yesterday = str(date.today() - timedelta(days=1))
     stats.gamelog = pd.DataFrame(
-        {"gameId": [1], "gameDate": [yesterday], "playerName": ["A"], "team": ["TOR"]}
+        {
+            "gameId": [1],
+            "gameDate": [yesterday],
+            "playerId": ["8470001"],
+            "playerName": ["A"],
+            "team": ["TOR"],
+        }
     )
     stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
 
@@ -267,6 +273,7 @@ def test_every_nhl_update_writes_the_goalie_list(monkeypatch, tmp_path):
         {
             "gameId": [1, 1],
             "gameDate": [yesterday, yesterday],
+            "playerId": ["8470001", "8470002"],
             "playerName": ["Skater", "Netminder"],
             "team": ["TOR", "TOR"],
             "position": ["C", "G"],

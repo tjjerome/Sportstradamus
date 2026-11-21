@@ -40,6 +40,7 @@ def test_nhl_update_keeps_four_years_of_gamelog(monkeypatch):
         {
             "gameId": [1, 2, 3],
             "gameDate": [cut, kept, recent],
+            "playerId": ["8470001", "8470002", "8470003"],
             "playerName": ["A", "B", "C"],
             "team": ["TOR", "TOR", "TOR"],
         }

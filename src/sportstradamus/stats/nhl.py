@@ -88,6 +88,15 @@ _REGULAR_SEASON_GAME_TYPE: int = 2
 # preseason games (01) and international events (19, 20: the 4 Nations Face-Off), whose rows
 # carry national teams and tryout rosters.
 _LOGGED_GAME_TYPES = (2, 3)
+# Same-name players the feeds tell apart only by id. Offers, the archive and every feature are
+# keyed by name, so the lesser-quoted player of a pair is logged under his name and id, and the
+# other's history stays his own. "Lesser" counts archive quotes on the dates only one of the
+# pair played, 2022-10 to 2026-11.
+_DISTINCT_PLAYER_NAMES = {
+    8483678: "Elias Pettersson 8483678",  # VAN defenseman; the center 8480012 holds the quotes
+    8480222: "Sebastian Aho 8480222",  # NYI defenseman; the CAR center 8478427 holds them
+    8483575: "Matt Murray 8483575",  # DAL and NSH goalie; 8476899 (TOR, SEA) holds them
+}
 # The fields of a stored players.json row that describe the player, not his season. A comp
 # pool reads only these from the running season's row: its stats are season-to-date as of
 # the last roster fetch, so for a training row they look ahead.
@@ -107,6 +116,11 @@ PLAYER_BIO_FIELDS = (
 def _game_type(game_id):
     """Characters 5-6 of an NHL game id, of one id or a Series of them: 2025020001 -> 2."""
     return game_id // 10_000 % 100
+
+
+def _player_name(player_id, name: str) -> str:
+    """``name`` as offers spell it, or the distinct name of a player who shares it."""
+    return _DISTINCT_PLAYER_NAMES.get(int(player_id), remove_accents(name))
 
 
 def _game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
@@ -209,8 +223,9 @@ class StatsNHL(Stats):
         to the books'. Rows stored before an alias existed keep the old spelling, so the stored
         names are respelled here and the next update writes them back. A stored name that is not
         a string (a feed that sent none) stays as stored, so one bad row cannot stop the league
-        loading. Rows of games outside ``_LOGGED_GAME_TYPES``, stored before the schedule walk
-        skipped them, leave both logs the same way.
+        loading. A player of ``_DISTINCT_PLAYER_NAMES`` takes his distinct name, and rows of games
+        outside ``_LOGGED_GAME_TYPES``, stored before the schedule walk skipped them, leave both
+        logs, the same way.
         """
         super().load()
         if not self.teamlog.empty:
@@ -225,11 +240,13 @@ class StatsNHL(Stats):
             spellings = {
                 name: remove_accents(name) for name in names.unique() if isinstance(name, str)
             }
-            self.gamelog["playerName"] = names.map(lambda name: spellings.get(name, name))
+            respelled = names.map(lambda name: spellings.get(name, name))
+            distinct = pd.to_numeric(self.gamelog["playerId"]).map(_DISTINCT_PLAYER_NAMES)
+            self.gamelog["playerName"] = respelled.where(distinct.isna(), distinct)
         for roster in self.players.values():
-            for row in roster.values():
+            for player_id, row in roster.items():
                 if isinstance(row.get("playerName"), str):
-                    row["playerName"] = remove_accents(row["playerName"])
+                    row["playerName"] = _player_name(player_id, row["playerName"])
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Keep only players who can accrue the requested NHL market."""
@@ -558,7 +575,7 @@ class StatsNHL(Stats):
             ),
             "home": home,
             "playerId": player["playerId"],
-            "playerName": remove_accents(player["playerName"]),
+            "playerName": _player_name(player["playerId"], player["playerName"]),
             "position": player["position"],
         }
         stats = {
@@ -575,12 +592,8 @@ class StatsNHL(Stats):
             "shotsAgainst": float(player["OnIce_A_shotsOnGoal"]),
             "goalsAgainst": float(player["OnIce_A_goals"]),
         }
-        if player["playerName"] in pp_df["playerName"].to_list():
-            stats["powerPlayPoints"] = float(
-                pp_df.loc[pp_df["playerName"] == player["playerName"]]["I_F_points"].iat[0]
-            )
-        else:
-            stats["powerPlayPoints"] = 0
+        power_play = pp_df.loc[pp_df["playerId"] == player["playerId"], "I_F_points"]
+        stats["powerPlayPoints"] = float(power_play.iat[0]) if len(power_play) else 0
         stats.update(
             {
                 "fantasy points prizepicks": stats.get("goals", 0) * 8
@@ -686,7 +699,7 @@ class StatsNHL(Stats):
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
         ]
-        self.gamelog.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
+        self.gamelog = self.gamelog.loc[~_game_player_key(self.gamelog).duplicated(keep="last")]
         self.teamlog = self.teamlog[
             pd.to_datetime(self.teamlog["gameDate"]).dt.date >= four_years_ago
         ]
@@ -746,17 +759,18 @@ class StatsNHL(Stats):
         return nhl_gamelog, nhl_teamlog
 
     def _merge_new_gamelogs(self, nhl_gamelog, nhl_teamlog):
-        """Dedup new player/team rows, enrich markets, and prepend to the stored logs."""
+        """Dedup new player/team rows, enrich markets, and prepend to the stored logs.
+
+        A player row is keyed by game and player id: two players can share a name, as two
+        Elias Petterssons did on one Vancouver roster.
+        """
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0).infer_objects(copy=False)
         if not nhl_df.empty:
-            nhl_df.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
+            keys = _game_player_key(nhl_df)
+            fresh = ~keys.duplicated(keep="last")
             if not self.gamelog.empty:
-                existing = set(
-                    self.gamelog[["gameId", "playerName"]].itertuples(index=False, name=None)
-                )
-                nhl_df = nhl_df[
-                    ~nhl_df.apply(lambda x: (x["gameId"], x["playerName"]) in existing, axis=1)
-                ]
+                fresh &= ~keys.isin(_game_player_key(self.gamelog))
+            nhl_df = nhl_df.loc[fresh]
             self._enrich_team_markets(nhl_df, date_col="gameDate", team_col="team")
         nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
         if not nhl_teamlog_df.empty:
@@ -856,7 +870,10 @@ class StatsNHL(Stats):
         player_df["age"] = (
             datetime.now() - pd.to_datetime(player_df["birthDate"])
         ).dt.days / 365.25
-        player_df.playerName = player_df.playerName.apply(remove_accents)
+        player_df["playerName"] = [
+            _player_name(player_id, name)
+            for player_id, name in zip(player_df["playerId"], player_df["playerName"], strict=True)
+        ]
         player_df["position"] = player_df["position"].replace("R", "W")
         player_df["position"] = player_df["position"].replace("L", "W")
         return player_df

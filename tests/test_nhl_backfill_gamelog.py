@@ -63,7 +63,7 @@ def test_skater_row_logs_every_season_sum_source_as_a_float():
         True,
         True,
         game_df,
-        pd.DataFrame({"playerName": []}),
+        pd.DataFrame({"playerId": [], "I_F_points": []}),
         _TEAM_MAP,
     )
 
@@ -201,7 +201,7 @@ def test_update_heals_the_running_season(monkeypatch):
     )
     stats = StatsNHL()
     stats.season_start = date.today() + timedelta(days=5)
-    stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerName", "team"])
+    stats.gamelog = pd.DataFrame(columns=["gameId", "gameDate", "playerId", "playerName", "team"])
     stats.teamlog = pd.DataFrame(columns=["gameId", "gameDate", "team"])
 
     stats._update()
