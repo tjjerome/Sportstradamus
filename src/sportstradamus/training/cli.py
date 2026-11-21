@@ -16,6 +16,7 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import LazyArchive, book_weights, get_logger, odds_budget
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
+from sportstradamus.helpers.config import MEAN_ANCHOR_VALUES
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
@@ -452,6 +453,17 @@ def _lock_production_artifacts(
     ),
 )
 @click.option(
+    "--mean-anchor",
+    type=click.Choice(sorted(MEAN_ANCHOR_VALUES)),
+    default=None,
+    hidden=True,
+    help=(
+        "Sandbox override of every cell's stat_meta mean_anchor: 'plain' re-centres the served "
+        "mean on the plain squared-error model fit beside it, keeping the shape; 'none' keeps "
+        "the distributional model's own mean."
+    ),
+)
+@click.option(
     "--matrix-only/--no-matrix-only",
     default=False,
     help=(
@@ -531,6 +543,7 @@ def meditate(
     hpo_selection,
     count_dispersion_objective,
     sn_param,
+    mean_anchor,
     matrix_only,
     full_rebuild,
     matrix_output,
@@ -797,6 +810,7 @@ def meditate(
                 "hpo_selection": cell_hpo_selection,
                 "count_dispersion_objective": cell_count_dispersion,
                 "sn_param": cell_sn_param,
+                "mean_anchor": mean_anchor,
                 "matrix_only": matrix_only,
                 "full_rebuild": full_rebuild,
                 "matrix_output": matrix_output,

@@ -13,6 +13,7 @@ import datetime
 import os.path
 import pickle
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from scipy.stats import skewnorm
@@ -25,7 +26,6 @@ from sportstradamus.helpers import (
     archive_market,
     book_gate,
     book_leg,
-    decode_predictive_mean,
     fused_loc,
     get_odds,
     get_push_prob,
@@ -167,6 +167,7 @@ def _decode_skewnormal(
     hist_gate: float,
     offset_meta: dict | None,
     target_normalization: str,
+    mean_anchor: lgb.Booster | None = None,
 ) -> pd.DataFrame:
     """Decode raw SkewNormal model outputs into absolute EV / sigma / skew.
 
@@ -189,6 +190,8 @@ def _decode_skewnormal(
             inside drives the EB prior at decode time.
         target_normalization: Slug of the baseline strategy the model was
             trained against; defaults to ``"ratio_meanyr"``.
+        mean_anchor: The pickle's plain booster on an anchored cell, whose
+            prediction then sets the ``Projection``.
 
     Returns:
         The same ``prob_params`` frame, mutated in place with the absolute
@@ -202,6 +205,7 @@ def _decode_skewnormal(
         hist_gate=hist_gate,
         offset_meta=offset_meta,
         target_normalization=target_normalization,
+        mean_anchor=mean_anchor,
     )
     prob_params["Projection"] = decoded.ev
     prob_params["Model Sigma"] = decoded.sigma
@@ -388,13 +392,14 @@ def _decode_model_params(
     hist_gate: float,
     offset_meta,
     target_normalization: str,
+    mean_anchor: lgb.Booster | None,
 ) -> None:
     if dist == "SkewNormal":
         if "loc" in prob_params.columns:
             # Dispatch SkewNormal loc/scale through the baselines registry so the
             # train-side forward transform and predict-side inverse cannot drift.
             _decode_skewnormal(
-                prob_params, playerStats, hist_gate, offset_meta, target_normalization
+                prob_params, playerStats, hist_gate, offset_meta, target_normalization, mean_anchor
             )
         return
     # The raw-column guards skip the volume_stats branch, which already set Projection
@@ -408,7 +413,15 @@ def _decode_model_params(
     }.get(dist)
     if raw_col is None or raw_col not in prob_params.columns:
         return
-    decoded = decode_predictive_mean(prob_params, dist)
+    decoded = decode_model_params(
+        prob_params,
+        dist,
+        playerStats,
+        hist_gate=hist_gate,
+        offset_meta=offset_meta,
+        target_normalization=target_normalization,
+        mean_anchor=mean_anchor,
+    )
     prob_params["Projection"] = decoded.ev
     if decoded.r is not None:
         prob_params["Model R"] = decoded.r
@@ -1152,7 +1165,13 @@ def model_prob(
     annotate_quote_provenance(playerStats, quotes)
 
     _decode_model_params(
-        prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization
+        prob_params,
+        dist,
+        playerStats,
+        hist_gate,
+        offset_meta,
+        target_normalization,
+        filedict.get("mean_anchor"),
     )
 
     # The feature log is diagnostics, so nothing that goes wrong in it may cost the market its

@@ -44,8 +44,9 @@ Registered strategies (A/B history in
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
@@ -69,6 +70,11 @@ _MEANYR_FLOOR: float = 0.5
 
 # Floor applied to the ratio target post-divide, mirroring pipeline.py:468.
 _RATIO_TARGET_FLOOR: float = 0.01
+
+# Lowest mean a count family takes from the plain anchor: a squared-error booster can
+# predict at or below zero, and NegBin's p = r / (r + mean) and the Double Poisson's mean
+# inversion both need a positive mean.
+_ANCHOR_MEAN_FLOOR: float = 1e-3
 
 # Fallback denominator for ``ratio_projvol`` when a volume projection is missing:
 # degrades cleanly to ``ratio_meanyr`` semantics and is present in every
@@ -546,16 +552,23 @@ def decode_model_params(
     hist_gate: float,
     offset_meta: dict | None,
     target_normalization: str,
+    mean_anchor: lgb.Booster | None,
 ) -> DecodedParams:
     """Decode raw LightGBMLSS output into an absolute mean plus family shape.
 
     Wraps :func:`~sportstradamus.helpers.distributions.decode_predictive_mean` with
     the target-normalization inverse the count families don't need: only SkewNormal
     trains in a transformed space, so only it routes ``loc``/``scale`` back through
-    the registry. Every serving consumer — the market path in
+    the registry. Every consumer — training's decode, the market path in
     ``prediction.model_prob`` and the volume-projection path in ``stats.base`` —
     decodes here, so a cell cannot mean one thing scored as a market and another
     scored as a volume dependency.
+
+    A cell trained with ``mean_anchor: "plain"`` re-centres here: the plain squared-error
+    booster (``training/plain_baseline.py``) replaces the mean and every shape field stays
+    as decoded, so ``get_odds`` moves the location with the mean. ``ev`` is the base
+    component's mean, so a published zero gate divides back out of the anchor: the
+    zero-inclusive mean, ``(1 - gate) * ev``, is then the anchor's own prediction.
 
     Args:
         prob_params: ``predict(pred_type="parameters")`` frame. SkewNormal needs
@@ -563,31 +576,41 @@ def decode_model_params(
             and their ``gate`` where zero-inflated.
         dist: Distribution family slug from the model pickle.
         X: The feature frame the params were predicted from, row-aligned with
-            ``prob_params``; supplies the decode denominator.
+            ``prob_params``; supplies the decode denominator and the anchor's inputs.
         hist_gate: Empirical zero-rate persisted with the model.
         offset_meta: Pickle-persisted baseline metadata; ``None`` for legacy or
             ratio-strategy models.
         target_normalization: Slug of the baseline strategy the model trained
             against.
+        mean_anchor: The pickle's plain booster on an anchored cell, else ``None``.
 
     Returns:
         DecodedParams with the absolute ``ev`` plus the family's shape fields.
     """
     if dist != "SkewNormal":
-        return decode_predictive_mean(prob_params, dist)
-
-    strategy = get_target_normalization(target_normalization)
-    # ratio_projvol persists its projected-volume denominator in offset_meta;
-    # serve_denom_col reads it (and the centered prior_* back-compat keys),
-    # falling back to the season-mean choice for legacy pickles.
-    denom_col = serve_denom_col(offset_meta, hist_gate, X.columns)
-    # global_mean snapshot lives in offset_meta for centered strategies; the
-    # ratio strategy ignores it (uses MeanYr from features directly).
-    global_mean = float((offset_meta or {}).get("global_mean", 0.0))
-    return decode_predictive_mean(
-        prob_params,
-        dist,
-        sn_loc=strategy.decode_loc(prob_params["loc"].values, X, global_mean, denom_col),
-        sn_scale=strategy.decode_scale(prob_params["scale"].values, X, denom_col),
-        hist_gate=hist_gate,
-    )
+        decoded = decode_predictive_mean(prob_params, dist)
+    else:
+        strategy = get_target_normalization(target_normalization)
+        # ratio_projvol persists its projected-volume denominator in offset_meta;
+        # serve_denom_col reads it (and the centered prior_* back-compat keys),
+        # falling back to the season-mean choice for legacy pickles.
+        denom_col = serve_denom_col(offset_meta, hist_gate, X.columns)
+        # global_mean snapshot lives in offset_meta for centered strategies; the
+        # ratio strategy ignores it (uses MeanYr from features directly).
+        global_mean = float((offset_meta or {}).get("global_mean", 0.0))
+        decoded = decode_predictive_mean(
+            prob_params,
+            dist,
+            sn_loc=strategy.decode_loc(prob_params["loc"].values, X, global_mean, denom_col),
+            sn_scale=strategy.decode_scale(prob_params["scale"].values, X, denom_col),
+            hist_gate=hist_gate,
+        )
+    if mean_anchor is None:
+        return decoded
+    # LightGBM stores a feature name's spaces as underscores.
+    columns = {column.replace(" ", "_"): column for column in X.columns}
+    anchor = mean_anchor.predict(X[[columns[name] for name in mean_anchor.feature_name()]])
+    if dist != "SkewNormal":
+        anchor = np.maximum(anchor, _ANCHOR_MEAN_FLOOR)
+    gate = 0.0 if decoded.gate is None else decoded.gate
+    return replace(decoded, ev=anchor / (1 - gate))

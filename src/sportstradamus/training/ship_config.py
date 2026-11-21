@@ -60,7 +60,12 @@ import json
 from pathlib import Path
 
 from sportstradamus import data
-from sportstradamus.helpers.config import BOOK_LEG_VALUES, QUOTE_BOOK_LEG
+from sportstradamus.helpers.config import (
+    BOOK_LEG_VALUES,
+    MEAN_ANCHOR_VALUES,
+    NO_MEAN_ANCHOR,
+    QUOTE_BOOK_LEG,
+)
 from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS
 from sportstradamus.training.calibration import BLENDING_SLUGS, DEFAULT_BLENDING
 from sportstradamus.training.posthoc import POSTHOC_SLUGS
@@ -146,6 +151,12 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
         raise ValueError(
             f"stat_meta.json: cell {league}/{market} has unknown book_leg "
             f"value {book_leg!r}; valid: {sorted(BOOK_LEG_VALUES)}"
+        )
+    mean_anchor = cell.get("mean_anchor", NO_MEAN_ANCHOR)
+    if mean_anchor not in MEAN_ANCHOR_VALUES:
+        raise ValueError(
+            f"stat_meta.json: cell {league}/{market} has unknown mean_anchor "
+            f"value {mean_anchor!r}; valid: {sorted(MEAN_ANCHOR_VALUES)}"
         )
     if dist in CONTINUOUS_DISTS and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(

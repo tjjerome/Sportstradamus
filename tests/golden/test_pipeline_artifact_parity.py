@@ -104,7 +104,8 @@ def _stage_count_shape(
     return frame
 
 
-def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp_path):
+@pytest.mark.parametrize("anchored", [False, True])
+def test_persist_converts_internal_book_over_to_scorecard_under(anchored, monkeypatch, tmp_path):
     # The scorecard's priced-row reader drops an authentic set below its cluster floor (dates,
     # with no Player column), so the round-trip below needs a wider book than the two-row shape
     # fixtures above.
@@ -152,6 +153,9 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
             matrix_hash=matrix_hash,
         ).as_model_blob(),
     }
+    if anchored:
+        # Any picklable object stands in for the booster _build_filedict stores.
+        filedict["mean_anchor"] = "plain booster"
     monkeypatch.setattr(pipe.pkg_resources, "files", lambda _package: tmp_path)
 
     pipe._step_persist_artifacts(
@@ -189,6 +193,11 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     assert not np.array_equal(persisted["R_model"], persisted["R"])
     # The plain baseline's mean rides beside EV for offline reads.
     np.testing.assert_allclose(persisted["Plain"], plain_mean)
+    # Only an anchored cell's dump marks the plain mean as its served mean's source.
+    if anchored:
+        np.testing.assert_allclose(persisted["MeanAnchor"], plain_mean)
+    else:
+        assert "MeanAnchor" not in persisted
     assert persisted["QuoteAuthenticity"].tolist() == authenticity
     assert persisted["QuoteSource"].tolist() == sources
     brier_inputs = _brier_inputs(persisted)
@@ -372,6 +381,7 @@ def test_dpo_count_path_target_normalization_is_probability_inert():
             5.0,
             "MeanYr",
             0.0,
+            None,
         )
     for field in ("ev", "ev_validation", "phi", "phi_validation"):
         np.testing.assert_array_equal(decoded["none"][field], decoded["ratio_meanyr"][field])

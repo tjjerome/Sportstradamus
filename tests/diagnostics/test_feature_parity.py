@@ -105,7 +105,7 @@ def _features(n: int = 8) -> pd.DataFrame:
 
 def _outputs(filedict: dict, features: pd.DataFrame) -> pd.DataFrame:
     outputs = _booster(filedict, "PTS", None, features)
-    mp._decode_model_params(outputs, "DPO", features, 0.0, None, "none")
+    mp._decode_model_params(outputs, "DPO", features, 0.0, None, "none", None)
     return outputs
 
 

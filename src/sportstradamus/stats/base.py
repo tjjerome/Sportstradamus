@@ -2254,6 +2254,7 @@ class Stats:
             hist_gate=filedict.get("hist_gate", 0.0),
             offset_meta=filedict.get("offset_meta"),
             target_normalization=target_normalization,
+            mean_anchor=filedict.get("mean_anchor"),
         )
         self.playerProfile = self.playerProfile.join(
             pd.DataFrame(

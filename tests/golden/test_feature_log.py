@@ -417,6 +417,23 @@ def test_model_prob_logs_each_scored_player(log_dir, monkeypatch, tmp_path):
     assert served["Player"].tolist() == _PLAYERS
 
 
+class _PlainAnchor:
+    """A plain booster stand-in on one spaced column, which LightGBM names with an underscore."""
+
+    def feature_name(self):
+        return ["Defense_avg"]
+
+    def predict(self, rows):
+        return 1.0 + rows["Defense avg"].to_numpy()
+
+
+def test_model_prob_serves_the_pickles_mean_anchor(log_dir, monkeypatch, tmp_path):
+    """An anchored pickle's plain booster sets the model's own Projection on the market path."""
+    _score(monkeypatch, tmp_path, filedict={**_FILEDICT, "mean_anchor": _PlainAnchor()})
+
+    np.testing.assert_allclose(_read(log_dir, "NBA_BLK")["Projection"], [1.1, 0.8, 1.3])
+
+
 @pytest.mark.parametrize(("weight", "temperature"), [(0.6, 1.0), (1.0, 1.5), (1.0, 1.0)])
 def test_standalone_prob_is_the_models_own_price_of_the_chosen_side(
     weight, temperature, log_dir, monkeypatch, tmp_path

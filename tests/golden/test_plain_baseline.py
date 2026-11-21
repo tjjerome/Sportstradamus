@@ -6,7 +6,8 @@ early on the train part's newest 15 %, scored against the served mean on the tes
 pins hold what a reader of ``plain_mse_ratio`` relies on: the ratio falls below 1 when the
 served mean is the worse mean, the stopping rows are the newest by date whatever the label
 order, the priced ratio reads pick'em and authentic rows aligned by label, and the fit leaves
-``splits`` as it found it.
+``splits`` as it found it. The booster an anchored cell's pickle carries predicts the dump's
+``Plain`` exactly, and a ``--deterministic`` run's params reach the fit.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.training import plain_baseline
+from sportstradamus.training.pipeline import LGB_DETERMINISM
 
 N_ROWS = 3000
 # Rows sharing one game date, so the date sort has ties to keep in order.
@@ -69,19 +71,20 @@ def test_plain_model_beats_a_noisier_served_mean_and_reads_priced_rows_by_label(
     splits, dates, served, quote_class = _cell()
     before = {key: value.copy() for key, value in splits.items()}
 
-    plain = plain_baseline.fit_plain_baseline(splits, dates, served)
+    plain = plain_baseline.fit_plain_baseline(splits, dates, {})
+    diagnostics = plain_baseline.plain_diagnostics(splits, plain, served)
 
     outcome = splits["y_test"]["Result"].to_numpy()
     plain_error = (plain.predictions - outcome) ** 2
     served_error = (served - outcome) ** 2
     priced = np.isin(quote_class, ("authentic", "pickem"))
-    diagnostics = plain.diagnostics
     assert diagnostics["plain_mse_ratio"] == pytest.approx(plain_error.mean() / served_error.mean())
     assert diagnostics["plain_mse_ratio"] < 1
     assert diagnostics["plain_mse_ratio_priced"] == pytest.approx(
         plain_error[priced].mean() / served_error[priced].mean()
     )
     assert 0 < diagnostics["plain_rounds"] < plain_baseline._MAX_ROUNDS
+    np.testing.assert_array_equal(plain.booster.predict(splits["X_test"]), plain.predictions)
     for key, frame in before.items():
         assert frame.equals(splits[key]), f"fit_plain_baseline changed splits[{key!r}]"
 
@@ -93,7 +96,8 @@ def test_priced_ratio_is_nan_without_a_priced_row(unpriced):
         # A legacy matrix carries no QuoteAuthenticity column at all.
         splits["quote_authenticity_test"] = None
 
-    diagnostics = plain_baseline.fit_plain_baseline(splits, dates, served).diagnostics
+    plain = plain_baseline.fit_plain_baseline(splits, dates, {})
+    diagnostics = plain_baseline.plain_diagnostics(splits, plain, served)
 
     assert np.isnan(diagnostics["plain_mse_ratio_priced"])
     assert np.isfinite(diagnostics["plain_mse_ratio"])
@@ -109,9 +113,9 @@ def test_early_stopping_reads_the_newest_rows_of_the_train_part(monkeypatch):
             return super().fit(X, y, **kwargs)
 
     monkeypatch.setattr(plain_baseline.lgb, "LGBMRegressor", RecordingRegressor)
-    splits, dates, served, _ = _cell()
+    splits, dates, _, _ = _cell()
 
-    plain_baseline.fit_plain_baseline(splits, dates, served)
+    plain_baseline.fit_plain_baseline(splits, dates, {})
 
     train = splits["y_train"].index
     fit_rows, stop_rows = seen["fit"], seen["stop"]
@@ -119,3 +123,19 @@ def test_early_stopping_reads_the_newest_rows_of_the_train_part(monkeypatch):
     assert fit_rows.append(stop_rows).sort_values().equals(train)
     assert dates.loc[stop_rows].min() >= dates.loc[fit_rows].max()
     assert not fit_rows.append(stop_rows).isin(splits["X_test"].index).any()
+
+
+def test_deterministic_params_reach_the_fit(monkeypatch):
+    seen = {}
+
+    class RecordingRegressor(lgb.LGBMRegressor):
+        def fit(self, X, y, **kwargs):
+            seen.update(self.get_params())
+            return super().fit(X, y, **kwargs)
+
+    monkeypatch.setattr(plain_baseline.lgb, "LGBMRegressor", RecordingRegressor)
+    splits, dates, _, _ = _cell()
+
+    plain_baseline.fit_plain_baseline(splits, dates, LGB_DETERMINISM)
+
+    assert {name: seen[name] for name in LGB_DETERMINISM} == LGB_DETERMINISM

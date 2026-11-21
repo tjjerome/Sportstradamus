@@ -101,6 +101,7 @@ def _dist_info(dist: str, dist_obj) -> dict:
         "dist_obj": dist_obj,
         "normalize": False,
         "shape_ceiling": 50.0,
+        "hist_gate": 0.0,
         "offset_mode": False,
         "sn_param": "direct",
         "target_normalization": None,

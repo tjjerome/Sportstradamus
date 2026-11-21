@@ -9,9 +9,10 @@ load cost per call site.
 Per-cell training metadata is split across two files:
 
 * ``stat_meta.json`` — **committed.** Per-cell
-  ``{dist, shipped, target_normalization, posthoc, book_leg}``: the semi-stable ML config humans
-  curate (distribution family, release state, target-normalization slug, post-hoc corrector
-  slug, book-leg pricing per :func:`book_leg`).
+  ``{dist, shipped, target_normalization, posthoc, book_leg, mean_anchor}``: the semi-stable ML
+  config humans curate (distribution family, release state, target-normalization slug, post-hoc
+  corrector slug, book-leg pricing per :func:`book_leg`, served-mean source per
+  :func:`mean_anchor`).
 * ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
   the calibration values that meditate recomputes every run.
 
@@ -77,6 +78,12 @@ QUOTE_BOOK_LEG = "quote"
 RUNG_BOOK_LEG = "rung"
 BOOK_LEG_VALUES = frozenset({QUOTE_BOOK_LEG, RUNG_BOOK_LEG})
 
+# A cell's served-mean source: its distributional model (the default) or the plain squared-error
+# model training fits beside it (training/plain_baseline.py); read by mean_anchor().
+NO_MEAN_ANCHOR = "none"
+PLAIN_MEAN_ANCHOR = "plain"
+MEAN_ANCHOR_VALUES = frozenset({NO_MEAN_ANCHOR, PLAIN_MEAN_ANCHOR})
+
 # Public union of committed meta + runtime calibration. Each cell carries
 # every field; callers that want a typed view can read the field directly.
 stat_meta: dict[str, dict[str, dict]] = {}
@@ -90,6 +97,7 @@ for _league, _markets in _stat_meta_committed.items():
             "target_normalization": _meta_cell["target_normalization"],
             "posthoc": _meta_cell.get("posthoc", "none"),
             "book_leg": _meta_cell.get("book_leg", QUOTE_BOOK_LEG),
+            "mean_anchor": _meta_cell.get("mean_anchor", NO_MEAN_ANCHOR),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
@@ -138,6 +146,17 @@ def book_leg(league: str, market: str) -> str:
     knob is ``"quote"``. Flipped per cell in ``stat_meta.json`` after X3's acceptance read.
     """
     return stat_meta.get(league, {}).get(market, {}).get("book_leg", QUOTE_BOOK_LEG)
+
+
+def mean_anchor(league: str, market: str) -> str:
+    """Where a cell's served mean comes from: ``"none"`` (its distributional model) or ``"plain"``.
+
+    ``"plain"`` makes ``meditate`` store the plain squared-error booster
+    (``training/plain_baseline.py``) in the cell's pickle, and every decode of that pickle
+    re-centres on it (:func:`sportstradamus.training.baselines.decode_model_params`); a cell
+    without the knob is ``"none"``. Serving reads the pickle, never this knob.
+    """
+    return stat_meta.get(league, {}).get(market, {}).get("mean_anchor", NO_MEAN_ANCHOR)
 
 
 def book_skewnormal_shape(

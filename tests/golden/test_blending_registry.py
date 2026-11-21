@@ -150,6 +150,22 @@ def test_unknown_book_leg_rejected():
         )
 
 
+def test_unknown_mean_anchor_rejected():
+    from sportstradamus.training import ship_config
+
+    with pytest.raises(ValueError, match="unknown mean_anchor"):
+        ship_config._validate_cell(
+            "NFL",
+            "receptions",
+            {
+                "shipped": "withheld",
+                "dist": "SkewNormal",
+                "target_normalization": "ratio_meanyr",
+                "mean_anchor": "plan",
+            },
+        )
+
+
 def test_fit_blend_weight_rejects_unknown_slug():
     with pytest.raises(ValueError, match="Unknown blending slug"):
         calibration.fit_blend_weight("bogus", [1.0], [1.0], [1.0], "NegBin")

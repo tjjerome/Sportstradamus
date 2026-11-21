@@ -180,7 +180,9 @@ def score(
     outputs = _build_prob_params(
         filedict, market, _NO_VOLUME, frame, dist, filedict["normalized"], norm, structural
     )
-    _decode_model_params(outputs, dist, frame, hist_gate, filedict["offset_meta"], norm)
+    _decode_model_params(
+        outputs, dist, frame, hist_gate, filedict["offset_meta"], norm, filedict.get("mean_anchor")
+    )
     return outputs
 
 

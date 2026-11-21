@@ -36,7 +36,6 @@ from sportstradamus.helpers import (
     NONZERO_DENOM_GATE,
     apply_cdf_recal,
     apply_temperature,
-    decode_predictive_mean,
     dp_crps,
     fused_loc,
     gamma_crps,
@@ -49,10 +48,13 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_zi,
 )
+from sportstradamus.helpers.config import PLAIN_MEAN_ANCHOR
+from sportstradamus.helpers.config import mean_anchor as cell_mean_anchor
 from sportstradamus.helpers.distributions import (
     _DP_PHI_CEILING,
     _DP_PHI_FLOOR,
     LOGIT_CLIP_EPS,
+    DecodedParams,
     _dp_mu_from_mean,
 )
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
@@ -109,7 +111,7 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     validate_strategy_selection,
 )
-from sportstradamus.training.plain_baseline import fit_plain_baseline
+from sportstradamus.training.plain_baseline import fit_plain_baseline, plain_diagnostics
 from sportstradamus.training.prior_models import keep_prior_model
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
@@ -287,6 +289,15 @@ DETERMINISTIC_FIXED_PARAMS = {
 }
 
 
+# The LightGBM params that make a fit bit-reproducible; --deterministic merges them into the
+# distributional fit (seed_everything) and the plain baseline's.
+LGB_DETERMINISM: dict[str, bool | int] = {
+    "deterministic": True,
+    "force_row_wise": True,
+    "num_threads": 1,  # multi-thread histogram reductions are not bit-reproducible
+}
+
+
 def seed_everything(seed: int) -> dict[str, int | bool]:
     """Pin Python/NumPy/Torch RNGs and return LightGBM determinism kwargs.
 
@@ -314,9 +325,7 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
         "seed": seed,
         "bagging_seed": seed,
         "feature_fraction_seed": seed,
-        "deterministic": True,
-        "force_row_wise": True,
-        "num_threads": 1,  # multi-thread histogram reductions are not bit-reproducible
+        **LGB_DETERMINISM,
     }
 
 
@@ -1429,19 +1438,20 @@ def _calibration_penalty(
         y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
         return preds, X_train.loc[preds.index], y_pool
 
+    # Neither closure re-centres on a mean anchor: the plain model is fit later, on every
+    # training row, so on this out-of-fold pool it would score in-sample.
     def sn_frame_ks(preds, X_pool, y_pool, book_ev):
-        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_pool, global_mean, denom_col)
-        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_pool, denom_col)
-        skew = preds["alpha"].to_numpy()
-        decoded = decode_predictive_mean(
+        decoded = baselines.decode_model_params(
             preds,
             dist,
-            sn_loc=sn_loc,
-            sn_scale=sn_scale,
+            X_pool,
             hist_gate=dist_info["hist_gate"],
+            offset_meta=strategy.offset_meta(global_mean, denom_col),
+            target_normalization=strategy.slug,
+            mean_anchor=None,
         )
         mean, sn_scale, skew, gate = _blend_oof_skewnormal(
-            decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
+            decoded, decoded.sigma, preds["alpha"].to_numpy(), book_ev, y_pool, dist_info, blending
         )
 
         # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
@@ -1488,8 +1498,16 @@ def _calibration_penalty(
         return max(ks_oof, ks_val)
 
     def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
-        preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
-        decoded = decode_predictive_mean(preds, dist)
+        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+        decoded = baselines.decode_model_params(
+            preds,
+            dist,
+            X_pool,
+            hist_gate=dist_info["hist_gate"],
+            offset_meta=None,
+            target_normalization=TARGET_NORM_NONE,
+            mean_anchor=None,
+        )
         shape_ceiling = dist_info["shape_ceiling"]
         if dist == "DPO":
             upper = min(10.0, _DP_PHI_CEILING / float(np.max(decoded.phi)))
@@ -2387,6 +2405,7 @@ def _build_filedict(
     structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
     algorithm_payload: dict | None = None,
     expert_models: dict[int, object] | None = None,
+    mean_anchor: lgb.Booster | None = None,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
     trained_at = datetime.now(UTC).isoformat()
@@ -2482,6 +2501,8 @@ def _build_filedict(
     ).as_model_blob()
     if expert_models is not None:
         filedict["expert_models"] = expert_models
+    if mean_anchor is not None:
+        filedict["mean_anchor"] = mean_anchor
     return filedict
 
 
@@ -2654,9 +2675,12 @@ def _step_persist_artifacts(
     # (1/2/3/6) read that. The served shape columns below retain their separately
     # calibrated dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
-    # training/plain_baseline.py's squared-error mean, for offline reads beside EV; nothing
-    # serves, calibrates or gates on it.
+    # training/plain_baseline.py's squared-error mean, for offline reads beside EV. An
+    # anchored cell also serves it as its mean (before the count floor and the gate), and its
+    # dump says so with MeanAnchor.
     X_test["Plain"] = plain_mean
+    if "mean_anchor" in filedict:
+        X_test["MeanAnchor"] = plain_mean
     # Pre-blend probe inputs: with the book base mean and the model-only shape in absolute
     # EV space, an offline pass re-runs fused_loc at any weight instead of inverting the
     # served pool. _stage_family_shape_columns stays the served-shape contract.
@@ -3347,106 +3371,59 @@ def _step_decode_predictions(
     global_mean: float,
     denom_col: str,
     hist_gate: float,
+    mean_anchor: lgb.Booster | None,
 ) -> dict:
     """Decode raw distribution parameters to per-row EVs and shape vectors.
 
-    SkewNormal applies the strategy's decode_loc/decode_scale, then its family
-    mean adjustment. NegBin/ZINB: EV = r·p/(1−p).
-    DPO: EV is the exact series mean (``mu`` is only approximate) with ``phi`` alongside.
-    Gamma/ZAGamma: EV = α/β. Synthesizes a constant ``gate_*`` vector for
-    SkewNormal when ``hist_gate > GATE_PUBLISH_THRESHOLD`` (no per-row gate from the model).
+    Every family but Mixture decodes through :func:`baselines.decode_model_params`, the
+    decode serving runs, with the normalization the pickle persists — so the mean and shape
+    the calibration chain fits on are the ones the cell is priced with, re-centred on
+    ``mean_anchor`` when the cell trains with one. Mixture decodes its two components here.
 
     Returns:
         Dict with: ``ev``, ``ev_validation``, ``gate_test``, ``gate_validation``,
         ``sn_sigma_test``, ``sn_sigma_val``, ``sn_alpha_test``, ``sn_alpha_val``,
-        ``r``, ``p``, ``r_validation``, ``p_validation``, ``phi``, ``phi_validation``,
-        ``alpha``, ``beta``, ``alpha_validation``, ``beta_validation``.
-        Unused fields are None.
+        ``r``, ``r_validation``, ``phi``, ``phi_validation``, ``alpha``,
+        ``alpha_validation``, ``mix_test``, ``mix_val``. Fields the family lacks are None.
     """
-    out = {
-        "ev": None,
-        "ev_validation": None,
-        "gate_test": None,
-        "gate_validation": None,
-        "sn_sigma_test": None,
-        "sn_sigma_val": None,
-        "sn_alpha_test": None,
-        "sn_alpha_val": None,
-        "r": None,
-        "p": None,
-        "r_validation": None,
-        "p_validation": None,
-        "phi": None,
-        "phi_validation": None,
-        "alpha": None,
-        "beta": None,
-        "alpha_validation": None,
-        "beta_validation": None,
-        "mix_test": None,
-        "mix_val": None,
-    }
     if dist == "Mixture":
         mix_test = _decode_mixture_frame(prob_params, X_test, strategy, global_mean, denom_col)
         mix_val = _decode_mixture_frame(
             prob_params_validation, X_validation, strategy, global_mean, denom_col
         )
-        out["mix_test"] = mix_test
-        out["mix_val"] = mix_val
-        out["ev"], _ = _mixture_moments(**mix_test)
-        out["ev_validation"], _ = _mixture_moments(**mix_val)
-        out["gate_test"] = None
-        out["gate_validation"] = None
-        return out
-    if dist == "SkewNormal":
-        # Location/scale come from the baselines registry (feature/strategy
-        # dependent); the shared kernel applies the skew mean-adjustment and gate.
-        ev_loc = strategy.decode_loc(prob_params["loc"].to_numpy(), X_test, global_mean, denom_col)
-        ev_scale = strategy.decode_scale(prob_params["scale"].to_numpy(), X_test, denom_col)
-        ev_loc_val = strategy.decode_loc(
-            prob_params_validation["loc"].to_numpy(), X_validation, global_mean, denom_col
-        )
-        ev_scale_val = strategy.decode_scale(
-            prob_params_validation["scale"].to_numpy(), X_validation, denom_col
-        )
-        decoded_test = decode_predictive_mean(
-            prob_params, dist, sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
-        )
-        decoded_val = decode_predictive_mean(
-            prob_params_validation,
-            dist,
-            sn_loc=ev_loc_val,
-            sn_scale=ev_scale_val,
-            hist_gate=hist_gate,
-        )
-        out["sn_sigma_test"] = decoded_test.sigma
-        out["sn_sigma_val"] = decoded_val.sigma
-        out["sn_alpha_test"] = decoded_test.skew
-        out["sn_alpha_val"] = decoded_val.skew
-    elif dist in ("NegBin", "ZINB"):
-        decoded_test = decode_predictive_mean(prob_params, dist)
-        decoded_val = decode_predictive_mean(prob_params_validation, dist)
-        out["r"] = decoded_test.r
-        out["p"] = prob_params["probs"].to_numpy()
-        out["r_validation"] = decoded_val.r
-        out["p_validation"] = prob_params_validation["probs"].to_numpy()
-    elif dist == "DPO":
-        decoded_test = decode_predictive_mean(prob_params, dist)
-        decoded_val = decode_predictive_mean(prob_params_validation, dist)
-        out["phi"] = decoded_test.phi
-        out["phi_validation"] = decoded_val.phi
+        decoded_test = DecodedParams(ev=_mixture_moments(**mix_test)[0])
+        decoded_val = DecodedParams(ev=_mixture_moments(**mix_val)[0])
     else:
-        decoded_test = decode_predictive_mean(prob_params, dist)
-        decoded_val = decode_predictive_mean(prob_params_validation, dist)
-        out["alpha"] = decoded_test.alpha
-        out["beta"] = prob_params["rate"].to_numpy()
-        out["alpha_validation"] = decoded_val.alpha
-        out["beta_validation"] = prob_params_validation["rate"].to_numpy()
-
-    out["ev"] = decoded_test.ev
-    out["ev_validation"] = decoded_val.ev
-    out["gate_test"] = decoded_test.gate
-    out["gate_validation"] = decoded_val.gate
-    return out
+        mix_test = mix_val = None
+        offset_meta = None if strategy is None else strategy.offset_meta(global_mean, denom_col)
+        settings = {
+            "hist_gate": hist_gate,
+            "offset_meta": offset_meta,
+            "target_normalization": TARGET_NORM_NONE if strategy is None else strategy.slug,
+            "mean_anchor": mean_anchor,
+        }
+        decoded_test = baselines.decode_model_params(prob_params, dist, X_test, **settings)
+        decoded_val = baselines.decode_model_params(
+            prob_params_validation, dist, X_validation, **settings
+        )
+    return {
+        "ev": decoded_test.ev,
+        "ev_validation": decoded_val.ev,
+        "gate_test": decoded_test.gate,
+        "gate_validation": decoded_val.gate,
+        "sn_sigma_test": decoded_test.sigma,
+        "sn_sigma_val": decoded_val.sigma,
+        "sn_alpha_test": decoded_test.skew,
+        "sn_alpha_val": decoded_val.skew,
+        "r": decoded_test.r,
+        "r_validation": decoded_val.r,
+        "phi": decoded_test.phi,
+        "phi_validation": decoded_val.phi,
+        "alpha": decoded_test.alpha,
+        "alpha_validation": decoded_val.alpha,
+        "mix_test": mix_test,
+        "mix_val": mix_val,
+    }
 
 
 def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
@@ -4439,6 +4416,7 @@ def _step_calibrate_and_serve(
     posthoc_slug: str,
     structural_strategy: str,
     experiment_context,
+    mean_anchor: lgb.Booster | None,
 ) -> dict:
     """Decode, correct, fuse and calibrate one model's predictions into served values.
 
@@ -4462,6 +4440,7 @@ def _step_calibrate_and_serve(
         dist_info["global_mean"],
         dist_info["denom_col"],
         hist_gate,
+        mean_anchor,
     )
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
     mean_posthoc_blob = _step_correct_fused_mean(fused, splits, dist, posthoc_slug)
@@ -4662,6 +4641,7 @@ def train_market(
     hpo_selection: str = "loss",
     count_dispersion_objective: str = "crps",
     sn_param: str = "direct",
+    mean_anchor: str | None = None,
     matrix_only: bool = False,
     full_rebuild: bool = False,
     matrix_output: Path | None = None,
@@ -4724,6 +4704,12 @@ def train_market(
             zero serving delta). Arrives resolved: the CLI maps ``"auto"`` to the
             cell's stat_meta before calling. Consulted only on the SkewNormal
             branch and in start-value seeding; persisted in the pickle.
+        mean_anchor: ``"plain"`` stores the plain squared-error model
+            (``training/plain_baseline.py``) in the pickle, and every decode re-centres the
+            served mean on it; ``"none"`` keeps the distributional model's own mean. ``None``
+            (default) reads the cell's stat_meta knob (:func:`helpers.config.mean_anchor`); the
+            hidden ``meditate --mean-anchor`` flag overrides it for sandbox runs. Outside the
+            strategy identity: an anchored pickle signs the same corner as an unanchored one.
         params_from: A model pickle whose LightGBM params, ``cv`` and ``shape_ceiling`` this
             run reuses instead of searching and re-deriving them, so a canonical run refits the
             booster a holdout-blind sandbox run ranked.
@@ -5025,6 +5011,10 @@ def train_market(
     )
     if structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
         experiment_context = preds["structural_context"]
+    # After _step_predict_splits: its in-place index sort orders the plain fit's same-date rows.
+    plain = fit_plain_baseline(splits, M["Date"], LGB_DETERMINISM if deterministic else {})
+    anchored = (mean_anchor or cell_mean_anchor(league, market)) == PLAIN_MEAN_ANCHOR
+    anchor = plain.booster if anchored else None
     calibrate = _step_crossfit_calibrate_and_serve if holdout_blind else _step_calibrate_and_serve
     served = calibrate(
         splits,
@@ -5040,6 +5030,7 @@ def train_market(
         posthoc_slug=posthoc_slug,
         structural_strategy=structural_strategy,
         experiment_context=experiment_context,
+        mean_anchor=anchor,
     )
     prob_params = served["prob_params"]
     decoded = served["decoded"]
@@ -5123,6 +5114,7 @@ def train_market(
         structural_strategy=structural_strategy,
         algorithm_payload=calibrated.get("structural_calibration_blob"),
         expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
+        mean_anchor=anchor,
     )
     if dependency_namespace is not None:
         filedict["dependency_identity"] = {
@@ -5135,10 +5127,11 @@ def train_market(
         }
     # Zero-adjusted families keep the gate out of EV; reapplied, EV is the model's own mean of
     # the zero-inclusive outcome, the scale the plain regression predicts on.
-    plain = fit_plain_baseline(
-        splits, M["Date"], _zero_inflated_outcome_mean(decoded["ev"], dist, decoded["gate_test"])
+    filedict["diagnostics"].update(
+        plain_diagnostics(
+            splits, plain, _zero_inflated_outcome_mean(decoded["ev"], dist, decoded["gate_test"])
+        )
     )
-    filedict["diagnostics"].update(plain.diagnostics)
 
     _step_persist_artifacts(
         filedict=filedict,
