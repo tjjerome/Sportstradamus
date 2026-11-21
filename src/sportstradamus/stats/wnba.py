@@ -442,3 +442,8 @@ class StatsWNBA(StatsNBA):
     # are per 40 and its matrices were not rebuilt to carry them, so it keeps the base profile.
     def _build_player_profile_stats(self, stat_types, date):
         return super(StatsNBA, self)._build_player_profile_stats(stat_types, date)
+
+    # stats.wnba.com's tables are read undated (_fetch_player_bios), so the running season
+    # pools as stored instead of through StatsNBA's dated read.
+    def _rosters_as_of(self, rosters, season_key, target_game_date):
+        return rosters

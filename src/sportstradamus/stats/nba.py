@@ -18,7 +18,7 @@ from sportstradamus.collectors.tabular import PLAYER_DATA_BASE
 from sportstradamus.helpers import combo_props, remove_accents, stat_cv, stat_dist
 from sportstradamus.helpers.io import VOLUME_STATS, read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import availability, nba_client
+from sportstradamus.stats import availability, nba_client, nba_season_tables
 from sportstradamus.stats.base import (
     GAMELOG_RETENTION_DAYS,
     PROFILE_SHORT_GAMES,
@@ -88,6 +88,22 @@ _REGULATION_MINUTES: int = 48
 # The recent-minutes mean's games: the feature study's batch (docs/gbdt_feature_study.md §10
 # item 9) names last-game and three-game minutes.
 _RECENT_MINUTES_GAMES: int = 3
+
+# The comp inputs the season-to-date bio and shot-location tables hold, read as of the eve of
+# a comp pool's date (StatsNBA._rosters_as_of). The play-type fields come from SynergyPlayTypes,
+# which takes no date range, and keep the stored season's values.
+_DATED_COMP_FIELDS = (
+    "USG_PCT",
+    "TS_PCT",
+    "ITP_PCT",
+    "ITP_PPP",
+    "MR_PCT",
+    "MR_PPP",
+    "C3_PCT",
+    "C3_PPP",
+    "B3_PCT",
+    "B3_PPP",
+)
 
 
 def _roster_seed_path(season: str) -> Path:
@@ -621,23 +637,53 @@ class StatsNBA(Stats):
 
         Returns a ``{team: {player_name: stats_dict}}`` mapping ready for
         :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts.
+        season's roster wins on dict-update conflicts; that season's rosters are
+        read as they stood the day before the date (:meth:`_rosters_as_of`).
         """
         cutoff = self._current_season_key(target_game_date)
         merged: dict = {}
         for season_key in sorted(self.players.keys()):
             if season_key > cutoff:
                 continue
-            for team, roster in self.players[season_key].items():
+            rosters = self.players[season_key]
+            if season_key == cutoff:
+                rosters = self._rosters_as_of(rosters, season_key, target_game_date)
+            for team, roster in rosters.items():
                 merged.setdefault(team, {}).update(roster)
         return merged
 
+    def _rosters_as_of(self, rosters: dict, season_key: str, target_game_date: date) -> dict:
+        """The running season's ``rosters`` as the league's tables stood on the date's eve.
+
+        The stored season holds the bio and shot-location tables of its last update, which
+        for a training row came after the row. Each player the tables list by the eve keeps
+        his stored entry with ``_DATED_COMP_FIELDS`` read then; one they do not list yet
+        drops out, so his latest past season's entry stands. Serving reads yesterday's
+        tables, the ones the update stores, for every game date: a later date's eve is not
+        over yet. A failed read keeps the stored season.
+        """
+        day = min(target_game_date, datetime.today().date()) - timedelta(days=1)
+        try:
+            bios, shots = nba_season_tables.read(season_key, day)
+        except NBAStatsError:
+            logger.warning(f"NBA comps for {target_game_date} pool the stored season tables")
+            return rosters
+        if bios.empty:
+            return {}
+        tables = self._merge_season_tables(bios, shots, {}).drop_duplicates("PLAYER_NAME")
+        as_of = tables.set_index("PLAYER_NAME")[list(_DATED_COMP_FIELDS)].to_dict("index")
+        return {
+            team: {name: entry | as_of[name] for name, entry in roster.items() if name in as_of}
+            for team, roster in rosters.items()
+        }
+
     def _compute_comps(self, target_game_date: date | None = None) -> None:
-        """Build comps from loaded data at runtime (no JSON I/O).
+        """Build comps at runtime from the loaded data (no stored comps file).
 
         When ``target_game_date`` is provided, the player pool is bounded to
         seasons whose key (NBA "YYYY-YY") is ``<=`` the target date's season,
-        so a 2022 training row's comps no longer pool with 2024+ rookies.
+        so a 2022 training row's comps no longer pool with 2024+ rookies, and
+        the running season's bio and shot tables are read as of the date's eve.
         ``self.playerProfile`` is already date-bounded by
         :meth:`base_profile` upstream (it filters ``short_gamelog`` to the
         300-day window ending at ``date``), so this fix only needs to gate
@@ -704,7 +750,7 @@ class StatsNBA(Stats):
             inplace=True,
         )
 
-        playerBios, shotData, synergy = self._fetch_league_endpoints()
+        playerBios, shotData, synergy = self._fetch_league_endpoints(today - timedelta(days=1))
         self._build_player_profiles(player_df, playerBios, shotData, synergy)
 
         position_map = {
@@ -859,11 +905,14 @@ class StatsNBA(Stats):
             latest = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
         return max(latest, self.season_start)
 
-    def _fetch_league_endpoints(self):
+    def _fetch_league_endpoints(self, as_of: date):
         """Pull the season-level bio / shot-location / synergy endpoints.
 
-        Returns ``(playerBios, shotData, synergy)`` as DataFrames / a dict of
-        play-type DataFrames; on an API error every result is its empty shape.
+        Bios and shot locations count the season's games through ``as_of``
+        (:func:`nba_season_tables.read`); synergy takes no date range and reads
+        the season to date. Returns ``(playerBios, shotData, synergy)`` as
+        DataFrames / a dict of play-type DataFrames; on an API error every
+        result is empty.
         """
 
         def _synergy(play_type):
@@ -888,32 +937,18 @@ class StatsNBA(Stats):
         ]
         try:
             with tqdm(total=8, desc="NBA league endpoints", unit="endpoint", leave=False) as pbar:
-                pbar.set_postfix_str("PlayerBioStats")
-                playerBios = nba_client.fetch(
-                    nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats, season=self.season
-                ).get_normalized_dict()["LeagueDashPlayerBioStats"]
-                pbar.update(1)
-                pbar.set_postfix_str("ShotLocations")
-                shotData = nba_client.fetch(
-                    nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations,
-                    season=self.season,
-                    season_type_all_star="Regular Season",
-                    distance_range="By Zone",
-                    per_mode_detailed="PerGame",
-                ).get_dict()["resultSets"]
-                pbar.update(1)
+                pbar.set_postfix_str("PlayerBioStats + ShotLocations")
+                playerBios, shotData = nba_season_tables.read(self.season, as_of)
+                pbar.update(2)
                 synergy_raw = {}
                 for name, play_type in synergy_types:
                     pbar.set_postfix_str(f"Synergy:{play_type}")
                     synergy_raw[name] = _synergy(play_type)
                     pbar.update(1)
         except NBAStatsError:
-            playerBios = []
-            shotData = {"rowSet": [], "headers": [{}, {"columnNames": []}]}
+            playerBios, shotData = pd.DataFrame(), pd.DataFrame()
             synergy_raw = {name: {"rowSet": [], "headers": []} for name, _ in synergy_types}
 
-        playerBios = pd.DataFrame(playerBios)
-        shotData = pd.DataFrame(shotData["rowSet"], columns=shotData["headers"][1]["columnNames"])
         synergy = {
             name: pd.DataFrame(raw["rowSet"], columns=raw["headers"])
             for name, raw in synergy_raw.items()
@@ -949,6 +984,16 @@ class StatsNBA(Stats):
         shotData.loc[shotData["FGA"].iloc[:, 7] < 0.5, "B3_PPP"] = 0
         return shotData.fillna(0)
 
+    @staticmethod
+    def _merge_season_tables(playerBios, shotData, synergy):
+        """Bios beside each player's shot zones and play types, by accent-free name; blanks 0."""
+        shotData = StatsNBA._enrich_shot_data(shotData, synergy)
+        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+        shotData.PLAYER_NAME = shotData.PLAYER_NAME.apply(remove_accents)
+        return playerBios.merge(
+            shotData, on="PLAYER_NAME", suffixes=(None, "_y"), how="outer"
+        ).fillna(0)
+
     def _build_player_profiles(self, player_df, playerBios, shotData, synergy):
         """Merge bios + shot/synergy data into per-team player profiles on self.players."""
         if playerBios.empty:
@@ -959,12 +1004,7 @@ class StatsNBA(Stats):
             self.players.setdefault(self.season, {})
             return
 
-        shotData = self._enrich_shot_data(shotData, synergy)
-        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
-        shotData.PLAYER_NAME = shotData.PLAYER_NAME.apply(remove_accents)
-        playerBios = playerBios.merge(
-            shotData, on="PLAYER_NAME", suffixes=(None, "_y"), how="outer"
-        ).fillna(0)
+        playerBios = self._merge_season_tables(playerBios, shotData, synergy)
         player_df = player_df.merge(
             playerBios, on=["PLAYER_NAME", "TEAM_ABBREVIATION"], suffixes=(None, "_x"), how="outer"
         )
@@ -994,16 +1034,7 @@ class StatsNBA(Stats):
             "AGE",
             "PLAYER_HEIGHT_INCHES",
             "PLAYER_BMI",
-            "USG_PCT",
-            "TS_PCT",
-            "ITP_PCT",
-            "ITP_PPP",
-            "MR_PCT",
-            "MR_PPP",
-            "C3_PCT",
-            "C3_PPP",
-            "B3_PCT",
-            "B3_PPP",
+            *_DATED_COMP_FIELDS,
             "POST_PCT",
             "POST_PPP",
             "HANDOFF_PCT",
