@@ -265,8 +265,8 @@ class StatsNHL(Stats):
         position = gamelog[self.log_strings["position"]].astype("string")
         return gamelog.loc[position.isin(allowed)].copy()
 
-    def window_short_logs(self, date):
-        """The base window, with each ``_PER_60_COUNTS`` count per 60 minutes on ice.
+    def window_short_logs(self, date: date) -> None:
+        """Slice the base window, then rate each ``_PER_60_COUNTS`` count per 60 minutes on ice.
 
         Rated here from the stored counts, so a training row and a served one read one
         definition, and a count the stats service filled after its game was logged is rated

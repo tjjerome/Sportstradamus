@@ -55,15 +55,15 @@ def _window_values(game_ids: list[int], max_attempts: int) -> pd.DataFrame | Non
     ``None`` once the service stops answering.
     """
     ids = ",".join(map(str, game_ids))
+    params = {
+        "isAggregate": "false",
+        "isGame": "true",
+        "limit": -1,
+        "sort": _PAGE_SORT,
+        "cayenneExp": f"gameId in ({ids})",
+    }
     frames = []
     for report, fields in _REPORTS.items():
-        params = {
-            "isAggregate": "false",
-            "isGame": "true",
-            "limit": -1,
-            "sort": _PAGE_SORT,
-            "cayenneExp": f"gameId in ({ids})",
-        }
         rows = []
         while True:
             sleep(_REQUEST_GAP_S)
