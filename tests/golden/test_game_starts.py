@@ -293,41 +293,52 @@ def _mlb_game(pk: int, start: str, state: str = "Final", tbd: bool = False) -> d
 
 
 def test_mlb_starts_keep_a_postponed_games_played_instance(store, monkeypatch):
-    """One request spans the missing dates; a TBD start (a doubleheader's game 2) stays NaT."""
-    payload = {
-        "dates": [
-            {
-                "date": "2026-06-10",
-                "games": [
-                    _mlb_game(7, "2026-06-10T23:05:00Z", state="Postponed"),
-                    _mlb_game(8, "2026-06-10T17:05:00Z"),
-                    _mlb_game(9, "2026-06-10T20:33:00Z", tbd=True),
-                ],
-            },
-            {"date": "2026-06-11", "games": [_mlb_game(7, "2026-06-11T17:10:00Z")]},
-        ]
+    """One request per season spans its missing dates (statsapi cuts a span off a year past
+    its start); a TBD start (a doubleheader's game 2) stays NaT."""
+    payloads = {
+        "2025-09-28": {
+            "dates": [{"date": "2025-09-28", "games": [_mlb_game(5, "2025-09-28T19:10:00Z")]}]
+        },
+        "2026-06-10": {
+            "dates": [
+                {
+                    "date": "2026-06-10",
+                    "games": [
+                        _mlb_game(7, "2026-06-10T23:05:00Z", state="Postponed"),
+                        _mlb_game(8, "2026-06-10T17:05:00Z"),
+                        _mlb_game(9, "2026-06-10T20:33:00Z", tbd=True),
+                    ],
+                },
+                {"date": "2026-06-11", "games": [_mlb_game(7, "2026-06-11T17:10:00Z")]},
+            ]
+        },
     }
     requests_made = []
 
     def get(url, params, timeout):
         requests_made.append((url, params["startDate"], params["endDate"]))
+        payload = payloads[params["startDate"]]
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload)
 
     monkeypatch.setattr(game_starts.requests, "get", get)
     games = pd.DataFrame(
         {
-            "game_id": ["7", "8", "9"],
-            "date": [date(2026, 6, 11), date(2026, 6, 10), date(2026, 6, 10)],
+            "game_id": ["7", "8", "9", "5"],
+            "date": [date(2026, 6, 11), date(2026, 6, 10), date(2026, 6, 10), date(2025, 9, 28)],
         }
     )
 
     starts = game_starts.game_starts("MLB", games)
 
-    assert requests_made == [(game_starts.MLB_SCHEDULE_URL, "2026-06-10", "2026-06-11")]
+    assert requests_made == [
+        (game_starts.MLB_SCHEDULE_URL, "2025-09-28", "2025-09-28"),
+        (game_starts.MLB_SCHEDULE_URL, "2026-06-10", "2026-06-11"),
+    ]
     assert starts.to_dict() == {
         "7": pd.Timestamp("2026-06-11 17:10"),
         "8": pd.Timestamp("2026-06-10 17:05"),
         "9": pd.NaT,
+        "5": pd.Timestamp("2025-09-28 19:10"),
     }
 
 

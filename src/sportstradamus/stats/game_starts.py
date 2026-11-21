@@ -4,12 +4,12 @@ A training row reads the sportsbook quotes as of its game's start minus ``TRAINI
 (:func:`read_times`), the last board before the game. The starts live in
 ``data/leagues/<league>/game_starts.parquet``: ``game_id``, the gamelog's game id as text, and
 ``start``, naive UTC. A lookup fetches only the games the store lacks, a whole season (NBA,
-WNBA, NFL) or the weeks and date span (NHL, MLB) holding them, and stores every game asked
+WNBA, NFL) or the weeks and date spans (NHL, MLB) holding them, and stores every game asked
 for, NaT where the schedule gives no start, so no game is fetched twice. Sources:
 
 - NBA, WNBA: ``ScheduleLeagueV2`` (:func:`nba_client.schedule_games`), ``gameDateTimeUTC``.
 - NHL: api-web's weekly schedule, ``startTimeUTC``.
-- MLB: statsapi's schedule, read as the weather capture reads it
+- MLB: statsapi's schedule, one request per season, read as the weather capture reads it
   (:func:`collectors.weather.mlb_schedule_games`): no start for a TBD game.
 - NFL: nflverse's schedule (:func:`collectors.weather.nfl_kickoffs`).
 
@@ -149,18 +149,24 @@ def _nhl_starts(_league: str, missing: pd.DataFrame) -> pd.Series:
 
 
 def _mlb_starts(_league: str, missing: pd.DataFrame) -> pd.Series:
-    """Every game statsapi lists from the first missing game's date to the last one's."""
-    response = requests.get(
-        MLB_SCHEDULE_URL,
-        params={
-            **MLB_SCHEDULE_PARAMS,
-            "startDate": f"{missing['date'].min():%Y-%m-%d}",
-            "endDate": f"{missing['date'].max():%Y-%m-%d}",
-        },
-        timeout=REQUEST_TIMEOUT_S,
-    )
-    response.raise_for_status()
-    return mlb_schedule_games(response.json()).set_index("game_id")["kickoff"]
+    """Every game statsapi lists from each season's first missing game date to its last."""
+    days = pd.to_datetime(missing["date"])
+    seasons = []
+    # statsapi cuts a schedule span off a year past its start without saying so; a season sits
+    # inside one calendar year.
+    for _, season in days.groupby(days.dt.year):
+        response = requests.get(
+            MLB_SCHEDULE_URL,
+            params={
+                **MLB_SCHEDULE_PARAMS,
+                "startDate": f"{season.min():%Y-%m-%d}",
+                "endDate": f"{season.max():%Y-%m-%d}",
+            },
+            timeout=REQUEST_TIMEOUT_S,
+        )
+        response.raise_for_status()
+        seasons.append(mlb_schedule_games(response.json()).set_index("game_id")["kickoff"])
+    return pd.concat(seasons)
 
 
 def _nfl_starts(_league: str, missing: pd.DataFrame) -> pd.Series:
