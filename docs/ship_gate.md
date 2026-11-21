@@ -301,7 +301,9 @@ whole game dates. A league's primary statistic is `p2_dbrier` when its rungs spa
 else `p1_dmse`; each cell reads its league's primary on its own rows. KEEP: the primary's interval
 lies wholly below zero and no other statistic's wholly above. KILL: any statistic's lies wholly
 above. NEUTRAL otherwise, and always when the primary spans fewer than 20 dates; a statistic over
-fewer than 20 dates is reported and never judged (a date bootstrap that thin runs narrow).
+fewer than 20 dates is reported and never judged (a date bootstrap that thin runs narrow). A
+value both arms serve alike to float rounding (rtol 1e-12) is no change, so a probability-only
+candidate (a posthoc map switched off) reads `p1_dmse` exactly 0 rather than an interval of noise.
 `--baseline-book` judges against the sportsbook (P = 1 − `Odds`, mean `Book_EV`, authentic rows)
 for cells production serves at the consensus.
 
