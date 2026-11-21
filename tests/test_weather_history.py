@@ -122,7 +122,7 @@ def _stub(
         asked["nflverse"].append(list(years))
         return nfl if nfl is not None else _nfl_schedule()
 
-    monkeypatch.setattr(wh, "_LEAGUES_DIR", tmp_path)
+    monkeypatch.setattr(wh, "LEAGUES_DIR", tmp_path)
     monkeypatch.setattr(wh.requests, "get", fake_get)
     monkeypatch.setattr(wh.nfl, "import_schedules", fake_import_schedules)
     monkeypatch.setattr(wh.time, "sleep", asked["slept"].append)

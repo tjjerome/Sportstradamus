@@ -18,7 +18,6 @@ A failed fetch raises: a row cached on the stand-in read would keep it.
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from collections.abc import Callable
 from datetime import date, timedelta
 
@@ -26,7 +25,6 @@ import nfl_data_py as nfl
 import pandas as pd
 import requests
 
-from sportstradamus import data
 from sportstradamus.collectors.weather import (
     MLB_SCHEDULE_PARAMS,
     MLB_SCHEDULE_URL,
@@ -35,7 +33,7 @@ from sportstradamus.collectors.weather import (
 )
 from sportstradamus.helpers import Scrape
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
-from sportstradamus.helpers.io import _atomic_write_parquet
+from sportstradamus.helpers.io import LEAGUES_DIR, _atomic_write_parquet
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
@@ -44,7 +42,6 @@ from sportstradamus.stats import nba_client
 # row's read before starts were stored, ahead of every regular US start.
 UNTIMED_READ = timedelta(hours=12)
 NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/schedule/{day}"
-_LEAGUES_DIR = pkg_resources.files(data) / "leagues"
 
 scraper = Scrape()
 
@@ -96,7 +93,7 @@ def game_starts(league: str, games: pd.DataFrame) -> pd.Series:
         Every stored game's start, naive UTC, indexed by game id; NaT where the schedule
         gives none.
     """
-    path = _LEAGUES_DIR / league.lower() / "game_starts.parquet"
+    path = LEAGUES_DIR / league.lower() / "game_starts.parquet"
     try:
         stored = pd.read_parquet(path)
     except FileNotFoundError:

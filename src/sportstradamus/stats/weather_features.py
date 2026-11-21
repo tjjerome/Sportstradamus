@@ -12,14 +12,11 @@ neither source holds.
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
-
 import numpy as np
 import pandas as pd
 
-from sportstradamus import data
 from sportstradamus.collectors.weather import VENUES
-from sportstradamus.helpers.io import WEATHER_CAPTURE_DIR
+from sportstradamus.helpers.io import LEAGUES_DIR, WEATHER_CAPTURE_DIR
 
 _SHARED_COLUMNS = (
     "weather wind",
@@ -39,7 +36,6 @@ WEATHER_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 # The lead the plan trains on: of the leads stored from 2024, the nearest a pre-game decision.
 _TRAINING_LEAD_DAYS = 1
-_LEAGUES_DIR = pkg_resources.files(data) / "leagues"
 _MLB_AZIMUTH = pd.Series({venue: entry["azimuth"] for venue, entry in VENUES["MLB"].items()})
 
 
@@ -53,7 +49,7 @@ def history_weather(league: str) -> pd.DataFrame:
         Floats indexed by game id (text); no rows when no history is stored.
     """
     try:
-        history = pd.read_parquet(_LEAGUES_DIR / league.lower() / "weather_history.parquet")
+        history = pd.read_parquet(LEAGUES_DIR / league.lower() / "weather_history.parquet")
     except FileNotFoundError:
         return pd.DataFrame(columns=list(WEATHER_COLUMNS[league]), dtype=float)
     # The training lead sorts ahead of every other, the rest shortest first; a dome's lone row

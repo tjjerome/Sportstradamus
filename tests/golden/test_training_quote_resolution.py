@@ -390,7 +390,7 @@ class _Stub:
 
 @pytest.fixture
 def empty_start_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(game_starts, "_LEAGUES_DIR", tmp_path)
+    monkeypatch.setattr(game_starts, "LEAGUES_DIR", tmp_path)
 
 
 @pytest.mark.parametrize(

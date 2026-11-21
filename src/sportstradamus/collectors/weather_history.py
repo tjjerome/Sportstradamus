@@ -20,7 +20,6 @@ record: a rerun requests only the games it lacks, so rerun daily until ``--dry-r
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 import time
 from datetime import date, timedelta
 from http import HTTPStatus
@@ -34,9 +33,8 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
-from sportstradamus import data
 from sportstradamus.collectors import weather
-from sportstradamus.helpers.io import _atomic_write_parquet
+from sportstradamus.helpers.io import LEAGUES_DIR, _atomic_write_parquet
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 
 _LEAGUES = ("NFL", "MLB")
@@ -79,7 +77,6 @@ _DEFAULT_MAX_COST = 8_000.0
 _SECONDS_PER_CALL = 3600 / 4_500
 # Requests between file writes: a crash loses at most this many.
 _WRITE_EVERY = 25
-_LEAGUES_DIR = pkg_resources.files(data) / "leagues"
 
 
 class _Request(NamedTuple):
@@ -95,7 +92,7 @@ class _Request(NamedTuple):
 
 
 def _history_path(league: str) -> Path:
-    return _LEAGUES_DIR / league.lower() / "weather_history.parquet"
+    return LEAGUES_DIR / league.lower() / "weather_history.parquet"
 
 
 def _cost(variables: int, start: date, end: date) -> float:

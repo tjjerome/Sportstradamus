@@ -118,6 +118,8 @@ INJURY_CAPTURE_DIR = _RUNTIME_DIR / "injuries"
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes a withheld cell's.
 MODELS_DIR = pkg_resources.files(data) / "models"
+# Root of each league's stored data: gamelogs, game starts, weather history.
+LEAGUES_DIR = pkg_resources.files(data) / "leagues"
 
 # Serve-time volume denominators Stats.load_volume_model_params reads for every other cell
 # of the league; a withheld one keeps its pickle (its own offers still serve the book consensus).
@@ -539,7 +541,7 @@ def write_modifier_overrides(overlay: dict) -> None:
 
 def _gamelog_paths(league: str):
     league = league.lower()
-    base = pkg_resources.files(data) / "leagues" / league
+    base = LEAGUES_DIR / league
     return {
         "gamelog": base / "gamelog.parquet",
         "teamlog": base / "teamlog.parquet",

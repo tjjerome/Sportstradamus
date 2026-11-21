@@ -45,7 +45,7 @@ H1, H2, H3 = "2025-07-04 23:00", "2025-07-05 00:00", "2025-07-05 01:00"
 def stores(monkeypatch, tmp_path):
     """Both readers pointed under ``tmp_path``: the history's leagues dir and the capture dir."""
     leagues_dir, capture_dir = tmp_path / "leagues", tmp_path / "weather"
-    monkeypatch.setattr(weather_features, "_LEAGUES_DIR", leagues_dir)
+    monkeypatch.setattr(weather_features, "LEAGUES_DIR", leagues_dir)
     monkeypatch.setattr(weather_features, "WEATHER_CAPTURE_DIR", capture_dir)
     return leagues_dir, capture_dir
 

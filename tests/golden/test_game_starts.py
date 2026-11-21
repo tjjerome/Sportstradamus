@@ -34,7 +34,7 @@ _LOG_STRINGS = {
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """An empty store: every league's file lands under ``tmp_path``."""
-    monkeypatch.setattr(game_starts, "_LEAGUES_DIR", tmp_path)
+    monkeypatch.setattr(game_starts, "LEAGUES_DIR", tmp_path)
     return tmp_path
 
 

@@ -22,7 +22,7 @@ LOG_STRINGS = {
 @pytest.fixture(autouse=True)
 def no_game_starts(tmp_path, monkeypatch):
     """An empty start store whose schedules list nothing: every row reads at 12:00 UTC."""
-    monkeypatch.setattr(game_starts, "_LEAGUES_DIR", tmp_path)
+    monkeypatch.setattr(game_starts, "LEAGUES_DIR", tmp_path)
     for league in ("NBA", "NFL"):
         monkeypatch.setitem(
             game_starts._SOURCES, league, lambda _league, _missing: pd.Series(dtype=object)
