@@ -21,6 +21,7 @@ from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import availability, nba_client
 from sportstradamus.stats.base import (
     GAMELOG_RETENTION_DAYS,
+    PROFILE_SHORT_GAMES,
     ComboSpec,
     Stats,
     archive,
@@ -80,6 +81,13 @@ NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL
 # It graded PIT KS 0.0405 against legacy's 0.1489 when the cap was off, which makes
 # it a component-model-blend candidate rather than a book quote.
 NBA_ASSUMABLE_FANTASY_COMPONENTS = frozenset({"TOV", "BLK", "STL"})
+
+# Regulation minutes of an NBA game, the scale of every *_48 per-minute rate.
+_REGULATION_MINUTES: int = 48
+
+# The recent-minutes mean's games: the feature study's batch (docs/gbdt_feature_study.md §10
+# item 9) names last-game and three-game minutes.
+_RECENT_MINUTES_GAMES: int = 3
 
 
 def _roster_seed_path(season: str) -> Path:
@@ -426,6 +434,42 @@ class StatsNBA(Stats):
         self.players = nba_data["players"]
         self.gamelog = nba_data["gamelog"]
         self.teamlog = nba_data["teamlog"]
+
+    def _build_player_profile_stats(self, stat_types, date):
+        """Add minutes history and each ``*_48`` rate pooled over the profile's two windows.
+
+        A pooled rate is a window's summed stat over its summed minutes, per 48: a short stint
+        weighs by its minutes and a game without minutes adds nothing, where the per-game mean
+        beside it counts that game as a zero rate. ``AST_48 opp adj`` first divides each game's
+        assists by the opponent's assists allowed per game over the league's, across the window
+        (``profile_market``'s ``Defense avg``).
+        """
+        playerstats = super()._build_player_profile_stats(stat_types, date)
+        player, opponent = self.log_strings["player"], self.log_strings["opponent"]
+        logs = self.short_gamelog
+        rates = {rate.removesuffix("_48"): rate for rate in stat_types if rate.endswith("_48")}
+        allowed = logs.groupby([opponent, self.log_strings["game"]])["AST"].sum()
+        allowed = allowed.groupby(level=opponent).mean()
+        games = logs[[player, "MIN", *rates]].assign(
+            **{"AST opp adj": logs["AST"] / logs[opponent].map(allowed / allowed.mean())}
+        )
+        rates["AST opp adj"] = "AST_48 opp adj"
+
+        def pooled(frame: pd.DataFrame) -> pd.DataFrame:
+            sums = frame.groupby(player).sum()
+            per_48 = sums[list(rates)].div(sums["MIN"], axis=0) * _REGULATION_MINUTES
+            return per_48.rename(columns=rates)
+
+        by_player = games.groupby(player)
+        recent = by_player.tail(_RECENT_MINUTES_GAMES).groupby(player)["MIN"].mean()
+        return playerstats.join(
+            [
+                by_player["MIN"].last().rename("MIN last game"),
+                recent.rename(f"MIN last {_RECENT_MINUTES_GAMES}"),
+                pooled(games).add_suffix(" pooled"),
+                pooled(by_player.tail(PROFILE_SHORT_GAMES)).add_suffix(" pooled short"),
+            ]
+        )
 
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.

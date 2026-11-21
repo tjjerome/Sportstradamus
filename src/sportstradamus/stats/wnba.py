@@ -437,3 +437,8 @@ class StatsWNBA(StatsNBA):
     # inheriting StatsNBA's absence columns.
     def _availability_context(self, stats, date, teams, opponents):
         pass
+
+    # StatsNBA's minutes history and pooled rates are per 48 and NBA-only: the WNBA's rates
+    # are per 40 and its matrices were not rebuilt to carry them, so it keeps the base profile.
+    def _build_player_profile_stats(self, stat_types, date):
+        return super(StatsNBA, self)._build_player_profile_stats(stat_types, date)

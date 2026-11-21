@@ -97,9 +97,10 @@ def _build_logs(stat_types: list[str], team_stat_types: list[str]):
     """Synthetic NBA gamelog + teamlog covering ``GAMES_BACK`` days up to ``GAMEDAY``.
 
     Columns follow ``StatsNBA.log_strings`` plus the per-cell stat-type panels, the
-    archive-baked ``moneyline`` / ``totals``, and the ``PLAYER_ID`` and ``AST`` / ``REB`` /
-    ``FGA`` the absence weights read. Values are deterministic (seeded RNG); only their
-    *parity across the two branches* matters, never their realism.
+    archive-baked ``moneyline`` / ``totals``, the ``PLAYER_ID`` and ``AST`` / ``REB`` /
+    ``FGA`` the absence weights read, and the other counts the profile pools per 48 minutes.
+    Values are deterministic (seeded RNG); only their *parity across the two branches*
+    matters, never their realism.
     """
     rng = np.random.default_rng(0)
     game_dates = [GAMEDAY - dt.timedelta(days=k) for k in range(GAMES_BACK, -1, -1)]
@@ -124,6 +125,12 @@ def _build_logs(stat_types: list[str], team_stat_types: list[str]):
                 "AST": float(rng.uniform(0, 10)),
                 "REB": float(rng.uniform(0, 12)),
                 "FGA": float(rng.uniform(3, 20)),
+                "FG3A": float(rng.uniform(1, 8)),
+                "OREB": float(rng.uniform(0, 4)),
+                "DREB": float(rng.uniform(1, 8)),
+                "TOV": float(rng.uniform(0, 4)),
+                "BLKA": float(rng.uniform(0, 2)),
+                "STL": float(rng.uniform(0, 3)),
                 "AGE": 25.0,
                 "moneyline": TEAM_MONEYLINE[team],
                 "totals": TEAM_TOTAL[team],
@@ -360,6 +367,16 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     assert set(absence) <= set(shared), "absence columns missing from the shared surface"
     pd.testing.assert_frame_equal(train[absence], live[absence])
     assert (train[absence] != 0).any().all(), "an absence column is zero on every row"
+
+    # StatsNBA's profile batch: minutes history and every *_48 rate pooled over the profile's
+    # two windows, assists also adjusted for the defenses faced. Non-zero on every row, so
+    # none can agree by being blank in both arms.
+    rates = [*(stat for stat in stats.stat_types if stat.endswith("_48")), "AST_48 opp adj"]
+    batch = ["Player MIN last game", "Player MIN last 3"]
+    batch += [f"Player {rate} pooled{window}" for rate in rates for window in ("", " short")]
+    assert set(batch) <= set(shared), "profile batch columns missing from the shared surface"
+    pd.testing.assert_frame_equal(train[batch], live[batch])
+    assert (train[batch] != 0).all().all(), "a profile batch column is zero on some row"
 
     # parity-surface extension point: a future feature batch that adds a per-gameday
     # column (or a new _game_context lookup / volume-dispatch surface) extends the

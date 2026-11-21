@@ -103,6 +103,10 @@ _VOLUME_SCALE_RATIO_CAP: float = 10.0
 # slope is too noisy on so few points.
 _MIN_GAMES_FOR_TRENDS: int = 3
 
+# A player's most recent games, the window of the profile's " short" means and " growth"
+# slopes; league profiles that add their own short columns read it too.
+PROFILE_SHORT_GAMES: int = 5
+
 # Participation floor for defense/usage profiling: keep only players whose
 # market hit-rate (per-game value clipped to [0, 1], averaged) clears this.
 # Below it the player barely sees the market and only adds profile noise.
@@ -1026,14 +1030,14 @@ class Stats:
         return stat_types, team_stat_types
 
     def _player_recent_slope(self, frame, value_cols):
-        """Per-player OLS slope of each value col over the player's last 5 games.
+        """Per-player OLS slope of each value col over his last ``PROFILE_SHORT_GAMES`` games.
 
         Rank-indexed least-squares slope, zeroed for players with fewer than
         ``_MIN_GAMES_FOR_TRENDS`` total games. Shared by the efficiency-stat
         ``growth`` profile columns and the comp-trend market signal.
         """
         _pc = self.log_strings["player"]
-        last5 = frame.groupby(_pc).tail(5).copy()
+        last5 = frame.groupby(_pc).tail(PROFILE_SHORT_GAMES).copy()
         last5["_rank"] = last5.groupby(_pc).cumcount()
         grp = last5.groupby(_pc)
         n = grp.size()
@@ -1059,7 +1063,7 @@ class Stats:
         _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
         playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
 
-        _last5 = _filled_gl.groupby(_player_col).tail(5)
+        _last5 = _filled_gl.groupby(_player_col).tail(PROFILE_SHORT_GAMES)
         playershortstats = (
             _last5.groupby(_last5[_player_col])[_avail_stats]
             .mean()
