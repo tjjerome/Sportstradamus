@@ -60,8 +60,8 @@ WEATHER_DTYPES: dict[str, str] = {
 # 2 h 40 min, so four hours holds overtime, extra innings or a short delay).
 HOURS_BEFORE_KICKOFF = 1
 HOURS_AFTER_KICKOFF = 4
-# statsapi's schedule query for mlb_games: regular season and every postseason round, with the
-# game's weather label, cut to the fields mlb_games reads. Callers add the dates or the season.
+# statsapi's schedule query for mlb_schedule_games: regular season and every postseason round,
+# with the game's weather label, cut to the fields it reads. Callers add the dates or the season.
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 MLB_SCHEDULE_PARAMS = {
     "sportId": 1,
@@ -144,7 +144,7 @@ def nfl_kickoffs(schedule: pd.DataFrame) -> pd.Series:
 def mlb_games(payload: dict) -> pd.DataFrame:
     """One row per MLB game of a statsapi schedule payload with a start time, at its venue.
 
-    The games are :func:`mlb_schedule_games`'; a venue the table lacks drops its games.
+    Games are those :func:`mlb_schedule_games` returns; a venue the table lacks drops its games.
     """
     return _locate(mlb_schedule_games(payload), "MLB")
 

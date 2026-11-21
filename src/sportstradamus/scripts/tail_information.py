@@ -12,12 +12,12 @@ forecast-encompassing regression (Chong & Hendry 1986), each estimator with an i
 The market is read at two references on the same rows. Decision time: each sportsbook's
 latest ``under_prob`` at the row's line by the DFS platforms' last poll of the row,
 averaged over books, and the consensus line then. Training time: ``1 - Odds`` and
-``Book_EV``, the quote the row's training read took (``stats.game_starts.read_times``). Their
-difference is the reference-timing skew. League
-and overall rows pool their cells with fixed effects (a cell intercept and market slope,
-one common b_model), so cross-cell level differences are not credited to the model. Every
-CI resamples whole days. No through-origin slope of (y - m) on (p - m): a mis-levelled
-market reference, like the NFL count quotes, contaminates it.
+``Book_EV``, the quote the row's training read took (``stats.game_starts.read_times``).
+Their difference is the reference-timing skew. League and overall rows pool their cells
+with fixed effects (a cell intercept and market slope, one common b_model), so cross-cell
+level differences are not credited to the model. Every CI resamples whole days. No
+through-origin slope of (y - m) on (p - m): a mis-levelled market reference, like the NFL
+count quotes, contaminates it.
 """
 
 from __future__ import annotations

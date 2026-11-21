@@ -726,9 +726,9 @@ def get_props(
     """Fetch per-event player-prop markets and store book-level EVs.
 
     ``observed_at_hour`` overrides the historical snapshot stamp (default
-    game-day 01:00): close-layer backfills stamp 23:00
-    (:func:`_historical_observed_at` says which training reads take it). ``leagues`` narrows the
-    ``sport="All"`` slate (the broad-run budget governor passes its allowance).
+    game-day 01:00): close-layer backfills stamp 23:00 (:func:`_historical_observed_at`
+    says which training reads take it). ``leagues`` narrows the ``sport="All"`` slate
+    (the broad-run budget governor passes its allowance).
     """
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
