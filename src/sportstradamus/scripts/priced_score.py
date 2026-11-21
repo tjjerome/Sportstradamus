@@ -25,6 +25,7 @@ P2 rungs span ``MIN_DATES`` game dates, else ``p1_dmse``, and each cell reads it
 primary on its own rows. A scope whose primary spans fewer dates is NEUTRAL. Otherwise it is
 KILL when any judged statistic spanning ``MIN_DATES`` dates has its interval wholly above
 zero, KEEP when the primary's lies wholly below, and NEUTRAL else.
+A value both arms serve alike, to float rounding (``SAME_VALUE_RTOL``), is no change.
 """
 
 from __future__ import annotations
@@ -59,6 +60,9 @@ CI_PERCENTILES = (2.5, 97.5)
 MIN_DATES = 20
 # Brier changes read in units of 1e-4.
 BRIER_SCALE = 1e4
+# Two serving paths computing the same value differ by float rounding (~1e-16 relative); a
+# real change sits many orders above it.
+SAME_VALUE_RTOL = 1e-12
 # Paired with each scope key's crc32 (``key_rng``), so a --league run reproduces the full
 # run's intervals.
 DEFAULT_SEED = 1729
@@ -133,9 +137,12 @@ def p2_rungs(candidate: pd.DataFrame, baseline: pd.DataFrame) -> pd.DataFrame:
 
 def _brier_changes(rows: pd.DataFrame, statistic: str) -> pd.DataFrame:
     settled = rows[rows["Result"] != rows["Line"]]
-    over = (settled["Result"] > settled["Line"]).astype(float)
-    change = (settled["p_cand"] - over) ** 2 - (settled["p_base"] - over) ** 2
-    return settled.assign(statistic=statistic, change=BRIER_SCALE * change)
+    over = (settled["Result"] > settled["Line"]).to_numpy(float)
+    # A frame with no rungs holds object columns, which isclose cannot read.
+    p_cand, p_base = (settled[arm].to_numpy(float) for arm in ("p_cand", "p_base"))
+    change = (p_cand - over) ** 2 - (p_base - over) ** 2
+    same_p = np.isclose(p_cand, p_base, rtol=SAME_VALUE_RTOL, atol=0.0)
+    return settled.assign(statistic=statistic, change=np.where(same_p, 0.0, BRIER_SCALE * change))
 
 
 def row_changes(p1: pd.DataFrame, p2: pd.DataFrame) -> pd.DataFrame:
@@ -153,11 +160,17 @@ def row_changes(p1: pd.DataFrame, p2: pd.DataFrame) -> pd.DataFrame:
     sq_cand = (p1["Result"] - p1["mean_cand"]) ** 2
     sq_base = (p1["Result"] - p1["mean_base"]) ** 2
     cell_mse = sq_base.groupby(p1["cell"]).transform("mean")
+    # A probability-only candidate serves the baseline's mean through another code path, a
+    # rounding error away on every row: that noise reads as an interval wholly above zero, a KILL.
+    same_mean = np.isclose(p1["mean_cand"], p1["mean_base"], rtol=SAME_VALUE_RTOL, atol=0.0)
     book = 1 - p1["Odds"]
     toward = (p1["p_base"] - book).abs() - (p1["p_cand"] - book).abs()
     authentic = p1["QuoteAuthenticity"].eq(AUTHENTIC)
     parts = [
-        p1.assign(statistic="p1_dmse", change=100 * (sq_cand - sq_base) / cell_mse),
+        p1.assign(
+            statistic="p1_dmse",
+            change=np.where(same_mean, 0.0, 100 * (sq_cand - sq_base) / cell_mse),
+        ),
         _brier_changes(p1, "p1_dbrier"),
         _brier_changes(p2, "p2_dbrier"),
         p1[authentic].assign(statistic="toward_book", change=100 * toward[authentic]),

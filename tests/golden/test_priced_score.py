@@ -134,6 +134,27 @@ def test_pooled_dmse_scores_each_row_against_its_own_cells_baseline_mse():
     assert table.loc[(ps.POOLED, "p1_dmse"), "estimate"] == pytest.approx(-27)
 
 
+def test_values_both_arms_serve_alike_read_no_change():
+    # The candidate serves the baseline's mean and P a rounding error away on every row, all
+    # on the worse side: float noise whose interval lies wholly above zero must read zero.
+    dates = [f"2026-10-{day:02d}" for day in range(1, 26)]
+    mean = 2.5 + np.arange(25) / 10
+    p1 = _p1(
+        Date=dates,
+        Result=1.0,
+        mean_base=mean,
+        mean_cand=mean * (1 + 4e-16),
+        p_base=0.3,
+        p_cand=0.3 * (1 + 4e-16),
+    )
+    no_rungs = ps.p2_rungs(pd.DataFrame(), pd.DataFrame())
+
+    table = ps.judge(ps.scope_table(ps.row_changes(p1, no_rungs), ps.DEFAULT_SEED))
+
+    assert table[["estimate", "lo", "hi"]].eq(0.0).all().all()
+    assert set(table["verdict"]) == {"NEUTRAL"}
+
+
 def _dated(statistic: str, n_dates: int, change: np.ndarray) -> pd.DataFrame:
     dates = pd.date_range("2026-10-01", periods=n_dates).strftime("%Y-%m-%d")
     return pd.DataFrame(
