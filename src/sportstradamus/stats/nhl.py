@@ -30,6 +30,7 @@ from sportstradamus.stats.base import (
     scraper,
 )
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
+from sportstradamus.stats.nhl_reports import WINDOW_DAYS, fill_report_columns, game_player_key
 
 # DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
 # are carried as separate shots/blocked components because those are distinct book
@@ -121,13 +122,6 @@ def _game_type(game_id):
 def _player_name(player_id, name: str) -> str:
     """``name`` as offers spell it, or the distinct name of a player who shares it."""
     return _DISTINCT_PLAYER_NAMES.get(int(player_id), remove_accents(name))
-
-
-def _game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
-    """(gameId, playerId) row key; the stored playerId is object-typed, so both sides cast."""
-    return pd.MultiIndex.from_arrays(
-        [frame["gameId"].astype(int), pd.to_numeric(frame["playerId"])]
-    )
 
 
 class StatsNHL(Stats):
@@ -685,6 +679,9 @@ class StatsNHL(Stats):
         # Rows stored before these sums were logged hold NaN; the first update after the
         # deploy re-parses the running season's games so its comp profile can be rebuilt.
         self.backfill_season_sums(seasons={self.season_start.year})
+        # A game the stats service has not published yet is asked for again next run, up to
+        # two weeks back; older rows wait for `admin backfill-nhl-gamelog --reports`.
+        self.gamelog = fill_report_columns(self.gamelog, since=today - timedelta(days=WINDOW_DAYS))
         self._fetch_upcoming_games_nhl(today)
 
         player_df = self._fetch_player_bios_nhl()
@@ -699,7 +696,7 @@ class StatsNHL(Stats):
         self.gamelog = self.gamelog[
             pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
         ]
-        self.gamelog = self.gamelog.loc[~_game_player_key(self.gamelog).duplicated(keep="last")]
+        self.gamelog = self.gamelog.loc[~game_player_key(self.gamelog).duplicated(keep="last")]
         self.teamlog = self.teamlog[
             pd.to_datetime(self.teamlog["gameDate"]).dt.date >= four_years_ago
         ]
@@ -766,10 +763,10 @@ class StatsNHL(Stats):
         """
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0).infer_objects(copy=False)
         if not nhl_df.empty:
-            keys = _game_player_key(nhl_df)
+            keys = game_player_key(nhl_df)
             fresh = ~keys.duplicated(keep="last")
             if not self.gamelog.empty:
-                fresh &= ~keys.isin(_game_player_key(self.gamelog))
+                fresh &= ~keys.isin(game_player_key(self.gamelog))
             nhl_df = nhl_df.loc[fresh]
             self._enrich_team_markets(nhl_df, date_col="gameDate", team_col="team")
         nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
@@ -809,9 +806,9 @@ class StatsNHL(Stats):
             # (Cam Atkinson, J.J. Moser), and a name key left 310 respelled 2024 rows lacking.
             fresh = pd.DataFrame(parsed)
             # A blank cell reads 0 as the hourly merge reads it; DataFrame.update skips NaN.
-            fresh = fresh.set_index(_game_player_key(fresh))[columns].fillna(0)
+            fresh = fresh.set_index(game_player_key(fresh))[columns].fillna(0)
             fresh = fresh[~fresh.index.duplicated(keep="last")]
-            stored = log.set_index(_game_player_key(log))[columns]
+            stored = log.set_index(game_player_key(log))[columns]
             stored.update(fresh)
             log[columns] = stored.to_numpy()
         self.gamelog = log
