@@ -1037,17 +1037,17 @@ class Stats:
         ``growth`` profile columns and the comp-trend market signal.
         """
         _pc = self.log_strings["player"]
-        last5 = frame.groupby(_pc).tail(PROFILE_SHORT_GAMES).copy()
-        last5["_rank"] = last5.groupby(_pc).cumcount()
-        grp = last5.groupby(_pc)
+        recent = frame.groupby(_pc).tail(PROFILE_SHORT_GAMES).copy()
+        recent["_rank"] = recent.groupby(_pc).cumcount()
+        grp = recent.groupby(_pc)
         n = grp.size()
         sum_r = grp["_rank"].sum()
-        sum_r2 = (last5["_rank"] ** 2).groupby(last5[_pc]).sum()
+        sum_r2 = (recent["_rank"] ** 2).groupby(recent[_pc]).sum()
         denom = (n * sum_r2 - sum_r**2).replace(0, np.nan)
-        valid = [c for c in value_cols if c in last5.columns]
+        valid = [c for c in value_cols if c in recent.columns]
         sum_y = grp[valid].sum()
-        iy = last5[valid].multiply(last5["_rank"], axis=0)
-        sum_iy = iy.groupby(last5[_pc]).sum()
+        iy = recent[valid].multiply(recent["_rank"], axis=0)
+        sum_iy = iy.groupby(recent[_pc]).sum()
         slopes = (sum_iy.multiply(n, axis=0) - sum_y.multiply(sum_r, axis=0)).div(denom, axis=0)
         total = frame.groupby(_pc).size()
         slopes.loc[total < _MIN_GAMES_FOR_TRENDS] = 0.0
@@ -1063,9 +1063,9 @@ class Stats:
         _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
         playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
 
-        _last5 = _filled_gl.groupby(_player_col).tail(PROFILE_SHORT_GAMES)
+        _recent = _filled_gl.groupby(_player_col).tail(PROFILE_SHORT_GAMES)
         playershortstats = (
-            _last5.groupby(_last5[_player_col])[_avail_stats]
+            _recent.groupby(_recent[_player_col])[_avail_stats]
             .mean()
             .fillna(0)
             .infer_objects(copy=False)

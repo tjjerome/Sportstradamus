@@ -670,7 +670,7 @@ class StatsNBA(Stats):
             return rosters
         if bios.empty:
             return {}
-        tables = self._merge_season_tables(bios, shots, {}).drop_duplicates("PLAYER_NAME")
+        tables = self._merge_season_tables(bios, shots, synergy={}).drop_duplicates("PLAYER_NAME")
         as_of = tables.set_index("PLAYER_NAME")[list(_DATED_COMP_FIELDS)].to_dict("index")
         return {
             team: {name: entry | as_of[name] for name, entry in roster.items() if name in as_of}
@@ -985,14 +985,12 @@ class StatsNBA(Stats):
         return shotData.fillna(0)
 
     @staticmethod
-    def _merge_season_tables(playerBios, shotData, synergy):
+    def _merge_season_tables(bios, shots, synergy):
         """Bios beside each player's shot zones and play types, by accent-free name; blanks 0."""
-        shotData = StatsNBA._enrich_shot_data(shotData, synergy)
-        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
-        shotData.PLAYER_NAME = shotData.PLAYER_NAME.apply(remove_accents)
-        return playerBios.merge(
-            shotData, on="PLAYER_NAME", suffixes=(None, "_y"), how="outer"
-        ).fillna(0)
+        shots = StatsNBA._enrich_shot_data(shots, synergy)
+        bios.PLAYER_NAME = bios.PLAYER_NAME.apply(remove_accents)
+        shots.PLAYER_NAME = shots.PLAYER_NAME.apply(remove_accents)
+        return bios.merge(shots, on="PLAYER_NAME", suffixes=(None, "_y"), how="outer").fillna(0)
 
     def _build_player_profiles(self, player_df, playerBios, shotData, synergy):
         """Merge bios + shot/synergy data into per-team player profiles on self.players."""
@@ -1200,15 +1198,15 @@ class StatsNBA(Stats):
         game["FTR"] = (game["FTM"] / game["FGA"]) if game["FGA"] > 0 else 0
         game["FG3_RATIO"] = (game["FG3A"] / game["FGA"]) if game["FGA"] > 0 else 0
         game["BLK_PCT"] = (game["BLK"] / game["BLKA"]) if game["BLKA"] > 0 else 0
-        game["FGA_48"] = game["FGA"] / game["MIN"] * 48
-        game["FG3A_48"] = game["FG3A"] / game["MIN"] * 48
-        game["REB_48"] = game["REB"] / game["MIN"] * 48
-        game["OREB_48"] = game["OREB"] / game["MIN"] * 48
-        game["DREB_48"] = game["DREB"] / game["MIN"] * 48
-        game["AST_48"] = game["AST"] / game["MIN"] * 48
-        game["TOV_48"] = game["TOV"] / game["MIN"] * 48
-        game["BLKA_48"] = game["BLKA"] / game["MIN"] * 48
-        game["STL_48"] = game["STL"] / game["MIN"] * 48
+        game["FGA_48"] = game["FGA"] / game["MIN"] * _REGULATION_MINUTES
+        game["FG3A_48"] = game["FG3A"] / game["MIN"] * _REGULATION_MINUTES
+        game["REB_48"] = game["REB"] / game["MIN"] * _REGULATION_MINUTES
+        game["OREB_48"] = game["OREB"] / game["MIN"] * _REGULATION_MINUTES
+        game["DREB_48"] = game["DREB"] / game["MIN"] * _REGULATION_MINUTES
+        game["AST_48"] = game["AST"] / game["MIN"] * _REGULATION_MINUTES
+        game["TOV_48"] = game["TOV"] / game["MIN"] * _REGULATION_MINUTES
+        game["BLKA_48"] = game["BLKA"] / game["MIN"] * _REGULATION_MINUTES
+        game["STL_48"] = game["STL"] / game["MIN"] * _REGULATION_MINUTES
 
     def _assemble_player_rows(self, nba_gamelog, adv_idx, usg_idx, position_map):
         """Build per-player gamelog rows, resolving POS and derived stats per game."""
