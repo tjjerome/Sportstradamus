@@ -712,8 +712,11 @@ class StatsNHL(Stats):
         # deploy re-parses the running season's games so its comp profile can be rebuilt.
         self.backfill_season_sums(seasons={self.season_start.year})
         # A game the stats service has not published yet is asked for again next run, up to
-        # two weeks back; older rows wait for `admin backfill-nhl-gamelog --reports`.
-        self.gamelog = fill_report_columns(self.gamelog, since=today - timedelta(days=WINDOW_DAYS))
+        # two weeks back; older rows wait for `admin backfill-nhl-gamelog --reports`. One try
+        # per request: this runs inside prophecize, so a hung service costs a minute, not three.
+        self.gamelog = fill_report_columns(
+            self.gamelog, since=today - timedelta(days=WINDOW_DAYS), max_attempts=1
+        )
         self._fetch_upcoming_games_nhl(today)
 
         player_df = self._fetch_player_bios_nhl()

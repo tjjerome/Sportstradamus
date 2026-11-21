@@ -45,7 +45,7 @@ class _StatsService:
         self.reports = reports
         self.requests = []
 
-    def get(self, url, params):
+    def get(self, url, max_attempts, params):
         report = url.rsplit("/", 1)[1]
         games = re.search(r"gameId in \(([^)]*)\)", params["cayenneExp"]).group(1)
         self.requests.append((report, games, params["start"]))
@@ -115,7 +115,7 @@ def test_a_game_one_report_lists_before_another_waits(service):
 
 
 def test_the_rows_wait_when_the_service_stops_answering(service, monkeypatch):
-    monkeypatch.setattr(service, "get", lambda url, params: {})
+    monkeypatch.setattr(service, "get", lambda url, max_attempts, params: {})
 
     filled = fill_report_columns(_gamelog())
 
@@ -136,7 +136,9 @@ def test_the_update_fills_the_report_columns_two_weeks_back(monkeypatch):
     monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: None)
     monkeypatch.setattr(StatsNHL, "backfill_season_sums", lambda self, seasons=None: 0)
     monkeypatch.setattr(
-        nhl, "fill_report_columns", lambda gamelog, since: bounds.append(since) or gamelog
+        nhl,
+        "fill_report_columns",
+        lambda gamelog, since, max_attempts: bounds.append((since, max_attempts)) or gamelog,
     )
     stats = StatsNHL()
     stats.season_start = date.today() + timedelta(days=5)
@@ -145,4 +147,5 @@ def test_the_update_fills_the_report_columns_two_weeks_back(monkeypatch):
 
     stats._update()
 
-    assert bounds == [date.today() - timedelta(days=14)]
+    # One try per request: the update runs inside prophecize.
+    assert bounds == [(date.today() - timedelta(days=14), 1)]

@@ -49,7 +49,7 @@ def game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
     )
 
 
-def _window_values(game_ids: list[int]) -> pd.DataFrame | None:
+def _window_values(game_ids: list[int], max_attempts: int) -> pd.DataFrame | None:
     """REPORT_COLUMNS of each player every report lists in ``game_ids``, keyed (gameId, playerId).
 
     ``None`` once the service stops answering.
@@ -68,7 +68,9 @@ def _window_values(game_ids: list[int]) -> pd.DataFrame | None:
         while True:
             sleep(_REQUEST_GAP_S)
             body = scraper.get(
-                _REPORT_URL.format(report=report), params=params | {"start": len(rows)}
+                _REPORT_URL.format(report=report),
+                max_attempts=max_attempts,
+                params=params | {"start": len(rows)},
             )
             if not body:
                 return None
@@ -84,7 +86,10 @@ def _window_values(game_ids: list[int]) -> pd.DataFrame | None:
 
 
 def fill_report_columns(
-    gamelog: pd.DataFrame, seasons: set[int] | None = None, since: date | None = None
+    gamelog: pd.DataFrame,
+    seasons: set[int] | None = None,
+    since: date | None = None,
+    max_attempts: int = 3,
 ) -> pd.DataFrame:
     """``gamelog`` with REPORT_COLUMNS filled on the rows of every game the service published.
 
@@ -97,6 +102,7 @@ def fill_report_columns(
         gamelog: The NHL gamelog.
         seasons: Season start years to fill, e.g. ``{2025}``; ``None`` is every season.
         since: The earliest game date to fill; ``None`` is every date.
+        max_attempts: Tries per request before the fill stops and the rest wait.
 
     Returns:
         The gamelog, holding every REPORT_COLUMNS column.
@@ -112,7 +118,7 @@ def fill_report_columns(
     days = pd.to_datetime(games["gameDate"])
     windows = games["gameId"].groupby((days - days.min()).dt.days // WINDOW_DAYS)
     for _, game_ids in tqdm(windows, desc="Getting NHL report stats"):
-        values = _window_values(game_ids.tolist())
+        values = _window_values(game_ids.tolist(), max_attempts)
         if values is None:
             logger.warning("NHL stats service stopped answering; the unfilled rows wait")
             break
