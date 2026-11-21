@@ -1585,7 +1585,8 @@ Copula research is **done** (R3 brief
   / pitcher strikeouts), NBA 4.2M (PTS/REB/AST/FG3M alternates, 2024-10→2026-06), NHL 3.5M (7
   markets, 2023-10→2026-06), NFL 523k (yardage + receptions alternates, two seasons), WNBA 314k.
   MLB/NHL additionally carry a **close-layer dual snapshot** (`observed_at` 23:00,
-  evaluation-only vs the 01:00 feature layer) over their core windows — open→close movement and
+  beside the 01:00 feature layer; training reads it for games starting at or after 00:00 UTC under
+  the start-minus-1-h quote rule, 2026-11-20) over their core windows — open→close movement and
   CLV are computable per slot (C-3's raw material; the feature build stays §8.2-gated). The
   standing tail read on `g4_tail_pit_ks` + central50/80 is runnable at scale, and the
   §6.5-deferred ladder-lift re-test (book-CDF fit on real rungs, previously blocked on an empty

@@ -84,7 +84,8 @@ _DIST_CONFIG_PATHS = (
 )
 # §7: a backfill block reads the config of the day before ladder capture began (92f918ab).
 _BACKFILL_CONFIG_DATE = datetime.date(2026, 6, 17)
-# §4: close rows fall after the training read's cutoff, so they are never levelled.
+# §4: the decode never levels close rows; a training read that reaches one (a game starting after
+# 00:00 UTC) prices it from the ladder rung of the same observation.
 _CLOSE_LAYER = "23:00"
 # §5: the native layers a block is referenced against, in the order it tries them.
 _REFERENCE_LAYERS = ("01:00", _CLOSE_LAYER)
