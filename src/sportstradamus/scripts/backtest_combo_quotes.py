@@ -26,13 +26,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus.helpers import get_odds
+from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.config import stat_cv, stat_dist
-from sportstradamus.scripts.inject_backfilled_odds import (
-    _COMMENCE_STANDIN,
-    _load_league,
-    _target_at,
-)
+from sportstradamus.scripts.inject_backfilled_odds import _load_league
 from sportstradamus.stats.base import archive, is_mlb_pitcher_market
+from sportstradamus.stats.game_starts import read_times
 
 # Acceptance buckets from the lane plan: the flip gate compares |claimed - hit| in the
 # directional extremes, n >= 50 per bucket.
@@ -40,17 +38,6 @@ _EXTREME_HI = 0.75
 _EXTREME_LO = 0.25
 _EXTREME_MIN_N = 50
 _DECILE_EDGES = np.linspace(0.0, 1.0, 11)
-
-
-def _game_time(game_date: datetime.date) -> datetime.datetime:
-    """Serving's read cutoff: everything quoted before first pitch, nothing after.
-
-    The DFS platforms post their boards hours after the training lookback has
-    closed (measured: Underdog's MLB fantasy rows land ~13:50 UTC against a
-    12:00 training cutoff), so replaying a serving consumer at the training
-    cutoff would grade an empty board.
-    """
-    return datetime.datetime.combine(game_date, datetime.time()) + _COMMENCE_STANDIN
 
 
 def _grade_market(stat_data, market: str, days: int, serving: bool) -> pd.DataFrame:
@@ -68,19 +55,23 @@ def _grade_market(stat_data, market: str, days: int, serving: bool) -> pd.DataFr
     if stat_data.league == "MLB":
         usage_stat = "batters faced" if is_mlb_pitcher_market(market) else ls["usage"]
     gamelog = gamelog.loc[pd.to_numeric(gamelog[usage_stat], errors="coerce") > 0]
+    # The archive keys a quote by date, so a player's first game of a date stands for it.
+    gamelog = gamelog.drop_duplicates([ls["date"], ls["player"]])
+    # Serving prices with every quote posted before the start; training reads the lookback earlier.
+    reads = read_times(stat_data.league, gamelog[ls["game"]], gamelog[ls["date"]])
+    read_at = reads + TRAINING_LOOKBACK if serving else reads
 
     cv = stat_cv.get(stat_data.league, {}).get(market, 1)
     dist = stat_dist.get(stat_data.league, {}).get(market, "Gamma")
 
     records = []
-    gamedays = gamelog.groupby(pd.to_datetime(gamelog[ls["date"]]).dt.date)
-    for game_date, players_df in tqdm(
-        gamedays, unit="gameday", desc=f"{stat_data.league} {market}", total=len(gamedays)
+    windowed = None
+    slates = gamelog.groupby([pd.to_datetime(gamelog[ls["date"]]).dt.date, read_at])
+    for (game_date, at), players_df in tqdm(
+        slates, unit="slate", desc=f"{stat_data.league} {market}", total=len(slates)
     ):
         date = game_date.strftime("%Y-%m-%d")
-        at = _game_time(game_date) if serving else _target_at(game_date)
         results = players_df.set_index(ls["player"])[market]
-        results = results[~results.index.duplicated()]
         players = list(results.index)
 
         quote_inputs = archive.get_training_quote_inputs(
@@ -94,7 +85,10 @@ def _grade_market(stat_data, market: str, days: int, serving: bool) -> pd.DataFr
         if not lines:
             continue
 
-        stat_data.window_short_logs(game_date)
+        # Slates come in date order; one window serves every read time of a date.
+        if game_date != windowed:
+            stat_data.window_short_logs(game_date)
+            windowed = game_date
         kernel_quotes = stat_data.combo_quote(market, list(lines), date, at, lines=lines)
 
         for player, line in lines.items():

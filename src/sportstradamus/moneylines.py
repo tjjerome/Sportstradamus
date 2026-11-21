@@ -726,8 +726,8 @@ def get_props(
     """Fetch per-event player-prop markets and store book-level EVs.
 
     ``observed_at_hour`` overrides the historical snapshot stamp (default
-    game-day 01:00): close-layer backfills stamp a post-read hour so their
-    rows are evaluation-only by construction. ``leagues`` narrows the
+    game-day 01:00): close-layer backfills stamp 23:00
+    (:func:`_historical_observed_at` says which training reads take it). ``leagues`` narrows the
     ``sport="All"`` slate (the broad-run budget governor passes its allowance).
     """
     stat_cv["NCAAB"] = stat_cv["NBA"]
@@ -760,9 +760,10 @@ def _historical_observed_at(historical, game_date, hour=None):
 
     Live writes default to ``utcnow()``. Backfilled rows stamp game-day
     01:00 so they beat the migrated midnight (``00:00``) rows on recency
-    while staying before any ``kickoff - 8h`` point-in-time training read.
-    ``hour`` overrides that for close-layer backfills, whose rows must land
-    AFTER every pre-game read (evaluation-only layer).
+    while staying before the training read (start minus ``TRAINING_LOOKBACK``)
+    of every game that starts after 02:00 UTC. ``hour`` overrides that for
+    close-layer backfills (23:00), which land after the read of every game
+    starting before midnight UTC; a later game's read takes them.
     """
     if not historical:
         return None

@@ -125,11 +125,13 @@ ALT_MARKET_KEYS = {
     },
 }
 
-# Close-layer rows stamp game-day 23:00 UTC — after every pre-game training
-# read, so the layer is evaluation-only (CLV / movement) by construction.
+# Close-layer rows stamp game-day 23:00 UTC: after the training read (start minus
+# TRAINING_LOOKBACK) of every game starting before midnight UTC, which never reads
+# them; a game starting later reads them as its last board.
 CLOSE_LAYER_HOUR = 23
-# Feature-layer content must predate the 12:00 UTC training read or backfilled
-# lines would leak information the live pipeline never had.
+# Feature-layer content (stamped 01:00) must predate the training read or backfilled
+# lines would leak information the live pipeline never had; 12:00 UTC precedes the
+# read of every game starting from 13:00 UTC, which holds every regular US start.
 FEATURE_SNAPSHOT_MAX_HOUR = 12
 
 ODDS_API_SPORT_KEYS = {
@@ -418,7 +420,8 @@ def _backfill(
     type=click.Choice(["feature", "close"]),
     default="feature",
     help="feature: pre-read snapshot (props observed_at 01:00; game lines at the snapshot hour). "
-    "close: evaluation-only closing snapshot (observed_at 23:00, props only).",
+    "close: closing snapshot (observed_at 23:00, props only; only games starting after "
+    "midnight UTC read it).",
 )
 @click.option(
     "--game-lines-only",
@@ -485,7 +488,8 @@ def main(
     if layer == "feature" and snapshot_hour > FEATURE_SNAPSHOT_MAX_HOUR:
         raise click.ClickException(
             f"feature-layer snapshots must be <= {FEATURE_SNAPSHOT_MAX_HOUR}:00 UTC "
-            "(the training read hour) — later content would leak post-read lines"
+            "(before the training read of every regular US start) — later content would "
+            "leak post-read lines"
         )
     if layer == "close" and snapshot_hour <= FEATURE_SNAPSHOT_MAX_HOUR:
         raise click.ClickException(

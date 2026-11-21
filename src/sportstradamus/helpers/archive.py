@@ -97,9 +97,9 @@ _BOOK_LINE_HISTORY_COLS = [
 LADDER_POLL_TOLERANCE_S = 300
 _LADDER_RUNG_COLS = ["entity", "book", "line", "p_over", "observed_at"]
 
-# Hours before commence_time treated as "the books' line" during training.
-# Aligned with the typical Vegas closing-window inflection (~8h pre-game).
-TRAINING_LOOKBACK_HOURS: int = 8
+# A training row reads the books' quotes this many hours before its game starts: the last board
+# before the game, as live serving prices it (owner, 2026-11-20).
+TRAINING_LOOKBACK_HOURS: int = 1
 TRAINING_LOOKBACK = timedelta(hours=TRAINING_LOOKBACK_HOURS)
 
 # Game lines for a finished game are read as of 15:00 UTC on its game date: after the

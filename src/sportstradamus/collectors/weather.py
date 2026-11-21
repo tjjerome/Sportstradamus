@@ -121,25 +121,42 @@ def nfl_games(schedule: pd.DataFrame) -> pd.DataFrame:
     if schedule.empty:
         schedule = pd.DataFrame(columns=["game_id", "gameday", "gametime", "roof", "stadium"])
     timed = schedule.dropna(subset=["gametime"])
-    kickoff = pd.to_datetime(timed["gameday"] + " " + timed["gametime"])
     games = pd.DataFrame(
         {
             "game_id": timed["game_id"],
             "venue": timed["stadium"].replace(_NFL_ALIASES),
-            "kickoff": kickoff.dt.tz_localize(_NFL_TZ).dt.tz_convert("UTC").dt.tz_localize(None),
+            "kickoff": nfl_kickoffs(timed),
             "schedule_label": timed["roof"],
         }
     )
     return _locate(games, "NFL")
 
 
-def mlb_games(payload: dict) -> pd.DataFrame:
-    """One row per MLB game of a statsapi schedule payload, at its venue.
+def nfl_kickoffs(schedule: pd.DataFrame) -> pd.Series:
+    """Each nflverse schedule row's kickoff, naive UTC, from its US Eastern gameday and gametime.
 
-    A postponed or cancelled game gets no row, nor one whose start time is TBD (a traditional
-    doubleheader's second game, whose ``gameDate`` is a placeholder minutes after the first
-    game's). A ``gamePk`` listed twice (a suspended game, on the date it began and the date it
-    resumes) keeps its latest ``gameDate``. ``schedule_label`` is statsapi's game condition
+    Also read by the start-time store (``stats.game_starts``). A row without a gametime is NaT.
+    """
+    kickoff = pd.to_datetime(schedule["gameday"] + " " + schedule["gametime"])
+    return kickoff.dt.tz_localize(_NFL_TZ).dt.tz_convert("UTC").dt.tz_localize(None)
+
+
+def mlb_games(payload: dict) -> pd.DataFrame:
+    """One row per MLB game of a statsapi schedule payload with a start time, at its venue.
+
+    The games are :func:`mlb_schedule_games`'; a venue the table lacks drops its games.
+    """
+    return _locate(mlb_schedule_games(payload), "MLB")
+
+
+def mlb_schedule_games(payload: dict) -> pd.DataFrame:
+    """One row per MLB game of a statsapi schedule payload with a start time.
+
+    Also read by the start-time store (``stats.game_starts``). A postponed or cancelled game
+    gets no row, nor one whose start time is TBD (a traditional doubleheader's second game,
+    whose ``gameDate`` is a placeholder minutes after the first game's). A ``gamePk`` listed
+    twice (a suspended game, on the date it began and the date it resumes) keeps its latest
+    ``gameDate``. ``kickoff`` is naive UTC; ``schedule_label`` is statsapi's game condition
     ("Roof Closed", "Dome", "Clear", ...), NA until posted.
     """
     games = pd.DataFrame(
@@ -158,8 +175,7 @@ def mlb_games(payload: dict) -> pd.DataFrame:
         columns=["game_id", "venue", "kickoff", "schedule_label"],
     )
     games["kickoff"] = pd.to_datetime(games["kickoff"], utc=True).dt.tz_localize(None)
-    games = games.sort_values("kickoff").drop_duplicates("game_id", keep="last")
-    return _locate(games, "MLB")
+    return games.sort_values("kickoff").drop_duplicates("game_id", keep="last")
 
 
 def hourly_frame(reply: dict | list[dict], venues: Sequence[str]) -> pd.DataFrame:

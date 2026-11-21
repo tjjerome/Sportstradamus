@@ -22,6 +22,7 @@ from sportstradamus.helpers.training_quotes import (
 )
 from sportstradamus.scripts.inject_backfilled_odds import resolve_cached_quotes
 from sportstradamus.stats import base as base_mod
+from sportstradamus.stats import game_starts
 from sportstradamus.training.data import _clip_lines
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_affine import (
     _affine_authenticity_mask,
@@ -378,9 +379,18 @@ class _Stub:
         return np.nan
 
     depth_quoted_markets = frozenset()
+    # The repair finds each cached row's game in the gamelog; with none logged, every row takes
+    # the stand-in read, which the fake archive ignores.
+    log_strings = {"game": "GAME_ID", "date": "GAME_DATE", "player": "PLAYER_NAME"}
+    gamelog = pd.DataFrame(columns=["GAME_ID", "GAME_DATE", "PLAYER_NAME"])
 
     def window_short_logs(self, date):
         """The repair windows the logs per gameday; the stub has none to window."""
+
+
+@pytest.fixture
+def empty_start_store(tmp_path, monkeypatch):
+    monkeypatch.setattr(game_starts, "_LEAGUES_DIR", tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -391,7 +401,9 @@ class _Stub:
         ([], 0.0),
     ],
 )
-def test_repair_and_scratch_append_emit_identical_book_fields(monkeypatch, rows, legacy_line):
+def test_repair_and_scratch_append_emit_identical_book_fields(
+    monkeypatch, empty_start_store, rows, legacy_line
+):
     archive = _FakeArchive(rows, legacy_line)
     monkeypatch.setattr(base_mod, "archive", archive)
     stats = pd.DataFrame({"Avg10": [2.0]}, index=["P"])
@@ -411,7 +423,9 @@ def test_repair_and_scratch_append_emit_identical_book_fields(monkeypatch, rows,
 
 
 @pytest.mark.parametrize("depth_quoted", [frozenset({"AST"}), frozenset()])
-def test_repair_runs_get_depth_only_for_depth_quoted_markets(monkeypatch, depth_quoted):
+def test_repair_runs_get_depth_only_for_depth_quoted_markets(
+    monkeypatch, empty_start_store, depth_quoted
+):
     """A market whose combo spec reads the position ``get_depth`` writes (NFL fantasy)
     pays one ``get_depth`` per gameday in the repair; every other market skips it."""
     monkeypatch.setattr(base_mod, "archive", _FakeArchive([], 0.0))

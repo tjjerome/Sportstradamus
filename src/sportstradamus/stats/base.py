@@ -2,7 +2,6 @@
 
 import dataclasses
 import importlib.resources as pkg_resources
-import itertools
 import os.path
 import pickle
 import warnings
@@ -14,7 +13,6 @@ from pathlib import Path
 import line_profiler
 import numpy as np
 import pandas as pd
-from nba_api.stats.endpoints import scheduleleaguev2
 from tqdm import tqdm
 
 from sportstradamus import data
@@ -54,7 +52,7 @@ from sportstradamus.helpers.training_quotes import (
     resolve_training_quote,
 )
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nba_client, weather_features
+from sportstradamus.stats import game_starts, nba_client, weather_features
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE, load_model_dependency
 from sportstradamus.stats.nba_client import NBAStatsError
@@ -123,13 +121,6 @@ SEASON_MAX_DAYS: int = 300
 # Three days covers today + tomorrow + day-after so late-night runs don't miss
 # next-day tip-offs, and an offer dated a day or two ahead finds its own game.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
-
-# The LeagueID and stats host each league's schedule is read from. WNBA goes to its own host
-# so the call spends that host's rate budget, not the NBA's (stats/nba_client.py).
-_SCHEDULE_SOURCES: dict[str, tuple[str, nba_client.StatsHost]] = {
-    "NBA": ("00", nba_client.NBA_HOST),
-    "WNBA": ("10", nba_client.WNBA_HOST),
-}
 
 # A "blowout" is a game lopsided enough to suppress a starter's volume. Each
 # threshold is the |implied spread| (own minus opponent implied total, league
@@ -458,11 +449,8 @@ def fetch_upcoming_games(
     A fetch that fails every retry leaves both maps empty, so the league's rows read as
     away games instead of the league dropping off the board.
     """
-    league_id, host = _SCHEDULE_SOURCES[league]
     try:
-        game_days = nba_client.fetch(
-            scheduleleaguev2.ScheduleLeagueV2, host=host, league_id=league_id, season=season
-        ).get_dict()["leagueSchedule"]["gameDates"]
+        games = nba_client.schedule_games(league, season)
     except NBAStatsError:
         logger.warning(f"{league} schedule unavailable: every {league} row reads as away")
         return {}, {}
@@ -472,8 +460,8 @@ def fetch_upcoming_games(
     }
     upcoming_games: dict[str, dict] = {}
     games_by_date: dict[tuple[str, str], dict] = {}
-    # Game days come in date order, so the first game a team is seen in is its next one.
-    for game in itertools.chain.from_iterable(game_day["games"] for game_day in game_days):
+    # Games come in date order, so the first game a team is seen in is its next one.
+    for game in games:
         day = game["gameDateEst"][:10]
         home, away = game["homeTeam"]["teamTricode"], game["awayTeam"]["teamTricode"]
         # A knockout game names no teams until its bracket settles (NBA Cup placeholders).
@@ -2479,8 +2467,9 @@ class Stats:
         Returns:
             pd.DataFrame: A row is one player on one gameday: the ``get_stats`` features,
             the quote and provenance columns of ``resolve_player_market_odds``, and
-            ``Result`` (the target), ``Player``, ``Date`` and ``GameTime``. Empty when
-            no gameday yields a row.
+            ``Result`` (the target), ``Player``, ``Date`` and ``GameTime``, the game start
+            its quotes are read ``TRAINING_LOOKBACK`` before (``game_starts.read_times``).
+            Empty when no gameday yields a row.
         """
         # style: allow-complexity — one gameday loop assembling every matrix source in order:
         # offers, volume dispatch, features, usage, quotes, then the MLB book-first split.
@@ -2508,6 +2497,11 @@ class Stats:
             & (gamelog[self.log_strings["date"]] < datetime.today().date())
         ]
         gamelog = self._market_position_filter(gamelog, market)
+        gamelog = gamelog.assign(
+            ReadAt=game_starts.read_times(
+                self.league, gamelog[self.log_strings["game"]], gamelog[self.log_strings["date"]]
+            )
+        )
         # MLB never set self.usage_stat (its usage path used to be skipped entirely), so read
         # the participation column explicitly: pitcher markets accrue on the mound (batters
         # faced), hitter markets at the plate (log_strings["usage"] == plateAppearances).
@@ -2553,20 +2547,22 @@ class Stats:
             usage = usage[~usage.index.duplicated(keep="first")]
 
             date = gameDate.strftime("%Y-%m-%d")
-
-            # 8 PM UTC stand-in for true commence_time. Per-league actual
-            # start times can be wired in later; this default sits well
-            # after every league's typical kickoff window so target_at
-            # below stays >= the legacy single-point archive sentinel
-            # (game_date midnight) and back-compat lookups never miss.
-            game_time = datetime.combine(gameDate, datetime.min.time()) + timedelta(hours=20)
-            target_at = game_time - TRAINING_LOOKBACK
-
-            stats = stats.join(self.resolve_player_market_odds(stats, market, date, target_at))
+            # The archive read takes one time; a gameday's games start at different hours.
+            reads = (
+                players.drop_duplicates(self.log_strings["player"])
+                .set_index(self.log_strings["player"])["ReadAt"]
+                .loc[stats.index]
+            )
+            stats = stats.join(
+                pd.concat(
+                    self.resolve_player_market_odds(group, market, date, read_at)
+                    for read_at, group in stats.groupby(reads)
+                )
+            )
             stats = stats.join(offers_df["Result"])
             stats["Player"] = stats.index
             stats["Date"] = date
-            stats["GameTime"] = game_time
+            stats["GameTime"] = reads + TRAINING_LOOKBACK
             if stats["Home"].dtype == bool:
                 if self.league == "MLB":
                     # Book-first: keep only real-odds rows so book-quoted MLB cells stay

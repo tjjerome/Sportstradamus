@@ -15,7 +15,8 @@ rows. ``Stats.resolve_player_market_odds`` reads only ``stats.index`` and
 ``stats["Avg10"]`` from its frame — both cached — and its combo fallback needs
 only the 300-day log window, not the profile frames built from it. So one
 ``window_short_logs`` call per gameday reproduces what a rebuild resolves, at one
-batched archive query per gameday instead of a full feature rebuild. The exception
+batched archive query per gameday and read time (each row reads before its own game's
+start, which the loaded gamelog's game id finds) instead of a full feature rebuild. The exception
 is a league's ``depth_quoted_markets`` (NFL's fantasy cells, whose per-position
 spec reads the position ``get_depth`` writes): those pay one ``get_depth`` per
 gameday, roughly 15 s each on NFL.
@@ -40,7 +41,6 @@ serving cells too:
     poetry run python -m sportstradamus.scripts.inject_backfilled_odds --all-cached
 """
 
-import datetime
 import importlib.resources as pkg_resources
 from collections import Counter
 
@@ -50,16 +50,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers.archive import TRAINING_LOOKBACK
+from sportstradamus.helpers import remove_accents
 from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS
 from sportstradamus.stats import Stats, StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
-
-# 8 PM UTC commence-time stand-in from stats/base.py get_training_matrix. The
-# archive read happens at this minus the training lookback; backfilled rows
-# (observed_at 01:00) and the midnight seed both precede it, so the read returns
-# the latest observation = the backfill.
-_COMMENCE_STANDIN = datetime.timedelta(hours=20)
+from sportstradamus.stats.game_starts import read_times
 
 _LEAGUE_CLASSES = {
     "NBA": StatsNBA,
@@ -72,14 +67,6 @@ _LEAGUE_CLASSES = {
 _REPAIRED_COLUMNS = ("Line", "Odds", "EV", "Archived", "Odds_synthetic", *PROVENANCE_COLUMNS)
 
 
-def _target_at(game_date: datetime.date) -> datetime.datetime:
-    return (
-        datetime.datetime.combine(game_date, datetime.time())
-        + _COMMENCE_STANDIN
-        - TRAINING_LOOKBACK
-    )
-
-
 def _load_league(league: str):
     """Load one league's gamelog exactly as the training run does, minus the network."""
     stat_data = _LEAGUE_CLASSES[league]()
@@ -88,28 +75,52 @@ def _load_league(league: str):
     return stat_data
 
 
+def _game_ids(stat_data: Stats, M: pd.DataFrame) -> pd.Series:
+    """Each cached row's game id, as text, from the loaded gamelog; NaN where it holds none.
+
+    A player's first game on a date is the one ``get_training_matrix`` keys his row by, so an
+    MLB doubleheader resolves to the game the row was built from.
+    """
+    log_strings = stat_data.log_strings
+    games = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(stat_data.gamelog[log_strings["date"]]).dt.date,
+            # The matrix keys rows by accent-free names; older NBA gamelog rows hold raw ones.
+            "Player": stat_data.gamelog[log_strings["player"]].map(remove_accents),
+            "game_id": stat_data.gamelog[log_strings["game"]].astype(str),
+        }
+    ).drop_duplicates(["Date", "Player"])
+    rows = pd.DataFrame({"Date": pd.to_datetime(M["Date"]).dt.date, "Player": M["Player"]})
+    return rows.merge(games, how="left")["game_id"].set_axis(M.index)
+
+
 def resolve_cached_quotes(stat_data: Stats, market: str, M: pd.DataFrame) -> pd.DataFrame:
     """Re-resolve every cached row's quote through the training join's own resolver.
 
+    Each row reads at the time a rebuild would (``game_starts.read_times``): a gameday's rows
+    resolve in one batch per read time.
+
     Returns the canonical quote record for each row, aligned to ``M.index``.
     """
+    reads = read_times(stat_data.league, _game_ids(stat_data, M), M["Date"])
     game_dates = pd.to_datetime(M["Date"]).dt.date
     resolved = []
     for game_date, rows in tqdm(
         M.groupby(game_dates), unit="gameday", desc=f"{stat_data.league} {market}", leave=False
     ):
         stat_data.window_short_logs(game_date)
-        players = rows["Player"]
         if market in stat_data.depth_quoted_markets:
-            stat_data.get_depth(dict.fromkeys(players), game_date)
-        stats = pd.DataFrame({"Avg10": rows["Avg10"].to_numpy()}, index=players)
-        stats = stats.loc[~stats.index.duplicated()]
-        quotes = stat_data.resolve_player_market_odds(
-            stats, market, game_date.strftime("%Y-%m-%d"), _target_at(game_date)
-        )
-        quotes = quotes.reindex(players)
-        quotes.index = rows.index
-        resolved.append(quotes)
+            stat_data.get_depth(dict.fromkeys(rows["Player"]), game_date)
+        for read_at, group in rows.groupby(reads):
+            players = group["Player"]
+            stats = pd.DataFrame({"Avg10": group["Avg10"].to_numpy()}, index=players)
+            stats = stats.loc[~stats.index.duplicated()]
+            quotes = stat_data.resolve_player_market_odds(
+                stats, market, game_date.strftime("%Y-%m-%d"), read_at
+            )
+            quotes = quotes.reindex(players)
+            quotes.index = group.index
+            resolved.append(quotes)
     return pd.concat(resolved).reindex(M.index)
 
 

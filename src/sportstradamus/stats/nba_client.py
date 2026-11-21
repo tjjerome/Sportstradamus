@@ -29,6 +29,7 @@ import random
 from time import monotonic, sleep
 from typing import NamedTuple
 
+from nba_api.stats.endpoints import scheduleleaguev2
 from nba_api.stats.library.http import NBAStatsHTTP
 
 from sportstradamus.helpers.scraping import BROWSER_USER_AGENT
@@ -76,6 +77,13 @@ class StatsHost(NamedTuple):
 # its own rate-limit budget. The "{endpoint}" placeholder is nba_api's own.
 NBA_HOST = StatsHost("https://stats.nba.com/stats/{endpoint}", NBA_STATS_HEADERS)
 WNBA_HOST = StatsHost("https://stats.wnba.com/stats/{endpoint}", WNBA_STATS_HEADERS)
+
+# The LeagueID and host each league's schedule is read from. WNBA goes to its own host so the
+# call spends that host's rate budget, not the NBA's.
+_SCHEDULE_SOURCES: dict[str, tuple[str, StatsHost]] = {
+    "NBA": ("00", NBA_HOST),
+    "WNBA": ("10", WNBA_HOST),
+}
 
 # Per-request read timeout (seconds). Healthy responses return in under ~2s, so
 # this is mostly a bound on a hung socket — short enough to abort and hand
@@ -167,3 +175,25 @@ def fetch(endpoint_cls: type, *, host: StatsHost = NBA_HOST, **params: object) -
             NBAStatsHTTP.base_url = previous_base_url
 
     raise NBAStatsError(f"{name} failed after {NBA_MAX_ATTEMPTS} attempts")
+
+
+def schedule_games(league: str, season: str | int) -> list[dict]:
+    """Every game ``ScheduleLeagueV2`` lists for an NBA or WNBA season, in date order.
+
+    Read by the upcoming-games map (``stats.base.fetch_upcoming_games``) and the start-time
+    store (``stats.game_starts``). Past seasons list their preseason, play-in, playoff and Cup
+    games too. Each game is the payload's own dict: ``gameId``, ``gameDateEst`` (its US Eastern
+    date), ``gameDateTimeUTC``, each side's ``teamTricode`` and the rest.
+
+    Args:
+        league: ``"NBA"`` or ``"WNBA"``.
+        season: The endpoint's season: ``"2026-27"`` for the NBA, the year for the WNBA.
+
+    Raises:
+        NBAStatsError: If the fetch fails every retry.
+    """
+    league_id, host = _SCHEDULE_SOURCES[league]
+    game_days = fetch(
+        scheduleleaguev2.ScheduleLeagueV2, host=host, league_id=league_id, season=season
+    ).get_dict()["leagueSchedule"]["gameDates"]
+    return [game for game_day in game_days for game in game_day["games"]]
