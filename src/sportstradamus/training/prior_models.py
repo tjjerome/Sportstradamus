@@ -107,9 +107,8 @@ def retire_test_set(league: str, market: str) -> bool:
     if market in VOLUME_STATS[league]:
         return False
     model_path = model_pickle_path(league, market)
-    test_set_path = Path(str(pkg_resources.files(data) / "test_sets")) / (
-        f"{market_file_slug(league, market)}.csv"
-    )
+    test_sets_dir = Path(str(pkg_resources.files(data) / "test_sets"))
+    test_set_path = test_sets_dir / f"{market_file_slug(league, market)}.csv"
     if model_path.is_file():
         keep_prior_model(model_path, test_set_path)
     elif test_set_path.is_file():
