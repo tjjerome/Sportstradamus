@@ -239,7 +239,7 @@ def test_a_blocked_nhl_roster_pull_fails_the_update_once_the_season_has_games(
     monkeypatch.setattr(nhl, "scraper", _SilentSites())
     monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: writes.append(bundle))
     monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: writes.append("goalies"))
-    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since: gamelog)
+    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since, max_attempts: gamelog)
     stats = StatsNHL()
     stats.season_start = date.today() - timedelta(days=days_since_opening_night)
     yesterday = str(date.today() - timedelta(days=1))
@@ -265,7 +265,7 @@ def test_every_nhl_update_writes_the_goalie_list(monkeypatch, tmp_path):
     """Only a training run wrote it, so production's list aged and a new goalie read as a skater."""
     monkeypatch.setattr(nhl, "scraper", _SilentSites())
     monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: None)
-    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since: gamelog)
+    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since, max_attempts: gamelog)
     stats = StatsNHL()
     (tmp_path / "config").mkdir()
     monkeypatch.setattr(nhl, "pkg_resources", SimpleNamespace(files=lambda package: tmp_path))

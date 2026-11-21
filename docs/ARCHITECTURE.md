@@ -92,7 +92,7 @@ Sportstradamus/
 | `wnba.py` | `StatsWNBA(StatsNBA)` — WNBA, inherits from `StatsNBA` |
 | `mlb.py` | `StatsMLB(Stats)` — MLB via `statsapi` |
 | `nfl.py` | `StatsNFL(Stats)` — NFL via `nfl_data_py` / `nflreadpy` |
-| `nhl.py` | `StatsNHL(Stats)` — NHL; `nhl_position_policy.py` holds the fail-closed training-market position policy |
+| `nhl.py` | `StatsNHL(Stats)` — NHL; `nhl_position_policy.py` holds the fail-closed training-market position policy; `nhl_reports.py` fills faceoffs taken, power-play and short-handed time, power-play shots and share from the NHL stats service's game reports (the hourly update fills the last two weeks) |
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |
 | `collector_snapshots.py` | Date-keyed snapshot loader for the collector framework (CTG / Savant) |
 | `availability.py` | NBA absence features: each row's absent teammates and opponents, weighted by their recent minutes, points, assists, rebounds and attempts, and the player's own recent absences. Training reads the official per-game lists, serving the newest ESPN injury capture |

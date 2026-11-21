@@ -29,7 +29,7 @@ def test_nhl_update_keeps_four_years_of_gamelog(monkeypatch):
     monkeypatch.setattr(nhl, "scraper", _SilentSites())
     monkeypatch.setattr(nhl, "write_gamelog", lambda *bundle: None)
     monkeypatch.setattr(StatsNHL, "dump_goalie_list", lambda self: None)
-    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since: gamelog)
+    monkeypatch.setattr(nhl, "fill_report_columns", lambda gamelog, since, max_attempts: gamelog)
     stats = StatsNHL()
     # Before opening night, so the empty roster pull is not an error.
     stats.season_start = date.today() + timedelta(days=5)
