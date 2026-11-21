@@ -28,6 +28,9 @@ SYNTHETIC = "synthetic"
 PICKEM = "pickem"
 # Every value a ``QuoteAuthenticity`` column may hold; its readers reject anything else.
 AUTHENTICITY_VALUES = (AUTHENTIC, PICKEM, DERIVED, SYNTHETIC)
+# The classes whose line an app or a book posted: the priced population every model change is
+# judged on (CLAUDE.md, "Judging model changes").
+PRICED_AUTHENTICITY = (AUTHENTIC, PICKEM)
 # Component-sum kernel quotes carry this source with ``authenticity=DERIVED``:
 # the probability is derived from real component-book quotes, not fabricated.
 COMBO_SUM_SOURCE = "combo_sum"
@@ -103,7 +106,7 @@ class TrainingQuote:
     @property
     def archived(self) -> bool:
         """Legacy compatibility projection: a directly priced line, sportsbook or pick'em."""
-        return self.authenticity in (AUTHENTIC, PICKEM)
+        return self.authenticity in PRICED_AUTHENTICITY
 
     @property
     def odds_synthetic(self) -> bool:

@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus.helpers.training_quotes import AUTHENTIC, PICKEM
+from sportstradamus.helpers.training_quotes import AUTHENTIC, PRICED_AUTHENTICITY
 from sportstradamus.scripts.realized_replay import still_posted
 from sportstradamus.scripts.tail_information import key_rng
 from sportstradamus.scripts.tail_pricing import (
@@ -50,8 +50,6 @@ from sportstradamus.scripts.tail_pricing import (
 )
 from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
 
-# The rows an app or a sportsbook priced, scored at their own line.
-PRICED_CLASSES = (PICKEM, AUTHENTIC)
 # Whole-game-date resamples behind every interval.
 N_RESAMPLES = 500
 # The 95 % two-sided bounds, as the bootstrap's (low, high) percentiles.
@@ -360,7 +358,7 @@ def main(
         classes = (AUTHENTIC,)
     else:
         baseline = _served_cells(cells, baseline_test_sets, baseline_models, day, "baseline")
-        classes = PRICED_CLASSES
+        classes = PRICED_AUTHENTICITY
     scored = sorted(candidate.keys() & baseline.keys())
     if not scored:
         raise click.ClickException("no cell both arms can serve")

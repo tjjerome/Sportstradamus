@@ -13,7 +13,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.training_quotes import AUTHENTIC, PICKEM
+from sportstradamus.helpers.training_quotes import PRICED_AUTHENTICITY
 
 # The study's settings (its x6_pover.py ``plain_preds``): small trees on half the columns with
 # 60 rows a leaf, for NBA and NFL cells that train on only 14 to 48 rows per input column.
@@ -35,8 +35,6 @@ _FIT_SHARE = 0.85
 _STOPPING_ROUNDS = 100
 # One fixed seed: a diagnostic needs one reproducible fit, not the study's three-seed average.
 _SEED = 0
-# The priced population (CLAUDE.md, "Judging model changes"): lines an app or a book posted.
-_PRICED = (AUTHENTIC, PICKEM)
 
 
 class PlainBaseline(NamedTuple):
@@ -95,7 +93,7 @@ def fit_plain_baseline(splits: dict, dates: pd.Series, served_mean: np.ndarray) 
     priced = (
         np.zeros(len(test_rows), dtype=bool)
         if authenticity is None
-        else authenticity.reindex(test_rows).isin(_PRICED).to_numpy()
+        else authenticity.reindex(test_rows).isin(PRICED_AUTHENTICITY).to_numpy()
     )
     priced_ratio = (
         plain_error[priced].mean() / served_error[priced].mean() if priced.any() else np.nan

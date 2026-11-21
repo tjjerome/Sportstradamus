@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from sportstradamus.helpers.training_quotes import AUTHENTIC
+from sportstradamus.helpers.training_quotes import AUTHENTIC, PRICED_AUTHENTICITY
 from sportstradamus.scripts import priced_score as ps
 
 THIN = f"NEUTRAL (fewer than {ps.MIN_DATES} dates)"
@@ -39,7 +39,7 @@ def test_p1_keeps_priced_rows_both_arms_scored_at_one_line():
         ]
     )
 
-    rows, split = ps.p1_rows(candidate, baseline, ps.PRICED_CLASSES)
+    rows, split = ps.p1_rows(candidate, baseline, PRICED_AUTHENTICITY)
 
     assert rows["Player"].tolist() == ["a", "b"]
     assert split == 1
