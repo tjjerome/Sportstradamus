@@ -6,10 +6,9 @@ NHL_POSITION_CODES = {"C": 1, "W": 2, "D": 3, "G": 4}
 
 _SKATER_POSITIONS = frozenset(("C", "W", "D"))
 _GOALIE_POSITIONS = frozenset(("G",))
-_ALL_POSITIONS = frozenset(NHL_POSITION_CODES)
 
 NHL_MARKET_POSITIONS: dict[str, frozenset[str]] = {
-    "timeOnIce": _ALL_POSITIONS,
+    "timeOnIce": _SKATER_POSITIONS,
     "shotsAgainst": _GOALIE_POSITIONS,
     "saves": _GOALIE_POSITIONS,
     "shots": _SKATER_POSITIONS,
