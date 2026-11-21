@@ -568,7 +568,8 @@ def decode_model_params(
     booster (``training/plain_baseline.py``) replaces the mean and every shape field stays
     as decoded, so ``get_odds`` moves the location with the mean. ``ev`` is the base
     component's mean, so a published zero gate divides back out of the anchor: the
-    zero-inclusive mean, ``(1 - gate) * ev``, is then the anchor's own prediction.
+    zero-inclusive mean, ``(1 - gate) * ev``, is then the anchor's own prediction. Count
+    families floor the anchor at :data:`_ANCHOR_MEAN_FLOOR` first; SkewNormal takes it as is.
 
     Args:
         prob_params: ``predict(pred_type="parameters")`` frame. SkewNormal needs

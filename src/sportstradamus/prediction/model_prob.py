@@ -1117,6 +1117,7 @@ def model_prob(
     posthoc_blob = filedict.get("posthoc_blob", None)
     pit_recal_blob = filedict.get("pit_recal_blob", None)
     structural_calibration = filedict.get("structural_calibration")
+    mean_anchor = filedict.get("mean_anchor")
     two_part_candidate_state = (
         _two_part_candidate_state(structural_calibration)
         if structural_strategy == TWO_PART_STRATEGY
@@ -1165,13 +1166,7 @@ def model_prob(
     annotate_quote_provenance(playerStats, quotes)
 
     _decode_model_params(
-        prob_params,
-        dist,
-        playerStats,
-        hist_gate,
-        offset_meta,
-        target_normalization,
-        filedict.get("mean_anchor"),
+        prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization, mean_anchor
     )
 
     # The feature log is diagnostics, so nothing that goes wrong in it may cost the market its

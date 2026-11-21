@@ -122,42 +122,21 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
     """Raise ValueError if a stat_meta entry is internally inconsistent."""
     shipped = cell.get("shipped")
     target_norm = cell.get("target_normalization")
-    posthoc = cell.get("posthoc", TARGET_NORM_NONE)
     dist = cell.get("dist")
-    if shipped not in _SHIPPED_VALUES:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown shipped "
-            f"value {shipped!r}; valid: {sorted(_SHIPPED_VALUES)}"
-        )
-    _valid_target_norms = set(TARGET_NORMALIZATION_SLUGS) | {TARGET_NORM_NONE}
-    if target_norm not in _valid_target_norms:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown target_normalization "
-            f"value {target_norm!r}; valid: {sorted(_valid_target_norms)}"
-        )
-    if posthoc not in POSTHOC_SLUGS:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown posthoc "
-            f"value {posthoc!r}; valid: {sorted(POSTHOC_SLUGS)}"
-        )
-    blending = cell.get("blending", DEFAULT_BLENDING)
-    if blending not in BLENDING_SLUGS:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown blending "
-            f"value {blending!r}; valid: {sorted(BLENDING_SLUGS)}"
-        )
-    book_leg = cell.get("book_leg", QUOTE_BOOK_LEG)
-    if book_leg not in BOOK_LEG_VALUES:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown book_leg "
-            f"value {book_leg!r}; valid: {sorted(BOOK_LEG_VALUES)}"
-        )
-    mean_anchor = cell.get("mean_anchor", NO_MEAN_ANCHOR)
-    if mean_anchor not in MEAN_ANCHOR_VALUES:
-        raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown mean_anchor "
-            f"value {mean_anchor!r}; valid: {sorted(MEAN_ANCHOR_VALUES)}"
-        )
+    fields = (
+        ("shipped", shipped, _SHIPPED_VALUES),
+        ("target_normalization", target_norm, {*TARGET_NORMALIZATION_SLUGS, TARGET_NORM_NONE}),
+        ("posthoc", cell.get("posthoc", TARGET_NORM_NONE), POSTHOC_SLUGS),
+        ("blending", cell.get("blending", DEFAULT_BLENDING), BLENDING_SLUGS),
+        ("book_leg", cell.get("book_leg", QUOTE_BOOK_LEG), BOOK_LEG_VALUES),
+        ("mean_anchor", cell.get("mean_anchor", NO_MEAN_ANCHOR), MEAN_ANCHOR_VALUES),
+    )
+    for field, value, valid in fields:
+        if value not in valid:
+            raise ValueError(
+                f"stat_meta.json: cell {league}/{market} has unknown {field} "
+                f"value {value!r}; valid: {sorted(valid)}"
+            )
     if dist in CONTINUOUS_DISTS and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(
             f"stat_meta.json: continuous cell {league}/{market} (dist={dist!r}) cannot "

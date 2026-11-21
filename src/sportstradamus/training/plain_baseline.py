@@ -35,7 +35,7 @@ _MAX_ROUNDS = 3000
 _FIT_SHARE = 0.85
 # Rounds without a lower squared error on the stopping rows before the fit stops.
 _STOPPING_ROUNDS = 100
-# One fixed seed: a diagnostic needs one reproducible fit, not the study's three-seed average.
+# One fixed seed: one reproducible fit, not the study's three-seed average.
 _SEED = 0
 
 
