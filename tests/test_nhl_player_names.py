@@ -107,7 +107,13 @@ def test_an_offer_meets_the_roster_the_gamelog_and_the_comp_pool_after_load(monk
 
 def test_load_keeps_a_stored_name_that_is_not_a_string(monkeypatch):
     """A feed that sends no name must not stop the league loading."""
-    gamelog = pd.DataFrame({"playerId": [STUTZLE, MCDAVID], "playerName": ["Tim Sttzle", None]})
+    gamelog = pd.DataFrame(
+        {
+            "gameId": [2026020001, 2026020001],
+            "playerId": [STUTZLE, MCDAVID],
+            "playerName": ["Tim Sttzle", None],
+        }
+    )
     players = {
         2026: {
             STUTZLE: {"playerName": "Tim Sttzle", "position": "C"},

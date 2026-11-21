@@ -82,9 +82,12 @@ SEASON_SUM_COLUMNS = {
     "reboundsAgainst": "OnIce_A_rebounds",
     "xReboundsAgainst": "OnIce_A_xRebounds",
 }
-# Characters 5-6 of an NHL game id (2025020001 -> 02): the season summary a comp profile
-# mirrors counts regular-season games only.
+# The season summary a comp profile mirrors counts regular-season games only.
 _REGULAR_SEASON_GAME_TYPE: int = 2
+# Props are posted on regular-season (02) and playoff (03) games. The schedule also lists
+# preseason games (01) and international events (19, 20: the 4 Nations Face-Off), whose rows
+# carry national teams and tryout rosters.
+_LOGGED_GAME_TYPES = (2, 3)
 # The fields of a stored players.json row that describe the player, not his season. A comp
 # pool reads only these from the running season's row: its stats are season-to-date as of
 # the last roster fetch, so for a training row they look ahead.
@@ -99,6 +102,11 @@ PLAYER_BIO_FIELDS = (
     "team",
     "birthDate",
 )
+
+
+def _game_type(game_id):
+    """Characters 5-6 of an NHL game id, of one id or a Series of them: 2025020001 -> 2."""
+    return game_id // 10_000 % 100
 
 
 def _game_player_key(frame: pd.DataFrame) -> pd.MultiIndex:
@@ -201,10 +209,18 @@ class StatsNHL(Stats):
         to the books'. Rows stored before an alias existed keep the old spelling, so the stored
         names are respelled here and the next update writes them back. A stored name that is not
         a string (a feed that sent none) stays as stored, so one bad row cannot stop the league
-        loading.
+        loading. Rows of games outside ``_LOGGED_GAME_TYPES``, stored before the schedule walk
+        skipped them, leave both logs the same way.
         """
         super().load()
+        if not self.teamlog.empty:
+            self.teamlog = self.teamlog.loc[
+                _game_type(self.teamlog["gameId"]).isin(_LOGGED_GAME_TYPES)
+            ]
         if not self.gamelog.empty:
+            self.gamelog = self.gamelog.loc[
+                _game_type(self.gamelog["gameId"]).isin(_LOGGED_GAME_TYPES)
+            ].copy()
             names = self.gamelog["playerName"]
             spellings = {
                 name: remove_accents(name) for name in names.unique() if isinstance(name, str)
@@ -271,7 +287,7 @@ class StatsNHL(Stats):
         game_id = self.gamelog["gameId"]
         rows = self.gamelog.loc[
             (game_id // 1_000_000 == season)
-            & (game_id // 10_000 % 100 == _REGULAR_SEASON_GAME_TYPE)
+            & (_game_type(game_id) == _REGULAR_SEASON_GAME_TYPE)
             & (self._gamelog_dates() < pd.Timestamp(target_game_date))
         ]
         if rows.reindex(columns=list(SEASON_SUM_COLUMNS)).isna().to_numpy().any():
@@ -694,7 +710,7 @@ class StatsNHL(Stats):
             )
 
     def _collect_game_ids(self, latest_date, today):
-        """Walk the NHL schedule day-by-day collecting (gameId, date) since latest_date."""
+        """Walk the NHL schedule day-by-day collecting (gameId, date) of ``_LOGGED_GAME_TYPES``."""
         ids = []
         while latest_date <= today:
             start_date = latest_date.strftime("%Y-%m-%d")
@@ -706,7 +722,11 @@ class StatsNHL(Stats):
 
             if len(res.get("gameWeek", [])) > 0:
                 for day in res.get("gameWeek"):
-                    ids.extend([(game["id"], day["date"]) for game in day["games"]])
+                    ids.extend(
+                        (game["id"], day["date"])
+                        for game in day["games"]
+                        if _game_type(game["id"]) in _LOGGED_GAME_TYPES
+                    )
 
             else:
                 break
