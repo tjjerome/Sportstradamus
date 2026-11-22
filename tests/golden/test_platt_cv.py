@@ -2,7 +2,8 @@
 
 The lambda=0 corner must reproduce ``prob_recal_platt`` exactly, lambda=inf must be
 intercept-free, small-n base-rate noise must drive the CV to a positive penalty, and
-degenerate inputs must degrade to the unpenalised map instead of raising.
+degenerate inputs must degrade to the unpenalised map instead of raising. Both Platt slugs
+refuse a map whose slope comes out non-positive.
 """
 
 import math
@@ -33,6 +34,13 @@ def test_lambda_zero_reproduces_plain_platt():
     a, b = posthoc._platt_coeffs(_feat(x), y, 0.0)
     plain = posthoc._fit_platt(x, y)
     assert (a, b) == (plain["a"], plain["b"])
+
+
+@pytest.mark.parametrize("slug", ["prob_recal_platt", "prob_recal_platt_cv"])
+def test_a_map_that_would_invert_the_ordering_is_refused(slug):
+    reversed_x, y = _synthetic(300, seed=7, slope=-0.6)
+    assert posthoc.fit_posthoc(slug, reversed_x, y) is None
+    assert posthoc.fit_posthoc(slug, *_synthetic(300, seed=7))["a"] > 0.0
 
 
 def test_lambda_inf_is_intercept_free():

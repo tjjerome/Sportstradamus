@@ -286,6 +286,7 @@ def _wide_row(
         "marginal_shape": _diag("marginal_shape"),
         "dispersion_cal": _diag("dispersion_cal"),
         "skew_cal": _diag("skew_cal"),
+        "temperature": _safe_float(model.get("temperature")),
         # Ship gates — populated by training.scorecard.compute_gates.
         "g1_brier_diff_mean": float("nan"),
         "g1_ci_lo": float("nan"),

@@ -487,7 +487,7 @@ consult.
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
 | Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_pit_ks`/`g4_pit_ks_max` (↓; `g4_iqr_ratio` reported), `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`, `g6_citl_ci_hi`, `g6_over_ci_lo` (all cells), `g1_book_thin`, `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
 | HP | `hp_rounds`, `hp_leaves`, `hp_lr`, `hp_min_child`, `hp_l1`, `hp_l2` | `meditate` |
-| Calibration | `cv`, `std` | `meditate` (from `stat_calibration.json`) |
+| Calibration | `cv`, `std` (from `stat_calibration.json`); `temperature` (the over-probability temperature; at its 10.0 cap meditate's ship-gate warnings list the cell even when every gate passes) | `meditate` |
 
 **Reading the parquet**:
 

@@ -19,6 +19,7 @@ def _stats(rows: list[dict]) -> pd.DataFrame:
         "g4_pit_ks": 0.04,
         "g4_pit_ks_max": 0.05,
         "brier_skill_score": 0.01,
+        "temperature": 2.0,
         **{f"g{i}_pass": True for i in range(1, 7)},
     }
     frame = pd.DataFrame([{**base, **row} for row in rows])
@@ -95,4 +96,22 @@ def test_all_ship_prints_nothing(_warn_env, capsys):
         {"NBA"},
     )
     assert capsys.readouterr().out == ""
+    assert pruned == []
+
+
+def test_capped_temperature_warns_though_every_gate_passes(_warn_env, capsys):
+    rows = [
+        {"league": "NFL", "market": "attempts", "temperature": 9.99999},
+        {"league": "NFL", "market": "completions", "temperature": 5.84},
+    ]
+    pruned = _warn_env(
+        rows,
+        {"NFL": ["attempts", "completions"]},
+        {"NFL": {"attempts": "ratio_meanyr", "completions": "ratio_meanyr"}},
+        {"NFL"},
+    )
+    out = capsys.readouterr().out
+    assert "NFL attempts" in out
+    assert "T=10.0 (cap)" in out
+    assert "NFL completions" not in out
     assert pruned == []

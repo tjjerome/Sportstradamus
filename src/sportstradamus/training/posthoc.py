@@ -127,10 +127,16 @@ def fit_posthoc(
         return None
     if slug == "prob_recal_book_citl":
         return _fit_book_citl(x, np.asarray(book, dtype=float)[finite])
-    if slug == "prob_recal_platt_cv":
-        return _fit_platt_cv(x, y, None if clusters is None else np.asarray(clusters)[finite])
-    if slug == "prob_recal_platt":
-        return _fit_platt(x, y)
+    if slug in ("prob_recal_platt", "prob_recal_platt_cv"):
+        blob = (
+            _fit_platt(x, y)
+            if slug == "prob_recal_platt"
+            else _fit_platt_cv(x, y, None if clusters is None else np.asarray(clusters)[finite])
+        )
+        # A slope <= 0 reverses the model's ordering, so served P(over) would rise with the
+        # line (NFL attempts, 2026-11-22: a = -0.29 on a validation split the temperature had
+        # already flattened to its cap). Serving the probabilities unmapped beats inverting them.
+        return blob if blob is None or blob["a"] > 0 else None
     if slug in ("prob_recal_isotonic", "isotonic_mean"):
         return _fit_isotonic(x, y)
     return _fit_affine(x, y)

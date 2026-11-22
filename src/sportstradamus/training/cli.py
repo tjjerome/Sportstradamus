@@ -30,6 +30,7 @@ from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import (
     _FORCEABLE_DISTS,
+    _TEMPERATURE_BOUNDS,
     DIST_TRAINING_LOSS_CHOICES,
     LOSS_AUTO,
     train_market,
@@ -61,6 +62,8 @@ faulthandler.enable()
 # Reproducibility seed for non-deterministic training runs. Not used under
 # --deterministic (which pins RNGs via seed_everything with a fixed value).
 _RNG_SEED: int = 69
+# The bounded temperature search stops within its 1e-5 tolerance of a bound, never on it.
+_TEMPERATURE_CAP: float = _TEMPERATURE_BOUNDS[1] - 1e-3
 
 
 def _na_fmt(value, spec: str) -> str:
@@ -75,6 +78,10 @@ def _warn_ship_gate(
     log,
 ) -> None:
     """Warn about every served cell whose latest offline gates fail; the human decides the cull.
+
+    A cell whose temperature sits at its cap is listed too, though it may pass every gate: the
+    validation Brier wanted its over-probabilities flatter still, and the cap flattens its
+    alternate lines toward 0.5 (NFL attempts, 2026-11-22), which only a posted-rung read shows.
 
     ``report()`` writes each cell's fresh gates during training, so this post-loop pass surfaces
     every served cell (``ship_config`` value other than ``WITHHELD``, leagues actually loaded this
@@ -96,11 +103,13 @@ def _warn_ship_gate(
             "g4_pit_ks",
             "g4_pit_ks_max",
             "brier_skill_score",
+            "temperature",
             *(f"{g}_pass" for g in _SHIP_GATES),
         ],
     )
     failed = stats["ship"].eq(False).fillna(False).astype(bool)
-    failing = {(r.league, r.market): r for r in stats[failed].itertuples(index=False)}
+    flagged = failed | stats["temperature"].ge(_TEMPERATURE_CAP)
+    failing = {(r.league, r.market): r for r in stats[flagged].itertuples(index=False)}
     rows = []
     for lg, markets in active_markets.items():
         if lg not in loaded_leagues:
@@ -111,13 +120,15 @@ def _warn_ship_gate(
             row = failing.get((lg, market))
             if row is None:
                 continue
-            gates = " ".join(
+            flags = [
                 g for g in _SHIP_GATES if not (pd.notna(v := getattr(row, f"{g}_pass")) and bool(v))
-            )
+            ]
+            if row.temperature >= _TEMPERATURE_CAP:
+                flags.append(f"T={row.temperature:.1f} (cap)")
             rows.append(
                 [
                     f"{lg} {market}",
-                    gates,
+                    " ".join(flags),
                     f"{_na_fmt(row.g4_pit_ks, '.3f')} ({_na_fmt(row.g4_pit_ks_max, '.3f')})",
                     _na_fmt(row.brier_skill_score, "+.4f"),
                 ]
@@ -126,11 +137,15 @@ def _warn_ship_gate(
     if not rows:
         return
     click.secho(
-        "\nSHIP-GATE WARNINGS (served cells failing fresh gates — still serving)", bold=True
+        "\nSHIP-GATE WARNINGS (served cells failing fresh gates or at the temperature cap"
+        " — still serving)",
+        bold=True,
     )
     click.echo(
         tabulate.tabulate(
-            rows, headers=["cell", "failed gates", "g4_pit_ks (max)", "bss"], tablefmt="github"
+            rows,
+            headers=["cell", "failed gates / flags", "g4_pit_ks (max)", "bss"],
+            tablefmt="github",
         )
     )
     click.echo(
