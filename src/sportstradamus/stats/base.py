@@ -177,6 +177,10 @@ _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanC
 _TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
 _TRAINING_WINDOW_ROWS_DEFAULT = 21_500
 
+# A player-row counts as usable (trim_gamelog's window, and the bar an unquoted training row
+# clears in get_training_matrix) above this quantile of the league's usage stat.
+_USAGE_FLOOR_QUANTILE: float = 0.15
+
 # Days of logs before a date that its profile and rolling features read; trim_gamelog cuts
 # the gamelog this many days before the first training day so that day keeps its window.
 _SHORT_LOG_WINDOW_DAYS: int = 300
@@ -2497,15 +2501,8 @@ class Stats:
         gamelog[self.log_strings["date"]] = pd.to_datetime(
             gamelog[self.log_strings["date"]]
         ).dt.date
-        gamelog = gamelog.loc[
-            (gamelog[self.log_strings["date"]] > cutoff_date)
-            & (gamelog[self.log_strings["date"]] < datetime.today().date())
-        ]
-        gamelog = self._market_position_filter(gamelog, market)
-        gamelog = gamelog.assign(
-            ReadAt=game_starts.read_times(
-                self.league, gamelog[self.log_strings["game"]], gamelog[self.log_strings["date"]]
-            )
+        gamelog = self._market_position_filter(
+            gamelog.loc[gamelog[self.log_strings["date"]] < datetime.today().date()], market
         )
         # MLB never set self.usage_stat (its usage path used to be skipped entirely), so read
         # the participation column explicitly: pitcher markets accrue on the mound (batters
@@ -2515,7 +2512,16 @@ class Stats:
             usage_stat = (
                 "batters faced" if is_mlb_pitcher_market(market) else self.log_strings["usage"]
             )
-        usage_cutoff = gamelog[usage_stat].quantile(0.15)
+        # Over the whole loaded window, before the cut to the days this call builds: an append
+        # then keeps the rows a cold rebuild keeps. A week's own quantile of NFL snap share ran
+        # .04 to .41 against .13 over the window.
+        usage_cutoff = gamelog[usage_stat].quantile(_USAGE_FLOOR_QUANTILE)
+        gamelog = gamelog.loc[gamelog[self.log_strings["date"]] > cutoff_date]
+        gamelog = gamelog.assign(
+            ReadAt=game_starts.read_times(
+                self.league, gamelog[self.log_strings["game"]], gamelog[self.log_strings["date"]]
+            )
+        )
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -2600,7 +2606,7 @@ class Stats:
 
         usable_gamelog = self.gamelog[
             self.gamelog[self.log_strings["usage"]]
-            >= self.gamelog[self.log_strings["usage"]].quantile(0.15)
+            >= self.gamelog[self.log_strings["usage"]].quantile(_USAGE_FLOOR_QUANTILE)
         ]
         cutoff_date = pd.to_datetime(usable_gamelog[self.log_strings["date"]]).iloc[
             0
