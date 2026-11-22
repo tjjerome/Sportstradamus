@@ -118,7 +118,8 @@
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "crps",
             "sn_param": "direct",
-            "blending": "crps"
+            "blending": "crps",
+            "mean_anchor": "plain"
         },
         "PTS": {
             "dist": "SkewNormal",
