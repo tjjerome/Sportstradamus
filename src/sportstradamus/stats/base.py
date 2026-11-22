@@ -2470,8 +2470,9 @@ class Stats:
 
         Args:
             market (str): The market type to retrieve training data for.
-            cutoff_date (date): Only gamedays after this date and before today are
-                used. Defaults to 850 days before today.
+            cutoff_date (date): Only gamedays after this date and before today yield
+                rows; the usage floor that keeps an unquoted row still reads every loaded
+                gameday before today. Defaults to 850 days before today.
 
         Returns:
             pd.DataFrame: A row is one player on one gameday: the ``get_stats`` features,
@@ -2501,9 +2502,8 @@ class Stats:
         gamelog[self.log_strings["date"]] = pd.to_datetime(
             gamelog[self.log_strings["date"]]
         ).dt.date
-        gamelog = self._market_position_filter(
-            gamelog.loc[gamelog[self.log_strings["date"]] < datetime.today().date()], market
-        )
+        gamelog = gamelog.loc[gamelog[self.log_strings["date"]] < datetime.today().date()]
+        gamelog = self._market_position_filter(gamelog, market)
         # MLB never set self.usage_stat (its usage path used to be skipped entirely), so read
         # the participation column explicitly: pitcher markets accrue on the mound (batters
         # faced), hitter markets at the plate (log_strings["usage"] == plateAppearances).
@@ -2604,10 +2604,8 @@ class Stats:
         """Trims the gamelog to the league's training-window rows plus the log window they read."""
         ROWS = _TRAINING_WINDOW_ROWS.get(self.league, _TRAINING_WINDOW_ROWS_DEFAULT)
 
-        usable_gamelog = self.gamelog[
-            self.gamelog[self.log_strings["usage"]]
-            >= self.gamelog[self.log_strings["usage"]].quantile(_USAGE_FLOOR_QUANTILE)
-        ]
+        usage = self.gamelog[self.log_strings["usage"]]
+        usable_gamelog = self.gamelog[usage >= usage.quantile(_USAGE_FLOOR_QUANTILE)]
         cutoff_date = pd.to_datetime(usable_gamelog[self.log_strings["date"]]).iloc[
             0
         ].date() + timedelta(days=200)
