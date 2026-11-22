@@ -291,12 +291,13 @@
         "receptions": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "target_normalization": "ratio_meanyr",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "none",
             "dist_training_loss": "nll",
             "sn_param": "direct",
             "blending": "nll",
-            "hpo_selection": "calibrated"
+            "hpo_selection": "calibrated",
+            "mean_anchor": "plain"
         },
         "rushing tds": {
             "dist": "ZINB",
@@ -311,7 +312,8 @@
             "posthoc": "cdf_recal_isotonic",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "crps"
+            "blending": "crps",
+            "mean_anchor": "plain"
         },
         "sacks taken": {
             "dist": "SkewNormal",
