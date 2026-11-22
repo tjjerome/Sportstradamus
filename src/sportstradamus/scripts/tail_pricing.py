@@ -4,8 +4,9 @@ The pricing half of the tail scorecard; ``tail_scorecard`` replays the live rule
 builds. A test row is re-served from its dump's model-only parameters and the cell pickle's
 serving knobs. The training convention must first rebuild the dump's own ``P`` (the
 self-check that the chain is the pickle's); the serving convention then prices each Underdog
-and Sleeper rung the ladder held for the row. Every input is read-only, the archive opened
-``read_only``.
+and Sleeper rung the ladder held for the row. At the rungs both conventions anchor a line off
+an authentic row's own line there, as serving anchors an offer off its sportsbook quote's
+line. Every input is read-only, the archive opened ``read_only``.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from tqdm import tqdm
 
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
+    anchor_to_reference,
     apply_cdf_recal,
     apply_temperature,
     fused_loc,
@@ -165,6 +167,7 @@ def serve(
     w_row: np.ndarray,
     ev_book: np.ndarray,
     gate_book: np.ndarray | None = None,
+    ref_line: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Re-serve test rows from their persisted model-only parameters at each row's ``Line``.
 
@@ -175,7 +178,9 @@ def serve(
     differ only in ``w_row``, ``ev_book`` and ``gate_book``.
 
     ``gate_book`` is a ZINB cell's per-row book gate (the X3 rung leg); ``None`` is the
-    pickle's ``hist_gate``.
+    pickle's ``hist_gate``. ``ref_line`` is each row's reference line, NaN for none: a row
+    off it is anchored there as serving anchors an offer off its quote line
+    (``anchor_to_reference``); ``None`` anchors no row.
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
@@ -204,15 +209,13 @@ def serve(
         )
         base = correct_fused_mean(slug, blob, base, gate)
         shape = DecodedParams(ev=base, sigma=sigma * shape_cal, skew=skew + knobs["skew_cal"])
-        under = get_odds(
-            line, base, dist, step=step, sigma=shape.sigma, skew_alpha=shape.skew, gate=gate
-        )
+        odds_kw = {"sigma": shape.sigma, "skew_alpha": shape.skew, "gate": gate}
     elif dist == "DPO":
         phi_model = rows["DP_PHI_model"].to_numpy(float)
         base, phi, gate = fused_loc(w_row, ev_model, ev_book, cv, dist, phi=phi_model)
         base = correct_fused_mean(slug, blob, base, gate)
         shape = DecodedParams(ev=base, phi=np.minimum(phi * shape_cal, _DP_PHI_CEILING))
-        under = get_odds(line, base, dist, step=step, phi=shape.phi)
+        odds_kw = {"phi": shape.phi}
     else:
         gate_kw = {}
         if dist == "ZINB":
@@ -224,11 +227,20 @@ def serve(
         r, p, gate = fused_loc(w_row, ev_model, ev_book, cv, "NegBin", r=r_model, **gate_kw)
         base = correct_fused_mean(slug, blob, r * (1 - p) / p, gate)
         shape = DecodedParams(ev=base, r=r * shape_cal)
-        under = get_odds(line, base, dist, step=step, r=shape.r, gate=gate)
-    under = apply_cdf_recal(knobs["pit_recal_blob"], under)
-    p_over = apply_temperature(1 - under, knobs["temperature"])
-    if slug in PROB_STAGE:
-        p_over = apply_posthoc(slug, blob, p_over)
+        odds_kw = {"r": shape.r, "gate": gate}
+
+    def priced_at(at: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        raw = 1 - apply_cdf_recal(
+            knobs["pit_recal_blob"], get_odds(at, base, dist, step=step, **odds_kw)
+        )
+        served = apply_temperature(raw, knobs["temperature"])
+        return raw, apply_posthoc(slug, blob, served) if slug in PROB_STAGE else served
+
+    raw_over, p_over = priced_at(line)
+    if ref_line is not None:
+        moved = np.isfinite(ref_line) & (ref_line != line)
+        raw_ref, served_ref = priced_at(np.where(moved, ref_line, line))
+        p_over = np.where(moved, anchor_to_reference(raw_over, raw_ref, served_ref), p_over)
     gate = 0.0 if gate is None else np.asarray(gate, dtype=float)
     # A zero-inflated family is a point mass at 0 of weight gate beside the base distribution.
     sd = np.sqrt((1 - gate) * predictive_std(dist, shape) ** 2 + gate * (1 - gate) * base**2)
@@ -247,15 +259,30 @@ def reconstruction_error(rows: pd.DataFrame, knobs: dict) -> float:
     return float(np.max(np.abs(rebuilt - rows["P"].to_numpy(float))))
 
 
+def _reference_line(rows: pd.DataFrame) -> np.ndarray | None:
+    """The line each priced rung is anchored at, NaN for none; ``None`` for own-line rows.
+
+    Serving anchors at the sportsbook quote's line, so a rung anchors at its test row's own
+    ``Test Line`` where that row is authentic; a pick'em line never anchors. Rows at their own
+    line carry no ``Test Line``.
+    """
+    if "Test Line" not in rows:
+        return None
+    return rows["Test Line"].where(rows["QuoteAuthenticity"].eq(AUTHENTIC)).to_numpy(float)
+
+
 def serve_live(rows: pd.DataFrame, knobs: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``serve`` under the serving convention, at each row's ``Line``.
 
     Serving blends every row at the pickle's weight, against ``Book_EV`` on authentic rows
-    and the model's own ``EV`` on the rest (no sportsbook mean to pull toward).
+    and the model's own ``EV`` on the rest (no sportsbook mean to pull toward). A priced rung
+    off its authentic test row's line is anchored there (``_reference_line``).
     """
     authentic = rows["QuoteAuthenticity"].eq(AUTHENTIC)
     book = rows["Book_EV"].where(authentic, rows["EV"]).to_numpy(float)
-    return serve(rows, knobs, np.full(len(rows), knobs["weight"]), book)
+    return serve(
+        rows, knobs, np.full(len(rows), knobs["weight"]), book, ref_line=_reference_line(rows)
+    )
 
 
 def dump_paths(directory: Path, leagues: Collection[str]) -> list[Path]:
@@ -351,7 +378,11 @@ def price_cell(
     )
     priced["p_serving"], priced["Projection"], priced["served_sd"] = serve_live(priced, knobs)
     priced["p_training"] = serve(
-        priced, knobs, _training_weight(priced, knobs), priced["Book_EV"].to_numpy(float)
+        priced,
+        knobs,
+        _training_weight(priced, knobs),
+        priced["Book_EV"].to_numpy(float),
+        ref_line=_reference_line(priced),
     )[0]
     priced["Market Projection"] = priced["Book_EV"].where(priced["QuoteAuthenticity"].eq(AUTHENTIC))
     diag = {"cell": path.stem, "League": league, "test_rows": len(rows), "recon_err": error}

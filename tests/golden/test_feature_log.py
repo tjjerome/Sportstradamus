@@ -4,8 +4,9 @@
 be checked and a leg re-scored offline under another model file. The log sits on the
 serving path, so the last tests drive the real ``model_prob``: every scored player is
 logged, and a log that cannot be written costs no prediction. The same harness pins what a
-scored record keeps for an offline replay: the model's own price beside the served one, and
-a SkewNormal price rebuilt from its row.
+scored record keeps for an offline replay: the model's own price beside the served one, a
+SkewNormal price rebuilt from its row, and an offer off its quote line anchored at the price
+served there, which the replay's ``serve_live`` rebuilds from the log.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from sportstradamus.prediction.feature_log import (
     upsert_feature_log,
 )
 from sportstradamus.scripts import feature_parity
+from sportstradamus.scripts.tail_pricing import serve_live
 from sportstradamus.stats.mlb import StatsMLB
 
 # The package __init__ re-exports the model_prob *function*, shadowing the submodule.
@@ -307,16 +309,24 @@ _FILEDICT = {
 
 
 class _StubArchive:
-    """The two archive surfaces model_prob reads: the book cohort and the league totals."""
+    """The two archive surfaces model_prob reads: the book cohort and the league totals.
+
+    A player in ``unquoted`` has no book row, so his blend runs model-only.
+    """
 
     default_totals = {_LEAGUE: 220.0}
+
+    def __init__(self, unquoted=()):
+        self.unquoted = set(unquoted)
 
     def get_training_quote_inputs(self, league, market, date, entities, at=None, levelled=False):
         rows = [
             ArchivedBookQuote(book, None, _BOOK_UNDER, _LINE, _OBSERVED_AT)
             for book in ("fanduel", "draftkings")
         ]
-        return dict.fromkeys(entities, (rows, _LINE))
+        return {
+            entity: ([], None) if entity in self.unquoted else (rows, _LINE) for entity in entities
+        }
 
 
 def _predict(_filedict, _market, _stat_data, player_stats, *_args) -> pd.DataFrame:
@@ -330,17 +340,27 @@ def _predict(_filedict, _market, _stat_data, player_stats, *_args) -> pd.DataFra
 
 
 def _score(
-    monkeypatch, tmp_path, also_next_day=(), *, filedict=None, predict=_predict, stat_zi=None
+    monkeypatch,
+    tmp_path,
+    also_next_day=(),
+    *,
+    filedict=None,
+    predict=_predict,
+    stat_zi=None,
+    lines=None,
+    unquoted=(),
 ) -> pd.DataFrame:
     """Serve three NBA BLK offers through the real ``model_prob``; return its records.
 
     A player named in ``also_next_day`` is offered again a day later, listed last.
     ``filedict`` and ``predict`` default to the NegBin pickle and its booster stand-in.
+    ``lines`` offers a player off the quote line ``_LINE``; a player in ``unquoted`` has no
+    book quote.
     """
     pickle_path = tmp_path / "NBA_BLK.mdl"
     with open(pickle_path, "wb") as outfile:
         pickle.dump(filedict or _FILEDICT, outfile)
-    stub_archive = _StubArchive()
+    stub_archive = _StubArchive(unquoted)
     monkeypatch.setattr(mp, "model_pickle_path", lambda _league, _market: str(pickle_path))
     monkeypatch.setattr(mp, "stat_zi", stat_zi or {})
     monkeypatch.setattr(mp, "_build_prob_params", predict)
@@ -354,7 +374,7 @@ def _score(
             "Opponent": "BOS",
             "Date": _DATE,
             "Market": _MARKET,
-            "Line": _LINE,
+            "Line": (lines or {}).get(player, _LINE),
             "Boost": 1.0,
             "Boost_Over": 1.0,
             "Boost_Under": 1.0,
@@ -525,6 +545,63 @@ def test_a_skewnormal_win_prob_reprices_from_its_record(log_dir, monkeypatch, tm
     snapshot = persist._normalize_offers(served)
     assert snapshot["Model Skew"].isna().all()
     assert snapshot.columns.intersection(_RECORD_DECISION_COLS).empty
+
+
+def _overwrite_quote_column(monkeypatch, column: str, value) -> None:
+    """Have the next ``_score`` record every row's quote with ``column`` set to ``value``."""
+
+    def annotate(frame, quotes):
+        book_quotes.annotate_quote_provenance(frame, quotes)
+        frame[column] = value
+
+    monkeypatch.setattr(mp, "annotate_quote_provenance", annotate)
+
+
+def test_an_offer_off_its_quote_line_is_anchored_there(log_dir, monkeypatch, tmp_path):
+    """Off its sportsbook quote's line an offer serves the price at that line, moved by the
+    model's own odds; at the quote line, or with no quote, it serves the price it did before.
+    The replay's ``serve_live`` prices every row alike from the logged inputs.
+    """
+    filedict = _FILEDICT | {"temperature": 2.5}
+    lines, unquoted = {"Player B": 2.5, "Player C": 2.5}, ("Player C",)
+    anchored = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines, unquoted=unquoted)
+    logged = _read(log_dir, "NBA_BLK").set_index("Player").loc[anchored["Player"]]
+    _overwrite_quote_column(monkeypatch, "Quote Line", np.nan)
+    unanchored = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines, unquoted=unquoted)
+
+    def over(served: pd.DataFrame) -> np.ndarray:
+        return np.where(served["Bet"] == "Over", served["Win Prob"], 1 - served["Win Prob"])
+
+    assert anchored["Player"].tolist() == _PLAYERS
+    moved = (anchored["Player"] == "Player B").to_numpy()
+    pd.testing.assert_frame_equal(
+        anchored.loc[~moved, ["Bet", "Win Prob"]], unanchored.loc[~moved, ["Bet", "Win Prob"]]
+    )
+    # The temperature pulls a line above the quote toward even; the anchor keeps the model's drop.
+    assert over(anchored)[moved] < over(unanchored)[moved]
+    replay = pd.DataFrame(
+        {
+            "Line": anchored["Line"].to_numpy(),
+            "Test Line": logged["Quote Line"].to_numpy(),
+            "QuoteAuthenticity": logged["Quote Authenticity"].to_numpy(),
+            "EV": logged["Projection"].to_numpy(),
+            "Book_EV": logged["Market Projection"].to_numpy(),
+            "R_model": logged["Model R"].to_numpy(),
+        }
+    )
+    replayed = serve_live(replay, filedict | {"hist_gate": 0.0})[0]
+    np.testing.assert_allclose(replayed, over(anchored), rtol=1e-12)
+
+
+def test_a_quote_that_is_not_a_sportsbooks_never_anchors(log_dir, monkeypatch, tmp_path):
+    """A derived component sum's quote sits at the DFS line, and a DFS line never anchors."""
+    filedict, lines = _FILEDICT | {"temperature": 2.5}, {"Player B": 2.5}
+    _overwrite_quote_column(monkeypatch, "Quote Authenticity", "derived")
+    derived = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines)
+    _overwrite_quote_column(monkeypatch, "Quote Line", np.nan)
+    unanchored = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines)
+
+    pd.testing.assert_frame_equal(derived[["Bet", "Win Prob"]], unanchored[["Bet", "Win Prob"]])
 
 
 def test_a_two_date_player_is_priced_and_logged_for_his_earlier_game(

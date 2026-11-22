@@ -21,6 +21,7 @@ from scipy.stats import skewnorm
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     LazyArchive,
+    anchor_to_reference,
     apply_cdf_recal,
     apply_temperature,
     archive_market,
@@ -44,7 +45,7 @@ from sportstradamus.helpers.io import (
     model_pickle_path,
     resolve_model_version,
 )
-from sportstradamus.helpers.training_quotes import AUTHENTICITY_VALUES
+from sportstradamus.helpers.training_quotes import AUTHENTIC, AUTHENTICITY_VALUES
 from sportstradamus.prediction.book_quotes import (
     annotate_quote_provenance,
     apply_rung_book_leg,
@@ -1034,6 +1035,46 @@ def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, bas
     return 1 - raw_under, push
 
 
+def _served_over_and_push(
+    offer_df: pd.DataFrame,
+    dist: str,
+    cv: float,
+    step,
+    base_mean: np.ndarray,
+    temperature: float | None,
+    pit_recal_blob: dict | None,
+    posthoc_slug: str,
+    posthoc_blob: dict | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """The calibrated over-probability at each offer's line, and its push probability.
+
+    Temperature and the post-hoc are fit at each row's own line, and at a far rung they flatten
+    what the model knows. So an offer off its sportsbook quote's ``Quote Line`` keeps the price
+    served at that line and moves from it by the model's own odds (``anchor_to_reference``).
+    An offer at its quote line, or with no authentic quote, gets the chain unchanged. A derived
+    component sum's quote sits at the DFS line, and a DFS line never anchors.
+    """
+    raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
+    # §6.1 Rung C reshapes the whole served CDF (over = 1 − g(1 − over_raw)) before the
+    # binary-prob temperature/posthoc, matching the training-side warp + Gate-4 PIT.
+    raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
+    cal_over = apply_temperature(raw_over, temperature)
+    cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
+    quote_line = offer_df["Quote Line"].where(offer_df["Quote Authenticity"].eq(AUTHENTIC))
+    quote_line = quote_line.to_numpy(float)
+    moved = np.isfinite(quote_line) & (quote_line != offer_df["Line"].to_numpy(float))
+    if moved.any():
+        at_quote = offer_df.loc[moved].assign(Line=quote_line[moved])
+        raw_ref = _apply_cdf_recal_over(
+            _model_over_and_push(at_quote, dist, cv, step, base_mean[moved])[0], pit_recal_blob
+        )
+        served_ref = _apply_prob_posthoc(
+            apply_temperature(raw_ref, temperature), posthoc_slug, posthoc_blob
+        )
+        cal_over[moved] = anchor_to_reference(raw_over[moved], raw_ref, served_ref)
+    return cal_over, push
+
+
 def _offer_frame_for_market(offers: list[dict], market: str) -> pd.DataFrame:
     """Player-indexed offer frame with the short-line yards filter applied.
 
@@ -1251,14 +1292,10 @@ def model_prob(
             affine_candidate_calibration,
         )
 
-    raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
+    cal_over, push = _served_over_and_push(
+        offer_df, dist, cv, step, base_mean, temperature, pit_recal_blob, posthoc_slug, posthoc_blob
+    )
     offer_df["Push Prob"] = np.asarray(push, dtype=float)
-
-    # §6.1 Rung C reshapes the whole served CDF (over = 1 − g(1 − over_raw)) before the
-    # binary-prob temperature/posthoc, matching the training-side warp + Gate-4 PIT.
-    raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
-    cal_over = apply_temperature(raw_over, temperature)
-    cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
     if two_part_candidate_output is not None:
         cal_over = two_part_candidate_output.pooled_over
     if affine_candidate_over is not None:

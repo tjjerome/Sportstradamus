@@ -261,10 +261,11 @@ def price_offers_at_quotes(
 def annotate_quote_provenance(frame: pd.DataFrame, quotes: Sequence[TrainingQuote | None]) -> None:
     """Record which book quote backed each row, in place and row-aligned with ``quotes``.
 
-    Informational only — no scoring step reads these columns; they let a served leg be
-    traced to its quote (cohort or component sum, how many books, what line, how fresh).
-    ``None`` marks a row no servable quote backed, the model path's model-only blend,
-    and leaves its columns None/NaN/NaT.
+    The columns let a served leg be traced to its quote (cohort or component sum, how many
+    books, what line, how fresh). One scoring step reads them: the model path anchors an
+    offer off an authentic quote's ``Quote Line`` at the price it serves there
+    (``model_prob._served_over_and_push``). ``None`` marks a row no servable quote backed,
+    the model path's model-only blend, and leaves its columns None/NaN/NaT.
     """
     frame["Quote Source"] = [q.source if q else None for q in quotes]
     frame["Quote Authenticity"] = [q.authenticity if q else None for q in quotes]

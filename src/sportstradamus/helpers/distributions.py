@@ -21,7 +21,8 @@ Three related jobs live here:
 training matrix's per-player historical moments; kept here because it
 shares the distribution-family dispatch with the inversion code.
 ``apply_temperature`` / ``apply_cdf_recal`` apply a fitted calibration map at
-serve time; the fitters themselves live in ``training.posthoc``.
+serve time, and ``anchor_to_reference`` carries the calibrated price at a reference line
+to the other lines of a ladder; the fitters themselves live in ``training.posthoc``.
 """
 
 from dataclasses import dataclass
@@ -64,6 +65,10 @@ NONZERO_DENOM_GATE = 0.05
 
 # Logit-space clip keeping temperature scaling clear of the 0/1 singularities.
 LOGIT_CLIP_EPS = 1e-6
+
+# The served price at a reference line is clipped this far inside (0, 1) before it anchors a
+# ladder: an isotonic 0 or 1 at the main line must not pin a whole ladder.
+REFERENCE_ANCHOR_CLIP = 0.01
 
 # Double Poisson support-grid + parameter bounds. Mirror the torch constants in
 # ``sportstradamus.double_poisson`` (kept separate so this module's import graph
@@ -924,6 +929,32 @@ def apply_temperature(p_over, temperature):
         return p_over
     clipped = np.clip(p_over, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS)
     return expit(logit(clipped) / temperature)
+
+
+def anchor_to_reference(
+    raw_over: np.ndarray, raw_ref: np.ndarray, served_ref: np.ndarray
+) -> np.ndarray:
+    """Price a line off its reference line: the served price there, moved by the model's own odds.
+
+    Temperature and a probability-stage post-hoc are fit at each row's own line; applied at a
+    far alternate line, a temperature up to 10 flattens what the model knows there. This keeps
+    the served price at the reference line ``m`` and moves the rest of the ladder by the raw
+    model alone: ``expit(logit raw_over - logit raw_ref + logit clip(served_ref))``.
+
+    Args:
+        raw_over: Over-probability at the row's line after the whole-CDF recal, before
+            temperature.
+        raw_ref: The same at the reference line.
+        served_ref: The served over-probability at the reference line (temperature and
+            post-hoc applied), clipped to ``REFERENCE_ANCHOR_CLIP`` from 0 and 1.
+
+    Returns:
+        The anchored over-probability; ``clip(served_ref)`` where ``raw_over == raw_ref``.
+        The raw values are clipped to ``LOGIT_CLIP_EPS`` before the logit.
+    """
+    over, ref = (np.clip(p, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS) for p in (raw_over, raw_ref))
+    served = np.clip(served_ref, REFERENCE_ANCHOR_CLIP, 1 - REFERENCE_ANCHOR_CLIP)
+    return expit(logit(over) - logit(ref) + logit(served))
 
 
 def apply_cdf_recal(blob: dict | None, u):
