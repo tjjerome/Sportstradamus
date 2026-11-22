@@ -56,7 +56,7 @@ _RUNGS = pd.DataFrame(
 
 
 def _unanchored(rows: pd.DataFrame, knobs: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``serve`` under the serving convention with no reference line: the chain before it."""
+    """``serve`` under the serving convention with no reference line: no row is anchored."""
     book = rows["Book_EV"].where(rows["QuoteAuthenticity"].eq(AUTHENTIC), rows["EV"])
     return serve(rows, knobs, np.full(len(rows), knobs["weight"]), book.to_numpy(float))
 
@@ -96,16 +96,16 @@ def test_serve_live_leaves_own_line_rows_unanchored():
 
 def test_serve_live_anchors_only_an_authentic_rung_off_its_test_line():
     anchored, mean, sd = serve_live(_RUNGS, _KNOBS)
-    today, today_mean, today_sd = _unanchored(_RUNGS, _KNOBS)
+    unanchored, unanchored_mean, unanchored_sd = _unanchored(_RUNGS, _KNOBS)
     authentic = _RUNGS["QuoteAuthenticity"].eq(AUTHENTIC)
     moved = (authentic & _RUNGS["Line"].ne(_RUNGS["Test Line"])).to_numpy()
 
-    # The main rung, served at the isotonic's 1, and every pick'em rung keep today's price;
-    # no mean or SD moves.
-    assert today[1] > 1 - REFERENCE_ANCHOR_CLIP
-    np.testing.assert_array_equal(anchored[~moved], today[~moved])
-    np.testing.assert_array_equal(mean, today_mean)
-    np.testing.assert_array_equal(sd, today_sd)
+    # The main rung, served at the isotonic's 1, and every pick'em rung keep their unanchored
+    # price; no mean or SD moves.
+    assert unanchored[1] > 1 - REFERENCE_ANCHOR_CLIP
+    np.testing.assert_array_equal(anchored[~moved], unanchored[~moved])
+    np.testing.assert_array_equal(mean, unanchored_mean)
+    np.testing.assert_array_equal(sd, unanchored_sd)
     raw_knobs = _KNOBS | {"temperature": None, "posthoc": "none"}
     at_test_line = _RUNGS.assign(Line=_RUNGS["Test Line"])
     expected = anchor_to_reference(
@@ -114,7 +114,7 @@ def test_serve_live_anchors_only_an_authentic_rung_off_its_test_line():
         _unanchored(at_test_line, _KNOBS)[0],
     )
     np.testing.assert_allclose(anchored[moved], expected[moved], rtol=1e-12)
-    assert not np.isclose(anchored[moved], today[moved]).any()
+    assert not np.isclose(anchored[moved], unanchored[moved]).any()
 
 
 def test_serving_keeps_a_saturated_price_at_the_quote_line():
@@ -139,10 +139,11 @@ def test_serving_keeps_a_saturated_price_at_the_quote_line():
     }
 
     served, _ = mp._served_over_and_push(offers, **cell)
-    today, _ = mp._served_over_and_push(offers.assign(**{"Quote Line": np.nan}), **cell)
+    unanchored, _ = mp._served_over_and_push(offers.assign(**{"Quote Line": np.nan}), **cell)
 
-    assert today[0] > 1 - REFERENCE_ANCHOR_CLIP
-    np.testing.assert_array_equal(served[[0, 2]], today[[0, 2]])
+    assert unanchored[0] > 1 - REFERENCE_ANCHOR_CLIP
+    np.testing.assert_array_equal(served[[0, 2]], unanchored[[0, 2]])
     raw = 1 - get_odds(offers["Line"].to_numpy(), 4.0, "NegBin", r=3.0)
-    assert served[1] == pytest.approx(anchor_to_reference(raw[1], raw[0], today[0]), rel=1e-12)
+    expected = anchor_to_reference(raw[1], raw[0], unanchored[0])
+    assert served[1] == pytest.approx(expected, rel=1e-12)
     assert served[1] < 1 - REFERENCE_ANCHOR_CLIP

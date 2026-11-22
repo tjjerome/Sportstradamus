@@ -559,7 +559,7 @@ def _overwrite_quote_column(monkeypatch, column: str, value) -> None:
 
 def test_an_offer_off_its_quote_line_is_anchored_there(log_dir, monkeypatch, tmp_path):
     """Off its sportsbook quote's line an offer serves the price at that line, moved by the
-    model's own odds; at the quote line, or with no quote, it serves the price it did before.
+    model's own odds; at the quote line, or with no quote, it serves the unanchored price.
     The replay's ``serve_live`` prices every row alike from the logged inputs.
     """
     filedict = _FILEDICT | {"temperature": 2.5}
