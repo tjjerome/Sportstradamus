@@ -2,7 +2,8 @@
 
 A served cell whose fresh offline gates fail is *reported*, never pruned — the
 cull (flip ``shipped: "withheld"``, or ``ship config --branch devel --prune``) is the
-human's decision. Replaces the retired serve-iff-ship invariant test.
+human's decision. A served cell at the temperature cap is reported too, though every gate
+passes. Replaces the retired serve-iff-ship invariant test.
 """
 
 from unittest.mock import MagicMock

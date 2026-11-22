@@ -71,6 +71,14 @@ def _na_fmt(value, spec: str) -> str:
     return format(value, spec) if pd.notna(value) else "-"
 
 
+def _warning_flags(row) -> list[str]:
+    """Failed gates (an unwritten gate counts as failed), then ``T=<x> (cap)`` at the cap."""
+    flags = [g for g in _SHIP_GATES if not (pd.notna(v := getattr(row, f"{g}_pass")) and bool(v))]
+    if row.temperature >= _TEMPERATURE_CAP:
+        flags.append(f"T={row.temperature:.1f} (cap)")
+    return flags
+
+
 def _warn_ship_gate(
     active_markets: dict[str, list[str]],
     ship_config: ShipConfig,
@@ -108,8 +116,8 @@ def _warn_ship_gate(
         ],
     )
     failed = stats["ship"].eq(False).fillna(False).astype(bool)
-    flagged = failed | stats["temperature"].ge(_TEMPERATURE_CAP)
-    failing = {(r.league, r.market): r for r in stats[flagged].itertuples(index=False)}
+    at_cap = stats["temperature"].ge(_TEMPERATURE_CAP)
+    flagged = {(r.league, r.market): r for r in stats[failed | at_cap].itertuples(index=False)}
     rows = []
     for lg, markets in active_markets.items():
         if lg not in loaded_leagues:
@@ -117,18 +125,13 @@ def _warn_ship_gate(
         for market in markets:
             if ship_config.get(lg, {}).get(market, WITHHELD) == WITHHELD:
                 continue
-            row = failing.get((lg, market))
+            row = flagged.get((lg, market))
             if row is None:
                 continue
-            flags = [
-                g for g in _SHIP_GATES if not (pd.notna(v := getattr(row, f"{g}_pass")) and bool(v))
-            ]
-            if row.temperature >= _TEMPERATURE_CAP:
-                flags.append(f"T={row.temperature:.1f} (cap)")
             rows.append(
                 [
                     f"{lg} {market}",
-                    " ".join(flags),
+                    " ".join(_warning_flags(row)),
                     f"{_na_fmt(row.g4_pit_ks, '.3f')} ({_na_fmt(row.g4_pit_ks_max, '.3f')})",
                     _na_fmt(row.brier_skill_score, "+.4f"),
                 ]
