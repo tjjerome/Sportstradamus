@@ -402,6 +402,10 @@ served cell whose weekly retrain fails the fresh gates is **warned about**
 (meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
 it) but keeps serving until the human flips it back to `"withheld"` (next
 meditate prunes the pickle) or runs `ship config --branch devel --prune`.
+Meditate's table also lists a served cell whose temperature fit sits at its
+upper bound, even when every gate passes: the bound flattens the cell's
+alternate lines toward .5, which no gate scores and a posted-rung read
+(`ship priced`) shows. `ship config` does not repeat this flag.
 `sportstradamus ship config --branch main` mutates `stat_meta.json` monthly
 (cron via `run_job.sh gate-status`) to promote graduated cells `"devel"` →
 `"main"` and demote the rest back to `"devel"`; the cron opens a PR a human

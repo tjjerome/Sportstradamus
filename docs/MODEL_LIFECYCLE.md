@@ -179,7 +179,8 @@ The weekly `meditate` retrains each served cell once with its persisted `stat_me
 A retrain that fails the fresh gates only **warns** (a SHIP-GATE WARNINGS table at the end of the
 run, echoed by `ship config --branch devel`) — the cell keeps serving until you demote it: flip
 `shipped` to `"withheld"` (the next meditate prunes the pickle) or run
-`sportstradamus ship config --branch devel --prune` to prune the pickle now.
+`sportstradamus ship config --branch devel --prune` to prune the pickle now. Meditate's table also
+lists a cell whose temperature sits at its cap, gates or not ([ship_gate.md](ship_gate.md) says why).
 
 ## 5. Graduate to main
 
