@@ -29,6 +29,23 @@ def no_game_starts(tmp_path, monkeypatch):
         )
 
 
+def _training_stats(league: str, gamelog: pd.DataFrame, **hooks) -> SimpleNamespace:
+    """A Stats stand-in whose preflight, position and volume hooks do nothing.
+
+    ``hooks`` add what a test varies: ``get_stats`` and ``resolve_player_market_odds``.
+    """
+    return SimpleNamespace(
+        league=league,
+        gamelog=gamelog,
+        usage_stat="usage",
+        log_strings=LOG_STRINGS,
+        preflight_training_dependencies=lambda _market: None,
+        _market_position_filter=lambda frame, _market: frame,
+        _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
+        **hooks,
+    )
+
+
 def test_training_matrix_skips_gameday_without_reconstructable_stats():
     game_date = date(2024, 9, 8)
     gamelog = pd.DataFrame(
@@ -43,16 +60,8 @@ def test_training_matrix_skips_gameday_without_reconstructable_stats():
             "market": [3],
         }
     )
-    fake = SimpleNamespace(
-        league="NFL",
-        gamelog=gamelog,
-        usage_stat="usage",
-        volume_stats=[],
-        log_strings=LOG_STRINGS,
-        preflight_training_dependencies=lambda _market: None,
-        _market_position_filter=lambda frame, _market: frame,
-        _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
-        get_stats=lambda _market, _offers, _game_date: pd.DataFrame(),
+    fake = _training_stats(
+        "NFL", gamelog, get_stats=lambda _market, _offers, _game_date: pd.DataFrame()
     )
 
     rebuilt = Stats.get_training_matrix(fake, "market", cutoff_date=date(2024, 1, 1))
@@ -81,15 +90,9 @@ def test_training_matrix_keeps_a_player_whose_gamelog_name_has_an_accent():
         names = [offer["Player"] for offer in offers if offer["Player"] in short_log_names]
         return pd.DataFrame({"Home": [True] * len(names)}, index=names)
 
-    fake = SimpleNamespace(
-        league="NBA",
-        gamelog=gamelog,
-        usage_stat="usage",
-        volume_stats=[],
-        log_strings=LOG_STRINGS,
-        preflight_training_dependencies=lambda _market: None,
-        _market_position_filter=lambda frame, _market: frame,
-        _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
+    fake = _training_stats(
+        "NBA",
+        gamelog,
         get_stats=get_stats,
         resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
             {"Archived": True}, index=stats.index
@@ -109,19 +112,19 @@ def test_an_append_reads_the_usage_floor_over_the_whole_loaded_window():
         {
             "game": [f"old{i}" for i in range(10)],
             "player": [f"Starter {i}" for i in range(10)],
-            "date": [built_day] * 10,
-            "team": ["AAA"] * 10,
-            "opponent": ["BBB"] * 10,
-            "home": [True] * 10,
+            "date": built_day,
+            "team": "AAA",
+            "opponent": "BBB",
+            "home": True,
             "usage": [50 + i for i in range(10)],
-            "market": [5] * 10,
+            "market": 5,
         }
     )
     appended = pd.DataFrame(
         {
-            "game": ["new"] * 3,
+            "game": "new",
             "player": ["Rotation", "Starter", "Deep Bench"],
-            "date": [new_day] * 3,
+            "date": new_day,
             "team": ["AAA", "AAA", "BBB"],
             "opponent": ["BBB", "BBB", "AAA"],
             "home": [True, True, False],
@@ -129,15 +132,9 @@ def test_an_append_reads_the_usage_floor_over_the_whole_loaded_window():
             "market": [3, 6, 1],
         }
     )
-    fake = SimpleNamespace(
-        league="NBA",
-        gamelog=pd.concat([history, appended], ignore_index=True),
-        usage_stat="usage",
-        volume_stats=[],
-        log_strings=LOG_STRINGS,
-        preflight_training_dependencies=lambda _market: None,
-        _market_position_filter=lambda frame, _market: frame,
-        _dispatch_volume_stats=lambda _offers, _game_date, _market: None,
+    fake = _training_stats(
+        "NBA",
+        pd.concat([history, appended], ignore_index=True),
         get_stats=lambda _market, offers, _game_date: pd.DataFrame(
             {"Home": [True] * len(offers)}, index=[offer["Player"] for offer in offers]
         ),
