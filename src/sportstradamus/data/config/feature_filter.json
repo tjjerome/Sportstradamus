@@ -60,7 +60,6 @@
             "weather precip",
             "weather snow",
             "weather humidity",
-            "weather lead",
             "weather indoor",
             "weather retractable"
         ],
@@ -418,7 +417,6 @@
                 "weather gust",
                 "weather humidity",
                 "weather indoor",
-                "weather lead",
                 "weather precip",
                 "weather retractable",
                 "weather snow",
@@ -696,7 +694,6 @@
                 "weather gust",
                 "weather humidity",
                 "weather indoor",
-                "weather lead",
                 "weather precip",
                 "weather retractable",
                 "weather snow",
@@ -819,7 +816,6 @@
             "weather precip",
             "weather snow",
             "weather humidity",
-            "weather lead",
             "weather indoor",
             "weather retractable",
             "weather wind out"
