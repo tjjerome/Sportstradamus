@@ -135,7 +135,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `cli.py` | `main` click command — loads/updates `Stats` for active leagues, scrapes DFS offers (Underdog, Sleeper), scores via `process_offers`, snapshots scored offers + parlays as parquet for the dashboard, persists `history.parquet` / the `parlay_hist/` day partitions |
-| `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization |
+| `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization. Temperature and post-hoc price an offer at its authentic sportsbook quote line; an offer at another line moves off that price by the model's own logit gap (`helpers/distributions.anchor_to_reference`; `scripts/tail_pricing.serve` does the same at a test row's authentic `Test Line`) |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads the per-league correlation parquets, assembles Σ, scores parlay legs (calls `parlay.beam_search_parlays`) |
 | `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `leg_market_map` (a platform's market labels under the league's own cell keys), `resolve_leg_stat` |

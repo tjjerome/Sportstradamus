@@ -37,7 +37,7 @@ flowchart TD
     AR["Archive book consensus<br/>get_line / get_ev / get_total"] --> E
     D --> E["distributions.fused_loc<br/>blend model + sharp book line"]
     E --> F["distributions.get_odds<br/>CDF at line → P(over), P(under)"]
-    F --> G["temperature scaling + dispersion_cal<br/>calibrated P(over), P(under)"]
+    F --> G["temperature scaling + dispersion_cal<br/>temperature + post-hoc priced at the sportsbook quote line;<br/>other lines anchored to that price<br/>calibrated P(over), P(under)"]
     G --> H["EV per offer →<br/>correlation.find_correlation →<br/>parlay.beam_search_parlays"]
     H --> I["persist.write_current_offers → current_* snapshots<br/>io.write_history / io.upsert_parlay_hist → history.parquet / parlay_hist/"]
     I --> J["Streamlit dashboard<br/>reads the parquet snapshots"]
