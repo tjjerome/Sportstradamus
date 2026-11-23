@@ -90,7 +90,7 @@ Sportstradamus/
 | `base.py` | `Stats` base class. All shared logic: `load`, `update`, `parse_game`, `get_training_matrix`, `get_stats`, `get_volume_stats`, `profile_market`, player-comp KNN (`update_player_comps`), `trim_gamelog` |
 | `nba.py` | `StatsNBA(Stats)` — NBA loading and features via `nba_api`; `nba_client.py` is its reliable transport wrapper for stats.nba.com / stats.wnba.com; `nba_season_tables.py` reads the NBA's and the WNBA's season-to-date bio and shot-location tables as of a day (stored per day in `data/leagues/<league>/season_tables/`), which the comp pool reads as of its date's eve |
 | `wnba.py` | `StatsWNBA(StatsNBA)` — WNBA, inherits from `StatsNBA` |
-| `mlb.py` | `StatsMLB(Stats)` — MLB via `statsapi` |
+| `mlb.py` | `StatsMLB(Stats)` — MLB via `statsapi`; `mlb_pitch.py` keeps per player-game pitch counts from Savant's game feed (`parse_game` going forward, `admin backfill-gamelog --league MLB` for history); `mlb_profile.py` turns them, with lineup spots and handedness, into profile and matchup inputs |
 | `nfl.py` | `StatsNFL(Stats)` — NFL via `nfl_data_py` / `nflreadpy` |
 | `nhl.py` | `StatsNHL(Stats)` — NHL; `nhl_position_policy.py` holds the fail-closed training-market position policy; `nhl_reports.py` fills faceoffs taken, power-play and short-handed time, power-play shots and share from the NHL stats service's game reports (the hourly update fills the last two weeks) |
 | `nfl_fp_*.py`, `nfl_pbp_agg.py` | FantasyPoints snapshot loaders/aggregators and PBP/NGS-derived season aggregates feeding the NFL comp and team/defense profiles |

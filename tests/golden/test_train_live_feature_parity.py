@@ -36,6 +36,10 @@ training (``get_training_matrix``) and the model's serving path (``match_offers`
 end ``fillna(0).replace([inf,-inf],0)``, but the book fallback (``book_fallback_prob``)
 joins its features after ``fillna(0)`` only, so a shared column that can be ``inf``
 would diverge there, and the gate forbids one.
+
+``test_mlb_train_and_live_feature_paths_agree`` holds ``StatsMLB`` to the same gate on synthetic
+logs, for a pitcher and a hitter market, and requires each input ``stats/mlb_profile.py`` adds to
+reach ``get_stat_columns`` and read non-zero somewhere.
 """
 
 from __future__ import annotations
@@ -49,7 +53,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.stats import StatsNBA, StatsWNBA, availability, base, nba
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsWNBA, availability, base, mlb, nba
+from sportstradamus.stats.mlb_pitch import PITCH_COLUMNS
+from sportstradamus.stats.weather_features import WEATHER_COLUMNS
 
 MARKET = "PTS"
 GAMEDAY = date(2025, 12, 1)  # after the NBA season_start; far in the past vs real today
@@ -384,3 +390,192 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     # parity-surface extension point: a future feature batch that adds a per-gameday
     # column (or a new _game_context lookup / volume-dispatch surface) extends the
     # synthetic logs above and is automatically covered by the shared-surface assertion.
+
+
+# MLB: the same gate on StatsMLB, whose serving branch takes the opposing starter from
+# upcoming_games where training takes it from the gamelog row. One game a day; the starters
+# throw from opposite hands and each lineup bats left, right, both and right, so every
+# handedness flag and split is live in both arms.
+MLB_GAMEDAY = date(2026, 6, 15)  # after the 2026 season_start, before real today
+MLB_TEAMS = {"AAA": ("Arm Right", "R"), "BBB": ("Arm Left", "L")}
+MLB_SIDES = ("L", "R", "S", "R")
+MLB_MONEYLINE = {"AAA": 0.6, "BBB": 0.4}
+MLB_TOTAL = {"AAA": 4.5, "BBB": 4.0}
+# Title case, as remove_accents leaves a gamelog name.
+MLB_LINEUPS = {team: [f"{team.title()} Batter {slot}" for slot in range(4)] for team in MLB_TEAMS}
+MLB_BATS = {
+    batter: side
+    for lineup in MLB_LINEUPS.values()
+    for batter, side in zip(lineup, MLB_SIDES, strict=True)
+}
+MLB_IDS = {
+    name: 600000 + i for i, name in enumerate([*(p for p, _ in MLB_TEAMS.values()), *MLB_BATS])
+}
+# The counts every row draws: the box score's and the game feed's.
+MLB_COUNTS = [
+    *PITCH_COLUMNS,
+    "pitcher strikeouts",
+    "batters faced",
+    "walks allowed",
+    "pitches thrown",
+    "plateAppearances",
+    "batter strikeouts",
+    "walks",
+    "hits",
+]
+# What stats/mlb_profile.py adds for the players a market prices. The profile's and the
+# lineup's each have a " short" twin.
+_PITCHER_PROFILE = (
+    "pitcher K rate",
+    "pitcher BB rate",
+    "pitcher whiff rate",
+    "pitcher chase rate",
+    "pitcher zone rate",
+    "pitcher zone contact rate",
+    "fastball mph",
+    "pitches per start",
+    "batters faced per start",
+    "times through order",
+)
+_BATTER_PROFILE = (
+    "batter whiff rate",
+    "batter chase rate",
+    "exit velocity",
+    "hard-hit rate",
+    "barrel rate",
+    "sweet-spot rate",
+    "ground-ball rate",
+    "lineup spot",
+    "start rate",
+)
+MLB_NEW_INPUTS = {
+    "pitcher strikeouts": [
+        *(f"Player {name}{w}" for name in _PITCHER_PROFILE for w in ("", " short")),
+        *(
+            f"lineup {rate} rate vs hand{w}"
+            for rate in ("K", "BB", "whiff", "chase")
+            for w in ("", " short")
+        ),
+    ],
+    "hits": [
+        *(f"Player {name}{w}" for name in _BATTER_PROFILE for w in ("", " short")),
+        "platoon advantage",
+        "facing lefty",
+        "bats left",
+        "switch hitter",
+        "split gap",
+        "PA vs hand",
+        "pitcher split gap",
+        "pitcher PA vs side",
+    ],
+}
+
+
+def _mlb_opponent(team: str) -> str:
+    return "BBB" if team == "AAA" else "AAA"
+
+
+def _build_mlb_logs(stats: StatsMLB) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Synthetic MLB gamelog + teamlog, one AAA-BBB game a day up to ``MLB_GAMEDAY``."""
+    rng = np.random.default_rng(1)
+    player_stat_types, team_stat_types = stats._profile_stat_types()
+    rows, team_rows = [], []
+    for day in (MLB_GAMEDAY - dt.timedelta(days=k) for k in range(GAMES_BACK, -1, -1)):
+        for team, (pitcher, _) in MLB_TEAMS.items():
+            opponent = _mlb_opponent(team)
+            opp_pitcher, opp_hand = MLB_TEAMS[opponent]
+            game = {
+                "gameId": day.toordinal(),
+                "gameDate": day.isoformat(),
+                "team": team,
+                "opponent": opponent,
+                "opponent pitcher": opp_pitcher,
+                "opponent pitcher id": MLB_IDS[opp_pitcher],
+                "opponent pitcher hand": opp_hand,
+                "home": team == "AAA",
+                "moneyline": MLB_MONEYLINE[team],
+                "totals": MLB_TOTAL[team],
+                "game type": "R",
+            }
+            for slot, player in enumerate([pitcher, *MLB_LINEUPS[team]]):
+                rows.append(
+                    game
+                    | {
+                        "playerId": MLB_IDS[player],
+                        "playerName": player,
+                        "position": "OF" if slot else "P",
+                        "starting pitcher": not slot,
+                        "starting batter": bool(slot),
+                        "battingOrder": slot,
+                    }
+                    | {col: float(rng.integers(1, 30)) for col in MLB_COUNTS}
+                    | {st: float(rng.uniform(0, 1)) for st in player_stat_types}
+                )
+            team_rows.append(
+                {"gameId": day.toordinal(), "gameDate": day.isoformat(), "team": team}
+                | {st: float(rng.uniform(0, 1)) for st in team_stat_types}
+            )
+    return pd.DataFrame(rows), pd.DataFrame(team_rows)
+
+
+class _MlbStubArchive:
+    """The serving branch's archive reads, echoing what ``_build_mlb_logs`` baked in."""
+
+    def get_moneyline(self, league, game_date, team, **_):
+        return MLB_MONEYLINE[team]
+
+    def get_total(self, league, game_date, team, **_):
+        return MLB_TOTAL[team]
+
+
+class _FrozenMlbDatetime(dt.datetime):
+    @classmethod
+    def today(cls):
+        return dt.datetime(MLB_GAMEDAY.year, MLB_GAMEDAY.month, MLB_GAMEDAY.day)
+
+
+@pytest.mark.parametrize("market", ["pitcher strikeouts", "hits"])
+def test_mlb_train_and_live_feature_paths_agree(monkeypatch, market):
+    monkeypatch.setattr(base, "archive", _MlbStubArchive())
+    stats = StatsMLB()
+    stats.gamelog, stats.teamlog = _build_mlb_logs(stats)
+    stats.comps = {"pitchers": {}, "hitters": {}}
+    stats.park_factors = {team: {"R": 1.0, "K": 1.0} for team in MLB_TEAMS}
+    # The stored forecasts are on disk only where data was pulled; both arms read none.
+    stats._weather_history = stats._weather_forecast = pd.DataFrame(
+        columns=list(WEATHER_COLUMNS["MLB"]), dtype=float
+    )
+    stats.players = {MLB_IDS[p]: {"name": p, "throws": hand} for p, hand in MLB_TEAMS.values()}
+    stats.players |= {MLB_IDS[b]: {"name": b, "bats": side} for b, side in MLB_BATS.items()}
+    stats.upcoming_games = {
+        team: {
+            "Pitcher": pitcher,
+            "Home": team == "AAA",
+            "Opponent": _mlb_opponent(team),
+            "Opponent Pitcher": MLB_TEAMS[_mlb_opponent(team)][0],
+            "Batting Order": MLB_LINEUPS[team],
+            "Playoff": False,
+            "game type": "R",
+            "Game ID": str(MLB_GAMEDAY.toordinal()),
+        }
+        for team, (pitcher, _) in MLB_TEAMS.items()
+    }
+    offers = [
+        {"Player": p, "Team": t, "Opponent": _mlb_opponent(t), "Date": MLB_GAMEDAY.isoformat()}
+        for t, (pitcher, _) in MLB_TEAMS.items()
+        for p in ([pitcher] if market == "pitcher strikeouts" else MLB_LINEUPS[t])
+    ]
+    columns = stats.get_stat_columns(market)
+    new = MLB_NEW_INPUTS[market]
+    assert set(new) <= set(columns), "an MLB input is missing from get_stat_columns"
+
+    train = stats.get_stats(market, offers, MLB_GAMEDAY)
+    # StatsMLB reads today for its playoff flag in stats/mlb.py.
+    for module in (base, mlb):
+        monkeypatch.setattr(module, "datetime", _FrozenMlbDatetime)
+    live = stats.get_stats(market, offers, MLB_GAMEDAY)
+
+    assert len(train) == len(offers) and len(live) == len(offers)
+    shared = [c for c in columns if c in train.columns]
+    pd.testing.assert_frame_equal(train.sort_index()[shared], live.sort_index()[shared])
+    assert (train[new] != 0).any().all(), "an MLB input is zero on every row"

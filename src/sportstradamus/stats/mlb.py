@@ -33,6 +33,8 @@ from sportstradamus.stats.base import (
     is_mlb_pitcher_market,
     scraper,
 )
+from sportstradamus.stats.mlb_pitch import GAME_FEED_URL, PITCH_COLUMNS, pitch_columns
+from sportstradamus.stats.mlb_profile import lineup_vs_hand, platoon, player_rates
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -338,6 +340,12 @@ class StatsMLB(Stats):
         None
     """
 
+    # MLB fills no team, age, position z, defense position or defense comps: each read 0 on
+    # every row of every MLB matrix (docs/gbdt_feature_study.md §14 item 4). Position stays, as
+    # the MLB pickles read it, and depth with it (_join_defense_and_parks copies one to the other).
+    player_profile_seed = ("position", "depth", "z", "home", "moneyline gain", "totals gain")
+    defense_profile_seed = ("avg", "home", "moneyline gain", "totals gain")
+
     def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
@@ -392,9 +400,37 @@ class StatsMLB(Stats):
         )
         return team, None
 
+    def _build_player_profile_stats(self, stat_types, date):
+        """Add each player's pitch-level record, leash and lineup-spot history (mlb_profile)."""
+        playerstats = super()._build_player_profile_stats(stat_types, date)
+        return playerstats.join(player_rates(self.short_gamelog, self.log_strings["player"]))
+
+    def _h2h_features(self, stats, market, opponents, pitchers):
+        """Add the handedness matchup (mlb_profile): batters' platoon splits, pitchers' lineups."""
+        super()._h2h_features(stats, market, opponents, pitchers)
+        throws = {
+            entry["name"]: entry["throws"] for entry in self.players.values() if "throws" in entry
+        }
+        if is_mlb_pitcher_market(market):
+            matchup = lineup_vs_hand(stats.index, self.short_gamelog, opponents, throws)
+        else:
+            bats = {
+                entry["name"]: entry["bats"] for entry in self.players.values() if "bats" in entry
+            }
+            matchup = platoon(
+                stats.index,
+                self.short_gamelog,
+                market,
+                pitchers,
+                bats,
+                throws,
+                self.log_strings["player"],
+            )
+        stats[matchup.columns] = matchup
+
     def parse_game(self, gameId):
         """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""
-        game = scraper.get(f"https://baseballsavant.mlb.com/gf?game_pk={gameId}")
+        game = scraper.get(GAME_FEED_URL.format(game_id=gameId))
         if not game:
             return
 
@@ -461,6 +497,7 @@ class StatsMLB(Stats):
         )
 
         new_games = pd.DataFrame.from_records(away_rows + home_rows)
+        new_games[PITCH_COLUMNS] = pitch_columns(game, new_games["playerId"]).to_numpy()
         self._enrich_team_markets(new_games, date_col="gameDate", team_col="team")
         self.gamelog = pd.concat([self.gamelog, new_games], ignore_index=True)
 
@@ -1127,7 +1164,7 @@ class StatsMLB(Stats):
 
             leagueavg = defenseGroups[market].mean().mean()
             leaguestd = defenseGroups[market].mean().std()
-            self.defenseProfile[["avg", "z", "home", "moneyline gain", "totals gain", "comps"]] = 0
+            self.defenseProfile[["avg", "z", "home", "moneyline gain", "totals gain"]] = 0
             self.defenseProfile["avg"] = defenseGroups[market].mean().div(leagueavg) - 1
             self.defenseProfile["z"] = (defenseGroups[market].mean() - leagueavg).div(leaguestd)
             self.defenseProfile["home"] = (

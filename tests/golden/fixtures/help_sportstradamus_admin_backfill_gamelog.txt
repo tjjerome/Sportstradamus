@@ -1,0 +1,11 @@
+Usage: sportstradamus admin backfill-gamelog [OPTIONS]
+
+  Fill the gamelog rows that lack NHL season sums or report columns, or MLB
+  pitch counts.
+
+Options:
+  --league [NHL|MLB]  [required]
+  --season INTEGER    Restrict to these seasons, by start year, e.g. 2025.
+  --reports           NHL: fill the stats-service report columns instead; re-
+                      parses no game.
+  --help              Show this message and exit.

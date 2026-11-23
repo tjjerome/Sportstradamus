@@ -818,7 +818,23 @@
             "weather humidity",
             "weather indoor",
             "weather retractable",
-            "weather wind out"
+            "weather wind out",
+            "platoon advantage",
+            "facing lefty",
+            "bats left",
+            "switch hitter",
+            "split gap",
+            "PA vs hand",
+            "pitcher split gap",
+            "pitcher PA vs side",
+            "lineup K rate vs hand",
+            "lineup K rate vs hand short",
+            "lineup BB rate vs hand",
+            "lineup BB rate vs hand short",
+            "lineup whiff rate vs hand",
+            "lineup whiff rate vs hand short",
+            "lineup chase rate vs hand",
+            "lineup chase rate vs hand short"
         ],
         "Always": {
             "_default": []

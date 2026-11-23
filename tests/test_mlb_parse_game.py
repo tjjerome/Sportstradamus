@@ -3,7 +3,9 @@
 ``parse_game`` has no other automated coverage and is being decomposed for
 complexity, so this locks its gamelog/teamlog row-building against a real
 (trimmed) baseballsavant payload. The input fixture and both expected snapshots
-were captured from the pre-refactor code on game_pk 716896 (CHC @ DET).
+were captured from the pre-refactor code on game_pk 716896 (CHC @ DET); the
+fixture's pitches to its four batters, and the pitch columns they give the
+gamelog snapshot, were added with ``stats/mlb_pitch.py``.
 
 ``_refresh_handedness`` is covered here too: it exists to correct the ``bats`` /
 ``throws`` values ``parse_game``'s resolvers cache first-write-wins, so the two

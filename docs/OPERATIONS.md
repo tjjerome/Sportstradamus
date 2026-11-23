@@ -304,13 +304,19 @@ Quick checks when collection or serving looks wrong:
   its earlier calls each time: read the log for the call that fails, and to give
   the date up, add it to `archive/backfill_progress.json` under the job's key.
 - **NHL comp profile raises "lack the season sums"**: a stored gamelog row predates the
-  per-game moneypuck sums. Dev: `sportstradamus admin backfill-nhl-gamelog` (re-fetches every
-  lacking game, ~1.5 s each). Prod heals its running season inside the hourly NHL update.
+  per-game moneypuck sums. Dev: `sportstradamus admin backfill-gamelog --league NHL` (re-fetches
+  every lacking game, ~1.5 s each). Prod heals its running season inside the hourly NHL update.
 - **NHL report columns blank on old rows** (faceoffs taken, power-play / short-handed time,
   power-play shots and share): the hourly update fills only the last two weeks.
-  `sportstradamus admin backfill-nhl-gamelog --reports [--season N]` fills history from the NHL
-  stats service (100 rows a request: ~13 min a season). It rewrites the gamelog, so on prod run it
-  in a gap with no `prophecize`.
+  `sportstradamus admin backfill-gamelog --league NHL --reports [--season N]` fills history from
+  the NHL stats service (100 rows a request: ~13 min a season). It rewrites the gamelog, so on
+  prod run it in a gap with no `prophecize`.
+- **MLB pitch columns blank on old rows** (`PITCH_COLUMNS`, `stats/mlb_pitch.py`): the update
+  writes them only for the games it logs. `sportstradamus admin backfill-gamelog --league MLB
+  [--season N]` re-reads Savant's game feed for every lacking game, a second apart (~3.3 s a game:
+  2.3 hours a season, about 7 hours for the 7,400 games of 2024-26), writing the gamelog after
+  each season; a stopped run resumes in the season it stopped in. On prod, run it while MLB is out
+  of season or in a gap with no `prophecize`.
 - **Poisoned odds rows**: `sportstradamus admin sweep-runaway-odds`
   (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
   `fit_book_weights` refits off the cleaned archive.

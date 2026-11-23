@@ -11,6 +11,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   first release that allows Pillow 13.
 
 ### Changed
+- `admin backfill-nhl-gamelog` is now `admin backfill-gamelog --league NHL`; `--league MLB`
+  fills the MLB pitch columns a season at a time, resuming where a stopped run stopped.
 - A withheld cell's props that a sportsbook quotes serve the book consensus instead of leaving
   the board (`prediction/scoring.py::match_offers`).
 - Gate 1's ship CI resamples game dates; the row bootstrap's interval decides when its upper
@@ -20,6 +22,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Training's SkewNormal push probabilities use the cell's `step`, as serving does.
 
 ### Added
+- MLB pitch counts per player-game from Savant's game feed (`stats/mlb_pitch.py`), and inputs
+  built on them (`stats/mlb_profile.py`): pitch-level rates, leash, lineup spot, platoon
+  splits and the opposing lineup's rates against the pitcher's hand.
 - `odds-backfill` cron job: buys odds history with the credit cycle's leftover, newest
   date first. `odds_budget.backfill_allowance` grants it on the cycle's last day only
   (balance above the governor's reserve and a day of broad runs);
@@ -39,6 +44,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- MLB pitcher cells drop rows whose player faced no batter (walks allowed held 131 hitters);
+  MLB profiles stop seeding the team, age, position z, defense position and defense comps
+  columns, which read 0 on every row.
 - NFL team-weeks parsed before nflverse published their FTN charting or weekly PFR rows
   re-parse once it does (production held zeros in those columns for every 2026 week); PFR's
   `LA` reads as the Rams' `LAR`.

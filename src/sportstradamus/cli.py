@@ -101,7 +101,7 @@ cli.add_command(
             "sweep-runaway-odds": "sportstradamus.scripts.sweep_runaway_odds:main",
             "backfill-live-metrics": "sportstradamus.scripts.backfill_live_metrics:main",
             "backfill-history-eras": "sportstradamus.scripts.backfill_history_eras:backfill_history_eras",
-            "backfill-nhl-gamelog": "sportstradamus.scripts.backfill_nhl_gamelog:main",
+            "backfill-gamelog": "sportstradamus.scripts.backfill_gamelog:main",
             "count-family-screen": "sportstradamus.scripts.count_family_screen:main",
             "tail-scorecard": "sportstradamus.scripts.tail_scorecard:main",
             "realized-replay": "sportstradamus.scripts.realized_replay:main",

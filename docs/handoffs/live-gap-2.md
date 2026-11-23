@@ -257,7 +257,7 @@ restarts the cell's live clock, so live reads split by `Model Version`; the 30-d
      every league (NHL's players.json season summary, the NBA/WNBA players.json half, MLB's affinity
      CSVs, the NFL quarterbacks' PBP season aggregates); comp outcomes are point-in-time everywhere.
      The NHL fix is on `devel` as push 10 (10-29 10:12 CDT: the 21 per-game season sums on every
-     gamelog row, `admin backfill-nhl-gamelog`, production healing its running season inside `_update`,
+     gamelog row, `admin backfill-gamelog --league NHL`, production healing its running season inside `_update`,
      the season-to-date profile from games before the row's date, an August season key, age as of the
      date; lane `research/I6F_DESIGN.md`). The dev gamelog is backfilled (5,805 games, 0 rows lacking;
      derived profile vs stored finals corr ≥ .9978). The pool cache keeps the base weekly key until the

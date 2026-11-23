@@ -336,7 +336,7 @@ class StatsNHL(Stats):
         if rows.reindex(columns=list(SEASON_SUM_COLUMNS)).isna().to_numpy().any():
             raise RuntimeError(
                 f"NHL {season} gamelog rows before {target_game_date} lack the season sums; "
-                "run `sportstradamus admin backfill-nhl-gamelog` first"
+                "run `sportstradamus admin backfill-gamelog --league NHL` first"
             )
         by_player = rows.groupby(rows["playerId"].astype(int))
         sums = by_player[
@@ -712,8 +712,9 @@ class StatsNHL(Stats):
         # deploy re-parses the running season's games so its comp profile can be rebuilt.
         self.backfill_season_sums(seasons={self.season_start.year})
         # A game the stats service has not published yet is asked for again next run, up to
-        # two weeks back; older rows wait for `admin backfill-nhl-gamelog --reports`. One try
-        # per request: this runs inside prophecize, so a hung service costs a minute, not three.
+        # two weeks back; older rows wait for `admin backfill-gamelog --league NHL --reports`.
+        # One try per request: this runs inside prophecize, so a hung service costs a minute,
+        # not three.
         self.gamelog = fill_report_columns(
             self.gamelog, since=today - timedelta(days=WINDOW_DAYS), max_attempts=1
         )
