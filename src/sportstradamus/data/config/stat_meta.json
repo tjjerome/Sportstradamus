@@ -119,7 +119,8 @@
             "dist_training_loss": "crps",
             "sn_param": "direct",
             "blending": "crps",
-            "mean_anchor": "plain"
+            "mean_anchor": "plain",
+            "book_pull": 0.83
         },
         "PTS": {
             "dist": "SkewNormal",
@@ -179,7 +180,8 @@
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "nll",
             "sn_param": "direct",
-            "blending": "nll"
+            "blending": "nll",
+            "book_pull": 0.14
         },
         "carries": {
             "dist": "DPO",
@@ -188,7 +190,8 @@
             "posthoc": "prob_recal_platt",
             "count_dispersion_objective": "pit_ks",
             "blending": "nll",
-            "dist_training_loss": "nll"
+            "dist_training_loss": "nll",
+            "book_pull": 0.14
         },
         "completions": {
             "dist": "SkewNormal",
@@ -198,7 +201,8 @@
             "dist_training_loss": "nll",
             "sn_param": "direct",
             "blending": "nll",
-            "hpo_selection": "calibrated"
+            "hpo_selection": "calibrated",
+            "book_pull": 0.14
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
@@ -286,7 +290,8 @@
             "posthoc": "prob_recal_isotonic",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "crps"
+            "blending": "crps",
+            "book_pull": 0.14
         },
         "receptions": {
             "dist": "SkewNormal",
@@ -297,7 +302,8 @@
             "sn_param": "direct",
             "blending": "nll",
             "hpo_selection": "calibrated",
-            "mean_anchor": "plain"
+            "mean_anchor": "plain",
+            "book_pull": 0.14
         },
         "rushing tds": {
             "dist": "ZINB",
@@ -340,7 +346,8 @@
             "posthoc": "isotonic_mean",
             "dist_training_loss": "nll",
             "count_dispersion_objective": "crps",
-            "blending": "nll"
+            "blending": "nll",
+            "book_pull": 0.14
         },
         "yards": {
             "dist": "SkewNormal",
