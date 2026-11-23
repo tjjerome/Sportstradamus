@@ -3465,6 +3465,16 @@ def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
     return (archived_values & ~synthetic_values).to_numpy(dtype=bool)
 
 
+def _authentic_book_over(splits: dict, split: str) -> np.ndarray:
+    """Per-row book over-probability of ``split``, NaN where the row has no authentic quote.
+
+    Synthetic and EV-inverted quotes carry no market opinion. ``fit_posthoc`` (``book=``) and
+    ``apply_book_pull`` both read NaN as "no book".
+    """
+    book = splits[f"B_{split}"]["Odds"].to_numpy(dtype=float)
+    return np.where(_split_quote_authenticity_mask(splits, split), book, np.nan)
+
+
 def _blend_fit_clusters(splits: dict, mask: np.ndarray) -> np.ndarray:
     """Per-row cluster ids for the blend-weight fit: player identity, with the same
     date fallback for team markets as :func:`_calibration_folds`.
@@ -4315,16 +4325,12 @@ def _structural_gate_inputs(
         )
         posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
         if posthoc_slug in posthoc.PROB_STAGE:
-            # Synthetic and EV-inverted quotes carry no market opinion; only real prices feed
-            # the book leg.
-            book = splits["B_validation"]["Odds"].to_numpy(dtype=float)
-            book = np.where(_split_quote_authenticity_mask(splits, "validation"), book, np.nan)
             posthoc_blob = posthoc.fit_posthoc(
                 posthoc_slug,
                 val_calibrated,
                 y_class_val,
                 clusters=_blend_fit_clusters(splits, np.ones(len(y_class_val), dtype=bool)),
-                book=book,
+                book=_authentic_book_over(splits, "validation"),
             )
             val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
         test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
@@ -4333,8 +4339,7 @@ def _structural_gate_inputs(
                 posthoc_slug, posthoc_blob, test_calibrated_over
             )
         if book_pull is not None:
-            book = splits["B_test"]["Odds"].to_numpy(dtype=float)
-            book = np.where(_split_quote_authenticity_mask(splits, "test"), book, np.nan)
+            book = _authentic_book_over(splits, "test")
             test_calibrated_over = apply_book_pull(test_calibrated_over, book, book_pull)
         return {
             "calibrated": calibrated,
