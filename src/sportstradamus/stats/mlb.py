@@ -34,6 +34,7 @@ from sportstradamus.stats.base import (
     scraper,
 )
 from sportstradamus.stats.mlb_pitch import PITCH_COLUMNS, pitch_columns
+from sportstradamus.stats.mlb_profile import lineup_vs_hand, platoon, player_rates
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -392,6 +393,37 @@ class StatsMLB(Stats):
             _SAVANT_TEAM_DIR, _SAVANT_TEAM_KEY_COL, _SAVANT_TEAM_META_COLS, date.year, date
         )
         return team, None
+
+    def _build_player_profile_stats(self, stat_types, date):
+        """Add each player's pitch-level record, leash and lineup-spot history (mlb_profile)."""
+        return (
+            super()
+            ._build_player_profile_stats(stat_types, date)
+            .join(player_rates(self.short_gamelog, self.log_strings["player"]))
+        )
+
+    def _h2h_features(self, stats, market, opponents, pitchers):
+        """Add the handedness matchup (mlb_profile): a batter's platoon split, a pitcher's lineup."""
+        super()._h2h_features(stats, market, opponents, pitchers)
+        throws = {
+            entry["name"]: entry["throws"] for entry in self.players.values() if "throws" in entry
+        }
+        if is_mlb_pitcher_market(market):
+            matchup = lineup_vs_hand(stats.index, self.short_gamelog, opponents, throws)
+        else:
+            bats = {
+                entry["name"]: entry["bats"] for entry in self.players.values() if "bats" in entry
+            }
+            matchup = platoon(
+                stats.index,
+                self.short_gamelog,
+                market,
+                pitchers,
+                bats,
+                throws,
+                self.log_strings["player"],
+            )
+        stats[matchup.columns] = matchup
 
     def parse_game(self, gameId):
         """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""
