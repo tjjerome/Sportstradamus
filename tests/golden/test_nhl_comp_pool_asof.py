@@ -246,5 +246,5 @@ def test_profile_refuses_a_slice_missing_a_season_sum():
     gamelog.loc[(gamelog["gameId"] == 2026020001) & (gamelog["playerId"] == str(A)), "shifts"] = (
         np.nan
     )
-    with pytest.raises(RuntimeError, match="backfill-nhl-gamelog"):
+    with pytest.raises(RuntimeError, match="backfill-gamelog --league NHL"):
         _stats(gamelog)._season_to_date_profile(2026, D)
