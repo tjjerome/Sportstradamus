@@ -59,24 +59,24 @@ _UNKNOWN = 0.5
 _OPPOSITE = {"L": "R", "R": "L"}
 
 
-def _pooled(frame: pd.DataFrame, player: str, rates: dict, means: dict) -> pd.DataFrame:
-    sums = frame.groupby(player)[sorted({c for pair in rates.values() for c in pair})].sum()
+def _pooled(frame: pd.DataFrame, player_col: str, rates: dict, means: dict) -> pd.DataFrame:
+    sums = frame.groupby(player_col)[sorted({c for pair in rates.values() for c in pair})].sum()
     columns = {
         name: sums[num] / sums[den].where(sums[den] > 0) for name, (num, den) in rates.items()
     }
-    by_player = frame.groupby(player)
+    by_player = frame.groupby(player_col)
     columns |= {name: by_player[column].mean() for name, column in means.items()}
     return pd.DataFrame(columns)
 
 
-def _with_short(frame: pd.DataFrame, player: str, rates: dict, means: dict) -> pd.DataFrame:
-    recent = frame.groupby(player).tail(PROFILE_SHORT_GAMES)
-    return _pooled(frame, player, rates, means).join(
-        _pooled(recent, player, rates, means).add_suffix(" short")
+def _with_short(frame: pd.DataFrame, player_col: str, rates: dict, means: dict) -> pd.DataFrame:
+    recent = frame.groupby(player_col).tail(PROFILE_SHORT_GAMES)
+    return _pooled(frame, player_col, rates, means).join(
+        _pooled(recent, player_col, rates, means).add_suffix(" short")
     )
 
 
-def player_rates(logs: pd.DataFrame, player: str) -> pd.DataFrame:
+def player_rates(logs: pd.DataFrame, player_col: str) -> pd.DataFrame:
     """Each player's pitch-level record, leash and lineup-spot history over ``logs``.
 
     A pitcher's come from his starts, a batter's from the games he batted in; each column's
@@ -96,13 +96,18 @@ def player_rates(logs: pd.DataFrame, player: str) -> pd.DataFrame:
             "started": batted["starting batter"].astype(float),
         }
     )
-    return _with_short(starts, player, _PITCHER_RATES, _PITCHER_MEANS).join(
-        _with_short(batted, player, _BATTER_RATES, _BATTER_MEANS), how="outer"
+    return _with_short(starts, player_col, _PITCHER_RATES, _PITCHER_MEANS).join(
+        _with_short(batted, player_col, _BATTER_RATES, _BATTER_MEANS), how="outer"
     )
 
 
 def _flag(condition: pd.Series, known: pd.Series) -> pd.Series:
     return condition.astype(float).where(known, _UNKNOWN)
+
+
+def _shrunk(count, plate_appearances, baseline, prior_pa):
+    """Rate of ``count`` in ``plate_appearances`` after adding ``prior_pa`` more at ``baseline``."""
+    return (count + prior_pa * baseline) / (plate_appearances + prior_pa)
 
 
 def platoon(
@@ -112,7 +117,7 @@ def platoon(
     starters: dict,
     bats: dict,
     throws: dict,
-    player: str,
+    player_col: str,
 ) -> pd.DataFrame:
     """The handedness matchup of each batter in ``players`` against his opposing starter.
 
@@ -129,21 +134,19 @@ def platoon(
 
     batting = logs[logs["battingOrder"] > 0]
     counts = [market, "plateAppearances"]
-    totals = batting.groupby(player)[counts].sum()
+    totals = batting.groupby(player_col)[counts].sum()
     league = totals[market].sum() / totals["plateAppearances"].sum()
-    overall = (totals[market] + _OVERALL_PRIOR_PA * league) / (
-        totals["plateAppearances"] + _OVERALL_PRIOR_PA
-    )
+    overall = _shrunk(totals[market], totals["plateAppearances"], league, _OVERALL_PRIOR_PA)
     base = overall.reindex(players).to_numpy()
-    own = batting.groupby([player, "opponent pitcher hand"])[counts].sum()
+    own = batting.groupby([player_col, "opponent pitcher hand"])[counts].sum()
     own = own.reindex(pd.MultiIndex.from_arrays([players, hand])).fillna(0).to_numpy()
-    own_rate = (own[:, 0] + _SPLIT_PRIOR_PA * base) / (own[:, 1] + _SPLIT_PRIOR_PA)
+    own_rate = _shrunk(own[:, 0], own[:, 1], base, _SPLIT_PRIOR_PA)
 
-    past_side = batting[player].map(bats)
+    past_side = batting[player_col].map(bats)
     past_side = past_side.where(past_side != "S", batting["opponent pitcher hand"].map(_OPPOSITE))
     allowed = batting.groupby(["opponent pitcher", past_side.rename("side")])[counts].sum()
     allowed = allowed.reindex(pd.MultiIndex.from_arrays([starter, effective])).fillna(0).to_numpy()
-    allowed_rate = (allowed[:, 0] + _SPLIT_PRIOR_PA * league) / (allowed[:, 1] + _SPLIT_PRIOR_PA)
+    allowed_rate = _shrunk(allowed[:, 0], allowed[:, 1], league, _SPLIT_PRIOR_PA)
     return pd.DataFrame(
         {
             "platoon advantage": _flag(
