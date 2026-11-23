@@ -959,17 +959,18 @@ def anchor_to_reference(
 
 
 def apply_book_pull(
-    p_over: np.ndarray | pd.Series, p_book: np.ndarray | pd.Series, lam: float
+    p_over: np.ndarray | pd.Series, p_book: np.ndarray | pd.Series, pull: float
 ) -> np.ndarray:
-    """Pull a served over-probability toward the sportsbook's: ``(1 - lam)·p_book + lam·p_over``.
+    """Pull a served over-probability toward the sportsbook's: ``pull·p_book + (1 - pull)·p_over``.
 
-    ``lam`` is the cell's ``book_pull`` weight on ``p_over``, in [0, 1]. The convex form keeps
-    both ends exact: ``lam`` 1 returns ``p_over`` bit for bit and ``lam`` 0 returns ``p_book``.
-    A row whose ``p_book`` is NaN (no authentic sportsbook quote) keeps ``p_over``.
+    ``pull`` is the cell's ``book_pull``, the share of the way to the book's price, in [0, 1].
+    The convex form keeps both ends exact: ``pull`` 0 returns ``p_over`` bit for bit and
+    ``pull`` 1 returns ``p_book``. A row whose ``p_book`` is NaN (no authentic sportsbook
+    quote) keeps ``p_over``.
     """
     p_over = np.asarray(p_over, dtype=float)
     p_book = np.asarray(p_book, dtype=float)
-    return np.where(np.isfinite(p_book), (1 - lam) * p_book + lam * p_over, p_over)
+    return np.where(np.isfinite(p_book), pull * p_book + (1 - pull) * p_over, p_over)
 
 
 def apply_cdf_recal(blob: dict | None, u):

@@ -615,7 +615,7 @@ _BOOK_PULL = 0.25
 
 
 def test_a_quoted_price_is_pulled_toward_its_book(log_dir, monkeypatch, tmp_path):
-    """A pickle's ``book_pull`` serves ``(1 - pull) * book + pull * price`` on a row with an
+    """A pickle's ``book_pull`` serves ``pull * book + (1 - pull) * price`` on a row with an
     authentic sportsbook quote, Player B's from his anchored price; the unquoted Player C keeps
     his, as does a pick'em quote's book price. The replay's ``serve_live`` rebuilds the pulled
     prices from the logged inputs.
@@ -633,7 +633,7 @@ def test_a_quoted_price_is_pulled_toward_its_book(log_dir, monkeypatch, tmp_path
     )
     # On a quoted record Market Prob is the book's price of the chosen side at the offer's line.
     book = np.where(pulled["Bet"] == "Over", pulled["Market Prob"], 1 - pulled["Market Prob"])
-    expected = (1 - _BOOK_PULL) * book + _BOOK_PULL * _served_over(unpulled)
+    expected = _BOOK_PULL * book + (1 - _BOOK_PULL) * _served_over(unpulled)
     np.testing.assert_allclose(_served_over(pulled)[quoted], expected[quoted], rtol=1e-12)
     assert not np.isclose(_served_over(pulled), _served_over(unpulled))[quoted].any()
     knobs = pulling | {"hist_gate": 0.0, "league": _LEAGUE, "market": _MARKET}

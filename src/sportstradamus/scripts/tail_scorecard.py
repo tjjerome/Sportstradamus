@@ -41,7 +41,6 @@ from sportstradamus.helpers.io import TAIL_SCORECARD_PATH, _atomic_write_parquet
 from sportstradamus.prediction.offer_records import (
     _MAX_CONFIDENCE,
     SCORED_RECORD_COLS,
-    book_over_prob,
     finalize_records,
 )
 from sportstradamus.realized import cohort_summary, settled_offers
@@ -52,6 +51,7 @@ from sportstradamus.scripts.tail_pricing import (
     dump_paths,
     open_archive,
     price_dumps,
+    served_market_ev,
 )
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.graduation import DESCRIPTIVE_MIN_SELECTED
@@ -221,9 +221,7 @@ def replay_live_rule(rungs: pd.DataFrame, p_over: pd.Series, knobs: dict) -> pd.
         **{"Model Under": 1 - p_over, "Model Weight": knobs["weight"]}, **_PASSENGERS
     )
     board["Model Over"] = 1 - board["Model Under"]
-    # Serving decodes the book leg with the cell's zero rate on the zero-inflated family only.
-    zero_rate = knobs["hist_gate"] if dist == "ZINB" else None
-    board["Market EV"] = book_over_prob(board, dist, cv, step, zero_rate, league, market)
+    board["Market EV"] = served_market_ev(board, knobs, league, market)
     kept = []
     for (platform, _), slate in board.groupby(["Platform", "Date"]):
         records = finalize_records(

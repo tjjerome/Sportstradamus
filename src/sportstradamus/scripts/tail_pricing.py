@@ -163,6 +163,17 @@ def _training_weight(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
     return np.where(rows["QuoteAuthenticity"].eq(AUTHENTIC), knobs["weight"], 1.0)
 
 
+def served_market_ev(board: pd.DataFrame, knobs: dict, league: str, market: str) -> pd.Series:
+    """Serving's ``Market EV``: the book's over-probability at ``Line``, from ``Market Projection``.
+
+    NaN where ``Market Projection`` is. Serving decodes with the cell's zero rate on the
+    zero-inflated family only, though NegBin and DPO pickles carry one too.
+    """
+    dist = knobs["distribution"]
+    zero_rate = knobs["hist_gate"] if dist == "ZINB" else None
+    return book_over_prob(board, dist, knobs["cv"], knobs["step"], zero_rate, league, market)
+
+
 def _book_prob(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
     """The sportsbook's over-probability the book pull leans toward, NaN off an authentic row.
 
@@ -173,12 +184,7 @@ def _book_prob(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
     if "Test Line" not in rows:
         return (1 - rows["Odds"]).where(authentic).to_numpy(float)
     board = rows[["Line"]].assign(**{"Market Projection": rows["Book_EV"].where(authentic)})
-    dist = knobs["distribution"]
-    # NegBin and DPO pickles carry a zero rate too; serving decodes the book with it on ZINB only.
-    zero_rate = knobs["hist_gate"] if dist == "ZINB" else None
-    decoded = book_over_prob(
-        board, dist, knobs["cv"], knobs["step"], zero_rate, knobs["league"], knobs["market"]
-    )
+    decoded = served_market_ev(board, knobs, knobs["league"], knobs["market"])
     return decoded.reindex(rows.index).to_numpy(float)
 
 
@@ -265,8 +271,8 @@ def serve(
         moved = np.isfinite(ref_line) & (ref_line != line)
         raw_ref, served_ref = priced_at(np.where(moved, ref_line, line))
         p_over = np.where(moved, anchor_to_reference(raw_over, raw_ref, served_ref), p_over)
-    if (lam := knobs.get("book_pull")) is not None:
-        p_over = apply_book_pull(p_over, _book_prob(rows, knobs), lam)
+    if (pull := knobs.get("book_pull")) is not None:
+        p_over = apply_book_pull(p_over, _book_prob(rows, knobs), pull)
     gate = 0.0 if gate is None else np.asarray(gate, dtype=float)
     # A zero-inflated family is a point mass at 0 of weight gate beside the base distribution.
     sd = np.sqrt((1 - gate) * predictive_std(dist, shape) ** 2 + gate * (1 - gate) * base**2)

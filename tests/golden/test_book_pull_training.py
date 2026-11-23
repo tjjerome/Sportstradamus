@@ -1,6 +1,6 @@
 """Pins the book pull in training: the dump's ``P`` is the price serving pulls toward the book.
 
-On the standard path ``_structural_gate_inputs`` serves ``(1 - lam)·Odds + lam·P`` on rows with
+On the standard path ``_structural_gate_inputs`` serves ``pull·Odds + (1 - pull)·P`` on rows with
 an authentic sportsbook quote, where ``P`` is the over-probability after temperature and the
 probability-stage post-hoc and ``Odds`` the training layer's book over-probability. A pickem or
 derived row keeps ``P``, and so does every row of a cell without the knob. The stages before the
@@ -55,7 +55,7 @@ def _served_over(monkeypatch, book_pull):
 
 
 def test_authentic_rows_pull_toward_the_book(monkeypatch):
-    expected = (1 - _PULL) * _BOOK_OVER + _PULL * _UNPULLED
+    expected = _PULL * _BOOK_OVER + (1 - _PULL) * _UNPULLED
     np.testing.assert_allclose(_served_over(monkeypatch, _PULL)[_AUTHENTIC], expected[_AUTHENTIC])
 
 

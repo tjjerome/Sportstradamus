@@ -161,10 +161,10 @@ def mean_anchor(league: str, market: str) -> str:
 
 
 def book_pull(league: str, market: str) -> float | None:
-    """The weight a cell's served over-probability keeps against the sportsbook's, or ``None``.
+    """The share of the way a cell's served over-probability moves to the sportsbook's, or ``None``.
 
     On rows with an authentic sportsbook quote, serving prices
-    :func:`~sportstradamus.helpers.distributions.apply_book_pull` at this weight; a cell without
+    :func:`~sportstradamus.helpers.distributions.apply_book_pull` at this share; a cell without
     the knob is not pulled. ``meditate`` copies the knob into the cell's pickle and serving reads
     the pickle, never this knob.
     """

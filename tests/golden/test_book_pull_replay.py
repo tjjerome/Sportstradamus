@@ -1,11 +1,11 @@
 """The book pull in the replay: ``tail_pricing.serve`` pulls what serving and training pull.
 
-A cell's ``book_pull`` lam serves ``(1 - lam)·M + lam·P`` on authentic rows, last in the
+A cell's ``book_pull`` b serves ``b·M + (1 - b)·P`` on authentic rows, last in the
 chain, and leaves pick'em rows alone. M is the book's over-probability: the training layer's
 ``1 - Odds`` at a test row's own line, serving's ``Market EV`` at a priced rung (``Book_EV``
 decoded at the rung's line, with the cell's zero rate on ZINB only). Training pulls a test
-row's ``P`` at its own line, so a pulled dump reconstructs only under the pull. lam 1 serves
-the unpulled prices bit for bit.
+row's ``P`` at its own line, so a pulled dump reconstructs only under the pull. A pull of
+0 serves the unpulled prices bit for bit.
 """
 
 from __future__ import annotations
@@ -74,16 +74,16 @@ def _served_book(dist: str, gate: float | None) -> np.ndarray:
 
 
 @pytest.mark.parametrize("rows", [_OWN, _RUNGS], ids=["own line", "rungs"])
-def test_full_weight_serves_the_unpulled_prices_bit_for_bit(rows):
-    full = serve_live(rows, _KNOBS | {"book_pull": 1.0})
+def test_zero_pull_serves_the_unpulled_prices_bit_for_bit(rows):
+    none = serve_live(rows, _KNOBS | {"book_pull": 0.0})
 
-    for got, want in zip(full, serve_live(rows, _KNOBS), strict=True):
+    for got, want in zip(none, serve_live(rows, _KNOBS), strict=True):
         np.testing.assert_array_equal(got, want)
 
 
-def test_zero_weight_serves_the_books_price_on_authentic_rows_only():
-    own = serve_live(_OWN, _KNOBS | {"book_pull": 0.0})[0]
-    rungs = serve_live(_RUNGS, _KNOBS | {"book_pull": 0.0})[0]
+def test_full_pull_serves_the_books_price_on_authentic_rows_only():
+    own = serve_live(_OWN, _KNOBS | {"book_pull": 1.0})[0]
+    rungs = serve_live(_RUNGS, _KNOBS | {"book_pull": 1.0})[0]
 
     np.testing.assert_array_equal(own[_OWN_AUTHENTIC], 1 - _OWN["Odds"][_OWN_AUTHENTIC])
     np.testing.assert_array_equal(rungs[_RUNG_AUTHENTIC], _served_book("ZINB", _KNOBS["hist_gate"]))
@@ -92,14 +92,14 @@ def test_zero_weight_serves_the_books_price_on_authentic_rows_only():
     np.testing.assert_array_equal(rungs[~_RUNG_AUTHENTIC], unpulled_rungs[~_RUNG_AUTHENTIC])
 
 
-def test_half_weight_pulls_a_zinb_rung_toward_the_book_decoded_at_its_zero_rate():
-    lam = 0.5
-    pulled = serve_live(_RUNGS, _KNOBS | {"book_pull": lam})[0]
+def test_half_pull_moves_a_zinb_rung_toward_the_book_decoded_at_its_zero_rate():
+    pull = 0.5
+    pulled = serve_live(_RUNGS, _KNOBS | {"book_pull": pull})[0]
     unpulled = serve_live(_RUNGS, _KNOBS)[0]
     book = _served_book("ZINB", _KNOBS["hist_gate"])
 
     np.testing.assert_allclose(
-        pulled[_RUNG_AUTHENTIC], (1 - lam) * book + lam * unpulled[_RUNG_AUTHENTIC], rtol=1e-12
+        pulled[_RUNG_AUTHENTIC], pull * book + (1 - pull) * unpulled[_RUNG_AUTHENTIC], rtol=1e-12
     )
     np.testing.assert_array_equal(pulled[~_RUNG_AUTHENTIC], unpulled[~_RUNG_AUTHENTIC])
     # The zero rate moves every rung's decode, so a gate-free decode would not pass.
@@ -108,7 +108,7 @@ def test_half_weight_pulls_a_zinb_rung_toward_the_book_decoded_at_its_zero_rate(
 
 def test_a_negbin_rung_decodes_the_book_without_its_pickles_zero_rate():
     # NegBin pickles carry a zero rate (NFL tds .78) that serving never decodes the book with.
-    knobs = _KNOBS | {"distribution": "NegBin", "hist_gate": 0.7, "book_pull": 0.0}
+    knobs = _KNOBS | {"distribution": "NegBin", "hist_gate": 0.7, "book_pull": 1.0}
 
     served = serve_live(_RUNGS, knobs)[0]
 
@@ -116,13 +116,13 @@ def test_a_negbin_rung_decodes_the_book_without_its_pickles_zero_rate():
 
 
 def test_a_dump_training_pulled_reconstructs_only_under_the_pull(tmp_path):
-    lam = 0.5
+    pull = 0.5
     weight = _training_weight(_OWN, _KNOBS)
     unpulled = serve(_OWN, _KNOBS, weight, _OWN["Book_EV"].to_numpy(float))[0]
     # Training pulls an authentic test row toward its own book price, 1 - Odds.
-    pulled = np.where(_OWN_AUTHENTIC, (1 - lam) * (1 - _OWN["Odds"]) + lam * unpulled, unpulled)
+    pulled = np.where(_OWN_AUTHENTIC, pull * (1 - _OWN["Odds"]) + (1 - pull) * unpulled, unpulled)
     with (tmp_path / "MLB_stolen-bases.mdl").open("wb") as outfile:
-        pickle.dump(_KNOBS | {"book_pull": lam, "model_version": "fixture"}, outfile)
+        pickle.dump(_KNOBS | {"book_pull": pull, "model_version": "fixture"}, outfile)
     dump = _OWN.assign(
         Player="A", Date="2026-11-01", Result=1.0, P_standalone=0.5, StructuralStrategy="none"
     )
@@ -131,7 +131,7 @@ def test_a_dump_training_pulled_reconstructs_only_under_the_pull(tmp_path):
     dump.assign(P=pulled).to_csv(path, index=False)
     _, knobs, error = load_cell(path, tmp_path)
     assert error <= RECONSTRUCTION_TOL
-    assert knobs == _KNOBS | {"book_pull": lam, "model_version": "fixture"}
+    assert knobs == _KNOBS | {"book_pull": pull, "model_version": "fixture"}
 
     dump.assign(P=unpulled).to_csv(path, index=False)
     with pytest.raises(CellExcludedError, match="reconstruction"):

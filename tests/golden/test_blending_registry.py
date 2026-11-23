@@ -170,7 +170,7 @@ _PULL_CELL = {"shipped": "devel", "dist": "ZINB", "target_normalization": "none"
 
 
 @pytest.mark.parametrize("knob", [{}, {"book_pull": 0}, {"book_pull": 0.35}, {"book_pull": 1.0}])
-def test_book_pull_accepts_absent_or_a_unit_weight(knob):
+def test_book_pull_accepts_absent_or_a_share_in_the_unit_interval(knob):
     from sportstradamus.training import ship_config
 
     ship_config._validate_cell("NBA", "PRA", {**_PULL_CELL, **knob})

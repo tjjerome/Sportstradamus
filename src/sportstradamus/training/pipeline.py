@@ -4276,7 +4276,7 @@ def _structural_gate_inputs(
     The structural candidates carry their own already-pooled probabilities, so
     they bypass ``_step_calibrate_temperature`` and the prob-stage post-hoc; the
     standard path fits temperature and layers the post-hoc corrector, then pulls the
-    test over-probability toward the book by the cell's ``book_pull`` weight on rows
+    test over-probability toward the book by the cell's ``book_pull`` share on rows
     with an authentic sportsbook quote, as serving does. Both yield the same keys the
     downstream scorecard consumes.
     """
@@ -4443,7 +4443,7 @@ def _step_calibrate_and_serve(
     prob-stage corrector — is fit on ``splits["*_validation"]`` and applied to
     ``splits["*_test"]``, in that order: the mean corrector sits on the fused side of
     the pool, so the dispersion and temperature fits both see the corrected mean.
-    The ``book_pull`` weight is the cell's committed knob, never fit: it moves only the
+    The ``book_pull`` share is the cell's committed knob, never fit: it moves only the
     served test over-probability, after the prob-stage corrector.
     Nothing here refits the GBDT: the model's predictions arrive ready in ``preds``.
     That is what lets :func:`_step_crossfit_calibrate_and_serve` rotate the two frames

@@ -1,9 +1,10 @@
 """The book pull: a cell's served over-probability, pulled toward the sportsbook's on quoted rows.
 
-``apply_book_pull`` serves ``(1 - lam)·p_book + lam·p_over``. The convex form keeps both ends
-exact: ``lam`` 1 returns the model's price bit for bit, even near 0 and 1 where
-``p_book + lam·(p_over - p_book)`` would round it, and ``lam`` 0 returns the book's. A row
-without a book price keeps the model's. ``config.book_pull`` reads a cell's committed knob, which
+``apply_book_pull`` serves ``pull·p_book + (1 - pull)·p_over``, ``pull`` being the share of the
+way to the book's price. The convex form keeps both ends exact: ``pull`` 0 returns the model's
+price bit for bit and ``pull`` 1 the book's, even near 0 and 1 where
+``p_over + pull·(p_book - p_over)`` would round it. A row without a book price keeps the
+model's. ``config.book_pull`` reads a cell's committed knob, which
 training copies into the pickle; a cell without one is not pulled.
 """
 
@@ -15,7 +16,7 @@ import pandas as pd
 from sportstradamus.helpers import apply_book_pull, config
 
 # Model and book over-probabilities: an ordinary row, a tie, rows near 0 and 1 (where the
-# non-convex form rounds p_over), and a row without a book price.
+# non-convex form rounds the book's price), and a row without a book price.
 _P_OVER = np.array([0.37, 0.5, 1e-9, 1 - 1e-9, 0.81])
 _P_BOOK = np.array([0.55, 0.5, 0.9, 0.3, np.nan])
 _HAS_BOOK = np.isfinite(_P_BOOK)
@@ -24,21 +25,21 @@ _HAS_BOOK = np.isfinite(_P_BOOK)
 _PLANTED_PULL = 0.6
 
 
-def test_full_weight_serves_the_model_bit_for_bit():
-    assert np.array_equal(apply_book_pull(_P_OVER, _P_BOOK, 1.0), _P_OVER)
+def test_zero_pull_serves_the_model_bit_for_bit():
+    assert np.array_equal(apply_book_pull(_P_OVER, _P_BOOK, 0.0), _P_OVER)
 
 
-def test_zero_weight_serves_the_book():
-    pulled = apply_book_pull(_P_OVER, _P_BOOK, 0.0)
+def test_full_pull_serves_the_book_bit_for_bit():
+    pulled = apply_book_pull(_P_OVER, _P_BOOK, 1.0)
     assert np.array_equal(pulled[_HAS_BOOK], _P_BOOK[_HAS_BOOK])
 
 
 def test_a_row_without_a_book_price_keeps_the_model():
-    pulled = apply_book_pull(_P_OVER, _P_BOOK, 0.0)
+    pulled = apply_book_pull(_P_OVER, _P_BOOK, 1.0)
     assert np.array_equal(pulled[~_HAS_BOOK], _P_OVER[~_HAS_BOOK])
 
 
-def test_half_weight_serves_the_midpoint():
+def test_half_pull_serves_the_midpoint():
     pulled = apply_book_pull(_P_OVER, _P_BOOK, 0.5)
     np.testing.assert_allclose(pulled[_HAS_BOOK], ((_P_OVER + _P_BOOK) / 2)[_HAS_BOOK])
 
