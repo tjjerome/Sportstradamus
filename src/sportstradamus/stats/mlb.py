@@ -340,6 +340,12 @@ class StatsMLB(Stats):
         None
     """
 
+    # MLB fills no team, age, position z, defense position or defense comps: each read 0 on
+    # every row of every MLB matrix (docs/gbdt_feature_study.md §14 item 4). Position stays, as
+    # the MLB pickles read it, and depth with it (_join_defense_and_parks copies one to the other).
+    player_profile_seed = ("position", "depth", "z", "home", "moneyline gain", "totals gain")
+    defense_profile_seed = ("avg", "home", "moneyline gain", "totals gain")
+
     def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
@@ -1161,7 +1167,7 @@ class StatsMLB(Stats):
 
             leagueavg = defenseGroups[market].mean().mean()
             leaguestd = defenseGroups[market].mean().std()
-            self.defenseProfile[["avg", "z", "home", "moneyline gain", "totals gain", "comps"]] = 0
+            self.defenseProfile[["avg", "z", "home", "moneyline gain", "totals gain"]] = 0
             self.defenseProfile["avg"] = defenseGroups[market].mean().div(leagueavg) - 1
             self.defenseProfile["z"] = (defenseGroups[market].mean() - leagueavg).div(leaguestd)
             self.defenseProfile["home"] = (

@@ -523,6 +523,27 @@ class Stats:
         get_training_matrix(market, cutoff_date): Builds the training matrix for a market.
     """
 
+    # The columns base_profile starts each profile with; a league leaves out those it never fills.
+    player_profile_seed: tuple[str, ...] = (
+        "team",
+        "age",
+        "position",
+        "depth",
+        "z",
+        "position z",
+        "home",
+        "moneyline gain",
+        "totals gain",
+    )
+    defense_profile_seed: tuple[str, ...] = (
+        "avg",
+        "home",
+        "moneyline gain",
+        "totals gain",
+        "position",
+        "comps",
+    )
+
     def __init__(self):
         self.gamelog = pd.DataFrame()
         self.teamlog = pd.DataFrame()
@@ -1151,30 +1172,8 @@ class Stats:
         # be profiled again, also when a caller other than profile_market moved the date.
         self.profiled_market = ""
 
-        self.playerProfile = pd.DataFrame(
-            columns=[
-                "team",
-                "age",
-                "position",
-                "depth",
-                "z",
-                "position z",
-                "home",
-                "moneyline gain",
-                "totals gain",
-            ]
-        )
-        self.defenseProfile = pd.DataFrame(
-            columns=[
-                "avg",
-                "home",
-                "moneyline gain",
-                "totals gain",
-                "position",
-                "comps",
-                *self.positions,
-            ]
-        )
+        self.playerProfile = pd.DataFrame(columns=list(self.player_profile_seed))
+        self.defenseProfile = pd.DataFrame(columns=[*self.defense_profile_seed, *self.positions])
 
         self.window_short_logs(date)
 
@@ -2579,7 +2578,13 @@ class Stats:
                     # Book-first: keep only real-odds rows so book-quoted MLB cells stay
                     # Archived-only. Hold participation rows aside as a fallback used only
                     # when the market turns out to have no archived odds at all (below).
-                    matrix.extend(stats.loc[stats["Archived"]].to_dict("records"))
+                    quoted = stats["Archived"]
+                    if is_mlb_pitcher_market(market):
+                        # A pitcher prop on a player who faced no batter cannot settle: the
+                        # hitters quoted under walks allowed on 2026-03-26, starters pulled
+                        # before a batter.
+                        quoted &= usage > 0
+                    matrix.extend(stats.loc[quoted].to_dict("records"))
                     if not matrix:
                         mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
                 else:
