@@ -25,9 +25,9 @@ branches" risk that every game-context feature carries
 (``docs/handoffs/model_improvement_track.md`` §6.3.1, §7.2 step 2); the doc gates all
 later feature work behind this harness existing.
 
-The test drives the real ``StatsNBA.get_stats`` twice on one synthetic gameday,
-flipping **only** that branch (real today ``> D`` vs a frozen today ``== D``), and
-asserts the shared feature surface (``get_stat_columns``) matches. Synthetic gamelog
+The test drives the real ``get_stats`` of ``StatsNBA`` and of ``StatsWNBA`` twice on one
+synthetic gameday, flipping **only** that branch (real today ``> D`` vs a frozen today
+``== D``), and asserts the shared feature surface (``get_stat_columns``) matches. Synthetic gamelog
 data, a stubbed archive, absence sources written under ``tmp_path``, pre-seeded comps,
 and an injected depth keep it fast, deterministic, and free of network / DuckDB -- each
 of those is branch-*independent* state shared by both arms, so none can mask the branch
@@ -49,7 +49,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.stats import StatsNBA, availability, base, nba
+from sportstradamus.stats import StatsNBA, StatsWNBA, availability, base, nba, wnba
 
 MARKET = "PTS"
 GAMEDAY = date(2025, 12, 1)  # after the NBA season_start; far in the past vs real today
@@ -60,7 +60,6 @@ PLAYERS = {
     ("Plàyer 6" if i == 6 else f"Player {i}"): (TEAMS[0] if i < 5 else TEAMS[1]) for i in range(10)
 }
 PLAYER_IDS = {player: 1000 + i for i, player in enumerate(PLAYERS)}
-POSITIONS = ("P", "C", "F", "W", "B")
 GAMES_BACK = 15
 
 # Who sits, as (days before GAMEDAY, team, player, official list status). Training reads the
@@ -93,18 +92,18 @@ def _opponent(team: str) -> str:
     return TEAMS[1] if team == TEAMS[0] else TEAMS[0]
 
 
-def _build_logs(stat_types: list[str], team_stat_types: list[str]):
-    """Synthetic NBA gamelog + teamlog covering ``GAMES_BACK`` days up to ``GAMEDAY``.
+def _build_logs(stat_types: list[str], team_stat_types: list[str], positions: list[str]):
+    """Synthetic NBA or WNBA gamelog + teamlog covering ``GAMES_BACK`` days up to ``GAMEDAY``.
 
     Columns follow ``StatsNBA.log_strings`` plus the per-cell stat-type panels, the
     archive-baked ``moneyline`` / ``totals``, the ``PLAYER_ID`` and ``AST`` / ``REB`` /
-    ``FGA`` the absence weights read, and the other counts the profile pools per 48 minutes.
-    Values are deterministic (seeded RNG); only their *parity across the two branches*
+    ``FGA`` the absence weights read, and the other counts the profile pools per regulation
+    game. Values are deterministic (seeded RNG); only their *parity across the two branches*
     matters, never their realism.
     """
     rng = np.random.default_rng(0)
     game_dates = [GAMEDAY - dt.timedelta(days=k) for k in range(GAMES_BACK, -1, -1)]
-    player_pos = {p: POSITIONS[i % len(POSITIONS)] for i, p in enumerate(PLAYERS)}
+    player_pos = {p: positions[i % len(positions)] for i, p in enumerate(PLAYERS)}
 
     rows = []
     for gd in game_dates:
@@ -188,10 +187,11 @@ def _seed_comps(stats: StatsNBA) -> None:
     by both arms.
     """
     names = list(PLAYERS)
-    comps: dict = {pos: {} for pos in POSITIONS}
+    comps: dict = {pos: {} for pos in stats.positions}
     for i, player in enumerate(names):
         partner = names[(i + 5) % len(names)]
-        comps[POSITIONS[i % len(POSITIONS)]][player] = {"comps": [partner], "distances": [0.5]}
+        position = stats.positions[i % len(stats.positions)]
+        comps[position][player] = {"comps": [partner], "distances": [0.5]}
     stats.comps = comps
     key = stats._comp_target_key(GAMEDAY)
     stats._current_comps_key = key
@@ -218,9 +218,9 @@ def _write_absence_sources(lists_base: Path, capture_dir: Path) -> None:
     )
 
 
-@pytest.fixture
-def primed_stats(monkeypatch, tmp_path) -> tuple[StatsNBA, list[str]]:
-    """A ``StatsNBA`` (with synthetic logs) and its ``get_stat_columns``, both arms ready.
+@pytest.fixture(params=[StatsNBA, StatsWNBA], ids=["NBA", "WNBA"])
+def primed_stats(request, monkeypatch, tmp_path) -> tuple[StatsNBA, list[str]]:
+    """A ``StatsNBA`` or ``StatsWNBA`` (with synthetic logs) and its ``get_stat_columns``.
 
     Points the absence readers at ``OFFICIAL_LIST`` and ``ESPN_REPORT`` under ``tmp_path``.
     Fetches ``get_stat_columns`` first (it refreshes the base profile at *today*),
@@ -239,9 +239,9 @@ def primed_stats(monkeypatch, tmp_path) -> tuple[StatsNBA, list[str]]:
     monkeypatch.setattr(
         availability, "espn_absences", partial(availability.espn_absences, capture_dir=capture_dir)
     )
-    stats = StatsNBA()
+    stats = request.param()
     player_stat_types, team_stat_types = stats._profile_stat_types()
-    stats.gamelog, stats.teamlog = _build_logs(player_stat_types, team_stat_types)
+    stats.gamelog, stats.teamlog = _build_logs(player_stat_types, team_stat_types, stats.positions)
     _seed_comps(stats)
     stats.upcoming_games = {
         team: {"Opponent": _opponent(team), "Home": TEAM_HOME[team]} for team in TEAMS
@@ -276,7 +276,7 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
 
     # Serving arm: freeze today == GAMEDAY -> _game_context upcoming branch, and the same
     # branch in StatsNBA's absence hook, which reads today in stats/nba.py.
-    for module in (base, nba):
+    for module in (base, nba, wnba):
         monkeypatch.setattr(module, "datetime", _FrozenDatetime)
     live = stats.get_stats(MARKET, offers, GAMEDAY)
     assert not live.empty, "synthetic upcoming arm produced no rows"
@@ -362,16 +362,19 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
 
     # The absence columns (StatsNBA's hook at the end of _game_context): the official list
     # (training) and ESPN's report (serving) name the same players out on GAMEDAY. Every
-    # column is non-zero somewhere, so none can agree by being empty in both arms.
+    # column is non-zero somewhere, so none can agree by being empty in both arms. The WNBA's
+    # absences are unscreened.
     absence = list(availability.AVAILABILITY_COLUMNS)
-    assert set(absence) <= set(shared), "absence columns missing from the shared surface"
-    pd.testing.assert_frame_equal(train[absence], live[absence])
-    assert (train[absence] != 0).any().all(), "an absence column is zero on every row"
+    if stats.league == "NBA":
+        assert set(absence) <= set(shared), "absence columns missing from the shared surface"
+        pd.testing.assert_frame_equal(train[absence], live[absence])
+        assert (train[absence] != 0).any().all(), "an absence column is zero on every row"
 
-    # StatsNBA's profile batch: minutes history and every *_48 rate pooled over the profile's
-    # two windows, assists also adjusted for the defenses faced. Non-zero on every row, so
-    # none can agree by being blank in both arms.
-    rates = [*(stat for stat in stats.stat_types if stat.endswith("_48")), "AST_48 opp adj"]
+    # StatsNBA's profile batch: minutes history and every per-minute rate (per 48 in the NBA,
+    # per 40 in the WNBA) pooled over the profile's two windows, assists also adjusted for the
+    # defenses faced. Non-zero on every row, so none can agree by being blank in both arms.
+    scale = f"_{stats.regulation_minutes}"
+    rates = [*(stat for stat in stats.stat_types if stat.endswith(scale)), f"AST{scale} opp adj"]
     batch = ["Player MIN last game", "Player MIN last 3"]
     batch += [f"Player {rate} pooled{window}" for rate in rates for window in ("", " short")]
     assert set(batch) <= set(shared), "profile batch columns missing from the shared surface"

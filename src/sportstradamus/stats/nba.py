@@ -119,6 +119,8 @@ def _roster_seed_path(season: str) -> Path:
 class StatsNBA(Stats):
     """NBA player statistics: game log loading, feature engineering, and prediction."""
 
+    regulation_minutes = _REGULATION_MINUTES
+
     def __init__(self):
         super().__init__()
         self.league = "NBA"
@@ -452,9 +454,10 @@ class StatsNBA(Stats):
         self.teamlog = nba_data["teamlog"]
 
     def _build_player_profile_stats(self, stat_types, date):
-        """Add minutes history and each ``*_48`` rate pooled over the profile's two windows.
+        """Add minutes history and each per-minute rate pooled over the profile's two windows.
 
-        A pooled rate is a window's summed stat over its summed minutes, per 48: a short stint
+        A pooled rate is a window's summed stat over its summed minutes, per regulation game
+        (``regulation_minutes``: ``AST_48`` in the NBA, ``AST_40`` in the WNBA): a short stint
         weighs by its minutes and a game without minutes adds nothing, where the per-game mean
         beside it counts that game as a zero rate. ``AST_48 opp adj`` first divides each game's
         assists by the opponent's assists allowed per game over the league's, across the window
@@ -463,18 +466,19 @@ class StatsNBA(Stats):
         playerstats = super()._build_player_profile_stats(stat_types, date)
         player, opponent = self.log_strings["player"], self.log_strings["opponent"]
         logs = self.short_gamelog
-        rates = {rate.removesuffix("_48"): rate for rate in stat_types if rate.endswith("_48")}
+        scale = f"_{self.regulation_minutes}"
+        rates = {rate.removesuffix(scale): rate for rate in stat_types if rate.endswith(scale)}
         allowed = logs.groupby([opponent, self.log_strings["game"]])["AST"].sum()
         allowed = allowed.groupby(level=opponent).mean()
         games = logs[[player, "MIN", *rates]].assign(
             **{"AST opp adj": logs["AST"] / logs[opponent].map(allowed / allowed.mean())}
         )
-        rates["AST opp adj"] = "AST_48 opp adj"
+        rates["AST opp adj"] = f"AST{scale} opp adj"
 
         def pooled(frame: pd.DataFrame) -> pd.DataFrame:
             sums = frame.groupby(player).sum()
-            per_48 = sums[list(rates)].div(sums["MIN"], axis=0) * _REGULATION_MINUTES
-            return per_48.rename(columns=rates)
+            per_minute = sums[list(rates)].div(sums["MIN"], axis=0)
+            return (per_minute * self.regulation_minutes).rename(columns=rates)
 
         by_player = games.groupby(player)
         recent = by_player.tail(_RECENT_MINUTES_GAMES).groupby(player)["MIN"].mean()

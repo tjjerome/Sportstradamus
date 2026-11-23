@@ -13,6 +13,9 @@ from sportstradamus.stats.base import fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
+# Regulation minutes of a WNBA game (four 10-minute quarters), the scale of every *_40 rate.
+_REGULATION_MINUTES: int = 40
+
 # stats.wnba.com abbreviations differ from our canonical set; remapped wherever a
 # team code enters (player index, shot locations, player logs, team logs).
 _WNBA_TEAM_ABBR_MAP = {
@@ -46,6 +49,8 @@ _POSTSEASON_LOOKBACK_DAYS = 75
 
 class StatsWNBA(StatsNBA):
     """WNBA player statistics, routed to stats.wnba.com via nba_client."""
+
+    regulation_minutes = _REGULATION_MINUTES
 
     def __init__(self):
         super().__init__()
@@ -361,15 +366,15 @@ class StatsWNBA(StatsNBA):
         stat_df["FTR"] = (stat_df["FTM"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
         stat_df["FG3_RATIO"] = (stat_df["FG3A"] / stat_df["FGA"]).where(stat_df["FGA"] > 0, 0)
         stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).where(stat_df["BLKA"] > 0, 0)
-        stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
-        stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
-        stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
-        stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * 40
-        stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * 40
-        stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * 40
-        stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
-        stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
-        stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
+        stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * _REGULATION_MINUTES
+        stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * _REGULATION_MINUTES
         stat_df.TEAM_ABBREVIATION = _remap_abbr(stat_df.TEAM_ABBREVIATION)
         stat_df.OPP = _remap_abbr(stat_df.OPP)
 
@@ -437,11 +442,6 @@ class StatsWNBA(StatsNBA):
     # inheriting StatsNBA's absence columns.
     def _availability_context(self, stats, date, teams, opponents):
         pass
-
-    # StatsNBA's minutes history and pooled rates are per 48 and NBA-only: the WNBA's rates
-    # are per 40 and its matrices were not rebuilt to carry them, so it keeps the base profile.
-    def _build_player_profile_stats(self, stat_types, date):
-        return super(StatsNBA, self)._build_player_profile_stats(stat_types, date)
 
     # stats.wnba.com's tables are read undated (_fetch_player_bios), so the running season
     # pools as stored instead of through StatsNBA's dated read.
