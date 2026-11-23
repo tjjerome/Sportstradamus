@@ -958,13 +958,14 @@ def anchor_to_reference(
     return expit(logit(over) - logit(ref) + logit(served))
 
 
-def apply_book_pull(p_over, p_book, lam: float) -> np.ndarray:
+def apply_book_pull(
+    p_over: np.ndarray | pd.Series, p_book: np.ndarray | pd.Series, lam: float
+) -> np.ndarray:
     """Pull a served over-probability toward the sportsbook's: ``(1 - lam)·p_book + lam·p_over``.
 
-    Serves a cell's ``book_pull`` weight ``lam`` (read from its pickle) on rows with an
-    authentic sportsbook quote. The convex form keeps both ends exact: ``lam`` 1 returns
-    ``p_over`` bit for bit and ``lam`` 0 returns ``p_book``. A row whose ``p_book`` is NaN
-    keeps ``p_over``.
+    ``lam`` is the cell's ``book_pull`` weight on ``p_over``, in [0, 1]. The convex form keeps
+    both ends exact: ``lam`` 1 returns ``p_over`` bit for bit and ``lam`` 0 returns ``p_book``.
+    A row whose ``p_book`` is NaN (no authentic sportsbook quote) keeps ``p_over``.
     """
     p_over = np.asarray(p_over, dtype=float)
     p_book = np.asarray(p_book, dtype=float)
