@@ -34,6 +34,7 @@ from sportstradamus.double_poisson import DoublePoisson
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     NONZERO_DENOM_GATE,
+    apply_book_pull,
     apply_cdf_recal,
     apply_temperature,
     dp_crps,
@@ -49,6 +50,7 @@ from sportstradamus.helpers import (
     stat_zi,
 )
 from sportstradamus.helpers.config import PLAIN_MEAN_ANCHOR
+from sportstradamus.helpers.config import book_pull as cell_book_pull
 from sportstradamus.helpers.config import mean_anchor as cell_mean_anchor
 from sportstradamus.helpers.distributions import (
     _DP_PHI_CEILING,
@@ -2406,6 +2408,7 @@ def _build_filedict(
     algorithm_payload: dict | None = None,
     expert_models: dict[int, object] | None = None,
     mean_anchor: lgb.Booster | None = None,
+    book_pull: float | None = None,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
     trained_at = datetime.now(UTC).isoformat()
@@ -2503,6 +2506,8 @@ def _build_filedict(
         filedict["expert_models"] = expert_models
     if mean_anchor is not None:
         filedict["mean_anchor"] = mean_anchor
+    if book_pull is not None:
+        filedict["book_pull"] = float(book_pull)
     return filedict
 
 
@@ -4254,13 +4259,16 @@ def _structural_gate_inputs(
     experiment_context,
     posthoc_slug: str,
     mean_posthoc_blob,
+    book_pull: float | None,
 ) -> dict:
     """Return the unified gate-input tuple for the standard and structural paths.
 
     The structural candidates carry their own already-pooled probabilities, so
     they bypass ``_step_calibrate_temperature`` and the prob-stage post-hoc; the
-    standard path fits temperature and layers the post-hoc corrector. Both yield
-    the same keys the downstream scorecard consumes.
+    standard path fits temperature and layers the post-hoc corrector, then pulls the
+    test over-probability toward the book by the cell's ``book_pull`` weight on rows
+    with an authentic sportsbook quote, as serving does. Both yield the same keys the
+    downstream scorecard consumes.
     """
     if structural_strategy == TWO_PART_STRATEGY:
         calibrated, _ = _step_apply_two_part_groupcdf_candidate(
@@ -4324,6 +4332,10 @@ def _structural_gate_inputs(
             test_calibrated_over = posthoc.apply_posthoc(
                 posthoc_slug, posthoc_blob, test_calibrated_over
             )
+        if book_pull is not None:
+            book = splits["B_test"]["Odds"].to_numpy(dtype=float)
+            book = np.where(_split_quote_authenticity_mask(splits, "test"), book, np.nan)
+            test_calibrated_over = apply_book_pull(test_calibrated_over, book, book_pull)
         return {
             "calibrated": calibrated,
             "y_proba_no_filt": y_proba_no_filt,
@@ -4417,6 +4429,7 @@ def _step_calibrate_and_serve(
     structural_strategy: str,
     experiment_context,
     mean_anchor: lgb.Booster | None,
+    book_pull: float | None,
 ) -> dict:
     """Decode, correct, fuse and calibrate one model's predictions into served values.
 
@@ -4425,6 +4438,8 @@ def _step_calibrate_and_serve(
     prob-stage corrector — is fit on ``splits["*_validation"]`` and applied to
     ``splits["*_test"]``, in that order: the mean corrector sits on the fused side of
     the pool, so the dispersion and temperature fits both see the corrected mean.
+    The ``book_pull`` weight is the cell's committed knob, never fit: it moves only the
+    served test over-probability, after the prob-stage corrector.
     Nothing here refits the GBDT: the model's predictions arrive ready in ``preds``.
     That is what lets :func:`_step_crossfit_calibrate_and_serve` rotate the two frames
     over folds of a single split and pay only this chain.
@@ -4467,6 +4482,7 @@ def _step_calibrate_and_serve(
         experiment_context=experiment_context,
         posthoc_slug=posthoc_slug,
         mean_posthoc_blob=mean_posthoc_blob,
+        book_pull=book_pull,
     )
     test_calibrated_over = gate_inputs["test_calibrated_over"]
     return {
@@ -5015,6 +5031,7 @@ def train_market(
     plain = fit_plain_baseline(splits, M["Date"], LGB_DETERMINISM if deterministic else {})
     anchored = (mean_anchor or cell_mean_anchor(league, market)) == PLAIN_MEAN_ANCHOR
     anchor = plain.booster if anchored else None
+    pull = cell_book_pull(league, market)
     calibrate = _step_crossfit_calibrate_and_serve if holdout_blind else _step_calibrate_and_serve
     served = calibrate(
         splits,
@@ -5031,6 +5048,7 @@ def train_market(
         structural_strategy=structural_strategy,
         experiment_context=experiment_context,
         mean_anchor=anchor,
+        book_pull=pull,
     )
     prob_params = served["prob_params"]
     decoded = served["decoded"]
@@ -5115,6 +5133,7 @@ def train_market(
         algorithm_payload=calibrated.get("structural_calibration_blob"),
         expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
         mean_anchor=anchor,
+        book_pull=pull,
     )
     if dependency_namespace is not None:
         filedict["dependency_identity"] = {

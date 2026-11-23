@@ -5,8 +5,9 @@ be checked and a leg re-scored offline under another model file. The log sits on
 serving path, so the last tests drive the real ``model_prob``: every scored player is
 logged, and a log that cannot be written costs no prediction. The same harness pins what a
 scored record keeps for an offline replay: the model's own price beside the served one, a
-SkewNormal price rebuilt from its row, and an offer off its quote line anchored at the price
-served there, which the replay's ``serve_live`` rebuilds from the log.
+SkewNormal price rebuilt from its row, an offer off its quote line anchored at the price served
+there, and a quoted price pulled toward its book's. The replay's ``serve_live`` rebuilds the last
+two from the log.
 """
 
 from __future__ import annotations
@@ -557,6 +558,24 @@ def _overwrite_quote_column(monkeypatch, column: str, value) -> None:
     monkeypatch.setattr(mp, "annotate_quote_provenance", annotate)
 
 
+def _served_over(served: pd.DataFrame) -> np.ndarray:
+    return np.where(served["Bet"] == "Over", served["Win Prob"], 1 - served["Win Prob"])
+
+
+def _replay_rows(served: pd.DataFrame, logged: pd.DataFrame) -> pd.DataFrame:
+    """The served offers as ``tail_pricing`` rung rows, each from its feature-log row."""
+    return pd.DataFrame(
+        {
+            "Line": served["Line"].to_numpy(),
+            "Test Line": logged["Quote Line"].to_numpy(),
+            "QuoteAuthenticity": logged["Quote Authenticity"].to_numpy(),
+            "EV": logged["Projection"].to_numpy(),
+            "Book_EV": logged["Market Projection"].to_numpy(),
+            "R_model": logged["Model R"].to_numpy(),
+        }
+    )
+
+
 def test_an_offer_off_its_quote_line_is_anchored_there(log_dir, monkeypatch, tmp_path):
     """Off its sportsbook quote's line an offer serves the price at that line, moved by the
     model's own odds; at the quote line, or with no quote, it serves the unanchored price.
@@ -569,28 +588,15 @@ def test_an_offer_off_its_quote_line_is_anchored_there(log_dir, monkeypatch, tmp
     _overwrite_quote_column(monkeypatch, "Quote Line", np.nan)
     unanchored = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines, unquoted=unquoted)
 
-    def over(served: pd.DataFrame) -> np.ndarray:
-        return np.where(served["Bet"] == "Over", served["Win Prob"], 1 - served["Win Prob"])
-
     assert anchored["Player"].tolist() == _PLAYERS
     moved = (anchored["Player"] == "Player B").to_numpy()
     pd.testing.assert_frame_equal(
         anchored.loc[~moved, ["Bet", "Win Prob"]], unanchored.loc[~moved, ["Bet", "Win Prob"]]
     )
     # The temperature pulls a line above the quote toward even; the anchor keeps the model's drop.
-    assert over(anchored)[moved] < over(unanchored)[moved]
-    replay = pd.DataFrame(
-        {
-            "Line": anchored["Line"].to_numpy(),
-            "Test Line": logged["Quote Line"].to_numpy(),
-            "QuoteAuthenticity": logged["Quote Authenticity"].to_numpy(),
-            "EV": logged["Projection"].to_numpy(),
-            "Book_EV": logged["Market Projection"].to_numpy(),
-            "R_model": logged["Model R"].to_numpy(),
-        }
-    )
-    replayed = serve_live(replay, filedict | {"hist_gate": 0.0})[0]
-    np.testing.assert_allclose(replayed, over(anchored), rtol=1e-12)
+    assert _served_over(anchored)[moved] < _served_over(unanchored)[moved]
+    replayed = serve_live(_replay_rows(anchored, logged), filedict | {"hist_gate": 0.0})[0]
+    np.testing.assert_allclose(replayed, _served_over(anchored), rtol=1e-12)
 
 
 def test_a_quote_that_is_not_a_sportsbooks_never_anchors(log_dir, monkeypatch, tmp_path):
@@ -602,6 +608,43 @@ def test_a_quote_that_is_not_a_sportsbooks_never_anchors(log_dir, monkeypatch, t
     unanchored = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines)
 
     pd.testing.assert_frame_equal(derived[["Bet", "Win Prob"]], unanchored[["Bet", "Win Prob"]])
+
+
+# Off one half, where the pull's two weights are equal and swapping them would go unseen.
+_BOOK_PULL = 0.25
+
+
+def test_a_quoted_price_is_pulled_toward_its_book(log_dir, monkeypatch, tmp_path):
+    """A pickle's ``book_pull`` serves ``(1 - pull) * book + pull * price`` on a row with an
+    authentic sportsbook quote, Player B's from his anchored price; the unquoted Player C keeps
+    his, as does a pick'em quote's book price. The replay's ``serve_live`` rebuilds the pulled
+    prices from the logged inputs.
+    """
+    filedict = _FILEDICT | {"temperature": 2.5}
+    lines, unquoted = {"Player B": 2.5, "Player C": 2.5}, ("Player C",)
+    unpulled = _score(monkeypatch, tmp_path, filedict=filedict, lines=lines, unquoted=unquoted)
+    pulling = filedict | {"book_pull": _BOOK_PULL}
+    pulled = _score(monkeypatch, tmp_path, filedict=pulling, lines=lines, unquoted=unquoted)
+    logged = _read(log_dir, "NBA_BLK").set_index("Player").loc[pulled["Player"]]
+
+    quoted = (pulled["Player"] != "Player C").to_numpy()
+    pd.testing.assert_frame_equal(
+        pulled.loc[~quoted, ["Bet", "Win Prob"]], unpulled.loc[~quoted, ["Bet", "Win Prob"]]
+    )
+    # On a quoted record Market Prob is the book's price of the chosen side at the offer's line.
+    book = np.where(pulled["Bet"] == "Over", pulled["Market Prob"], 1 - pulled["Market Prob"])
+    expected = (1 - _BOOK_PULL) * book + _BOOK_PULL * _served_over(unpulled)
+    np.testing.assert_allclose(_served_over(pulled)[quoted], expected[quoted], rtol=1e-12)
+    assert not np.isclose(_served_over(pulled), _served_over(unpulled))[quoted].any()
+    knobs = pulling | {"hist_gate": 0.0, "league": _LEAGUE, "market": _MARKET}
+    replayed = serve_live(_replay_rows(pulled, logged), knobs)[0]
+    np.testing.assert_allclose(replayed, _served_over(pulled), rtol=1e-12)
+
+    _overwrite_quote_column(monkeypatch, "Quote Authenticity", "pickem")
+    pd.testing.assert_frame_equal(
+        _score(monkeypatch, tmp_path, filedict=pulling, lines=lines, unquoted=unquoted),
+        _score(monkeypatch, tmp_path, filedict=filedict, lines=lines, unquoted=unquoted),
+    )
 
 
 def test_a_two_date_player_is_priced_and_logged_for_his_earlier_game(

@@ -23,6 +23,7 @@ shares the distribution-family dispatch with the inversion code.
 ``apply_temperature`` / ``apply_cdf_recal`` apply a fitted calibration map at
 serve time, and ``anchor_to_reference`` carries the calibrated price at a reference line
 to the other lines of a ladder; the fitters themselves live in ``training.posthoc``.
+``apply_book_pull`` pulls the served price toward the sportsbook's on quoted rows.
 """
 
 from dataclasses import dataclass
@@ -955,6 +956,19 @@ def anchor_to_reference(
     over, ref = (np.clip(p, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS) for p in (raw_over, raw_ref))
     served = np.clip(served_ref, REFERENCE_ANCHOR_CLIP, 1 - REFERENCE_ANCHOR_CLIP)
     return expit(logit(over) - logit(ref) + logit(served))
+
+
+def apply_book_pull(p_over, p_book, lam: float) -> np.ndarray:
+    """Pull a served over-probability toward the sportsbook's: ``(1 - lam)·p_book + lam·p_over``.
+
+    Serves a cell's ``book_pull`` weight ``lam`` (read from its pickle) on rows with an
+    authentic sportsbook quote. The convex form keeps both ends exact: ``lam`` 1 returns
+    ``p_over`` bit for bit and ``lam`` 0 returns ``p_book``. A row whose ``p_book`` is NaN
+    keeps ``p_over``.
+    """
+    p_over = np.asarray(p_over, dtype=float)
+    p_book = np.asarray(p_book, dtype=float)
+    return np.where(np.isfinite(p_book), (1 - lam) * p_book + lam * p_over, p_over)
 
 
 def apply_cdf_recal(blob: dict | None, u):

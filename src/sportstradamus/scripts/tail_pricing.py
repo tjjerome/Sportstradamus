@@ -24,6 +24,7 @@ from tqdm import tqdm
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     anchor_to_reference,
+    apply_book_pull,
     apply_cdf_recal,
     apply_temperature,
     fused_loc,
@@ -32,6 +33,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING, DecodedParams, predictive_std
 from sportstradamus.helpers.io import MODELS_DIR, model_pickle_path, resolve_model_version
 from sportstradamus.helpers.training_quotes import AUTHENTIC, DFS_PLATFORM_BOOKS
+from sportstradamus.prediction.offer_records import book_over_prob
 from sportstradamus.scripts.tail_information import information_rows
 from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY
 from sportstradamus.training.posthoc import (
@@ -161,6 +163,25 @@ def _training_weight(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
     return np.where(rows["QuoteAuthenticity"].eq(AUTHENTIC), knobs["weight"], 1.0)
 
 
+def _book_prob(rows: pd.DataFrame, knobs: dict) -> np.ndarray:
+    """The sportsbook's over-probability the book pull leans toward, NaN off an authentic row.
+
+    At a dump row's own line it is the training layer's ``1 - Odds``; at a priced rung (a frame
+    with ``Test Line``) it is serving's ``Market EV``, ``Book_EV`` decoded at the rung's line.
+    """
+    authentic = rows["QuoteAuthenticity"].eq(AUTHENTIC)
+    if "Test Line" not in rows:
+        return (1 - rows["Odds"]).where(authentic).to_numpy(float)
+    board = rows[["Line"]].assign(**{"Market Projection": rows["Book_EV"].where(authentic)})
+    dist = knobs["distribution"]
+    # NegBin and DPO pickles carry a zero rate too; serving decodes the book with it on ZINB only.
+    zero_rate = knobs["hist_gate"] if dist == "ZINB" else None
+    decoded = book_over_prob(
+        board, dist, knobs["cv"], knobs["step"], zero_rate, knobs["league"], knobs["market"]
+    )
+    return decoded.reindex(rows.index).to_numpy(float)
+
+
 def serve(
     rows: pd.DataFrame,
     knobs: dict,
@@ -180,7 +201,8 @@ def serve(
     ``gate_book`` is a ZINB cell's per-row book gate (the X3 rung leg); ``None`` is the
     pickle's ``hist_gate``. ``ref_line`` is each row's reference line, NaN for none: a row
     off it is anchored there as serving anchors an offer off its quote line
-    (``anchor_to_reference``); ``None`` anchors no row.
+    (``anchor_to_reference``); ``None`` anchors no row. Last, a pickle's ``book_pull`` pulls
+    each authentic row's price toward the book's (``_book_prob``, ``apply_book_pull``).
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
@@ -241,6 +263,8 @@ def serve(
         moved = np.isfinite(ref_line) & (ref_line != line)
         raw_ref, served_ref = priced_at(np.where(moved, ref_line, line))
         p_over = np.where(moved, anchor_to_reference(raw_over, raw_ref, served_ref), p_over)
+    if (lam := knobs.get("book_pull")) is not None:
+        p_over = apply_book_pull(p_over, _book_prob(rows, knobs), lam)
     gate = 0.0 if gate is None else np.asarray(gate, dtype=float)
     # A zero-inflated family is a point mass at 0 of weight gate beside the base distribution.
     sd = np.sqrt((1 - gate) * predictive_std(dist, shape) ** 2 + gate * (1 - gate) * base**2)
@@ -304,14 +328,17 @@ def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.Data
 
     Returns:
         The rows (``_TEST_COLUMNS`` and the family's model-only columns), the knobs with the
-        ``model_version`` serving stamps on the cell's legs, and the reconstruction error.
+        ``model_version`` serving stamps on the cell's legs, the pickle's ``book_pull``
+        (``None`` on a pickle without one) and the cell's ``league`` and ``market``, and the
+        reconstruction error.
 
     Raises:
         CellExcludedError: no pickle, an unreplayed family, a test set without the model-only
             columns, a structural strategy, or a failed reconstruction.
     """
     league, slug = path.stem.split("_", 1)
-    pickle_path = models_dir / model_pickle_path(league, slug.replace("-", " ")).name
+    market = slug.replace("-", " ")
+    pickle_path = models_dir / model_pickle_path(league, market).name
     try:
         with pickle_path.open("rb") as infile:
             filedict = pickle.load(infile)
@@ -320,6 +347,7 @@ def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.Data
     knobs = {key: filedict[key] for key in _KNOBS}
     # The stamp serving writes on the cell's legs; a pre-stamp pickle gets its legacy hash.
     knobs["model_version"] = resolve_model_version(str(pickle_path), filedict)
+    knobs |= {"book_pull": filedict.get("book_pull"), "league": league, "market": market}
     dist = knobs["distribution"]
     if dist not in _FAMILY_COLUMNS:
         raise CellExcludedError(f"{dist} is not replayed")
@@ -354,9 +382,8 @@ def price_cell(
     Raises:
         CellExcludedError: ``load_cell``'s reasons, or no rung.
     """
-    league, slug = path.stem.split("_", 1)
-    market = slug.replace("-", " ")
     rows, knobs, error = load_cell(path, models_dir)
+    league, market = knobs["league"], knobs["market"]
     rows = rows[rows["Date"] >= start].reset_index(drop=True)
     keys = pd.DataFrame(
         {

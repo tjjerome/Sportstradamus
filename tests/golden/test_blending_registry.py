@@ -166,6 +166,24 @@ def test_unknown_mean_anchor_rejected():
         )
 
 
+_PULL_CELL = {"shipped": "devel", "dist": "ZINB", "target_normalization": "none"}
+
+
+@pytest.mark.parametrize("knob", [{}, {"book_pull": 0}, {"book_pull": 0.35}, {"book_pull": 1.0}])
+def test_book_pull_accepts_absent_or_a_unit_weight(knob):
+    from sportstradamus.training import ship_config
+
+    ship_config._validate_cell("NBA", "PRA", {**_PULL_CELL, **knob})
+
+
+@pytest.mark.parametrize("pull", [True, False, "0.5", None, float("nan"), -0.1, 1.5])
+def test_invalid_book_pull_rejected(pull):
+    from sportstradamus.training import ship_config
+
+    with pytest.raises(ValueError, match="invalid book_pull"):
+        ship_config._validate_cell("NBA", "PRA", {**_PULL_CELL, "book_pull": pull})
+
+
 def test_fit_blend_weight_rejects_unknown_slug():
     with pytest.raises(ValueError, match="Unknown blending slug"):
         calibration.fit_blend_weight("bogus", [1.0], [1.0], [1.0], "NegBin")

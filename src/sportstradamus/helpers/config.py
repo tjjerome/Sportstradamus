@@ -9,10 +9,10 @@ load cost per call site.
 Per-cell training metadata is split across two files:
 
 * ``stat_meta.json`` — **committed.** Per-cell
-  ``{dist, shipped, target_normalization, posthoc, book_leg, mean_anchor}``: the semi-stable ML
-  config humans curate (distribution family, release state, target-normalization slug, post-hoc
-  corrector slug, book-leg pricing per :func:`book_leg`, served-mean source per
-  :func:`mean_anchor`).
+  ``{dist, shipped, target_normalization, posthoc, book_leg, mean_anchor, book_pull}``: the
+  semi-stable ML config humans curate (distribution family, release state, target-normalization
+  slug, post-hoc corrector slug, book-leg pricing per :func:`book_leg`, served-mean source per
+  :func:`mean_anchor`, pull toward the sportsbook per :func:`book_pull`).
 * ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
   the calibration values that meditate recomputes every run.
 
@@ -98,6 +98,7 @@ for _league, _markets in _stat_meta_committed.items():
             "posthoc": _meta_cell.get("posthoc", "none"),
             "book_leg": _meta_cell.get("book_leg", QUOTE_BOOK_LEG),
             "mean_anchor": _meta_cell.get("mean_anchor", NO_MEAN_ANCHOR),
+            "book_pull": _meta_cell.get("book_pull"),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
@@ -157,6 +158,17 @@ def mean_anchor(league: str, market: str) -> str:
     without the knob is ``"none"``. Serving reads the pickle, never this knob.
     """
     return stat_meta.get(league, {}).get(market, {}).get("mean_anchor", NO_MEAN_ANCHOR)
+
+
+def book_pull(league: str, market: str) -> float | None:
+    """The weight a cell's served over-probability keeps against the sportsbook's, or ``None``.
+
+    On rows with an authentic sportsbook quote, serving prices
+    :func:`~sportstradamus.helpers.distributions.apply_book_pull` at this weight; a cell without
+    the knob is not pulled. ``meditate`` copies the knob into the cell's pickle and serving reads
+    the pickle, never this knob.
+    """
+    return stat_meta.get(league, {}).get(market, {}).get("book_pull")
 
 
 def book_skewnormal_shape(

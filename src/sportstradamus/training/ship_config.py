@@ -137,6 +137,14 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
                 f"stat_meta.json: cell {league}/{market} has unknown {field} "
                 f"value {value!r}; valid: {sorted(valid)}"
             )
+    # An absent knob stands for the inert weight 1. The type check is exact because bool is an
+    # int subclass, and NaN fails the range check.
+    pull = cell.get("book_pull", 1.0)
+    if type(pull) not in (int, float) or not 0 <= pull <= 1:
+        raise ValueError(
+            f"stat_meta.json: cell {league}/{market} has invalid book_pull value {pull!r}; "
+            "valid: a number in [0, 1]"
+        )
     if dist in CONTINUOUS_DISTS and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(
             f"stat_meta.json: continuous cell {league}/{market} (dist={dist!r}) cannot "

@@ -331,6 +331,29 @@ line. Accepted per cell by the X3 read (`docs/archive/researcher_model_class_and
 per-cell NHL verdicts in [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); the owner
 flips the knob. Default `"quote"` is the decode every other cell runs.
 
+### The book pull (`book_pull`, Wave 4.1)
+
+A cell whose pickle carries `book_pull` λ serves P′ = (1 − λ)·M + λ·P on rows with an authentic
+sportsbook quote, after temperature, the probability-stage post-hoc and the reference anchor
+(`helpers/distributions.apply_book_pull`). M is the sportsbook's over-probability at the row's
+line: serving's `Market EV`; in training the test row's book price, so the dump's `P`, the gates
+and `ship priced` score what serves; in the replay (`scripts/tail_pricing.serve`) 1 − `Odds` at a
+dump row's own line and the decode of `Book_EV` at a rung. λ = 1 serves the model unchanged, λ = 0
+the book; every other row keeps P. Training pulls the test half only: the validation side, where
+temperature, the post-hoc and the blend weight are fit and from which a canonical run's
+`brier_skill_score` and `kelly_shrinkage` come, stays unpulled. Structural (two-part, affine)
+candidates are never pulled. `meditate` copies the cell's `stat_meta.json` `book_pull`
+(absent: no pull) into the pickle, and serving and the replay read only the pickle, so a knob
+reaches production with the league's next send.
+
+The λ comes from the league's book-pull read on the arm it sends
+([archive/researcher_book_pull_rejudge.md](archive/researcher_book_pull_rejudge.md), "4.1
+pre-registration" and "Serving a KEEP"): the closed-form λ\* = Σ(y − M)(P − M) / Σ(P − M)² on
+the arm's held-out authentic rows, clipped to [0, 1], one value per league, judged by `ship
+priced`'s rule with the pull applied. A KEEP sets the knob on the read's cells except any that
+reads KILL; a send without a read clears it. Rung-leg cells and NHL goals take none: the replay
+does not rebuild their live book leg.
+
 ### The books'-lean paper test (`admin books-lean`, report only)
 
 `sportstradamus admin books-lean` (`scripts/books_lean.py`) grades a model-free paper rule on the

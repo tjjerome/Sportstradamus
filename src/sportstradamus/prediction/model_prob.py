@@ -22,6 +22,7 @@ from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     LazyArchive,
     anchor_to_reference,
+    apply_book_pull,
     apply_cdf_recal,
     apply_temperature,
     archive_market,
@@ -1045,6 +1046,7 @@ def _served_over_and_push(
     pit_recal_blob: dict | None,
     posthoc_slug: str,
     posthoc_blob: dict | None,
+    book_pull: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The calibrated over-probability at each offer's line, and its push probability.
 
@@ -1052,7 +1054,9 @@ def _served_over_and_push(
     what the model knows. So an offer off its sportsbook quote's ``Quote Line`` keeps the price
     served at that line and moves from it by the model's own odds (``anchor_to_reference``).
     An offer at its quote line, or with no authentic quote, gets the chain unchanged. A derived
-    component sum's quote sits at the DFS line, and a DFS line never anchors.
+    component sum's quote sits at the DFS line, and a DFS line never anchors. Last, a pickle's
+    ``book_pull`` pulls each authentically quoted price toward ``Market EV``, the book's
+    over-probability at the offer's line (``apply_book_pull``); ``None`` pulls nothing.
     """
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
     # §6.1 Rung C reshapes the whole served CDF (over = 1 − g(1 − over_raw)) before the
@@ -1060,8 +1064,8 @@ def _served_over_and_push(
     raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
     cal_over = apply_temperature(raw_over, temperature)
     cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
-    quote_line = offer_df["Quote Line"].where(offer_df["Quote Authenticity"].eq(AUTHENTIC))
-    quote_line = quote_line.to_numpy(float)
+    authentic = offer_df["Quote Authenticity"].eq(AUTHENTIC)
+    quote_line = offer_df["Quote Line"].where(authentic).to_numpy(float)
     moved = np.isfinite(quote_line) & (quote_line != offer_df["Line"].to_numpy(float))
     if moved.any():
         at_quote = offer_df.loc[moved].assign(Line=quote_line[moved])
@@ -1072,6 +1076,8 @@ def _served_over_and_push(
             apply_temperature(raw_ref, temperature), posthoc_slug, posthoc_blob
         )
         cal_over[moved] = anchor_to_reference(raw_over[moved], raw_ref, served_ref)
+    if book_pull is not None:
+        cal_over = apply_book_pull(cal_over, offer_df["Market EV"].where(authentic), book_pull)
     return cal_over, push
 
 
@@ -1159,6 +1165,7 @@ def model_prob(
     pit_recal_blob = filedict.get("pit_recal_blob", None)
     structural_calibration = filedict.get("structural_calibration")
     mean_anchor = filedict.get("mean_anchor")
+    book_pull = filedict.get("book_pull")
     two_part_candidate_state = (
         _two_part_candidate_state(structural_calibration)
         if structural_strategy == TWO_PART_STRATEGY
@@ -1278,22 +1285,26 @@ def model_prob(
     two_part_candidate_output = None
     if two_part_candidate_state is not None:
         two_part_candidate_output = _apply_two_part_candidate_distribution(
-            offer_df,
-            base_mean,
-            *two_part_candidate_state,
-            two_part_role_spec,
+            offer_df, base_mean, *two_part_candidate_state, two_part_role_spec
         )
 
     affine_candidate_over = None
     if affine_candidate_calibration is not None:
         base_mean, affine_candidate_over = _apply_affine_candidate_distribution(
-            offer_df,
-            base_mean,
-            affine_candidate_calibration,
+            offer_df, base_mean, affine_candidate_calibration
         )
 
     cal_over, push = _served_over_and_push(
-        offer_df, dist, cv, step, base_mean, temperature, pit_recal_blob, posthoc_slug, posthoc_blob
+        offer_df,
+        dist,
+        cv,
+        step,
+        base_mean,
+        temperature,
+        pit_recal_blob,
+        posthoc_slug,
+        posthoc_blob,
+        book_pull,
     )
     offer_df["Push Prob"] = np.asarray(push, dtype=float)
     if two_part_candidate_output is not None:

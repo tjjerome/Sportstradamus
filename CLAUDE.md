@@ -527,7 +527,7 @@ production data.
 
 | File | Purpose |
 |------|---------|
-| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`, `book_leg`, `mean_anchor`) |
+| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`, `book_leg`, `mean_anchor`, `book_pull`) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi, book_shape}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
