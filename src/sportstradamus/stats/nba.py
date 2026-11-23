@@ -466,14 +466,14 @@ class StatsNBA(Stats):
         playerstats = super()._build_player_profile_stats(stat_types, date)
         player, opponent = self.log_strings["player"], self.log_strings["opponent"]
         logs = self.short_gamelog
-        scale = f"_{self.regulation_minutes}"
-        rates = {rate.removesuffix(scale): rate for rate in stat_types if rate.endswith(scale)}
+        suffix = f"_{self.regulation_minutes}"
+        rates = {rate.removesuffix(suffix): rate for rate in stat_types if rate.endswith(suffix)}
         allowed = logs.groupby([opponent, self.log_strings["game"]])["AST"].sum()
         allowed = allowed.groupby(level=opponent).mean()
         games = logs[[player, "MIN", *rates]].assign(
             **{"AST opp adj": logs["AST"] / logs[opponent].map(allowed / allowed.mean())}
         )
-        rates["AST opp adj"] = f"AST{scale} opp adj"
+        rates["AST opp adj"] = f"AST{suffix} opp adj"
 
         def pooled(frame: pd.DataFrame) -> pd.DataFrame:
             sums = frame.groupby(player).sum()

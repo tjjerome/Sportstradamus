@@ -72,7 +72,7 @@ def test_a_pooled_rate_weighs_games_by_minutes_and_skips_one_without(cls, rate, 
         (6 / 30 + 0 + 4 / 10 + 2 / 20 + 12 / 36) * scale / 5
     )
     rates = [stat for stat in cls().stat_types if stat.endswith(f"_{scale}")]
-    assert {f"{rate} pooled{w}" for rate in rates for w in ("", " short")} <= set(profile.index)
+    assert {f"{stat} pooled{w}" for stat in rates for w in ("", " short")} <= set(profile.index)
 
 
 @pytest.mark.parametrize(("cls", "rate", "scale"), _LEAGUES)

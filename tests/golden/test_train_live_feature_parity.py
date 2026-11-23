@@ -49,7 +49,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.stats import StatsNBA, StatsWNBA, availability, base, nba, wnba
+from sportstradamus.stats import StatsNBA, StatsWNBA, availability, base, nba
 
 MARKET = "PTS"
 GAMEDAY = date(2025, 12, 1)  # after the NBA season_start; far in the past vs real today
@@ -276,7 +276,7 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
 
     # Serving arm: freeze today == GAMEDAY -> _game_context upcoming branch, and the same
     # branch in StatsNBA's absence hook, which reads today in stats/nba.py.
-    for module in (base, nba, wnba):
+    for module in (base, nba):
         monkeypatch.setattr(module, "datetime", _FrozenDatetime)
     live = stats.get_stats(MARKET, offers, GAMEDAY)
     assert not live.empty, "synthetic upcoming arm produced no rows"
@@ -373,8 +373,8 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     # StatsNBA's profile batch: minutes history and every per-minute rate (per 48 in the NBA,
     # per 40 in the WNBA) pooled over the profile's two windows, assists also adjusted for the
     # defenses faced. Non-zero on every row, so none can agree by being blank in both arms.
-    scale = f"_{stats.regulation_minutes}"
-    rates = [*(stat for stat in stats.stat_types if stat.endswith(scale)), f"AST{scale} opp adj"]
+    suffix = f"_{stats.regulation_minutes}"
+    rates = [*(stat for stat in stats.stat_types if stat.endswith(suffix)), f"AST{suffix} opp adj"]
     batch = ["Player MIN last game", "Player MIN last 3"]
     batch += [f"Player {rate} pooled{window}" for rate in rates for window in ("", " short")]
     assert set(batch) <= set(shared), "profile batch columns missing from the shared surface"
