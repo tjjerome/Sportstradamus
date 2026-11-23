@@ -652,5 +652,749 @@
     "stand": "L"
    }
   ]
- }
+ },
+ "team_home": [
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "called_strike",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 84.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FF",
+   "start_speed": 95.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FF",
+   "start_speed": 94.9,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "swinging_strike",
+   "zone": 13,
+   "pitch_type": "CH",
+   "start_speed": 88.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "called_strike",
+   "zone": 7,
+   "pitch_type": "FF",
+   "start_speed": 95,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "swinging_strike",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 85.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 84.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "FF",
+   "start_speed": 94.4,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "called_strike",
+   "zone": 8,
+   "pitch_type": "SI",
+   "start_speed": 95.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "swinging_strike_blocked",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 86.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "swinging_strike",
+   "zone": 14,
+   "pitch_type": "CU",
+   "start_speed": 77.9,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "CH",
+   "start_speed": 86.8,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "called_strike",
+   "zone": 8,
+   "pitch_type": "FF",
+   "start_speed": 94.6,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 84.3,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "foul",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 85.1,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "CH",
+   "start_speed": 88.7,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "foul",
+   "zone": 3,
+   "pitch_type": "FF",
+   "start_speed": 95.5,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FF",
+   "start_speed": 95.4,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 666624,
+   "pitch_call": "hit_into_play",
+   "zone": 1,
+   "pitch_type": "FF",
+   "start_speed": 94.4,
+   "launch_speed": "89.7",
+   "launch_angle": "26",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "foul",
+   "zone": 14,
+   "pitch_type": "CH",
+   "start_speed": 87.5,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 12,
+   "pitch_type": "FF",
+   "start_speed": 94.2,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "called_strike",
+   "zone": 7,
+   "pitch_type": "FF",
+   "start_speed": 94.7,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 7,
+   "pitch_type": "FF",
+   "start_speed": 94.8,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 681857,
+   "batter": 664023,
+   "pitch_call": "foul_tip",
+   "zone": 4,
+   "pitch_type": "FF",
+   "start_speed": 94.6,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 686839,
+   "batter": 666624,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 87.5,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 686839,
+   "batter": 666624,
+   "pitch_call": "ball",
+   "zone": 11,
+   "pitch_type": "FF",
+   "start_speed": 92.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 686839,
+   "batter": 666624,
+   "pitch_call": "hit_into_play",
+   "zone": 4,
+   "pitch_type": "FF",
+   "start_speed": 92.3,
+   "launch_speed": "78.3",
+   "launch_angle": "60",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 663947,
+   "batter": 664023,
+   "pitch_call": "swinging_strike",
+   "zone": 14,
+   "pitch_type": "CH",
+   "start_speed": 83.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 663947,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "FF",
+   "start_speed": 92.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 663947,
+   "batter": 664023,
+   "pitch_call": "called_strike",
+   "zone": 9,
+   "pitch_type": "FF",
+   "start_speed": 92.4,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 663947,
+   "batter": 664023,
+   "pitch_call": "foul",
+   "zone": 13,
+   "pitch_type": "ST",
+   "start_speed": 82.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 663947,
+   "batter": 664023,
+   "pitch_call": "hit_into_play",
+   "zone": 9,
+   "pitch_type": "CH",
+   "start_speed": 84.3,
+   "launch_speed": "86.7",
+   "launch_angle": "29",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 671345,
+   "batter": 666624,
+   "pitch_call": "called_strike",
+   "zone": 13,
+   "pitch_type": "SI",
+   "start_speed": 98.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 671345,
+   "batter": 666624,
+   "pitch_call": "blocked_ball",
+   "zone": 14,
+   "pitch_type": "SI",
+   "start_speed": 97.6,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 671345,
+   "batter": 666624,
+   "pitch_call": "hit_into_play",
+   "zone": 8,
+   "pitch_type": "SI",
+   "start_speed": 98.6,
+   "launch_speed": "104.3",
+   "launch_angle": "-22",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 656638,
+   "batter": 664023,
+   "pitch_call": "foul",
+   "zone": 13,
+   "pitch_type": "SL",
+   "start_speed": 87.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 656638,
+   "batter": 664023,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "SL",
+   "start_speed": 88.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 656638,
+   "batter": 664023,
+   "pitch_call": "hit_into_play",
+   "zone": 13,
+   "pitch_type": "SL",
+   "start_speed": 87.9,
+   "launch_speed": "75.9",
+   "launch_angle": "-13",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  }
+ ],
+ "team_away": [
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "called_strike",
+   "zone": 5,
+   "pitch_type": "SI",
+   "start_speed": 92.9,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "swinging_strike",
+   "zone": 14,
+   "pitch_type": "KC",
+   "start_speed": 80.1,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "KC",
+   "start_speed": 79.5,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 13,
+   "pitch_type": "KC",
+   "start_speed": 79.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "hit_into_play",
+   "zone": 8,
+   "pitch_type": "SI",
+   "start_speed": 93.1,
+   "launch_speed": "98.7",
+   "launch_angle": "-1",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 656716,
+   "pitch_call": "foul",
+   "zone": 8,
+   "pitch_type": "SI",
+   "start_speed": 93,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 656716,
+   "pitch_call": "hit_into_play",
+   "zone": 5,
+   "pitch_type": "SI",
+   "start_speed": 92.6,
+   "launch_speed": "85.5",
+   "launch_angle": "38",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FC",
+   "start_speed": 87.7,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "called_strike",
+   "zone": 7,
+   "pitch_type": "SI",
+   "start_speed": 92.3,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 14,
+   "pitch_type": "KC",
+   "start_speed": 78.3,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 14,
+   "pitch_type": "KC",
+   "start_speed": 80.3,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "swinging_strike",
+   "zone": 3,
+   "pitch_type": "SI",
+   "start_speed": 93.5,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 656716,
+   "pitch_call": "hit_into_play",
+   "zone": 9,
+   "pitch_type": "SI",
+   "start_speed": 93.3,
+   "launch_speed": "84.0",
+   "launch_angle": "24",
+   "is_barrel": 0,
+   "pitcher_time_thru_order": 2
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FC",
+   "start_speed": 88.5,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 14,
+   "pitch_type": "KC",
+   "start_speed": 77.9,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 12,
+   "pitch_type": "SI",
+   "start_speed": 92.4,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "FC",
+   "start_speed": 88.1,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 592767,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 12,
+   "pitch_type": "KC",
+   "start_speed": 79,
+   "pitcher_time_thru_order": 3
+  },
+  {
+   "type": "pitch",
+   "pitcher": 669713,
+   "batter": 656716,
+   "pitch_call": "foul",
+   "zone": 3,
+   "pitch_type": "FC",
+   "start_speed": 92.4,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 669713,
+   "batter": 656716,
+   "pitch_call": "foul",
+   "zone": 1,
+   "pitch_type": "FF",
+   "start_speed": 97,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 669713,
+   "batter": 656716,
+   "pitch_call": "blocked_ball",
+   "zone": 14,
+   "pitch_type": "ST",
+   "start_speed": 86.5,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 669713,
+   "batter": 656716,
+   "pitch_call": "called_strike",
+   "zone": 7,
+   "pitch_type": "ST",
+   "start_speed": 84,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "no_pitch",
+   "pitcher": 669713,
+   "batter": 681481,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 656716,
+   "pitch_call": "ball",
+   "zone": 14,
+   "pitch_type": "ST",
+   "start_speed": 81.9,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 656716,
+   "pitch_call": "foul",
+   "zone": 4,
+   "pitch_type": "FF",
+   "start_speed": 92,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 656716,
+   "pitch_call": "ball",
+   "zone": 12,
+   "pitch_type": "FF",
+   "start_speed": 92.9,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 656716,
+   "pitch_call": "called_strike",
+   "zone": 7,
+   "pitch_type": "SI",
+   "start_speed": 92.4,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 656716,
+   "pitch_call": "hit_by_pitch",
+   "zone": 14,
+   "pitch_type": "ST",
+   "start_speed": 82,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 13,
+   "pitch_type": "SI",
+   "start_speed": 94.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 4,
+   "pitch_type": "SI",
+   "start_speed": 92.7,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 12,
+   "pitch_type": "FF",
+   "start_speed": 91.8,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "foul",
+   "zone": 11,
+   "pitch_type": "FF",
+   "start_speed": 92,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "ball",
+   "zone": 13,
+   "pitch_type": "CH",
+   "start_speed": 87.2,
+   "pitcher_time_thru_order": 1
+  },
+  {
+   "type": "pitch",
+   "pitcher": 621016,
+   "batter": 681481,
+   "pitch_call": "hit_by_pitch",
+   "zone": 14,
+   "pitch_type": "ST",
+   "start_speed": 83.2,
+   "pitcher_time_thru_order": 1
+  }
+ ]
 }

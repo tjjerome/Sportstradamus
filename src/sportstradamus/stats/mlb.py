@@ -33,6 +33,7 @@ from sportstradamus.stats.base import (
     is_mlb_pitcher_market,
     scraper,
 )
+from sportstradamus.stats.mlb_pitch import PITCH_COLUMNS, pitch_columns
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -461,6 +462,7 @@ class StatsMLB(Stats):
         )
 
         new_games = pd.DataFrame.from_records(away_rows + home_rows)
+        new_games[PITCH_COLUMNS] = pitch_columns(game, new_games["playerId"]).to_numpy()
         self._enrich_team_markets(new_games, date_col="gameDate", team_col="team")
         self.gamelog = pd.concat([self.gamelog, new_games], ignore_index=True)
 
