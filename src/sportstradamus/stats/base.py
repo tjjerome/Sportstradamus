@@ -2583,7 +2583,7 @@ class Stats:
                         # A pitcher prop on a player who faced no batter cannot settle: the
                         # hitters quoted under walks allowed on 2026-03-26, starters pulled
                         # before a batter.
-                        quoted &= usage > 0
+                        quoted = quoted & (usage > 0)
                     matrix.extend(stats.loc[quoted].to_dict("records"))
                     if not matrix:
                         mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
