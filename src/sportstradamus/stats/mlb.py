@@ -33,7 +33,7 @@ from sportstradamus.stats.base import (
     is_mlb_pitcher_market,
     scraper,
 )
-from sportstradamus.stats.mlb_pitch import PITCH_COLUMNS, pitch_columns
+from sportstradamus.stats.mlb_pitch import GAME_FEED_URL, PITCH_COLUMNS, pitch_columns
 from sportstradamus.stats.mlb_profile import lineup_vs_hand, platoon, player_rates
 
 # Minimum Savant affinity match_score to include a player as a comparable.
@@ -402,14 +402,11 @@ class StatsMLB(Stats):
 
     def _build_player_profile_stats(self, stat_types, date):
         """Add each player's pitch-level record, leash and lineup-spot history (mlb_profile)."""
-        return (
-            super()
-            ._build_player_profile_stats(stat_types, date)
-            .join(player_rates(self.short_gamelog, self.log_strings["player"]))
-        )
+        playerstats = super()._build_player_profile_stats(stat_types, date)
+        return playerstats.join(player_rates(self.short_gamelog, self.log_strings["player"]))
 
     def _h2h_features(self, stats, market, opponents, pitchers):
-        """Add the handedness matchup (mlb_profile): a batter's platoon split, a pitcher's lineup."""
+        """Add the handedness matchup (mlb_profile): batters' platoon splits, pitchers' lineups."""
         super()._h2h_features(stats, market, opponents, pitchers)
         throws = {
             entry["name"]: entry["throws"] for entry in self.players.values() if "throws" in entry
@@ -433,7 +430,7 @@ class StatsMLB(Stats):
 
     def parse_game(self, gameId):
         """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""
-        game = scraper.get(f"https://baseballsavant.mlb.com/gf?game_pk={gameId}")
+        game = scraper.get(GAME_FEED_URL.format(game_id=gameId))
         if not game:
             return
 

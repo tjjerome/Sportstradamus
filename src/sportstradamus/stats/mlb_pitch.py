@@ -21,7 +21,7 @@ from tqdm import tqdm
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import scraper
 
-_FEED_URL = "https://baseballsavant.mlb.com/gf?game_pk={game_id}"
+GAME_FEED_URL = "https://baseballsavant.mlb.com/gf?game_pk={game_id}"
 # A feed runs 2-3 MB and takes about 2.3 s to fetch; with a second between them a game
 # takes 3.3 s, a season 2.3 hours (measured 2026-11-23, 40 games of 2024-26).
 _REQUEST_GAP_S = 1.0
@@ -169,7 +169,7 @@ def fill_pitch_columns(
     failures = 0
     for game_id in tqdm(log.loc[lacking, "gameId"].unique(), desc="Getting MLB pitch counts"):
         sleep(_REQUEST_GAP_S)
-        game = scraper.get(_FEED_URL.format(game_id=game_id), max_attempts=max_attempts)
+        game = scraper.get(GAME_FEED_URL.format(game_id=game_id), max_attempts=max_attempts)
         if not game:
             failures += 1
             if failures == _MAX_FAILURES_IN_A_ROW:
