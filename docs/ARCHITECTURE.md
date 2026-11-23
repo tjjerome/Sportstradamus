@@ -88,7 +88,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `base.py` | `Stats` base class. All shared logic: `load`, `update`, `parse_game`, `get_training_matrix`, `get_stats`, `get_volume_stats`, `profile_market`, player-comp KNN (`update_player_comps`), `trim_gamelog` |
-| `nba.py` | `StatsNBA(Stats)` — NBA loading and features via `nba_api`; `nba_client.py` is its reliable transport wrapper for stats.nba.com / stats.wnba.com; `nba_season_tables.py` reads the season-to-date bio and shot-location tables as of a day (stored per day in `data/leagues/nba/season_tables/`), which the comp pool reads as of its date's eve |
+| `nba.py` | `StatsNBA(Stats)` — NBA loading and features via `nba_api`; `nba_client.py` is its reliable transport wrapper for stats.nba.com / stats.wnba.com; `nba_season_tables.py` reads the NBA's and the WNBA's season-to-date bio and shot-location tables as of a day (stored per day in `data/leagues/<league>/season_tables/`), which the comp pool reads as of its date's eve |
 | `wnba.py` | `StatsWNBA(StatsNBA)` — WNBA, inherits from `StatsNBA` |
 | `mlb.py` | `StatsMLB(Stats)` — MLB via `statsapi` |
 | `nfl.py` | `StatsNFL(Stats)` — NFL via `nfl_data_py` / `nflreadpy` |

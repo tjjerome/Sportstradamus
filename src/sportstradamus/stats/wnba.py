@@ -8,13 +8,24 @@ import pandas as pd
 
 from sportstradamus.helpers import remove_accents
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
-from sportstradamus.stats import nba_client
+from sportstradamus.stats import nba_client, nba_season_tables
 from sportstradamus.stats.base import fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
 # Regulation minutes of a WNBA game (four 10-minute quarters), the scale of every *_40 rate.
 _REGULATION_MINUTES: int = 40
+
+# The comp inputs the season-to-date bio and shot-location tables hold, read as of the eve of a
+# comp pool's date (StatsNBA._rosters_as_of).
+_DATED_COMP_FIELDS = ("USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT")
+
+# Each zone share's column among the shot table's eight attempt columns: restricted area, the rest
+# of the paint, mid-range, left and right corner threes, above-the-break threes, backcourt, and
+# both corners' threes again as one zone. A share's denominator is the first six, every attempt
+# but the backcourt's counted once.
+_ZONE_SHARE_COLUMNS = {"RA_PCT": 0, "ITP_PCT": 1, "MR_PCT": 2, "C3_PCT": 7, "B3_PCT": 5}
+_COUNTED_ZONES = 6
 
 # stats.wnba.com abbreviations differ from our canonical set; remapped wherever a
 # team code enters (player index, shot locations, player logs, team logs).
@@ -31,6 +42,20 @@ _WNBA_TEAM_ABBR_MAP = {
 
 def _remap_abbr(series: pd.Series) -> pd.Series:
     return series.map(lambda x: _WNBA_TEAM_ABBR_MAP.get(x, x))
+
+
+def _shot_zone_shares(shots: pd.DataFrame) -> pd.DataFrame:
+    """Each player's share of her attempts by zone, beside her accent-free name and our team code.
+
+    A player without an attempt is left out.
+    """
+    attempts = shots["FGA"].fillna(0)
+    counted = attempts.iloc[:, :_COUNTED_ZONES].sum(axis=1)
+    shares = attempts.iloc[:, list(_ZONE_SHARE_COLUMNS.values())].div(counted, axis=0)
+    shares.columns = list(_ZONE_SHARE_COLUMNS)
+    shares["PLAYER_NAME"] = shots["PLAYER_NAME"].map(remove_accents)
+    shares["TEAM_ABBREVIATION"] = _remap_abbr(shots["TEAM_ABBREVIATION"])
+    return shares.loc[counted > 0]
 
 
 # Calendar month (inclusive) at which playoff logs are fetched in addition to regular season.
@@ -95,11 +120,10 @@ class StatsWNBA(StatsNBA):
 
     def _update(self) -> None:
         """Fetch new WNBA game logs from stats.wnba.com and merge into stored data."""
-        player_df = self._fetch_player_index()
-        playerBios, shotData = self._fetch_player_bios()
-        player_df = self._build_wnba_player_profiles(player_df, playerBios, shotData)
-
         today = datetime.today().date()
+        player_df = self._fetch_player_index()
+        bios, shots = self._fetch_player_bios(today - timedelta(days=1))
+        player_df = self._build_wnba_player_profiles(player_df, bios, shots)
 
         # Drop records with incomplete advanced stats so they can be re-fetched
         if "OFF_RATING" in self.gamelog.columns:
@@ -175,96 +199,47 @@ class StatsWNBA(StatsNBA):
             )
         return player_df
 
-    def _fetch_player_bios(self):
-        """Player bio stats and per-zone shot locations (empty stubs on API error)."""
+    def _fetch_player_bios(self, day: date) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """The season's bio and shot-location tables through ``day`` (empty on API error)."""
         try:
-            playerBios = nba_client.fetch(
-                nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats,
-                host=nba_client.WNBA_HOST,
-                season=self.season_start.year,
-                league_id="10",
-            ).get_normalized_dict()["LeagueDashPlayerBioStats"]
-
-            shotData = nba_client.fetch(
-                nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations,
-                host=nba_client.WNBA_HOST,
-                season=self.season_start.year,
-                league_id_nullable="10",
-                season_type_all_star="Regular Season",
-                distance_range="By Zone",
-                per_mode_detailed="Per40",
-            ).get_dict()["resultSets"]
+            return nba_season_tables.read(self.league, self.season, day)
         except NBAStatsError:
-            playerBios = {
-                "PLAYER_NAME": [],
-                "PLAYER_ID": [],
-                "PLAYER_HEIGHT_INCHES": [],
-                "PLAYER_WEIGHT": [],
-                "TEAM_ABBREVIATION": [],
-            }
-            shotData = {"rowSet": []}
-        return playerBios, shotData
+            return pd.DataFrame(), pd.DataFrame()
 
-    def _build_wnba_player_profiles(self, player_df, playerBios, shotData) -> pd.DataFrame:
+    def _build_wnba_player_profiles(self, player_df, bios, shots) -> pd.DataFrame:
         """Merge bios + shot-zone shares into per-team player profiles in self.players.
 
         Returns the player frame augmented with profile columns (or unchanged when
-        the bios endpoint returned nothing).
+        the bios table holds nobody).
         """
-        playerBios = pd.DataFrame(playerBios)
-        if not playerBios.empty:
-            playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
-            shotMap = []
-            for row in shotData["rowSet"]:
-                fga = np.nansum(np.array(row[7:-6:3], dtype=float))
-                if fga > 0:
-                    record = {
-                        "PLAYER_NAME": remove_accents(row[1]),
-                        "TEAM_ABBREVIATION": _WNBA_TEAM_ABBR_MAP.get(row[3], row[3]),
-                        "RA_PCT": (row[7] if row[7] else 0) / fga,
-                        "ITP_PCT": (row[10] if row[10] else 0) / fga,
-                        "MR_PCT": (row[13] if row[13] else 0) / fga,
-                        "C3_PCT": (row[28] if row[28] else 0) / fga,
-                        "B3_PCT": (row[22] if row[22] else 0) / fga,
-                    }
-                    shotMap.append(record)
+        if bios.empty:
+            return player_df
+        bios = bios.assign(PLAYER_NAME=bios.PLAYER_NAME.map(remove_accents))
+        player_df = player_df.merge(bios, on="PLAYER_ID", suffixes=(None, "_y")).merge(
+            _shot_zone_shares(shots),
+            on=["PLAYER_NAME", "TEAM_ABBREVIATION"],
+            suffixes=(None, "_y"),
+        )
+        player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
+        player_df.POS = player_df.POS.str[0]
+        player_df.index = player_df.PLAYER_NAME
+        player_df["PLAYER_BMI"] = (
+            player_df["PLAYER_WEIGHT"]
+            / player_df["PLAYER_HEIGHT_INCHES"]
+            / player_df["PLAYER_HEIGHT_INCHES"]
+        )
+        wnba_numeric_cols = ["AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", *_DATED_COMP_FIELDS]
+        player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS", *wnba_numeric_cols]].apply(
+            lambda x: x
+        )
+        player_dict[wnba_numeric_cols] = player_dict[wnba_numeric_cols].replace(
+            [np.nan, np.inf, -np.inf], 0
+        )
 
-            player_df = player_df.merge(playerBios, on="PLAYER_ID", suffixes=(None, "_y")).merge(
-                pd.DataFrame(shotMap),
-                on=["PLAYER_NAME", "TEAM_ABBREVIATION"],
-                suffixes=(None, "_y"),
-            )
-            player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
-            player_df.POS = player_df.POS.str[0]
-            player_df.index = player_df.PLAYER_NAME
-            player_df["PLAYER_BMI"] = (
-                player_df["PLAYER_WEIGHT"]
-                / player_df["PLAYER_HEIGHT_INCHES"]
-                / player_df["PLAYER_HEIGHT_INCHES"]
-            )
-            wnba_numeric_cols = [
-                "AGE",
-                "PLAYER_HEIGHT_INCHES",
-                "PLAYER_BMI",
-                "USG_PCT",
-                "TS_PCT",
-                "RA_PCT",
-                "ITP_PCT",
-                "MR_PCT",
-                "C3_PCT",
-                "B3_PCT",
-            ]
-            player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS", *wnba_numeric_cols]].apply(
-                lambda x: x
-            )
-            player_dict[wnba_numeric_cols] = player_dict[wnba_numeric_cols].replace(
-                [np.nan, np.inf, -np.inf], 0
-            )
-
-            player_dict = {
-                level: player_dict.xs(level).T.to_dict() for level in player_dict.index.levels[0]
-            }
-            self._merge_season_roster(self.season_start.year, player_dict)
+        player_dict = {
+            level: player_dict.xs(level).T.to_dict() for level in player_dict.index.levels[0]
+        }
+        self._merge_season_roster(self.season_start.year, player_dict)
         return player_df
 
     def _fetch_wnba_logs(self, latest_date, today):
@@ -443,7 +418,13 @@ class StatsWNBA(StatsNBA):
     def _availability_context(self, stats, date, teams, opponents):
         pass
 
-    # stats.wnba.com's tables are read undated (_fetch_player_bios), so the running season
-    # pools as stored instead of through StatsNBA's dated read.
-    def _rosters_as_of(self, rosters, season_key, target_game_date):
-        return rosters
+    def _dated_comp_fields(self, bios: pd.DataFrame, shots: pd.DataFrame) -> pd.DataFrame:
+        """``_DATED_COMP_FIELDS`` from a day's bio and shot tables, by accent-free player name.
+
+        A player the bios list without an attempt reads zero shares.
+        """
+        bios = bios.assign(PLAYER_NAME=bios.PLAYER_NAME.map(remove_accents))
+        tables = bios.merge(
+            _shot_zone_shares(shots), on="PLAYER_NAME", suffixes=(None, "_y"), how="outer"
+        ).drop_duplicates("PLAYER_NAME")
+        return tables.set_index("PLAYER_NAME")[list(_DATED_COMP_FIELDS)].fillna(0)

@@ -1,10 +1,10 @@
-"""The NBA comp pool reads the running season's bio and shot tables as of its date's eve.
+"""The NBA and WNBA comp pools read the running season's bio and shot tables as of the date's eve.
 
 The stored season holds the tables of its last update, after every training row's date, so a
 rebuilt row's comps read later usage and shot zones than the served row's did (study §14 item 6).
 The pool reads the tables through the day before its date instead, stored per day so a rebuild
 fetches each day once, and serving reads yesterday's, the ones the update stores. The client is
-faked: no test reaches stats.nba.com.
+faked: no test reaches stats.nba.com or stats.wnba.com.
 """
 
 from datetime import date, datetime, timedelta
@@ -12,10 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from sportstradamus.stats import StatsNBA, StatsWNBA, nba, nba_client, nba_season_tables
+from sportstradamus.stats import StatsNBA, StatsWNBA, nba, nba_client, nba_season_tables, wnba
 from sportstradamus.stats.nba_client import NBAStatsError
 
 D = date(2025, 12, 10)
+# A WNBA date in the season a fresh StatsWNBA holds.
+W = date(2026, 7, 1)
 _ZONES = 8
 _SHOT_COLUMNS = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION", "AGE", "NICKNAME"]
 _SHOT_COLUMNS += ["FGM", "FGA", "FG_PCT"] * _ZONES
@@ -27,6 +29,11 @@ _PLAYERS = {
     "2024-25": {"TTT": {"A": _STORED | {"USG_PCT": 0.2}, "C": _STORED | {"POS": "C"}}},
     "2025-26": {"TTT": {"A": _STORED, "C": _STORED | {"POS": "C"}}},
 }
+_WNBA_STORED = dict.fromkeys(wnba._DATED_COMP_FIELDS, 0.99) | {"POS": "G", "AGE": 27.0}
+_WNBA_PLAYERS = {
+    2025: {"LVA": {"A": _WNBA_STORED | {"USG_PCT": 0.2}, "C": _WNBA_STORED | {"POS": "C"}}},
+    2026: {"LVA": {"A": _WNBA_STORED, "C": _WNBA_STORED | {"POS": "C"}}},
+}
 
 
 class _FakeClient:
@@ -37,7 +44,7 @@ class _FakeClient:
         self.calls = []
 
     def __call__(self, endpoint_cls, *, host=nba_client.NBA_HOST, **params):
-        self.calls.append((endpoint_cls.__name__, params))
+        self.calls.append((endpoint_cls.__name__, host, params))
         bios = [{"PLAYER_NAME": name, "USG_PCT": 0.25, "TS_PCT": 0.55} for name in self.listed]
         zones = [v for fga in _A_ATTEMPTS for v in (fga / 2, fga, 0.5)]
         shots = {
@@ -54,15 +61,15 @@ class _FakeClient:
 
     def dated(self):
         return [
-            (name, params["season"], params["date_to_nullable"])
-            for name, params in self.calls
+            (name, host, params["season"], params["date_to_nullable"])
+            for name, host, params in self.calls
             if "date_to_nullable" in params
         ]
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    monkeypatch.setattr(nba_season_tables, "SEASON_TABLES_DIR", tmp_path)
+    monkeypatch.setattr(nba_season_tables, "LEAGUES_DIR", tmp_path)
     fake = _FakeClient()
     monkeypatch.setattr(nba_client, "fetch", fake)
     return fake
@@ -85,10 +92,10 @@ def _freeze_today(monkeypatch, today):
     monkeypatch.setattr(nba, "datetime", _Frozen)
 
 
-def _asked(day):
+def _asked(day, season="2025-26", host=nba_client.NBA_HOST):
     return [
-        ("LeagueDashPlayerBioStats", "2025-26", day.strftime("%m/%d/%Y")),
-        ("LeagueDashPlayerShotLocations", "2025-26", day.strftime("%m/%d/%Y")),
+        ("LeagueDashPlayerBioStats", host, season, day.strftime("%m/%d/%Y")),
+        ("LeagueDashPlayerShotLocations", host, season, day.strftime("%m/%d/%Y")),
     ]
 
 
@@ -132,7 +139,7 @@ def test_before_the_seasons_first_game_the_pool_is_past_seasons(client):
 
 
 def test_a_failed_read_pools_the_stored_season(monkeypatch, tmp_path):
-    monkeypatch.setattr(nba_season_tables, "SEASON_TABLES_DIR", tmp_path)
+    monkeypatch.setattr(nba_season_tables, "LEAGUES_DIR", tmp_path)
 
     def blocked(*_, **__):
         raise NBAStatsError("blocked")
@@ -143,8 +150,37 @@ def test_a_failed_read_pools_the_stored_season(monkeypatch, tmp_path):
     assert not list(tmp_path.iterdir())
 
 
-def test_the_wnba_pool_reads_its_season_as_stored(client):
-    players = {2025: {"LVA": {"W": {"POS": "G", "USG_PCT": 0.3}}}}
+def test_a_wnba_training_rows_pool_reads_stats_wnba_through_the_day_before(client, tmp_path):
+    stats = _stats(StatsWNBA, _WNBA_PLAYERS)
 
-    assert _stats(StatsWNBA, players)._player_seasons_through(date(2025, 7, 1)) == players[2025]
-    assert not client.calls
+    pool = stats._player_seasons_through(W)
+
+    eve = W - timedelta(days=1)
+    assert client.dated() == _asked(eve, 2026, nba_client.WNBA_HOST)
+    a = pool["LVA"]["A"]
+    assert (a["USG_PCT"], a["TS_PCT"]) == (0.25, 0.55)
+    # Each share is over A's attempts outside the backcourt, the corners counted once:
+    # 3 + 1 + 2 + 0.5 + 0.5 + 1 = 8. The site's per-game and per-40 tables misstate the corner
+    # threes, so the WNBA reads totals.
+    shares = {zone: a[zone] for zone in ("RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT")}
+    assert shares == pytest.approx(
+        {"RA_PCT": 3 / 8, "ITP_PCT": 1 / 8, "MR_PCT": 2 / 8, "C3_PCT": 1 / 8, "B3_PCT": 1 / 8}
+    )
+    assert [p["per_mode_detailed"] for _, _, p in client.calls if "per_mode_detailed" in p] == [
+        "Totals"
+    ]
+    assert (a["POS"], a["AGE"]) == ("G", 27.0)
+    assert pool["LVA"]["C"] == _WNBA_PLAYERS[2025]["LVA"]["C"]
+    assert stats.players == _WNBA_PLAYERS
+    assert (tmp_path / "wnba" / "season_tables" / "2026" / f"{eve}.json.gz").is_file()
+
+
+def test_the_wnba_update_stores_the_tables_its_serving_reads(client, monkeypatch):
+    _freeze_today(monkeypatch, W)
+    stats = _stats(StatsWNBA, _WNBA_PLAYERS)
+
+    stats._fetch_player_bios(W - timedelta(days=1))
+    stats._player_seasons_through(W)
+    stats._player_seasons_through(W + timedelta(days=1))
+
+    assert client.dated() == _asked(W - timedelta(days=1), 2026, nba_client.WNBA_HOST)

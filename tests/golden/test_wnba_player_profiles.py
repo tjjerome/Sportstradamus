@@ -15,6 +15,8 @@ from sportstradamus.stats import StatsWNBA
 
 # A stats.wnba.com shot-locations row is six id columns, then made / attempted / percentage
 # for each of eight zones.
+_SHOT_COLUMNS = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION", "AGE", "NICKNAME"]
+_SHOT_COLUMNS += ["FGM", "FGA", "FG_PCT"] * 8
 _SHOT_ZONE_COLUMNS = [1, 2, 0.5] * 8
 
 
@@ -42,7 +44,9 @@ def test_a_portland_player_keeps_her_roster_under_our_team_code():
     seattle_bios, seattle_shots = _site_rows(2, "Seattle Forward", "SEA")
 
     frame = stats._build_wnba_player_profiles(
-        player_index, [portland_bios, seattle_bios], {"rowSet": [portland_shots, seattle_shots]}
+        player_index,
+        pd.DataFrame([portland_bios, seattle_bios]),
+        pd.DataFrame([portland_shots, seattle_shots], columns=_SHOT_COLUMNS),
     )
 
     assert frame.index.tolist() == ["Portland Guard", "Seattle Forward"]

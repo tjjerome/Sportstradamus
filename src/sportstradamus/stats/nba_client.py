@@ -78,9 +78,9 @@ class StatsHost(NamedTuple):
 NBA_HOST = StatsHost("https://stats.nba.com/stats/{endpoint}", NBA_STATS_HEADERS)
 WNBA_HOST = StatsHost("https://stats.wnba.com/stats/{endpoint}", WNBA_STATS_HEADERS)
 
-# The LeagueID and host each league's schedule is read from. WNBA goes to its own host so the
-# call spends that host's rate budget, not the NBA's.
-_SCHEDULE_SOURCES: dict[str, tuple[str, StatsHost]] = {
+# The LeagueID and host each league's schedule and season tables are read from. WNBA goes to its
+# own host so its calls spend that host's rate budget, not the NBA's.
+LEAGUE_SOURCES: dict[str, tuple[str, StatsHost]] = {
     "NBA": ("00", NBA_HOST),
     "WNBA": ("10", WNBA_HOST),
 }
@@ -192,7 +192,7 @@ def schedule_games(league: str, season: str | int) -> list[dict]:
     Raises:
         NBAStatsError: If the fetch fails every retry.
     """
-    league_id, host = _SCHEDULE_SOURCES[league]
+    league_id, host = LEAGUE_SOURCES[league]
     game_days = fetch(
         scheduleleaguev2.ScheduleLeagueV2, host=host, league_id=league_id, season=season
     ).get_dict()["leagueSchedule"]["gameDates"]

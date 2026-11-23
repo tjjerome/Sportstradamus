@@ -656,30 +656,36 @@ class StatsNBA(Stats):
                 merged.setdefault(team, {}).update(roster)
         return merged
 
-    def _rosters_as_of(self, rosters: dict, season_key: str, target_game_date: date) -> dict:
+    def _rosters_as_of(self, rosters: dict, season_key: str | int, target_game_date: date) -> dict:
         """The running season's ``rosters`` as the league's tables stood on the date's eve.
 
         The stored season holds the bio and shot-location tables of its last update, which
         for a training row came after the row. Each player the tables list by the eve keeps
-        his stored entry with ``_DATED_COMP_FIELDS`` read then; one they do not list yet
-        drops out, so his latest past season's entry stands. Serving reads yesterday's
-        tables, the ones the update stores, for every game date: a later date's eve is not
-        over yet. A failed read keeps the stored season.
+        his stored entry with the fields :meth:`_dated_comp_fields` reads then; one they do
+        not list yet drops out, so his latest past season's entry stands. Serving reads
+        yesterday's tables, the ones the update stores, for every game date: a later date's
+        eve is not over yet. A failed read keeps the stored season.
         """
         day = min(target_game_date, datetime.today().date()) - timedelta(days=1)
         try:
-            bios, shots = nba_season_tables.read(season_key, day)
+            bios, shots = nba_season_tables.read(self.league, season_key, day)
         except NBAStatsError:
-            logger.warning(f"NBA comps for {target_game_date} pool the stored season tables")
+            logger.warning(
+                f"{self.league} comps for {target_game_date} pool the stored season tables"
+            )
             return rosters
         if bios.empty:
             return {}
-        tables = self._merge_season_tables(bios, shots, synergy={}).drop_duplicates("PLAYER_NAME")
-        as_of = tables.set_index("PLAYER_NAME")[list(_DATED_COMP_FIELDS)].to_dict("index")
+        as_of = self._dated_comp_fields(bios, shots).to_dict("index")
         return {
             team: {name: entry | as_of[name] for name, entry in roster.items() if name in as_of}
             for team, roster in rosters.items()
         }
+
+    def _dated_comp_fields(self, bios: pd.DataFrame, shots: pd.DataFrame) -> pd.DataFrame:
+        """``_DATED_COMP_FIELDS`` from a day's bio and shot tables, by accent-free player name."""
+        tables = self._merge_season_tables(bios, shots, synergy={}).drop_duplicates("PLAYER_NAME")
+        return tables.set_index("PLAYER_NAME")[list(_DATED_COMP_FIELDS)]
 
     def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps at runtime from the loaded data (no stored comps file).
@@ -942,7 +948,7 @@ class StatsNBA(Stats):
         try:
             with tqdm(total=8, desc="NBA league endpoints", unit="endpoint", leave=False) as pbar:
                 pbar.set_postfix_str("PlayerBioStats + ShotLocations")
-                playerBios, shotData = nba_season_tables.read(self.season, as_of)
+                playerBios, shotData = nba_season_tables.read(self.league, self.season, as_of)
                 pbar.update(2)
                 synergy_raw = {}
                 for name, play_type in synergy_types:
