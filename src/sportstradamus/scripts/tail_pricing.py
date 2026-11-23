@@ -201,8 +201,10 @@ def serve(
     ``gate_book`` is a ZINB cell's per-row book gate (the X3 rung leg); ``None`` is the
     pickle's ``hist_gate``. ``ref_line`` is each row's reference line, NaN for none: a row
     off it is anchored there as serving anchors an offer off its quote line
-    (``anchor_to_reference``); ``None`` anchors no row. Last, a pickle's ``book_pull`` pulls
-    each authentic row's price toward the book's (``_book_prob``, ``apply_book_pull``).
+    (``anchor_to_reference``); ``None`` anchors no row.
+
+    Last, a pickle's ``book_pull`` pulls each authentic row's price toward the book's
+    (``_book_prob``, ``apply_book_pull``); knobs without one pull nothing.
 
     Returns:
         ``(p_over, mean, sd)``: the calibrated over-probability, and the served
@@ -327,10 +329,10 @@ def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.Data
     The pickle is read from ``models_dir`` (a sandbox run's own models beside its own dumps).
 
     Returns:
-        The rows (``_TEST_COLUMNS`` and the family's model-only columns), the knobs with the
-        ``model_version`` serving stamps on the cell's legs, the pickle's ``book_pull``
-        (``None`` on a pickle without one) and the cell's ``league`` and ``market``, and the
-        reconstruction error.
+        ``(rows, knobs, error)``. ``rows`` holds ``_TEST_COLUMNS`` and the family's model-only
+        columns. ``knobs`` holds the pickle's serving knobs and ``book_pull`` (``None`` on a
+        pickle without one), the ``model_version`` serving stamps on the cell's legs, and the
+        cell's ``league`` and ``market``. ``error`` is the reconstruction error.
 
     Raises:
         CellExcludedError: no pickle, an unreplayed family, a test set without the model-only
