@@ -40,8 +40,8 @@ from sportstradamus.training.lineage import write_matrix_manifest
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     MODEL_STRATEGY_MODEL_KEY,
+    meditate_command,
 )
-from sportstradamus.training.model_strategy.registry import meditate_command
 from sportstradamus.training.refit import resolve_refit
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
