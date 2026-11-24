@@ -511,13 +511,15 @@
             "hpo_selection": "calibrated",
             "dist_training_loss": "nll",
             "count_dispersion_objective": "pit_ks",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "BLK": {
             "dist": "ZINB",
             "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "refit": "all"
         },
         "BLST": {
             "dist": "DPO",
@@ -525,7 +527,8 @@
             "target_normalization": "none",
             "posthoc": "isotonic_mean",
             "count_dispersion_objective": "crps",
-            "blending": "nll"
+            "blending": "nll",
+            "refit": "all"
         },
         "DREB": {
             "dist": "DPO",
@@ -534,7 +537,8 @@
             "posthoc": "isotonic_mean",
             "blending": "crps",
             "hpo_selection": "calibrated",
-            "count_dispersion_objective": "pit_ks"
+            "count_dispersion_objective": "pit_ks",
+            "refit": "all"
         },
         "FG3M": {
             "dist": "DPO",
@@ -576,7 +580,8 @@
             "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none",
-            "count_dispersion_objective": "pit_ks"
+            "count_dispersion_objective": "pit_ks",
+            "refit": "all"
         },
         "PA": {
             "dist": "SkewNormal",
@@ -596,7 +601,8 @@
             "hpo_selection": "calibrated",
             "dist_training_loss": "nll",
             "sn_param": "direct",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "PRA": {
             "dist": "SkewNormal",
@@ -644,7 +650,8 @@
             "posthoc": "prob_recal_platt",
             "count_dispersion_objective": "pit_ks",
             "zinb_mode": "hurdle",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
