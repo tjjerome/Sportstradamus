@@ -305,7 +305,10 @@ fewer than 20 dates is reported and never judged (a date bootstrap that thin run
 value both arms serve alike to float rounding (rtol 1e-12) is no change, so a probability-only
 candidate (a posthoc map switched off) reads `p1_dmse` exactly 0 rather than an interval of noise.
 `--baseline-book` judges against the sportsbook (P = 1 − `Odds`, mean `Book_EV`, authentic rows)
-for cells production serves at the consensus.
+for cells production serves at the consensus. Beside each interval, the bootstrap's standard error
+(`se`) and `deff_player`: the design effect of the change's clustering by player across dates,
+from the one-way ICC of player-date means (a date's rungs are already drawn together). Both are
+information; rule PR-1 below reads them.
 
 The arms. Candidate and control are refit at the same cut with the served parameters
 (`meditate --params-from`, `--frozen-matrix-dir` on the matrix pinned before the cut,
@@ -375,7 +378,8 @@ stays for a hand read: [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item
 
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)
 
-A challenger replaces an established baseline only if **all three** hold. Computed by
+A cell with priced validation rows picks its recipe by rule PR-1 (next section); the rest keep
+this bar. A challenger replaces an established baseline only if **all three** hold. Computed by
 `supersede_verdict()` on two row-aligned test-set CSVs via
 `sportstradamus ship scorecard --baseline ... --candidate ...`.
 
@@ -385,19 +389,49 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 | S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). The CI is a row bootstrap, not date-clustered, so it is narrower than Gate 1's. |
 | S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; the Memmel z of `sharpe_new − sharpe_current` must exceed 1.645 (one-sided 5%). |
 
-Under `ship sweep --confirm --min-model-weight T` the blend weight is a ship criterion as well:
-a board corner whose fitted `model_weight` is below `T` ranks but never nominates (exactly `1.0`
-= no sportsbook-priced quotes, exempt), a nominee whose blind full-HPO run lands below `T` never
-ranks as a pass, a canonical refit landing below `T` is reverted, and a challenger at or above `T`
-may replace an incumbent below `T` on **S1 alone** — two legs that
-both sit on the book at the line give S2/S3 a paired difference of zero, so they cannot separate
-them. Any other supersession keeps S1 + S2 + S3. See
-[handoffs/low_weight_models.md](handoffs/low_weight_models.md).
-
 The confirm walk applies the same rule twice. Blind, it ranks a live cell's nominees against the
 incumbent recipe's own full-HPO run on the cross-fit validation half; the chosen nominee's
 canonical refit then meets the served incumbent's test set once, and that verdict decides the
 swap.
+
+### Recipe choice on priced rows (rule PR-1)
+
+`ship sweep` and its confirm walk choose a priced cell's recipe on the rows we price
+(`training/model_strategy/priced_select.py`; pre-registered in the live-gap-2 lane brief
+`researcher_priced_recipe_selection.md`). The gates decide eligibility only.
+
+- **Tier**, fixed from the incumbent's blind validation dump before any contrast: `P2` when its
+  posted Underdog/Sleeper rungs span 20 game dates, else `P1` when its `pickem` and `authentic`
+  rows do, else `U`, which keeps S1 + S2 + S3 above. A withheld cell meets the book on its
+  authentic rows (`ship priced --baseline-book`) and counts no rungs; under 20 dates it is tier U,
+  printed "not judged against the book". The incumbent trains first in every sweep, beyond the
+  trial budget, because every contrast reads its dump.
+- **Ranking**: `ship priced`'s `p1_dmse`, candidate minus incumbent on the blind dumps, in every
+  priced tier. A blind dump's P is out of fold while its pickle holds the whole-fit calibration,
+  so the selection half cannot be re-served at a rung; `p2_dbrier` is read on the test half only.
+  The standard error `s` is the date-bootstrap SE × √`deff_player`, and the estimate is shrunk to
+  `d̂·τ₀²/(τ₀² + s²)` with τ₀ = 1.0 % of the incumbent's MSE (`p1_dmse`) or 10 ×10⁻⁴
+  (`p2_dbrier`).
+- **Eligibility**: a blind 6/6 (S1) and a served mean at most twice the matrix's largest `Result`.
+  Each sweep prints the best priced corner eligibility excluded and the gate that excluded it. TPE
+  minimizes the shrunk contrast, an excluded corner is infeasible, and slack only orders compute.
+- **Pick**: the eligible nominee with the lowest shrunk contrast switches only below `−0.5·s`.
+  Nominees within `0.25·s` of it tie; fewer axis changes from the stat_meta recipe win, then
+  higher slack. Otherwise the incumbent stays.
+- **Confirmation**, the pick's one test-half read: S1, and a harm guard that reverts when the
+  tier's primary (`p2_dbrier` on P2, `p1_dmse` on P1) reads above `+1·s`, or its or `p1_dmse`'s
+  interval lies wholly above zero over 20 dates. A refit whose blend weight moved more than .15
+  from its nominee's must instead read below zero. S2 and S3 print and never hold a priced pick;
+  a tier-P2 refit whose rungs cannot be replayed reverts.
+- **Record**: each pick's selection and test-half reads, with both blend weights, go to
+  `research/priced_picks.csv`; the selection-to-test slope and the τ₀ re-estimate
+  (DerSimonian–Laird, by hand after a league sweep, for the next sweep only) are read off it.
+- **No weight floor.** A book-riding candidate wins only where the book itself prices better on
+  the priced rows, which CLAUDE.md says to keep ("agreement with the line is information").
+- **Book pull.** Both sides run at the cell's stat_meta `book_pull`. The pull moves P, never the
+  mean, so the ranking is unaffected; the test-half P2 guard reads at the served pull.
+
+The league verdict and the send stay with `ship priced` on the assembled league candidate.
 
 ---
 

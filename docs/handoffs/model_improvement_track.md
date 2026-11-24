@@ -1663,7 +1663,11 @@ paired Kelly-Sharpe Memmel-z > min. All three → SUPERSEDE (swap the strategy i
 `stat_meta.json`); any fail → HOLD. The S2/S3 asymmetry is deliberate — it stops strategy-churn
 on noise. First-ships use Tier-0 absolute gates only. CLI:
 `sportstradamus ship scorecard --baseline … --candidate …` (both sides full-HPO,
-row-aligned test dumps).
+row-aligned test dumps). That bar now holds only tier-U cells: a cell with 20 game dates of
+priced validation rows picks its recipe, first ship or supersession, by rule PR-1 (gates as
+eligibility, a shrunk priced contrast with the incumbent or the book, a margin, a test-half harm
+guard; [`../ship_gate.md`](../ship_gate.md), "Recipe choice on priced rows"). The blend-weight
+floor is retired with it.
 
 ### §7.2 Feature validation protocol (every §6.3/§6.4/§6.7 item)
 
