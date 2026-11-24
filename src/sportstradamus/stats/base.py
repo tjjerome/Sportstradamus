@@ -2578,13 +2578,10 @@ class Stats:
                     # Book-first: keep only real-odds rows so book-quoted MLB cells stay
                     # Archived-only. Hold participation rows aside as a fallback used only
                     # when the market turns out to have no archived odds at all (below).
-                    quoted = stats["Archived"]
-                    if is_mlb_pitcher_market(market):
-                        # A pitcher prop on a player who faced no batter cannot settle: the
-                        # hitters quoted under walks allowed on 2026-03-26, starters pulled
-                        # before a batter.
-                        quoted = quoted & (usage > 0)
-                    matrix.extend(stats.loc[quoted].to_dict("records"))
+                    # A prop on a player who never batted, or a pitcher who faced no batter,
+                    # cannot settle (Sleeper voids it): pinch runners, starters pulled before
+                    # a batter, the hitters quoted under walks allowed on 2026-03-26.
+                    matrix.extend(stats.loc[stats["Archived"] & (usage > 0)].to_dict("records"))
                     if not matrix:
                         mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
                 else:

@@ -52,8 +52,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   P(Y = 0) is unchanged; pickles fit before the cap predict as before.
 - Atomic writes (`helpers/io._atomic_tmp`) each stage to their own temp file, removed on failure;
   a shared `<path>.tmp` let parallel MLB re-quotes corrupt `game_starts.parquet`.
-- MLB pitcher cells drop rows whose player faced no batter (walks allowed held 131 hitters);
-  MLB profiles stop seeding the team, age, position z, defense position and defense comps
+- MLB cells drop rows that cannot settle: a hitter with no plate appearance (1.4 % of hits)
+  or a pitcher who faced no batter (walks allowed held 131 hitters).
+- MLB profiles stop seeding the team, age, position z, defense position and defense comps
   columns, which read 0 on every row.
 - NFL team-weeks parsed before nflverse published their FTN charting or weekly PFR rows
   re-parse once it does (production held zeros in those columns for every 2026 week); PFR's

@@ -23,7 +23,7 @@ LOG_STRINGS = {
 def no_game_starts(tmp_path, monkeypatch):
     """An empty start store whose schedules list nothing: every row reads at 12:00 UTC."""
     monkeypatch.setattr(game_starts, "LEAGUES_DIR", tmp_path)
-    for league in ("NBA", "NFL"):
+    for league in ("NBA", "NFL", "MLB"):
         monkeypatch.setitem(
             game_starts._SOURCES, league, lambda _league, _missing: pd.Series(dtype=object)
         )
@@ -148,3 +148,45 @@ def test_an_append_reads_the_usage_floor_over_the_whole_loaded_window():
     # The new day's own 15th percentile is 23, which keeps "Rotation" (30); the window's
     # thirteen rows put it at 46.
     assert appended_rows["Player"].tolist() == ["Starter"]
+
+
+@pytest.mark.parametrize(
+    ("market", "kept"),
+    [
+        pytest.param("hits", ["Pinch Hitter"], id="hitter"),
+        pytest.param("walks allowed", ["Starter"], id="pitcher"),
+    ],
+)
+def test_an_mlb_quoted_row_needs_a_plate_appearance_or_a_batter_faced(market, kept):
+    """A prop on a player who never batted, or a pitcher who faced no batter, cannot settle."""
+    game_date = date(2024, 9, 8)
+    gamelog = pd.DataFrame(
+        {
+            "game": "g1",
+            "player": ["Starter", "Pulled Starter", "Pinch Hitter", "Pinch Runner"],
+            "date": game_date,
+            "team": ["AAA", "BBB", "AAA", "BBB"],
+            "opponent": ["BBB", "AAA", "BBB", "AAA"],
+            "home": [True, False, True, False],
+            "plateAppearances": [0, 0, 1, 0],
+            "batters faced": [24, 0, 0, 0],
+            "hits": [0, 0, 1, 0],
+            "walks allowed": [2, 0, 0, 0],
+        }
+    )
+    fake = _training_stats(
+        "MLB",
+        gamelog,
+        get_stats=lambda _market, offers, _game_date: pd.DataFrame(
+            {"Home": [True] * len(offers)}, index=[offer["Player"] for offer in offers]
+        ),
+        resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
+            {"Archived": True}, index=stats.index
+        ),
+    )
+    # StatsMLB's hitter usage: get_training_matrix reads log_strings["usage"] for hitter markets.
+    fake.log_strings = {**LOG_STRINGS, "usage": "plateAppearances"}
+
+    rebuilt = Stats.get_training_matrix(fake, market, cutoff_date=date(2024, 1, 1))
+
+    assert rebuilt["Player"].tolist() == kept
