@@ -636,14 +636,12 @@ def _write_players(players, paths) -> None:
         # Preserve the index — NFL's players DataFrame is indexed by player name.
         with _atomic_tmp(parquet_path) as tmp:
             players.to_parquet(tmp, engine="pyarrow", compression="zstd")
-        if json_path.is_file():
-            json_path.unlink()
+        json_path.unlink(missing_ok=True)
         return
     payload = _stringify_keys(players if isinstance(players, dict) else {})
     with _atomic_tmp(json_path) as tmp, tmp.open("w") as f:
         json.dump(payload, f, default=_json_default)
-    if parquet_path.is_file():
-        parquet_path.unlink()
+    parquet_path.unlink(missing_ok=True)
 
 
 def _read_players(paths):

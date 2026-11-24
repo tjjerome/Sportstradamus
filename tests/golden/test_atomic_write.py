@@ -6,8 +6,6 @@ two died on the rename and the store came out corrupt. A failed write removes it
 and leaves the target as it was.
 """
 
-from __future__ import annotations
-
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
