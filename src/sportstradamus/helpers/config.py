@@ -9,10 +9,11 @@ load cost per call site.
 Per-cell training metadata is split across two files:
 
 * ``stat_meta.json`` — **committed.** Per-cell
-  ``{dist, shipped, target_normalization, posthoc, book_leg, mean_anchor, book_pull}``: the
-  semi-stable ML config humans curate (distribution family, release state, target-normalization
-  slug, post-hoc corrector slug, book-leg pricing per :func:`book_leg`, served-mean source per
-  :func:`mean_anchor`, pull toward the sportsbook per :func:`book_pull`).
+  ``{dist, shipped, target_normalization, posthoc, book_leg, mean_anchor, book_pull, refit}``:
+  the semi-stable ML config humans curate (distribution family, release state,
+  target-normalization slug, post-hoc corrector slug, book-leg pricing per :func:`book_leg`,
+  served-mean source per :func:`mean_anchor`, pull toward the sportsbook per :func:`book_pull`,
+  the rows the served booster fits per :func:`refit`).
 * ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
   the calibration values that meditate recomputes every run.
 
@@ -84,6 +85,12 @@ NO_MEAN_ANCHOR = "none"
 PLAIN_MEAN_ANCHOR = "plain"
 MEAN_ANCHOR_VALUES = frozenset({NO_MEAN_ANCHOR, PLAIN_MEAN_ANCHOR})
 
+# A cell's served booster(s): fit on the oldest 70 % of rows like every layer and gate (the
+# default), or refit on every matrix row once the run is done (training/refit.py); read by refit().
+NO_REFIT = "none"
+ALL_ROWS_REFIT = "all"
+REFIT_VALUES = frozenset({NO_REFIT, ALL_ROWS_REFIT})
+
 # Public union of committed meta + runtime calibration. Each cell carries
 # every field; callers that want a typed view can read the field directly.
 stat_meta: dict[str, dict[str, dict]] = {}
@@ -99,6 +106,7 @@ for _league, _markets in _stat_meta_committed.items():
             "book_leg": _meta_cell.get("book_leg", QUOTE_BOOK_LEG),
             "mean_anchor": _meta_cell.get("mean_anchor", NO_MEAN_ANCHOR),
             "book_pull": _meta_cell.get("book_pull"),
+            "refit": _meta_cell.get("refit", NO_REFIT),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
@@ -169,6 +177,17 @@ def book_pull(league: str, market: str) -> float | None:
     the pickle, never this knob.
     """
     return stat_meta.get(league, {}).get(market, {}).get("book_pull")
+
+
+def refit(league: str, market: str) -> str:
+    """Which rows a cell's served booster(s) fit: ``"none"`` (the oldest 70 %) or ``"all"``.
+
+    ``"all"`` makes ``meditate`` refit the served booster(s) on every matrix row at the selected
+    hyperparameters and round count, carrying every calibration layer of the 70 % sibling, whose
+    gates the cell keeps (:mod:`sportstradamus.training.refit`); a cell without the knob is
+    ``"none"``. Serving reads the pickle, never this knob.
+    """
+    return stat_meta.get(league, {}).get(market, {}).get("refit", NO_REFIT)
 
 
 def book_skewnormal_shape(

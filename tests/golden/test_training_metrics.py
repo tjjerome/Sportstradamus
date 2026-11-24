@@ -196,6 +196,22 @@ def test_pickle_trained_before_the_plain_baseline_reads_nan(patched_paths):
     assert math.isnan(row["plain_rounds"])
 
 
+def test_refit_columns_fill_only_for_a_refit_pickle(patched_paths):
+    """A refit pickle reports its refit; a pickle serving its 70 % fit leaves the columns blank."""
+    refit = _make_model() | {
+        "refit_through": "2026-11-22",
+        "refit_rows": 1200,
+        "refit_rounds": {"model": 30, "mean_anchor": 194},
+        "sibling_booster_sha256": {"model": "a" * 64, "mean_anchor": "b" * 64},
+    }
+    write_model_stats({"NFL": {"refit": refit, "sibling": _make_model()}}, {}, {})
+    rows = pd.read_parquet(patched_paths[0]).set_index("market")
+    assert rows.loc["refit", "refit_through"] == "2026-11-22"
+    assert rows.loc["refit", "refit_rows"] == 1200
+    assert rows.loc["refit", "refit_rounds"] == 30
+    assert rows.loc["sibling", ["refit_through", "refit_rows", "refit_rounds"]].isna().all()
+
+
 def test_default_shipped_is_withheld(patched_paths):
     """Cells absent from the stat_shipped map default to ``"withheld"``."""
     league_models = {"NFL": {"m": _make_model()}}

@@ -325,6 +325,11 @@ def _wide_row(
         "hp_min_child": _param("min_child_samples"),
         "hp_l1": _param("lambda_l1"),
         "hp_l2": _param("lambda_l2"),
+        # Refit-carry (training/refit.py), report-only: blank while the cell serves its 70 % fit,
+        # whose gates every column above describes either way.
+        "refit_through": model.get("refit_through"),
+        "refit_rows": _safe_float(model.get("refit_rows")),
+        "refit_rounds": _safe_float((model.get("refit_rounds") or {}).get("model")),
         # Per-cell calibration
         "cv": float(stat_cv.get(league, {}).get(market, float("nan"))),
         "std": float(stat_std.get(league, {}).get(market, float("nan"))),

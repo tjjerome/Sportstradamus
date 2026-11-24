@@ -115,6 +115,7 @@ from sportstradamus.training.model_strategy import (
 )
 from sportstradamus.training.plain_baseline import fit_plain_baseline, plain_diagnostics
 from sportstradamus.training.prior_models import keep_prior_model
+from sportstradamus.training.refit import finish_refit, lss_refit_rows, resolve_refit
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
     _DISPERSION_C_BOUNDS,
@@ -4133,22 +4134,23 @@ def _step_select_distribution(
         # float(None) raises TypeError in _wide_row's _diag() helper.
         marginal_shape = float("nan")
 
-        zero_adjusted_continuous = dist in ("SkewNormal", "Mixture")
-        if zero_adjusted_continuous and hist_gate > NONZERO_DENOM_GATE:
-            nonzero_mask = y_train_labels > 0
-            X_train = X_train[nonzero_mask]
-            y_train_labels = y_train_labels[nonzero_mask]
-
         denom_col = baselines.resolve_denom_col(
             target_normalization,
             league,
             market,
             X_train.columns,
-            zero_inflated=zero_adjusted_continuous and hist_gate > NONZERO_DENOM_GATE,
+            zero_inflated=hist_gate > NONZERO_DENOM_GATE,
         )
         normalize = strategy.start_mode_flag == "normalized"
         offset_mode = strategy.start_mode_flag == "offset"
-        y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
+        X_train, y_train_labels = baselines.continuous_fit_target(
+            X_train,
+            y_train_labels,
+            strategy,
+            hist_gate=hist_gate,
+            global_mean=global_mean,
+            denom_col=denom_col,
+        )
         dist_obj = _continuous_dist_obj(
             dist, sn_param, stabilization, dist_training_loss, y_train_labels
         )
@@ -4663,6 +4665,7 @@ def train_market(
     count_dispersion_objective: str = "crps",
     sn_param: str = "direct",
     mean_anchor: str | None = None,
+    refit: str | None = None,
     matrix_only: bool = False,
     full_rebuild: bool = False,
     matrix_output: Path | None = None,
@@ -4731,6 +4734,11 @@ def train_market(
             (default) reads the cell's stat_meta knob (:func:`helpers.config.mean_anchor`); the
             hidden ``meditate --mean-anchor`` flag overrides it for sandbox runs. Outside the
             strategy identity: an anchored pickle signs the same corner as an unanchored one.
+        refit: ``"all"`` refits the served booster(s) on every matrix row once the run is done,
+            carrying every layer and gate of the 70 % sibling (:mod:`training.refit`);
+            ``"none"`` serves the sibling. ``None`` (default) reads the cell's stat_meta knob
+            (:func:`helpers.config.refit`); the hidden ``meditate --refit`` flag overrides it
+            for sandbox runs. Outside the strategy identity, as ``mean_anchor`` is.
         params_from: A model pickle whose LightGBM params, ``cv`` and ``shape_ceiling`` this
             run reuses instead of searching and re-deriving them, so a canonical run refits the
             booster a holdout-blind sandbox run ranked.
@@ -4867,6 +4875,14 @@ def train_market(
     hist_gate = dist_info["hist_gate"]
     shape_ceiling = dist_info["shape_ceiling"]
     use_hurdle = dist == "ZINB" and zinb_mode == "hurdle"
+    refit_all = resolve_refit(
+        league,
+        market,
+        refit,
+        use_hurdle=use_hurdle,
+        structural_strategy=structural_strategy,
+        holdout_blind=holdout_blind,
+    )
     strategy_slug = structural_strategy if structural_strategy != BASE_STRUCTURAL_STRATEGY else dist
     selected_spec = get_strategy(strategy_slug)
     runtime_controls = {
@@ -4989,18 +5005,22 @@ def train_market(
             opt_params, penalty_threshold, min(len(splits["X_train"]), _OOF_KS_MAX_ROWS)
         )
         opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
+    # One recipe for every booster the cell fits: the sibling, its affine experts, its refit.
+    fit_settings = {
+        "use_hurdle": use_hurdle,
+        "normalize": dist_info["normalize"],
+        "offset_mode": dist_info["offset_mode"],
+        "shape_ceiling": shape_ceiling,
+        "deterministic": deterministic,
+        "sn_param": sn_param,
+    }
     model = _step_fit_model(
         dist,
         dist_info["dist_obj"],
         splits["X_train"],
         splits["y_train_labels"],
         opt_params,
-        use_hurdle=use_hurdle,
-        normalize=dist_info["normalize"],
-        offset_mode=dist_info["offset_mode"],
-        shape_ceiling=shape_ceiling,
-        deterministic=deterministic,
-        sn_param=sn_param,
+        **fit_settings,
     )
     expert_models: dict[int, object] = {}
     if structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
@@ -5010,12 +5030,7 @@ def train_market(
             dist_obj=dist_info["dist_obj"],
             splits=splits,
             opt_params=opt_params,
-            use_hurdle=use_hurdle,
-            normalize=dist_info["normalize"],
-            offset_mode=dist_info["offset_mode"],
-            shape_ceiling=shape_ceiling,
-            deterministic=deterministic,
-            sn_param=sn_param,
+            **fit_settings,
         )
 
     preds = _step_predict_splits(
@@ -5101,8 +5116,27 @@ def train_market(
         step,
     )
 
+    # A refit's predictions on held-out rows are in-sample, so every layer, gate and diagnostic
+    # above, and the dump and SHAP pass below, stay on the sibling: only the pickle serves it.
+    served_model, served_anchor, refit_record = model, anchor, {}
+    if refit_all:
+        served_model = _step_fit_model(
+            dist,
+            dist_info["dist_obj"],
+            *lss_refit_rows(splits, dist_info),
+            opt_params,
+            **fit_settings,
+        )
+        served_anchor, refit_record = finish_refit(
+            splits,
+            M["Date"],
+            sibling=model,
+            refit_model=served_model,
+            anchor=anchor,
+            determinism=LGB_DETERMINISM if deterministic else {},
+        )
     filedict = _build_filedict(
-        model=model,
+        model=served_model,
         step=step,
         mode_stats=mode_stats,
         skill=skill,
@@ -5137,9 +5171,10 @@ def train_market(
         structural_strategy=structural_strategy,
         algorithm_payload=calibrated.get("structural_calibration_blob"),
         expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
-        mean_anchor=anchor,
+        mean_anchor=served_anchor,
         book_pull=pull,
     )
+    filedict.update(refit_record)
     if dependency_namespace is not None:
         filedict["dependency_identity"] = {
             "namespace": dependency_namespace,

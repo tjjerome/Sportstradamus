@@ -64,7 +64,9 @@ from sportstradamus.helpers.config import (
     BOOK_LEG_VALUES,
     MEAN_ANCHOR_VALUES,
     NO_MEAN_ANCHOR,
+    NO_REFIT,
     QUOTE_BOOK_LEG,
+    REFIT_VALUES,
 )
 from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS
 from sportstradamus.training.calibration import BLENDING_SLUGS, DEFAULT_BLENDING
@@ -130,6 +132,7 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
         ("blending", cell.get("blending", DEFAULT_BLENDING), BLENDING_SLUGS),
         ("book_leg", cell.get("book_leg", QUOTE_BOOK_LEG), BOOK_LEG_VALUES),
         ("mean_anchor", cell.get("mean_anchor", NO_MEAN_ANCHOR), MEAN_ANCHOR_VALUES),
+        ("refit", cell.get("refit", NO_REFIT), REFIT_VALUES),
     )
     for field, value, valid in fields:
         if value not in valid:

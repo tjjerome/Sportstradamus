@@ -16,7 +16,7 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import LazyArchive, book_weights, get_logger, odds_budget
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
-from sportstradamus.helpers.config import MEAN_ANCHOR_VALUES
+from sportstradamus.helpers.config import MEAN_ANCHOR_VALUES, REFIT_VALUES
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
@@ -482,6 +482,16 @@ def _lock_production_artifacts(
     ),
 )
 @click.option(
+    "--refit",
+    type=click.Choice(sorted(REFIT_VALUES)),
+    default=None,
+    hidden=True,
+    help=(
+        "Sandbox override of every cell's stat_meta refit: 'all' serves booster(s) refit on "
+        "every matrix row, carrying the 70 % fit's layers and gates; 'none' serves the 70 % fit."
+    ),
+)
+@click.option(
     "--matrix-only/--no-matrix-only",
     default=False,
     help=(
@@ -562,6 +572,7 @@ def meditate(
     count_dispersion_objective,
     sn_param,
     mean_anchor,
+    refit,
     matrix_only,
     full_rebuild,
     matrix_output,
@@ -829,6 +840,7 @@ def meditate(
                 "count_dispersion_objective": cell_count_dispersion,
                 "sn_param": cell_sn_param,
                 "mean_anchor": mean_anchor,
+                "refit": refit,
                 "matrix_only": matrix_only,
                 "full_rebuild": full_rebuild,
                 "matrix_output": matrix_output,

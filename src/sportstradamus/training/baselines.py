@@ -502,6 +502,39 @@ def resolve_denom_col(
     return "MeanYr"
 
 
+def continuous_fit_target(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    strategy: TargetNormalization,
+    *,
+    hist_gate: float,
+    global_mean: float,
+    denom_col: str,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """The rows and target a continuous family's distributional model fits on.
+
+    A cell whose zero rate clears ``NONZERO_DENOM_GATE`` fits its positive rows only, since its
+    served gate carries the zeros. The strategy's forward transform then maps each outcome into
+    the space the model learns, against the ``global_mean`` and ``denom_col`` the pickle's
+    ``offset_meta`` decodes with, so every fit of one cell must pass the same pair.
+
+    Args:
+        X: Feature rows, in the order the fit sees them.
+        y: Each row's raw outcome.
+        strategy: The cell's target normalization.
+        hist_gate: The cell's zero rate on its training rows.
+        global_mean: Mean raw outcome of the cell's training rows, zeros included.
+        denom_col: Denominator column from :func:`resolve_denom_col`.
+
+    Returns:
+        The kept rows of ``X`` and their transformed targets.
+    """
+    if hist_gate > NONZERO_DENOM_GATE:
+        positive = y > 0
+        X, y = X[positive], y[positive]
+    return X, strategy.forward(y, X, global_mean, denom_col)
+
+
 def serve_denom_col(offset_meta: dict | None, hist_gate: float, columns) -> str:
     """SkewNormal decode denominator, preferring the value training persisted.
 
