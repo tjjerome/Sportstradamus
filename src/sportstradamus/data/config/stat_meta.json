@@ -24,7 +24,8 @@
             "posthoc": "roe_mean",
             "dist_training_loss": "nll",
             "count_dispersion_objective": "pit_ks",
-            "blending": "nll"
+            "blending": "nll",
+            "refit": "all"
         },
         "DREB": {
             "dist": "DPO",
@@ -149,7 +150,8 @@
             "hpo_selection": "calibrated",
             "dist_training_loss": "nll",
             "count_dispersion_objective": "crps",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "STL": {
             "dist": "DPO",
@@ -248,7 +250,8 @@
             "target_normalization": "none",
             "posthoc": "isotonic_mean",
             "count_dispersion_objective": "pit_ks",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "passing yards": {
             "dist": "SkewNormal",
@@ -379,7 +382,8 @@
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "blocked": {
             "dist": "DPO",
@@ -387,7 +391,8 @@
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "crps",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "faceOffWins": {
             "dist": "ZINB",
@@ -435,7 +440,8 @@
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "crps",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "powerPlayPoints": {
             "dist": "NegBin",
@@ -460,7 +466,8 @@
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "crps",
-            "blending": "nll"
+            "blending": "nll",
+            "refit": "all"
         },
         "shotsAgainst": {
             "dist": "SkewNormal",
@@ -476,7 +483,8 @@
             "posthoc": "none",
             "dist_training_loss": "nll",
             "sn_param": "direct",
-            "blending": "nll"
+            "blending": "nll",
+            "refit": "all"
         },
         "sogBS": {
             "dist": "DPO",
