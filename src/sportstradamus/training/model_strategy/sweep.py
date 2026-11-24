@@ -1016,7 +1016,6 @@ def _priced_baseline(context: CellContext, csv_path: pathlib.Path) -> priced_sel
             )
             with _archive_read_only() as con:
                 found = ladder_rungs(con, league, market, keys)
-            cache.parent.mkdir(parents=True, exist_ok=True)
             posted = rows.iloc[found["rid"].to_numpy()][["Player", "Date", "Result"]]
             # Atomic: a sweep killed mid-write would leave a truncated cache every later sweep
             # of the cell reads as a hit.
@@ -2406,8 +2405,7 @@ def _note_board_only_flags(
     type=click.IntRange(min=1),
     default=None,
     help="Cap each cell's confirm walk at its first N nominees, best-ranked first (board slack, "
-    "or a priced cell's shrunk priced contrast). "
-    "Unset walks every nominee. Requires --confirm.",
+    "or a priced cell's shrunk priced contrast). Unset walks every nominee. Requires --confirm.",
 )
 @click.option(
     "--confirm-hours",
