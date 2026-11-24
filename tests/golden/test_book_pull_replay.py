@@ -131,7 +131,7 @@ def test_a_dump_training_pulled_reconstructs_only_under_the_pull(tmp_path):
     dump.assign(P=pulled).to_csv(path, index=False)
     _, knobs, error = load_cell(path, tmp_path)
     assert error <= RECONSTRUCTION_TOL
-    assert knobs == _KNOBS | {"book_pull": pull, "model_version": "fixture"}
+    assert knobs == _KNOBS | {"book_pull": pull, "model_version": "fixture", "refit_through": None}
 
     dump.assign(P=unpulled).to_csv(path, index=False)
     with pytest.raises(CellExcludedError, match="reconstruction"):

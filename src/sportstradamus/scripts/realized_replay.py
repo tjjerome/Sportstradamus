@@ -1,8 +1,9 @@
 """The offline realized-money replay: the live rule on held-out rows at posted rungs and market lines.
 
 The ``posted`` scope prices each dump's rows at the Underdog and Sleeper rungs the archive ladder
-held for them (``tail_pricing.price_cell``, the dump's own pickle from ``--models-dir``), keeps the
-rungs each prop still held at its last poll (``still_posted``), runs the live board's rule on them
+held for them (``tail_pricing.price_cell``, the dump's own pickle from ``--models-dir``, which
+leaves out a refit pickle's rows dated on or before its ``refit_through``), keeps the rungs each
+prop still held at its last poll (``still_posted``), runs the live board's rule on them
 (``tail_scorecard.replay_live_rule``) and keeps the recommended even-pick legs dated in the live
 window. The live side is the live record's recommended even-pick legs on the same rows (league,
 cell, player, date), and ``live_same_version`` is the share of them the dumps' own pickle read: a
@@ -11,7 +12,8 @@ the replay's representativeness is read where that share is 1, on forward dumps.
 
 The ``cell``, ``league`` and ``l2`` scopes are the first replay, kept until L2's pre-registered read
 finishes: ``realized.recommended`` (``Win Prob x Payout - 1 >= 0.05``) over each cell's test rows
-dated before ``--offline-before`` at Underdog's even-pick payout, on the rows that hold a market line:
+dated before ``--offline-before``, read at the dump's own ``P`` (no pickle re-serves them), at
+Underdog's even-pick payout, on the rows that hold a market line:
 pick'em rows (``QuoteAuthenticity == "pickem"``) and sportsbook rows priced within
 ``NEAR_EVEN_BAND`` of even. The league rows also carry the L2 gap-form column
 (``implied_live_hit_lb``, ``l2_flag``).

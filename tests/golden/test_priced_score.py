@@ -1,4 +1,6 @@
-"""``ship priced``: P1/P2 selection, the push drop, date-clustered intervals, the verdict."""
+"""``ship priced``: P1/P2 selection, the push drop, date-clustered intervals, the verdict and
+the quote-class split.
+"""
 
 from __future__ import annotations
 
@@ -104,10 +106,11 @@ def test_p2_keeps_the_rungs_still_posted_that_both_arms_priced():
             "Line": [20.5, 21.5, 19.5, 10.5],
             "last_poll": [last, last, last - pd.Timedelta(hours=3), last],
             "Actual": [22.0, 22.0, 22.0, 9.0],
+            "QuoteAuthenticity": AUTHENTIC,
             "p_serving": [0.6, 0.55, 0.7, 0.4],
         }
     )
-    baseline = candidate.head(3).assign(p_serving=[0.5, 0.45, 0.65])
+    baseline = candidate.head(3).assign(p_serving=[0.5, 0.45, 0.65], QuoteAuthenticity="pickem")
 
     rungs = ps.p2_rungs(candidate, baseline)
 
@@ -117,6 +120,7 @@ def test_p2_keeps_the_rungs_still_posted_that_both_arms_priced():
     assert rungs["p_cand"].tolist() == [0.6, 0.55]
     assert rungs["p_base"].tolist() == [0.5, 0.45]
     assert rungs["Result"].tolist() == [22.0, 22.0]
+    assert rungs["QuoteAuthenticity"].tolist() == [AUTHENTIC, AUTHENTIC]
     assert ps.p2_rungs(candidate, pd.DataFrame()).empty
 
 
@@ -332,3 +336,130 @@ def test_contradictory_baseline_options_are_usage_errors(tmp_path, baseline_args
 
     assert result.exit_code == 2, result.output
     assert message in result.output
+
+
+# Not DEFAULT_SEED, so a split that ignores the run's seed reads other intervals.
+_SPLIT_SEED = 11
+
+
+def _classed_reads() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Two cells' P1 rows over six dates and NBA_PTS's P2 rungs, the quote classes interleaved.
+
+    Player a's props are authentic, b's pick'em and c's synthetic: c holds rungs but no P1 row,
+    and its rungs come last.
+    """
+    rng = np.random.default_rng(5)
+    dates = pd.date_range("2026-11-01", periods=6).strftime("%Y-%m-%d")
+    p1 = _p1(
+        cell=np.repeat(["NBA_PTS", "NBA_REB"], 12),
+        Player=np.tile(["a", "b"], 12),
+        Date=np.tile(np.repeat(dates, 2), 2),
+        QuoteAuthenticity=np.tile([AUTHENTIC, "pickem"], 12),
+        Result=rng.integers(0, 6, 24).astype(float),
+        Odds=rng.uniform(0.4, 0.6, 24),
+        p_cand=rng.uniform(0.2, 0.8, 24),
+        mean_cand=rng.uniform(1.0, 4.0, 24),
+    )
+    p2 = pd.DataFrame(
+        {
+            "League": "NBA",
+            "cell": "NBA_PTS",
+            "Player": ["a", "b"] * 3 + ["c"] * 3,
+            "Date": [*np.repeat(dates[:3], 2), *dates[:3]],
+            "Platform": "Underdog",
+            "Line": 3.5,
+            "Result": rng.integers(0, 6, 9).astype(float),
+            "QuoteAuthenticity": [AUTHENTIC, "pickem"] * 3 + ["synthetic"] * 3,
+            "p_cand": rng.uniform(0.2, 0.8, 9),
+            "p_base": 0.5,
+        }
+    )
+    return p1, p2
+
+
+def _split(p1: pd.DataFrame, p2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    table = ps.judge(ps.scope_table(ps.row_changes(p1, p2), _SPLIT_SEED))
+    return table, ps.quote_class_table(p1, p2, table, _SPLIT_SEED)
+
+
+def test_the_quote_class_split_partitions_each_cells_reads():
+    p1, p2 = _classed_reads()
+
+    table, split = _split(p1, p2)
+
+    assert split.columns.tolist() == [
+        "league",
+        "cell",
+        "quotes",
+        "statistic",
+        "n_rows",
+        "n_dates",
+        "estimate",
+        "lo",
+        "hi",
+        "deff_player",
+        "primary",
+        "verdict",
+    ]
+    # Each read's rows land in one class apiece, c's rungs without a P1 row among them. No
+    # pooled scope, no toward_book (authentic rows only, so the main table's already).
+    key = ["league", "cell", "statistic"]
+    per_cell = table[table["cell"].ne(ps.POOLED) & table["statistic"].ne("toward_book")]
+    assert (
+        split.groupby(key)["n_rows"].sum().to_dict() == per_cell.set_index(key)["n_rows"].to_dict()
+    )
+    p2_classes = split[split["statistic"].eq("p2_dbrier")].set_index("quotes")["n_rows"]
+    assert p2_classes.to_dict() == {"authentic": 3, "not authentic": 6}
+    # primary and verdict are the main table's, never the split's own.
+    marked = table.assign(primary=False, verdict="the main table's")
+    copied = ps.quote_class_table(p1, p2, marked, _SPLIT_SEED)
+    assert not copied["primary"].any() and set(copied["verdict"]) == {"the main table's"}
+
+
+def test_each_quote_class_reads_as_scope_table_on_its_own_rows_under_the_runs_seed():
+    p1, p2 = _classed_reads()
+
+    _, split = _split(p1, p2)
+
+    columns = ["league", "cell", "statistic", "n_rows", "n_dates", "estimate", "lo", "hi"]
+    for quotes, players in (("authentic", ["a"]), ("not authentic", ["b", "c"])):
+        rows, rungs = (frame[frame["Player"].isin(players)] for frame in (p1, p2))
+        alone = ps.scope_table(ps.row_changes(rows, rungs), _SPLIT_SEED)
+        alone = alone[alone["cell"].ne(ps.POOLED) & alone["statistic"].ne("toward_book")]
+        pd.testing.assert_frame_equal(
+            split.loc[split["quotes"].eq(quotes), [*columns, "deff_player"]].reset_index(drop=True),
+            alone[[*columns, "deff_player"]].reset_index(drop=True),
+        )
+
+
+def test_the_split_lands_beside_out_and_leaves_the_main_csv_byte_identical(tmp_path, monkeypatch):
+    p1, p2 = _classed_reads()
+    _, split = _split(p1, p2)
+
+    def served(cells, dumps, models, start, arm):
+        own, other = ("cand", "base") if arm == "candidate" else ("base", "cand")
+        arm_rows = p1.drop(columns=["League", f"p_{other}", f"mean_{other}"])
+        arm_rows = arm_rows.rename(columns={f"p_{own}": "p", f"mean_{own}": "mean"})
+        return {cell: rows.drop(columns="cell") for cell, rows in arm_rows.groupby("cell")}
+
+    monkeypatch.setattr(ps, "_dump_cells", lambda dumps, leagues: set(p1["cell"]))
+    monkeypatch.setattr(ps, "_served_cells", served)
+    monkeypatch.setattr(ps, "_posted", lambda cells, arms, archive, start: p2)
+    archive = tmp_path / "archive.duckdb"
+    archive.touch()
+    args = [
+        *("--candidate-test-sets", str(tmp_path), "--candidate-models", str(tmp_path)),
+        *("--baseline-test-sets", str(tmp_path), "--baseline-models", str(tmp_path)),
+        *("--archive", str(archive), "--start", "2026-11-01", "--seed", str(_SPLIT_SEED)),
+    ]
+
+    split_run = CliRunner().invoke(ps.main, [*args, "--out", str(tmp_path / "split.csv")])
+    monkeypatch.setattr(ps, "quote_class_table", lambda *_: pd.DataFrame())
+    plain_run = CliRunner().invoke(ps.main, [*args, "--out", str(tmp_path / "plain.csv")])
+
+    assert split_run.exit_code == 0, split_run.output
+    assert plain_run.exit_code == 0, plain_run.output
+    assert (tmp_path / "split.csv").read_bytes() == (tmp_path / "plain.csv").read_bytes()
+    beside = tmp_path / "split.by_quote_class.csv"
+    assert f"split by quote class to {beside}" in split_run.output
+    pd.testing.assert_frame_equal(pd.read_csv(beside), split)

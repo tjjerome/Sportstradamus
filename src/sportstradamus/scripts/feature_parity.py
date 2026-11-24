@@ -45,6 +45,10 @@ features' doing (between versions, the model's). The line it is read at:
   ``Quote Line``, the consensus line when the row was scored. A row no book quoted has none
   and is left out.
 
+A refit file (one carrying ``refit_through``) trained on every row through that date, so no
+row dated on or before it is scored through that file, in any mode
+(``tail_pricing.out_of_sample``).
+
 Dev-side and read-only: it never runs in production, no served probability depends on it,
 and its one write is the sandbox CSV at ``--out``.
 """
@@ -79,6 +83,7 @@ from sportstradamus.prediction.model_prob import (
     _model_over_and_push,
     _resolve_serving_strategy,
 )
+from sportstradamus.scripts.tail_pricing import CellExcludedError, out_of_sample
 
 TRAINING_DATA_DIR = Path(str(pkg_resources.files(data) / "training_data"))
 _DEFAULT_OUT = Path("/tmp/feature_parity.csv")
@@ -228,9 +233,11 @@ def check_version(
 
     Returns:
         The summary record (``note`` set when the version does not reproduce), the features
-        that differ on matched rows, and one record per other version.
+        that differ on matched rows, and one record per other version, over the rows that
+        version's file did not train on (``out_of_sample``; a note when it trained on all).
     """
     league, market, version = (rows[key].iat[0] for key in ("League", "Market", "Model Version"))
+    cell = market_file_slug(league, market)
     expected = filedict["expected_columns"]
     scoreable, pairs = {}, []
     for other, other_file in others.items():
@@ -321,12 +328,21 @@ def check_version(
         )
         features = features[features["differ_share"] > 0]
 
-    quoted = rows.index[reproduced & rows["Quote Line"].notna()]
-    line = rows.loc[quoted, "Quote Line"]
-    own = over_probability(served.loc[quoted], filedict, line)
+    quoted = rows[reproduced & rows["Quote Line"].notna()]
+    own = pd.Series(
+        over_probability(served.loc[quoted.index], filedict, quoted["Quote Line"]),
+        index=quoted.index,
+    )
     for other, outputs in rescored.items():
-        dp = pd.Series(
-            over_probability(pd.concat(outputs).loc[quoted], scoreable[other], line) - own
+        try:
+            unseen = out_of_sample(quoted, scoreable[other].get("refit_through"), cell)
+        except CellExcludedError as error:
+            pairs.append({"other_version": other, "note": str(error)})
+            continue
+        rescore = pd.concat(outputs).loc[unseen.index]
+        dp = (
+            over_probability(rescore, scoreable[other], unseen["Quote Line"])
+            - own.loc[unseen.index]
         )
         pairs.append(
             {
@@ -375,6 +391,9 @@ def check_cell(
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """One cell's logged rows, version by version or pooled under the served file.
 
+    A file scores only the rows its booster did not train on (``out_of_sample``), and a
+    version left with none is excluded with a note.
+
     Returns:
         Summary records per model version (``note`` set on an excluded one), the differing
         features per version, and the version-pair records.
@@ -415,9 +434,14 @@ def check_cell(
             note = refused.get(version, "no model file on disk carries this version")
             records.append(tag | {"log_rows": len(rows), "note": note})
             continue
+        try:
+            unseen = out_of_sample(rows, files[version].get("refit_through"), cell)
+        except CellExcludedError as error:
+            records.append(tag | {"log_rows": len(rows), "note": str(error)})
+            continue
         others = {v: f for v, f in files.items() if v != version} if compare_versions else {}
         record, differing, version_pairs = check_version(
-            rows, files[version], others, train, fixed_file
+            unseen, files[version], others, train, fixed_file
         )
         records.append(tag | record)
         features += differing.assign(**tag).to_dict("records")

@@ -6,7 +6,9 @@ serving knobs. The training convention must first rebuild the dump's own ``P`` (
 self-check that the chain is the pickle's); the serving convention then prices each Underdog
 and Sleeper rung the ladder held for the row. At the rungs both conventions anchor a line off
 an authentic row's own line there, as serving anchors an offer off its sportsbook quote's
-line. Every input is read-only, the archive opened ``read_only``.
+line. A refit pickle prices no row dated on or before its ``refit_through``, which its booster
+trained on (``out_of_sample``, shared by every scorer that re-serves rows through a pickle).
+Every input is read-only, the archive opened ``read_only``.
 """
 
 from __future__ import annotations
@@ -329,6 +331,34 @@ def dump_paths(directory: Path, leagues: Collection[str]) -> list[Path]:
     )
 
 
+def out_of_sample(rows: pd.DataFrame, refit_through: str | None, cell: str) -> pd.DataFrame:
+    """The ``rows`` dated after ``refit_through``: the rows a refit pickle's booster never saw.
+
+    A refit pickle's booster trained on every row through ``refit_through`` (an ISO date), so
+    re-serving an earlier row through it scores the row in sample. The rows dropped are
+    reported per ``cell``; ``None``, a pickle that was not refit, keeps every row.
+
+    Raises:
+        CellExcludedError: ``rows`` is not empty and every row is on or before
+            ``refit_through``.
+    """
+    if refit_through is None:
+        return rows
+    # ISO dates order as text, so the rows' day strings compare unparsed, as ``start`` does.
+    unseen = rows[rows["Date"] > refit_through]
+    if dropped := len(rows) - len(unseen):
+        if unseen.empty:
+            raise CellExcludedError(
+                f"every {cell} row ({rows['Date'].min()} to {rows['Date'].max()}) is on or "
+                f"before refit_through {refit_through}, in the refit's training rows"
+            )
+        tqdm.write(
+            f"{cell}: dropped {dropped} of {len(rows)} rows on or before refit_through "
+            f"{refit_through} (in the refit's training rows)"
+        )
+    return unseen
+
+
 def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.DataFrame, dict, float]:
     """A dump's test rows and its pickle's serving knobs, checked to rebuild the dump's own ``P``.
 
@@ -336,9 +366,9 @@ def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.Data
 
     Returns:
         ``(rows, knobs, error)``. ``rows`` holds ``_TEST_COLUMNS`` and the family's model-only
-        columns. ``knobs`` holds the pickle's serving knobs and ``book_pull`` (``None`` on a
-        pickle without one), the ``model_version`` serving stamps on the cell's legs, and the
-        cell's ``league`` and ``market``. ``error`` is the reconstruction error.
+        columns. ``knobs`` holds the pickle's serving knobs, ``book_pull`` and ``refit_through``
+        (``None`` on a pickle without one), the ``model_version`` serving stamps on the cell's
+        legs, and the cell's ``league`` and ``market``. ``error`` is the reconstruction error.
 
     Raises:
         CellExcludedError: no pickle, an unreplayed family, a test set without the model-only
@@ -355,7 +385,12 @@ def load_cell(path: Path, models_dir: Path = SERVED_MODELS_DIR) -> tuple[pd.Data
     knobs = {key: filedict[key] for key in _KNOBS}
     # The stamp serving writes on the cell's legs; a pre-stamp pickle gets its legacy hash.
     knobs["model_version"] = resolve_model_version(str(pickle_path), filedict)
-    knobs |= {"book_pull": filedict.get("book_pull"), "league": league, "market": market}
+    knobs |= {
+        "book_pull": filedict.get("book_pull"),
+        "refit_through": filedict.get("refit_through"),
+        "league": league,
+        "market": market,
+    }
     dist = knobs["distribution"]
     if dist not in _FAMILY_COLUMNS:
         raise CellExcludedError(f"{dist} is not replayed")
@@ -385,14 +420,16 @@ def price_cell(
     price, last poll, sportsbook coverage and consensus, each convention's over-price and
     the served mean and SD), the pickle knobs, the cell's window test-row count and
     reconstruction error, and its information-test rows. The cell's pickle is read from
-    ``models_dir`` (``load_cell``).
+    ``models_dir`` (``load_cell``); a refit pickle's in-sample rows leave the window first
+    (``out_of_sample``).
 
     Raises:
-        CellExcludedError: ``load_cell``'s reasons, or no rung.
+        CellExcludedError: ``load_cell``'s reasons, every window row in sample, or no rung.
     """
     rows, knobs, error = load_cell(path, models_dir)
     league, market = knobs["league"], knobs["market"]
-    rows = rows[rows["Date"] >= start].reset_index(drop=True)
+    rows = out_of_sample(rows[rows["Date"] >= start], knobs["refit_through"], path.stem)
+    rows = rows.reset_index(drop=True)
     keys = pd.DataFrame(
         {
             "rid": rows.index,

@@ -6,10 +6,11 @@ their own ``Line``. P2 is the Underdog and Sleeper rungs each prop still held at
 poll: the rungs the ``realized-replay`` posted scope prices, before its live rule. Each arm
 reads its real served probability and mean: the dump re-served through the arm's own pickle
 under the serving convention (``tail_pricing.serve_live``, and ``price_dumps`` at the
-rungs). The arms meet on the rows both scored at the same line. With ``--baseline-book``
-the baseline is the sportsbook itself, on authentic P1 rows only: P(over) ``1 - Odds``
-(the dump's ``Odds`` is the book's under-probability) and mean ``Book_EV``, for the cells
-production serves at the book consensus.
+rungs); a refit pickle scores no row dated on or before its ``refit_through``
+(``tail_pricing.out_of_sample``). The arms meet on the rows both scored at the same line.
+With ``--baseline-book`` the baseline is the sportsbook itself, on authentic P1 rows only:
+P(over) ``1 - Odds`` (the dump's ``Odds`` is the book's under-probability) and mean
+``Book_EV``, for the cells production serves at the book consensus.
 
 Statistics, candidate minus baseline, each a mean over rows with a 95 % interval from
 ``N_RESAMPLES`` resamples of whole game dates; negative is better:
@@ -29,6 +30,9 @@ A value both arms serve alike, to float rounding (``SAME_VALUE_RTOL``), is no ch
 Beside each interval, ``deff_player``: the design effect of the change's clustering by player
 across dates, 1 + (sum n_i^2 / N - 1) * ICC over player-date means, the one-way ICC truncated
 at 0 (information, never in a verdict).
+
+Beside ``--out``, ``<stem>.by_quote_class.csv`` reads each cell apart by quote class,
+authentic or not (``quote_class_table``); a report that never changes a verdict.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ from sportstradamus.scripts.tail_pricing import (
     dump_paths,
     load_cell,
     open_archive,
+    out_of_sample,
     price_dumps,
     serve_live,
 )
@@ -76,7 +81,7 @@ STATISTICS = (*JUDGED, "toward_book")
 
 _ROW_KEY = ["Player", "Date"]
 _RUNG_KEY = ["League", "cell", "Player", "Date", "Platform", "Line"]
-_P2_COLUMNS = [*_RUNG_KEY, "Result", "p_cand", "p_base"]
+_P2_COLUMNS = [*_RUNG_KEY, "Result", "QuoteAuthenticity", "p_cand", "p_base"]
 _CHANGE_COLUMNS = ["League", "cell", "Player", "Date", "statistic", "change"]
 _TABLE_COLUMNS = [
     "league",
@@ -91,6 +96,8 @@ _TABLE_COLUMNS = [
     "primary",
     "verdict",
 ]
+# The quote-class split keeps the main table's columns, with each row's class after its cell.
+_SPLIT_COLUMNS = [*_TABLE_COLUMNS[:2], "quotes", *_TABLE_COLUMNS[2:]]
 
 
 def p1_rows(
@@ -122,13 +129,13 @@ def p2_rungs(candidate: pd.DataFrame, baseline: pd.DataFrame) -> pd.DataFrame:
     """The P2 rungs: those each prop still held at its last poll, priced by both arms.
 
     The arms' ``price_dumps`` rungs, each cut by ``still_posted`` as ``realized-replay``
-    cuts them, inner-joined on (cell, Player, Date, Platform, Line); the outcome is the
-    candidate's.
+    cuts them, inner-joined on (cell, Player, Date, Platform, Line); the outcome and the
+    prop's ``QuoteAuthenticity`` (its dump row's) are the candidate's.
     """
     if candidate.empty or baseline.empty:
         return pd.DataFrame(columns=_P2_COLUMNS)
     cand, base = (rungs[still_posted(rungs)] for rungs in (candidate, baseline))
-    joined = cand[[*_RUNG_KEY, "Actual", "p_serving"]].merge(
+    joined = cand[[*_RUNG_KEY, "Actual", "QuoteAuthenticity", "p_serving"]].merge(
         base[[*_RUNG_KEY, "p_serving"]],
         on=_RUNG_KEY,
         suffixes=("_cand", "_base"),
@@ -273,21 +280,53 @@ def judge(table: pd.DataFrame) -> pd.DataFrame:
     return table.assign(verdict=[verdicts[scope] for scope in scopes])
 
 
+def quote_class_table(
+    p1: pd.DataFrame, p2: pd.DataFrame, table: pd.DataFrame, seed: int
+) -> pd.DataFrame:
+    """Each cell's reads split by quote class, ``authentic`` or ``not authentic``; report-only.
+
+    A P1 row is classed by its own ``QuoteAuthenticity``, a P2 rung by its prop's: an authentic
+    prop holds a sportsbook quote, which the book pull and the reference anchor act on. Each
+    class is ``scope_table`` on its own rows under ``seed``, per cell, without ``toward_book``
+    (authentic rows only, so already the main table's). ``primary`` and ``verdict`` are the
+    main ``table``'s: the split never changes a verdict.
+    """
+    p1_authentic = p1["QuoteAuthenticity"].eq(AUTHENTIC)
+    p2_authentic = p2["QuoteAuthenticity"].eq(AUTHENTIC)
+    classes = {
+        "authentic": (p1[p1_authentic], p2[p2_authentic]),
+        "not authentic": (p1[~p1_authentic], p2[~p2_authentic]),
+    }
+    split = pd.concat(
+        [
+            scope_table(row_changes(rows, rungs), seed).assign(quotes=quotes)
+            for quotes, (rows, rungs) in classes.items()
+            if not (rows.empty and rungs.empty)
+        ],
+        ignore_index=True,
+    )
+    split = split[split["cell"].ne(POOLED) & split["statistic"].ne("toward_book")]
+    verdicts = table[["league", "cell", "statistic", "primary", "verdict"]]
+    split = split.merge(verdicts, on=["league", "cell", "statistic"])
+    return split.sort_values(["league", "cell"], kind="stable", ignore_index=True)[_SPLIT_COLUMNS]
+
+
 def _served_cells(
     cells: list[str], dumps: Path, models: Path, start: str, arm: str
 ) -> dict[str, pd.DataFrame]:
     """Each cell's dump rows dated from ``start`` with the arm's served ``p`` and ``mean``.
 
-    A cell ``load_cell`` refuses is printed with its reason and left out.
+    A refit pickle's in-sample rows are dropped first (``out_of_sample``). A cell ``load_cell``
+    refuses, or with every row in sample, is printed with its reason and left out.
     """
     served = {}
     for cell in tqdm(cells, desc=f"serving the {arm}"):
         try:
             rows, knobs, _ = load_cell(dumps / f"{cell}.csv", models)
+            rows = out_of_sample(rows[rows["Date"] >= start], knobs["refit_through"], cell)
         except CellExcludedError as exc:
             click.echo(f"excluded {cell} ({arm}): {exc}")
             continue
-        rows = rows[rows["Date"] >= start]
         p_over, mean, _ = serve_live(rows, knobs)
         served[cell] = rows.assign(p=p_over, mean=mean)
     return served
@@ -429,3 +468,7 @@ def main(
     click.echo(table.to_string(index=False, float_format=lambda x: f"{x:+.2f}"))
     table.to_csv(out, index=False)
     click.echo(f"wrote {len(table)} rows to {out}")
+    split = quote_class_table(p1, p2, table, seed)
+    split_out = out.with_name(f"{out.stem}.by_quote_class.csv")
+    split.to_csv(split_out, index=False)
+    click.echo(f"wrote {len(split)} rows split by quote class to {split_out}")
