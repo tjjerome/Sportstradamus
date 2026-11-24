@@ -203,7 +203,6 @@ class HurdleZINB:
         if seed is not None:
             det_kwargs = seed_everything(seed)
 
-        # --- Stage 1: binary classifier on zero/non-zero label ---
         binary_labels = (y == 0).astype(int)
         clf_params = {k: v for k, v in hp.items() if k in _LGB_ALLOWED_KEYS}
         clf_params = {
@@ -216,7 +215,6 @@ class HurdleZINB:
         dtrain_clf = lgb.Dataset(X, label=binary_labels)
         self.clf = lgb.train(clf_params, dtrain_clf, num_boost_round=rounds)
 
-        # --- Stage 2: NegBin LightGBMLSS on positive subset only ---
         pos_mask = y > 0
         X_pos = X[pos_mask]
         y_pos = y[pos_mask]
@@ -299,7 +297,6 @@ class HurdleZINB:
         # Stage 2: NegBin parameters on full X (not just positives).
         self.set_model_start_values(X)
         nb_preds = self.nb.predict(X, pred_type="parameters")
-        nb_preds.index = X.index
 
         total_count = nb_preds["total_count"].to_numpy()
         probs = nb_preds["probs"].to_numpy()
