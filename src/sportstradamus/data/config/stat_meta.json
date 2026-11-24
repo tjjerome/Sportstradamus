@@ -120,7 +120,8 @@
             "sn_param": "direct",
             "blending": "crps",
             "mean_anchor": "plain",
-            "book_pull": 0.83
+            "book_pull": 0.83,
+            "refit": "all"
         },
         "PTS": {
             "dist": "SkewNormal",
@@ -169,7 +170,8 @@
             "shipped": "devel",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         }
     },
     "NFL": {
@@ -181,7 +183,8 @@
             "dist_training_loss": "nll",
             "sn_param": "direct",
             "blending": "nll",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "carries": {
             "dist": "DPO",
@@ -191,7 +194,8 @@
             "count_dispersion_objective": "pit_ks",
             "blending": "nll",
             "dist_training_loss": "nll",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "completions": {
             "dist": "SkewNormal",
@@ -202,7 +206,8 @@
             "sn_param": "direct",
             "blending": "nll",
             "hpo_selection": "calibrated",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
@@ -218,7 +223,8 @@
             "posthoc": "cdf_recal_isotonic",
             "blending": "nll",
             "dist_training_loss": "crps",
-            "sn_param": "direct"
+            "sn_param": "direct",
+            "refit": "all"
         },
         "interceptions": {
             "dist": "DPO",
@@ -291,7 +297,8 @@
             "dist_training_loss": "crps",
             "sn_param": "centered",
             "blending": "crps",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "receptions": {
             "dist": "SkewNormal",
@@ -303,7 +310,8 @@
             "blending": "nll",
             "hpo_selection": "calibrated",
             "mean_anchor": "plain",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "rushing tds": {
             "dist": "ZINB",
@@ -319,7 +327,8 @@
             "dist_training_loss": "crps",
             "sn_param": "centered",
             "blending": "crps",
-            "mean_anchor": "plain"
+            "mean_anchor": "plain",
+            "refit": "all"
         },
         "sacks taken": {
             "dist": "SkewNormal",
@@ -337,7 +346,8 @@
             "posthoc": "prob_recal_isotonic",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "crps"
+            "blending": "crps",
+            "refit": "all"
         },
         "tds": {
             "dist": "NegBin",
@@ -347,7 +357,8 @@
             "dist_training_loss": "nll",
             "count_dispersion_objective": "crps",
             "blending": "nll",
-            "book_pull": 0.14
+            "book_pull": 0.14,
+            "refit": "all"
         },
         "yards": {
             "dist": "SkewNormal",
