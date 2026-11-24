@@ -1,16 +1,21 @@
 # Lane record — low-weight models: the model legs the book is hiding
 
-**Status: ACTIVE (opened 2026-09-01; first campaign wave closed 2026-09-02).** Context spine: CLAUDE.md,
-[docs/ARCHITECTURE.md](../ARCHITECTURE.md), [ship_gate.md](../ship_gate.md),
-[model_improvement_track.md](model_improvement_track.md) §6.5 / §8.2.
+**Status: CLOSED 2026-11-24 (opened 2026-09-01).** Rule PR-1 ([ship_gate.md](../ship_gate.md),
+"Recipe choice on priced rows") replaced this lane's criterion: a priced cell's recipe is chosen
+on the rows we price, the gates decide eligibility only, and there is no weight floor, so
+`ship sweep --min-model-weight` is gone. A book-riding weight stands wherever the book prices those
+rows better (CLAUDE.md, "Judging model changes"). What follows is the lane's record; its owner
+packets were not re-checked at the close. Context spine: CLAUDE.md,
+[docs/ARCHITECTURE.md](../ARCHITECTURE.md), [model_improvement_track.md](model_improvement_track.md)
+§6.5 / §8.2.
 
-## Mission
+## Mission (retired by PR-1)
 
-Breadth-75 is met in every league, but some cells pass the six ship gates only because the
-model↔book blend weight `model_weight` sits at its 0.05 floor: the served predictive is the
-sportsbook line and the cell's model contributes nothing. Diagnose those model legs and repair
-them until each cell passes all six gates with the **free** weight fit landing at **≥ 0.3**. No
-forced floor — the model has to earn the weight.
+Breadth-75 is met in every league, but some cells passed the six ship gates only because the
+model↔book blend weight `model_weight` sat at its 0.05 floor: the served predictive was the
+sportsbook line and the cell's model contributed nothing. The lane diagnosed those model legs and
+set out to repair them until each cell passed all six gates with the **free** weight fit landing
+at **≥ 0.3**.
 
 ## Owner constraints (binding)
 
@@ -53,9 +58,9 @@ derived from the class labels and `w` on every run.
 Board slack is the minimum gate headroom on the served predictive and Gate 1 is zero at the book,
 so on a weak-model cell the lowest weight wins. The ledger has passed over 6/6 arms at healthy
 weights twice (MLB hits allowed DPO at 0.90; NFL passing yards at 0.315), and the live S2/S3
-supersession tests cannot separate two legs that both sit on the book at the line. The
-`--min-model-weight` knob on `ship sweep` (nomination constraint, ship-time check, S1-only
-waiver against a book-riding incumbent) is the lane's answer; see [ship_gate.md](../ship_gate.md).
+supersession tests cannot separate two legs that both sit on the book at the line. The lane's
+answer was the `--min-model-weight` knob on `ship sweep` (nomination constraint, ship-time check,
+S1-only waiver against a book-riding incumbent); PR-1 removed it with the floor.
 
 ## Guards landed by this lane
 
@@ -183,6 +188,7 @@ shaped book inside the blend; BLP / decoupled blend; model-only quality as an HP
 
 ## Changelog
 
+- 2026-11-24 closed: PR-1 picks recipes on priced rows, no weight floor; knob gone.
 - 2026-09-02 wave 1 swept: MLB hits allowed + NHL hits superseded, four held; census re-run.
 - 2026-09-02 guards, cluster-id alignment fix, `--min-model-weight`, probes landed on devel.
 - 2026-09-01 lane opened.
