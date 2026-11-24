@@ -50,6 +50,13 @@ class PlainBaseline(NamedTuple):
     predictions: np.ndarray
 
 
+def _plain_regressor(rounds: int, determinism: dict[str, bool | int]) -> lgb.LGBMRegressor:
+    """The plain model's one recipe, shared by its fit and its refit; only ``rounds`` differs."""
+    return lgb.LGBMRegressor(
+        **_PARAMS, **determinism, n_estimators=rounds, random_state=_SEED, verbose=-1
+    )
+
+
 def fit_plain_baseline(
     splits: dict, dates: pd.Series, determinism: dict[str, bool | int]
 ) -> PlainBaseline:
@@ -78,9 +85,7 @@ def fit_plain_baseline(
     by_date = dates.loc[y_train.index].sort_values(kind="stable").index
     n_fit = int(len(by_date) * _FIT_SHARE)
     fit_rows, stop_rows = by_date[:n_fit], by_date[n_fit:]
-    model = lgb.LGBMRegressor(
-        **_PARAMS, **determinism, n_estimators=_MAX_ROUNDS, random_state=_SEED, verbose=-1
-    )
+    model = _plain_regressor(_MAX_ROUNDS, determinism)
     model.fit(
         features.loc[fit_rows],
         y_train.loc[fit_rows],
@@ -88,6 +93,23 @@ def fit_plain_baseline(
         callbacks=[lgb.early_stopping(_STOPPING_ROUNDS, verbose=False)],
     )
     return PlainBaseline(model.booster_, model.predict(features.loc[splits["X_test"].index]))
+
+
+def refit_plain_booster(
+    splits: dict, rounds: int, determinism: dict[str, bool | int]
+) -> lgb.Booster:
+    """Refit the plain regression on every matrix row for ``rounds`` rounds, with no early stopping.
+
+    The parameters, seed and feature columns are :func:`fit_plain_baseline`'s: the same model on
+    more rows. ``training/refit.py`` passes the sibling's early-stopped round count.
+
+    Args:
+        splits: ``train_market``'s splits. Reads ``X`` (every row's features, categoricals
+            already cast) and ``y`` (every row's outcome).
+        rounds: Boosting rounds to fit.
+        determinism: As :func:`fit_plain_baseline`.
+    """
+    return _plain_regressor(rounds, determinism).fit(splits["X"], splits["y"]["Result"]).booster_
 
 
 def plain_diagnostics(

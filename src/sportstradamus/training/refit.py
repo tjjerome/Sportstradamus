@@ -25,7 +25,7 @@ from lightgbmlss.model import LightGBMLSS
 from sportstradamus.helpers.config import ALL_ROWS_REFIT
 from sportstradamus.helpers.config import refit as cell_refit
 from sportstradamus.training import baselines
-from sportstradamus.training.plain_baseline import _PARAMS, _SEED
+from sportstradamus.training.plain_baseline import refit_plain_booster
 from sportstradamus.training.structural_strategies import AFFINE_EXPERT_EXPERIMENTS
 
 
@@ -104,10 +104,10 @@ def finish_refit(
 ) -> tuple[lgb.Booster | None, dict]:
     """Refit the plain mean anchor on every row, and describe the refit for the pickle.
 
-    The anchor refits as ``training/plain_baseline.py`` fits it (its parameters and seed, on
-    the same feature columns and categorical casts) on every matrix row's outcome, for the
-    sibling anchor's early-stopped round count with no new early stopping. Each
-    ``sibling_booster_sha256`` entry hashes the sibling booster's ``model_to_string()``.
+    The anchor refits through :func:`~sportstradamus.training.plain_baseline.refit_plain_booster`
+    on every matrix row's outcome, for the sibling anchor's early-stopped round count with no
+    new early stopping. Each ``sibling_booster_sha256`` entry hashes the sibling booster's
+    ``model_to_string()``.
 
     Args:
         splits: ``train_market``'s splits; reads ``X`` and ``y``, every matrix row.
@@ -125,17 +125,7 @@ def finish_refit(
     boosters = {"model": (sibling.booster, refit_model.booster)}
     refit_anchor = None
     if anchor is not None:
-        refit_anchor = (
-            lgb.LGBMRegressor(
-                **_PARAMS,
-                **determinism,
-                n_estimators=anchor.best_iteration,
-                random_state=_SEED,
-                verbose=-1,
-            )
-            .fit(splits["X"], splits["y"]["Result"])
-            .booster_
-        )
+        refit_anchor = refit_plain_booster(splits, anchor.best_iteration, determinism)
         boosters["mean_anchor"] = (anchor, refit_anchor)
     record = {
         "refit_through": dates.loc[splits["X"].index].max().date().isoformat(),
