@@ -145,6 +145,8 @@ class HurdleZINB:
     """
 
     is_hurdle: bool = True
+    # Pickles written before the count cap carry no ceiling and predict uncapped.
+    _count_ceiling: float | None = None
 
     def __init__(self) -> None:
         self.clf = None
@@ -218,6 +220,7 @@ class HurdleZINB:
         pos_mask = y > 0
         X_pos = X[pos_mask]
         y_pos = y[pos_mask]
+        self._count_ceiling = float(y_pos.max())
 
         nb_dist = NegativeBinomial(stabilization="None", loss_fn="nll")
         if shape_ceiling is not None:
@@ -272,6 +275,11 @@ class HurdleZINB:
         where NB(0) = (1 − p)^r  (PyTorch NegativeBinomial convention,
         mean = r · p / (1 − p)).
 
+        Stage 2 trains on the positive rows only, so on rows far from them its
+        mean can run away (NHL goals read ~480). Where the mean exceeds the
+        largest positive training count c, p drops to c / (r + c) with r kept,
+        before NB(0) and π are derived: the mean becomes c and P(Y = 0) stays q.
+
         Args:
             X: Feature matrix. Must match the training schema.
             pred_type: Forwarded to the internal NegBin model. Only
@@ -295,6 +303,8 @@ class HurdleZINB:
 
         total_count = nb_preds["total_count"].to_numpy()
         probs = nb_preds["probs"].to_numpy()
+        if self._count_ceiling is not None:
+            probs = np.minimum(probs, self._count_ceiling / (total_count + self._count_ceiling))
 
         # NB(0) in PyTorch convention: (1 − p)^r
         nb0 = (1 - probs) ** total_count
