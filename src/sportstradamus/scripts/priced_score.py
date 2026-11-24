@@ -157,8 +157,8 @@ def row_changes(p1: pd.DataFrame, p2: pd.DataFrame) -> pd.DataFrame:
         p2: P2 rungs (``p2_rungs``).
 
     Returns:
-        ``League``, ``cell``, ``Date``, ``statistic`` (ordered as ``STATISTICS``) and
-        ``change``: ``p1_dmse`` in % of the row's own cell's baseline MSE, the Brier
+        ``League``, ``cell``, ``Player``, ``Date``, ``statistic`` (ordered as ``STATISTICS``)
+        and ``change``: ``p1_dmse`` in % of the row's own cell's baseline MSE, the Brier
         statistics in 1e-4 on settled rows, ``toward_book`` in points on authentic rows.
     """
     sq_cand = (p1["Result"] - p1["mean_cand"]) ** 2

@@ -788,7 +788,7 @@ def _bootstrap_mean_ci_clustered(
 def _cluster_bootstrap_means(
     values: np.ndarray, cluster_ids: np.ndarray, rng: np.random.Generator, n_boot: int
 ) -> np.ndarray:
-    """``n_boot`` means of ``values`` (finite, non-empty), each over clusters drawn with replacement."""
+    """``n_boot`` means of ``values`` (finite, non-empty) over clusters drawn with replacement."""
     uniq = np.unique(cluster_ids)
     groups = [values[cluster_ids == c] for c in uniq]
     n_clusters = len(uniq)
