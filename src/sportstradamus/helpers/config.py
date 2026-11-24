@@ -85,8 +85,8 @@ NO_MEAN_ANCHOR = "none"
 PLAIN_MEAN_ANCHOR = "plain"
 MEAN_ANCHOR_VALUES = frozenset({NO_MEAN_ANCHOR, PLAIN_MEAN_ANCHOR})
 
-# A cell's served booster(s): fit on the oldest 70 % of rows like every layer and gate (the
-# default), or refit on every matrix row once the run is done (training/refit.py); read by refit().
+# Which rows a cell's served booster(s) fit: the oldest 70 % (the default, the fit every layer and
+# gate describes) or every matrix row once the run is done (training/refit.py); read by refit().
 NO_REFIT = "none"
 ALL_ROWS_REFIT = "all"
 REFIT_VALUES = frozenset({NO_REFIT, ALL_ROWS_REFIT})

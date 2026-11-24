@@ -67,11 +67,13 @@ def resolve_refit(
 
 
 def lss_refit_rows(splits: dict, dist_info: dict) -> tuple[pd.DataFrame, np.ndarray]:
-    """Every matrix row the distributional model refits on, and its training target.
+    """The matrix rows the distributional model refits on, and its training target.
 
-    A count family fits raw outcomes. A continuous family fits the sibling's target on every
-    row, at the sibling's ``global_mean`` and ``denom_col``, so the pickle's ``offset_meta``
-    decodes the refit too. Rows keep the matrix's order, which LightGBM's row order follows.
+    A count family fits raw outcomes. A continuous family applies the sibling's own rule,
+    :func:`~sportstradamus.training.baselines.continuous_fit_target`, so a zero-gated cell
+    refits on its positive rows only, at the sibling's ``global_mean`` and ``denom_col``: the
+    pickle's ``offset_meta`` then decodes the refit too. Rows keep the matrix's order, which
+    LightGBM's row order follows.
 
     Args:
         splits: ``train_market``'s splits; reads ``X`` and ``y``, every matrix row.
