@@ -482,6 +482,7 @@ consult.
 | Over rates | `predicted_over_rate`, `empirical_over_rate`, `over_pct_ev_gt` (↑), `over_pct_ev_lt` (↓) | `meditate` |
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
 | Plain baseline (report-only) | `plain_mse_ratio` (a plain LightGBM squared-error fit's test MSE over the model's own mean's; below 1 the plain fit wins), `plain_mse_ratio_priced` (the same on `pickem` / `authentic` rows), `plain_rounds`; the dump's `Plain` column holds its mean (`training/plain_baseline.py`) | `meditate` |
+| Refit (report-only) | `refit_through`, `refit_rows`, `refit_rounds`: blank unless the cell's `refit: "all"` served booster(s) refit on every matrix row (`training/refit.py`); every other column describes the 70 % fit either way | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight`, `n_authentic_validation` (sportsbook-priced validation rows; `pickem` DFS-only rows excluded), `n_blend_fit_clusters` (rows and distinct clusters behind the weight fit; below the cluster floor `model_weight` is 1.0 and the skill / Kelly columns are NaN) | `meditate` |
 | Book level (report-only) | `book_citl_offline` (mean book P(over) − outcome on the test half's sportsbook rows), `book_citl_native` / `_redecoded` / `_ladder` and `book_share_*` (the same, split by the quote's I6d levelling class) | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
@@ -527,7 +528,7 @@ production data.
 
 | File | Purpose |
 |------|---------|
-| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`, `book_leg`, `mean_anchor`, `book_pull`) |
+| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, target_normalization, posthoc}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, target normalization and post-hoc slugs) plus optional knobs (`blending`, `dist_training_loss`, `sn_param`, `hpo_selection`, `zinb_mode`, `count_dispersion_objective`, `book_leg`, `mean_anchor`, `book_pull`, `refit`) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi, book_shape}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
 | `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |

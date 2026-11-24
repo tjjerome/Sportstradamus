@@ -308,7 +308,10 @@ candidate (a posthoc map switched off) reads `p1_dmse` exactly 0 rather than an 
 for cells production serves at the consensus. Beside each interval, the bootstrap's standard error
 (`se`) and `deff_player`: the design effect of the change's clustering by player across dates,
 from the one-way ICC of player-date means (a date's rungs are already drawn together). Both are
-information; rule PR-1 below reads them.
+information; rule PR-1 below reads them. Beside `--out`, `<stem>.by_quote_class.csv` reads each
+cell apart by quote class, `authentic` or `not authentic` (a P1 row by its own class, a P2 rung by
+its prop's), with the main table's statistics and seed; it never changes a verdict. A refit
+pickle (below) scores no row dated on or before its `refit_through`.
 
 The arms. Candidate and control are refit at the same cut with the served parameters
 (`meditate --params-from`, `--frozen-matrix-dir` on the matrix pinned before the cut,
@@ -358,6 +361,28 @@ value per league, judged by `ship priced`'s rule with the pull applied (NFL's 11
 b .14; NBA's 11-23 read: λ\* .17, b .83). A KEEP sets the knob on the read's cells except any that
 reads KILL; a send without a read clears it. Rung-leg cells and NHL goals take none: the replay
 does not rebuild their live book leg.
+
+### Refit through the newest rows (`refit: "all"`, Wave 5)
+
+A cell whose `stat_meta.json` carries `refit: "all"` serves booster(s) refit on every matrix row
+(`training/refit.py`). Once the canonical run is done, the distributional model refits through the
+70 % fit's own recipe, target and round count, and a plain-anchored cell's mean anchor refits at
+its early-stopped round count; there is no new search and no new early stopping. Every layer
+carries over from the 70 % fit: the decode, the blend weight, the dispersion and post-hoc stages,
+the temperature and `book_pull`. The six gates, the `model_stats` gate columns, the test-set dump
+and SHAP keep describing that fit, since a refit's prediction on a held-out row is in-sample. The
+pickle records `refit_through` (the newest game date the refit trained on), `refit_rows`,
+`refit_rounds` and `sibling_booster_sha256`; `model_stats` reports the first three. The knob sits
+outside the strategy identity, as `book_pull` does. Hurdle cells, affine-expert strategies and
+holdout-blind runs refuse it; the hidden `meditate --refit` flag overrides it in a sandbox.
+
+Offline, a refit pickle scores no row dated on or before its `refit_through`
+(`scripts/tail_pricing.out_of_sample`: `ship priced`, the replay's `posted` scope,
+`tail_scorecard`, `admin feature-parity`). A refit is therefore judged on rows after its cut
+only: arms refit at a cut and read the forward window, or a pseudo-forward window at an earlier
+cut, never their own test half. For the same reason a cell carrying the knob takes no P2-tier
+switch under rule PR-1: its confirm refit's test-half rungs are in sample, so the harm guard
+reads none and the pick reverts. Turn the knob off for a confirm walk.
 
 ### The books'-lean paper test (`admin books-lean`, report only)
 
