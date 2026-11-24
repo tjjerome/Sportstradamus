@@ -12,7 +12,7 @@ import pandas as pd
 
 # _cell_context and NOMINEE_LEDGER_PATH are read off sweep at call time, not imported: other
 # confirm modules read them too, and one binding means one monkeypatch covers every caller.
-from sportstradamus.training.model_strategy import sweep
+from sportstradamus.training.model_strategy import priced_select, sweep
 from sportstradamus.training.model_strategy.identity import (
     ArtifactIdentity,
     build_artifact_identity,
@@ -76,25 +76,41 @@ _SHAPING_SLOT_TIE_TOL: float = 1e-9
 def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
     """The board value that decides this cell's nominations.
 
-    A withheld cell is ranked on absolute gate headroom, because passing the gates outright is
-    exactly the bar it has to clear. A live cell's bar is a different question — is this corner
-    better than the recipe already serving? — so it ranks on ``margin_vs_incumbent``. Ranking a
-    supersession on slack measures the candidate against the book and the gates while never
-    comparing it to the incumbent it would replace. ``live`` is only ever set on a board that
+    A priced cell (PR-1) ranks on its corners' shrunk priced contrast with the incumbent, negated
+    into ``priced_rank`` (:func:`_with_priced_rank`) so every rank reads higher-is-better. On a
+    tier-U cell a withheld cell is ranked on absolute gate headroom, because passing the gates
+    outright is exactly the bar it has to clear. A live cell's bar is a different question — is this
+    corner better than the recipe already serving? — so it ranks on ``margin_vs_incumbent``.
+    Ranking a supersession on slack measures the candidate against the book and the gates while
+    never comparing it to the incumbent it would replace. ``live`` is only ever set on a board that
     carries margins at all (see :func:`candidates`), so the column is present whenever it is read.
     """
+    if "priced_rank" in admissible.columns:
+        return "priced_rank"
     if live:
         return "margin_vs_incumbent"
     return "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
 
 
-def _nominees(
-    sub: pd.DataFrame, *, live: bool = False, min_model_weight: float | None = None
-) -> list[dict]:
+def _with_priced_rank(admissible: pd.DataFrame) -> pd.DataFrame:
+    """A priced cell's rows (``priced_tier`` set) with ``priced_rank``; any other cell's as is.
+
+    ``priced_rank`` is the negated shrunk contrast, blank on a row PR-1.4 excludes before the
+    gates: one without a contrast or past the mean-sanity scan. A board swept before PR-1 carries
+    no tier, like a tier-U cell.
+    """
+    if "priced_tier" not in admissible or admissible["priced_tier"].isna().all():
+        return admissible
+    shrunk = pd.to_numeric(admissible["priced_shrunk"], errors="coerce")
+    ratio = pd.to_numeric(admissible["priced_mean_ratio"], errors="coerce")
+    return admissible.assign(priced_rank=-shrunk.where(ratio.le(priced_select.MEAN_SANITY)))
+
+
+def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
     Only board-confident corners nominate: a corner needs a positive admissibility value — the
-    milder ``veto_slack`` pricing on a withheld cell that carries it, else the same value
+    milder ``veto_slack`` pricing on a priced or withheld cell that carries it, else the same value
     :func:`_rank_column` picks for ordering — and a cell whose best admissible corner is
     non-positive returns no nominees at all. On a live cell that also means a cell whose baseline
     never scored (``margin_vs_incumbent`` all ``NaN``) nominates nobody: an unmeasured incumbent
@@ -114,7 +130,7 @@ def _nominees(
     """
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = sweep._cell_context(lg, mkt)
-    admissible = sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)]
+    admissible = _with_priced_rank(sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)])
     rank_column = _rank_column(admissible, live=live)
     # A board read back off disk carries pd.NA in any column its sweep predates, and `pd.NA > 0` is
     # neither True nor False — every rank comparison below would raise on it.
@@ -125,9 +141,7 @@ def _nominees(
     ).sort_values([rank_column, "corner_fingerprint"], ascending=[False, True], kind="stable")
     if len(admissible):
         board_rank = float(ranked[rank_column].max())
-        lane_rows = _veto_admissible(
-            ranked, rank_column, live=live, min_model_weight=min_model_weight
-        )
+        lane_rows = _veto_admissible(ranked, rank_column, live=live)
         if lane_rows is None:
             return []
         ranked = lane_rows
@@ -148,24 +162,23 @@ def _nominees(
     return list(by_fingerprint.values())
 
 
-def _veto_admissible(
-    ranked: pd.DataFrame, rank_column: str, *, live: bool, min_model_weight: float | None = None
-) -> pd.DataFrame | None:
+def _veto_admissible(ranked: pd.DataFrame, rank_column: str, *, live: bool) -> pd.DataFrame | None:
     """The rows eligible for lane slots, or ``None`` when the whole cell fails the nomination bar.
 
     brief R3: admissibility is priced at the milder median ``veto_slack`` while the ordering (and
     ``board_rank``, the walk order) stays on the conservative rank column, so a cell whose corners
     fail only under the conservative price still walks — last. Boards that predate the veto
-    pricing, and the live lane's margin, keep the rank column as the bar. brief L4: a corner the
-    ledger has already decided on this matrix cannot usefully walk again — the walk would skip
-    it — so it never spends a lane slot either.
-
-    ``min_model_weight`` drops book-riding corners from the lane (why: :func:`confirm.run_confirm`).
-    It is a lane filter, not a cell veto: a cell whose top corner rides the book still nominates
-    its remaining positive corners, and when none remain, its seeds and incumbent.
+    pricing, and the live lane's margin, keep the rank column as the bar. A priced cell's rank is
+    no gate measure, so its bar is ``veto_slack`` on the rows PR-1.4 leaves eligible. brief L4: a
+    corner the ledger has already decided on this matrix cannot usefully walk again — the walk
+    would skip it — so it never spends a lane slot either. A corner's blend weight is reported,
+    never a veto: PR-1 retired the floor, since a book-riding corner now wins only where the book
+    itself prices better.
     """
     veto = ranked[rank_column]
-    if not live and "veto_slack" in ranked.columns:
+    if rank_column == "priced_rank":
+        veto = pd.to_numeric(ranked["veto_slack"], errors="coerce").where(veto.notna())
+    elif not live and "veto_slack" in ranked.columns:
         veto = pd.to_numeric(ranked["veto_slack"], errors="coerce").fillna(veto)
     if not veto.max() > 0:
         return None
@@ -178,11 +191,6 @@ def _veto_admissible(
             strict=True,
         )
         ranked = ranked[[pair not in decided for pair in pairs]]
-    if min_model_weight is not None:
-        # NaN (a board swept before the weight column existed) and exactly 1.0 (a cell with no
-        # authentic validation quotes to blend against) are not evidence of a book-rider.
-        weight = pd.to_numeric(ranked["model_weight"], errors="coerce")
-        ranked = ranked[~(weight < min_model_weight)]
     return ranked
 
 
@@ -451,11 +459,7 @@ def _validate_board_identity(
 
 
 def candidates(
-    board: pd.DataFrame,
-    meta: dict,
-    max_nominees: int | None = None,
-    *,
-    min_model_weight: float | None = None,
+    board: pd.DataFrame, meta: dict, max_nominees: int | None = None
 ) -> list[list[dict]]:
     """Each cell's ordered nominee list, strongest cells first; nothing confirmable drops out.
 
@@ -465,20 +469,20 @@ def candidates(
     nominees are ranked on.
 
     Cells sort by their best board rank descending (legacy seed-only cells last) so a deadline cut
-    lands on the weakest tail, not on cells the board likes that happened to group late. The two
-    lanes rank on different quantities, but a stable sort over the mixed list still leaves each
-    lane correctly ordered within itself, which is all :func:`confirm._walk_lanes` walks.
+    lands on the weakest tail, not on cells the board likes that happened to group late. The cells
+    rank on different quantities (slack, margin, a priced contrast), so across them the order is
+    only a rough strength order, and it decides only where a deadline cut lands.
 
     Whether a board carries incumbent margins is a property of the sweep that wrote it, so it is
     decided once here rather than per cell: on a board swept before margins existed every cell keeps
     the old slack ranking, and on one swept with them a live cell whose own baseline never scored
     gets ``NaN`` — unknown — instead of silently falling back to the wrong quantity.
     """
-    priced = "margin_vs_incumbent" in board and board["margin_vs_incumbent"].notna().any()
+    margined = "margin_vs_incumbent" in board and board["margin_vs_incumbent"].notna().any()
     cells = []
     for (league, market), sub in board.groupby(["league", "market"], sort=False):
-        live = priced and meta[league][market].get("shipped") != WITHHELD
-        nominated = _nominees(sub, live=live, min_model_weight=min_model_weight)
+        live = margined and meta[league][market].get("shipped") != WITHHELD
+        nominated = _nominees(sub, live=live)
         if nominated:
             cells.append(nominated[:max_nominees])
     cells.sort(key=lambda nominated: nominated[0]["board_rank"], reverse=True)

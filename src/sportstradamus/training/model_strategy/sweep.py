@@ -22,6 +22,10 @@ below their board scores, the board sorts on ``discounted_slack`` — raw slack 
 nominee ledger's measured blind-minus-board shifts at a conservative quantile — while the milder
 median pricing lands in ``veto_slack``, the admissibility bar confirm's nomination veto reads
 (:func:`_ledger_gate_discounts`).
+
+A cell with priced validation rows searches and nominates on priced error instead (rule PR-1,
+:mod:`sportstradamus.training.model_strategy.priced_select`): each corner's ``priced_*`` columns
+hold its shrunk contrast with the incumbent on the rows we price, and slack only orders compute.
 """
 
 import contextlib
@@ -41,6 +45,7 @@ from datetime import UTC, datetime
 from statistics import fmean
 
 import click
+import duckdb
 import numpy as np
 import optuna
 import pandas as pd
@@ -48,13 +53,17 @@ import pyarrow.parquet as pq
 import tabulate
 
 from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.archive import _DEFAULT_DB_PATH
 from sportstradamus.helpers.io import _atomic_write_csv, market_file_slug
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
     TRAINING_ARTIFACTS_LOCK_FILE,
     file_lock,
 )
+from sportstradamus.helpers.training_quotes import AUTHENTIC, PRICED_AUTHENTICITY
+from sportstradamus.scripts.tail_pricing import ladder_rungs
 from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.model_strategy import priced_select
 from sportstradamus.training.model_strategy.identity import (
     InactiveStrategyArtifactError,
     build_artifact_identity,
@@ -161,6 +170,13 @@ _LOCK_ERROR_SIGNATURE = "Could not set lock on file"
 # Back-off waits (seconds) between archive-lock retries; exhausting them re-raises so a genuinely
 # stuck lock fails loud instead of looping forever.
 _LOCK_RETRY_WAITS_S: tuple[int, ...] = (15, 30, 60, 120, 240)
+# DuckDB's default takes 80 % of RAM, and a priced read runs beside the sweep's parallel trainings.
+_ARCHIVE_MEMORY_LIMIT = "4GB"
+# A priced cell's ladder rungs, read once per matrix and kept for every later sweep of it (PR-1.3).
+_PRICED_RUNGS_ROOT = _REPO_ROOT / "research" / "priced_rungs"
+# A priced cell's TPE value for a corner PR-1.4 excludes: past every eligible corner's shrunk
+# contrast (a few units at most), less its slack, so slack still orders the excluded.
+_INFEASIBLE_OBJECTIVE = 1e9
 # glibc's heap-corruption aborts, as emitted by malloc_printerr. A native fit can kill the
 # interpreter with one of these and no traceback, and the message lands glued to the end of a
 # multi-kilobyte tqdm line — so pull it out by pattern rather than leaving it in the log tail.
@@ -229,6 +245,7 @@ _BOARD_COLUMNS: list[str] = [
     "is_incumbent",
     "margin_vs_incumbent",
     "confirm_risk",
+    *priced_select.COLUMNS,
     "g1_pass",
     "g1_brier_diff_ci_hi",
     "g1_brier_diff_ci_hi_standalone",
@@ -557,6 +574,28 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
                     f"  meditate timed out after {timeout}s — see {log_path}", fg="red", err=True
                 )
                 raise
+
+
+def _archive_read_only() -> duckdb.DuckDBPyConnection:
+    """A read-only connection to the odds archive, waiting out a cron job's write lock.
+
+    The path resolves as meditate resolves it from :data:`_REPO_ROOT`. Unlike
+    ``tail_pricing.open_archive`` this leaves the environment alone, because this process's meditate
+    children inherit it, and it caps DuckDB's memory (:data:`_ARCHIVE_MEMORY_LIMIT`).
+    """
+    path = _REPO_ROOT / os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", _DEFAULT_DB_PATH)
+    waits = iter(_LOCK_RETRY_WAITS_S)
+    while True:
+        try:
+            return duckdb.connect(
+                str(path), read_only=True, config={"memory_limit": _ARCHIVE_MEMORY_LIMIT}
+            )
+        except duckdb.IOException as exc:
+            wait = next(waits, None)
+            if wait is None or _LOCK_ERROR_SIGNATURE not in str(exc):
+                raise
+            echo_above_bar(f"  archive write-locked; retrying in {wait}s …", err=True)
+            time.sleep(wait)
 
 
 def _run_deterministic_meditate(
@@ -913,22 +952,21 @@ def _echo_scored(
 def _scored_incumbent(
     context: CellContext,
     families: tuple[str, ...],
-    scored: dict[str, dict[str, object]],
     timeout_s: int,
     progress: SearchProgress,
-) -> dict[str, dict[str, object]]:
-    """Score the cell's serving recipe on this matrix unless the search already did.
+) -> tuple[dict[str, dict[str, object]], priced_select.Baseline | None]:
+    """Score the cell's serving recipe first, and what the cell's corners are priced against.
 
-    The incumbent leads :func:`_enqueued_corners`, so the search covers it on a cell whose study is
-    fresh. It is not covered when the study already holds those params: ``enqueue_trial`` skips the
-    enqueue, and if the cached board row behind it had gone inadmissible nothing re-measures it. That
-    is not hypothetical — 25 of 73 live cells on the current board carry no incumbent row, which is
-    why their corners could only ever be ranked against the gates, never against what the cell
-    serves. This is the backstop that closes the gap, and it costs a retrain beyond ``max_trials``:
-    the baseline is what the search is measured against, not one of its trials.
+    The baseline is what the search is measured against, not one of its trials, so it trains
+    beyond ``max_trials`` on every sweep. A cached row cannot stand in for it: its dump, which every
+    priced corner's contrast reads, is long overwritten. It also closes an old gap: a study resumed
+    with the incumbent's params already enqueued never re-measures it, and 25 of 73 live cells once
+    carried no incumbent row, so their corners were ranked against the gates, never against what
+    the cell serves.
 
     A families-restricted sweep prices no cross-family incumbent — the corners it trains are not
-    comparable to a recipe it is not allowed to train — so those cells keep a ``NaN`` margin.
+    comparable to a recipe it is not allowed to train — so those cells keep a ``NaN`` margin, and
+    so does a cell whose incumbent fails to train; both rank as tier U.
 
     The result deliberately does not reach :class:`CellSearchState`: a crashed baseline is one
     observation of ``-inf`` on the incumbent's own family, which would abandon exactly the family
@@ -936,15 +974,113 @@ def _scored_incumbent(
     """
     incumbent = _incumbent_corner(context)
     if incumbent is None or incumbent[0].slug not in families:
-        return {}
+        return {}, None
     spec, corner = incumbent
-    fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
-    if fingerprint in scored:
-        return {}
     progress.starting(corner)
     row = _run_and_score(context.league, context.market, spec.slug, corner, timeout_s)
+    baseline = (
+        None
+        if "failure" in row
+        else _priced_baseline(context, _dump_paths(context.league, context.market, corner, spec)[0])
+    )
+    row = _priced(row, baseline, context, spec, corner)
     _echo_scored(progress, corner, row, trained=True)
-    return {fingerprint: row}
+    return {corner_fingerprint(spec, corner, str(context.matrix_sha256)): row}, baseline
+
+
+def _priced_baseline(context: CellContext, csv_path: pathlib.Path) -> priced_select.Baseline | None:
+    """What a cell's recipes are priced against under PR-1, or ``None`` on a tier-U cell.
+
+    ``csv_path`` is a blind dump of the cell's validation half: the incumbent's on a live cell,
+    which its recipes meet, its tier counted from its pick'em and authentic rows and its posted
+    rungs. The rungs are read once per matrix, read-only, and cached under
+    :data:`_PRICED_RUNGS_ROOT`. A withheld cell serves the book, so its recipes meet the book on its
+    authentic rows and it counts no rung (PR-1.6); one with too few is not judged against the book.
+    """
+    league, market = context.league, context.market
+    rows = priced_select.served(load_test_set(csv_path, _SHIP_PRED_COL))
+    if load_stat_meta(pathlib.Path(str(STAT_META_PATH)))[league][market].get("shipped") == WITHHELD:
+        tier, incumbent = priced_select.tier(rows, (AUTHENTIC,), 0), None
+        if tier == "U":
+            echo_above_bar(f"  {league} {market}: tier U, not judged against the book")
+    else:
+        slug = market_file_slug(league, market)
+        cache = _PRICED_RUNGS_ROOT / f"{slug}.{str(context.matrix_sha256)[:16]}.parquet"
+        if not cache.exists():
+            keys = pd.DataFrame(
+                {
+                    "rid": np.arange(len(rows)),
+                    "game_date": pd.to_datetime(rows["Date"]).dt.date.to_numpy(),
+                    "player": rows["Player"].to_numpy(),
+                }
+            )
+            with _archive_read_only() as con:
+                found = ladder_rungs(con, league, market, keys)
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            posted = rows.iloc[found["rid"].to_numpy()][["Player", "Date", "Result"]]
+            posted.reset_index(drop=True).assign(
+                Platform=found["platform"], Line=found["line"], last_poll=found["last_poll"]
+            ).to_parquet(cache)
+        rungs = pd.read_parquet(cache).assign(League=league, Market=market)
+        tier = priced_select.tier(rows, PRICED_AUTHENTICITY, priced_select.p2_dates(rungs))
+        incumbent = rows
+    if tier == "U":
+        return None
+    matrix = pd.read_parquet(_training_matrix_path(league, market), columns=["Result"])
+    return priced_select.Baseline(tier, incumbent, float(matrix["Result"].max()))
+
+
+def _priced(
+    row: dict[str, object],
+    baseline: priced_select.Baseline | None,
+    context: CellContext,
+    spec: StrategySpec,
+    corner: dict[str, str],
+) -> dict[str, object]:
+    """``row`` with its PR-1 columns, read off the corner's dump before the next corner overwrites it."""
+    if baseline is None or "failure" in row:
+        return row
+    csv_path, _ = _dump_paths(context.league, context.market, corner, spec)
+    dump = load_test_set(csv_path, _SHIP_PRED_COL)
+    cell = market_file_slug(context.league, context.market)
+    return {**row, **priced_select.selection_columns(dump, baseline, cell)}
+
+
+def _priced_eligible(row: dict[str, object]) -> bool:
+    """PR-1.4: all six gates pass and no served mean blew past twice the matrix's largest outcome."""
+    ratio = _board_float(row, "priced_mean_ratio")
+    return bool(row["ships"]) and ratio is not None and ratio <= priced_select.MEAN_SANITY
+
+
+def _objective_value(row: dict[str, object], baseline: priced_select.Baseline | None) -> float:
+    """What TPE minimizes for a corner: a priced cell's shrunk contrast, else negated slack.
+
+    Slack stays RAW: pricing the ledger discounts into it would let the sampler optimize against
+    its own correction (the Goodhart failure the brief bounded). A corner PR-1.4 excludes is
+    infeasible on a priced cell, behind every eligible one.
+    """
+    if baseline is None:
+        return -float(row["slack"])
+    shrunk = _board_float(row, "priced_shrunk")
+    if shrunk is not None and _priced_eligible(row):
+        return shrunk
+    return _INFEASIBLE_OBJECTIVE - float(row["slack"])
+
+
+def _echo_best_excluded(league: str, market: str, scored: dict[str, dict[str, object]]) -> None:
+    """PR-1.4's record: the best priced corner eligibility excluded, and what excluded it."""
+    excluded = [
+        row
+        for row in scored.values()
+        if _board_float(row, "priced_shrunk") is not None and not _priced_eligible(row)
+    ]
+    if excluded:
+        best = min(excluded, key=lambda row: float(row["priced_shrunk"]))
+        why = " ".join(_failed_gates(best)) or "mean scan"
+        echo_above_bar(
+            f"  {league} {market}: best excluded priced corner {best['family']} "
+            f"{best['controls_json']} shrunk {float(best['priced_shrunk']):+.3f} ({why})"
+        )
 
 
 def _shaping_probes(
@@ -953,6 +1089,7 @@ def _shaping_probes(
     evaluated: dict[str, dict[str, object]],
     scored: dict[str, dict[str, object]],
     discounts: _GateDiscounts,
+    baseline: priced_select.Baseline | None,
     timeout_s: int,
     progress: SearchProgress,
 ) -> dict[str, dict[str, object]]:
@@ -977,6 +1114,7 @@ def _shaping_probes(
             continue
         progress.starting(probe)
         probed = _run_and_score(context.league, context.market, slug, probe, timeout_s)
+        probed = _priced(probed, baseline, context, get_strategy(slug), probe)
         _echo_scored(progress, probe, probed, trained=True)
         probes[fingerprint] = probed
     return probes
@@ -1029,7 +1167,7 @@ def search_cell(
     seed_seconds: float | None = None,
     position: int = 0,
 ) -> pd.DataFrame:
-    """Search one cell's recipe space under a trial budget and rank the board by slack.
+    """Search one cell's recipe space under a trial budget, and rank its board.
 
     ``cached`` maps ``corner_fingerprint`` to an already-scored row — preloaded from admissible board
     rows — so a TPE re-suggestion or a resumed run never retrains a corner this matrix already has a
@@ -1044,26 +1182,25 @@ def search_cell(
     until enough of this run's own corners have landed to estimate from. ``position`` is the terminal
     row this cell's bar draws on, handed out by :class:`BoardProgress` when cells run concurrently.
 
-    After the budget is spent, the cell's ``stat_meta`` incumbent trains once more if the study
-    never scored it — a retrain beyond ``max_trials`` that prices every other row's
-    ``margin_vs_incumbent`` (:func:`_scored_incumbent`).
+    The cell's ``stat_meta`` incumbent trains first, beyond ``max_trials``: it prices every other
+    row's ``margin_vs_incumbent`` and fixes the cell's PR-1 tier (:func:`_scored_incumbent`). On a
+    priced tier TPE minimizes each corner's shrunk priced contrast with the incumbent
+    (:mod:`priced_select`), an excluded corner (PR-1.4) is infeasible, and a cached corner that
+    passes the gates retrains, because its contrast needs its own dump. A tier-U cell maximizes raw
+    slack, as before. The board sorts on discounted slack either way.
     """
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
-    evaluated = dict(cached or {})
+    # A cached row's priced columns were measured against an earlier run's incumbent dump.
+    evaluated = {
+        fingerprint: {
+            name: value for name, value in row.items() if name not in priced_select.COLUMNS
+        }
+        for fingerprint, row in (cached or {}).items()
+    }
     discounts, veto_discounts = _ledger_gate_discounts(out)
     timeout_s = _cell_timeout_seconds(out, league, market)
-    study = cell_study(league, market, families)
-    enqueued_fingerprints: set[str] = set()
-    for spec, corner in _enqueued_corners(context):
-        params = enqueue_params(context, spec, corner)
-        if params is not None and spec.slug in families:
-            study.enqueue_trial(params, skip_if_exists=True)
-            enqueued_fingerprints.add(corner_fingerprint(spec, corner, str(context.matrix_sha256)))
-
-    scored: dict[str, dict[str, object]] = {}
     trained: set[str] = set()
-    state = CellSearchState(context, families, _prior_standings(evaluated))
     progress = SearchProgress(
         league,
         market,
@@ -1073,55 +1210,73 @@ def search_cell(
         reused=len(evaluated),
         position=position,
     )
-
-    def objective(trial: optuna.Trial) -> float:
-        spec, corner = suggest_corner(trial, context, families)
-        fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
-        row = evaluated.get(fingerprint)
-        # Asked once, before the cache is written: `fingerprint in trained` would answer True again
-        # on a re-proposal of a corner this run already trained, and TPE re-proposes about a quarter
-        # of the time — enough to walk the bar past its total and double-weight the ETA.
-        retrained = row is None
-        if retrained:
-            if state.abandoned(spec.slug):
-                trial.set_user_attr(TRAINED_TRIAL_ATTR, False)
-                raise optuna.TrialPruned
-            progress.starting(corner)
-            row = _run_and_score(league, market, spec.slug, corner, timeout_s)
-            evaluated[fingerprint] = row
-            trained.add(fingerprint)
-            state.observe(
-                spec.slug,
-                float(row["slack"]),
-                sampled=fingerprint not in enqueued_fingerprints,
-            )
-        trial.set_user_attr(TRAINED_TRIAL_ATTR, retrained)
-        _echo_scored(progress, corner, row, trained=retrained)
-        scored[fingerprint] = row
-        _record_scored(league, market, scored, discounts, veto_discounts, out)
-        # The objective must stay RAW slack: pricing the ledger discounts into it would let the
-        # sampler optimize against its own correction (the Goodhart failure the brief bounded).
-        return -float(row["slack"])
-
-    def stop_when_budget_spent(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        del trial
-        if len(trained) >= max_trials:
-            study.stop()
-
-    # The budget counts retrains, not trials: a re-proposed, cached, or abandoned-family corner costs
-    # no training, so it must not cost budget either. n_trials is a ceiling on *suggestions*, so it
-    # carries slack over the reachable grid — a family the cell has ruled out keeps being proposed
-    # (TPE does not model pruned trials), and each of those costs a trial and no time.
     with contextlib.closing(progress):
+        scored, baseline = _scored_incumbent(context, families, timeout_s, progress)
+        if baseline is not None:
+            evaluated = {key: row for key, row in evaluated.items() if not row["ships"]}
+        state = CellSearchState(context, families, _prior_standings(evaluated))
+        evaluated.update(scored)
+        study = cell_study(
+            league, market, families, "slack" if baseline is None else "priced_shrunk"
+        )
+        enqueued_fingerprints: set[str] = set()
+        for spec, corner in _enqueued_corners(context):
+            params = enqueue_params(context, spec, corner)
+            if params is not None and spec.slug in families:
+                study.enqueue_trial(params, skip_if_exists=True)
+                enqueued_fingerprints.add(
+                    corner_fingerprint(spec, corner, str(context.matrix_sha256))
+                )
+
+        def objective(trial: optuna.Trial) -> float:
+            spec, corner = suggest_corner(trial, context, families)
+            fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
+            row = evaluated.get(fingerprint)
+            # Asked once, before the cache is written: `fingerprint in trained` would answer True
+            # again on a re-proposal of a corner this run already trained, and TPE re-proposes about
+            # a quarter of the time — enough to walk the bar past its total and double-weight the ETA.
+            retrained = row is None
+            if retrained:
+                if state.abandoned(spec.slug):
+                    trial.set_user_attr(TRAINED_TRIAL_ATTR, False)
+                    raise optuna.TrialPruned
+                progress.starting(corner)
+                row = _run_and_score(league, market, spec.slug, corner, timeout_s)
+                row = _priced(row, baseline, context, spec, corner)
+                evaluated[fingerprint] = row
+                trained.add(fingerprint)
+                state.observe(
+                    spec.slug,
+                    float(row["slack"]),
+                    sampled=fingerprint not in enqueued_fingerprints,
+                )
+            trial.set_user_attr(TRAINED_TRIAL_ATTR, retrained)
+            _echo_scored(progress, corner, row, trained=retrained)
+            scored[fingerprint] = row
+            _record_scored(league, market, scored, discounts, veto_discounts, out)
+            return _objective_value(row, baseline)
+
+        def stop_when_budget_spent(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+            del trial
+            if len(trained) >= max_trials:
+                study.stop()
+
+        # The budget counts retrains, not trials: a re-proposed, cached, or abandoned-family corner
+        # costs no training, so it must not cost budget either. n_trials is a ceiling on
+        # *suggestions*, so it carries slack over the reachable grid — a family the cell has ruled
+        # out keeps being proposed (TPE does not model pruned trials), and each of those costs a
+        # trial and no time.
         study.optimize(
             objective,
             n_trials=_PRUNED_SUGGESTION_SLACK * reachable_corners(context, families),
             callbacks=[state.stop_if_done, stop_when_budget_spent],
         )
-        scored.update(_scored_incumbent(context, families, scored, timeout_s, progress))
         scored.update(
-            _shaping_probes(context, families, evaluated, scored, discounts, timeout_s, progress)
+            _shaping_probes(
+                context, families, evaluated, scored, discounts, baseline, timeout_s, progress
+            )
         )
+        _echo_best_excluded(league, market, scored)
         _record_scored(league, market, scored, discounts, veto_discounts, out)
     return _rank_cell_board(league, market, scored, discounts, veto_discounts)
 
@@ -2116,7 +2271,6 @@ def _reject_inert_flags(
     confirm_hours: float | None,
     confirm_fresh_only: bool,
     confirm_auto_promote: bool,
-    min_model_weight: float | None,
     quiet: bool,
     verbose: bool,
 ) -> None:
@@ -2138,7 +2292,6 @@ def _reject_inert_flags(
             ("--confirm-hours", confirm_hours is not None),
             ("--confirm-fresh-only", confirm_fresh_only),
             ("--confirm-auto-promote", confirm_auto_promote),
-            ("--min-model-weight", min_model_weight is not None),
         )
         if is_set
     ]
@@ -2272,16 +2425,6 @@ def _note_board_only_flags(
     "and every swap stays local until the stat_meta.json diff is reviewed. Requires --confirm.",
 )
 @click.option(
-    "--min-model-weight",
-    type=click.FloatRange(min=0, max=1, max_open=True),
-    default=None,
-    help="Ship policy: a board corner whose fitted blend weight sits below this ranks but never "
-    "nominates (book-less cells at w=1.0 are exempt); a nominee whose full-HPO run lands below it "
-    "never passes, and a canonical refit landing below it is reverted; in the live lane a "
-    "candidate at or above it may supersede an incumbent below it on S1 alone — S2/S3 cannot "
-    "separate two book-riding legs. Unset keeps today's behavior. Requires --confirm.",
-)
-@click.option(
     "--resume",
     is_flag=True,
     default=False,
@@ -2330,7 +2473,6 @@ def main(
     confirm_hours: float | None,
     confirm_fresh_only: bool,
     confirm_auto_promote: bool,
-    min_model_weight: float | None,
     resume: bool,
     dry_run: bool,
     quiet: bool,
@@ -2352,7 +2494,6 @@ def main(
         confirm_hours,
         confirm_fresh_only,
         confirm_auto_promote,
-        min_model_weight,
         quiet,
         verbose,
     )
@@ -2412,7 +2553,6 @@ def main(
                 deadline_hours=confirm_hours,
                 fresh_only=confirm_fresh_only,
                 auto_promote=confirm_auto_promote,
-                min_model_weight=min_model_weight,
             )
 
 

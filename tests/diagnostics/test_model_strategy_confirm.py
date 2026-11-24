@@ -119,6 +119,14 @@ def _no_real_meditate(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _unpriced_cells(monkeypatch):
+    """Rank every cell as tier U, on slack: the real baseline reads a dump and the odds archive.
+    The priced-walk tests below put a baseline back.
+    """
+    monkeypatch.setattr(sweep, "_priced_baseline", lambda context, csv_path: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_incumbent(monkeypatch):
     """The real lookup reads the repo's committed stat_meta.json; the live-walk tests name one."""
     monkeypatch.setattr(mc, "_incumbent_fingerprint", lambda league, market: None)
@@ -274,11 +282,6 @@ def _structural_row(slug, market, ships=True, slack=0.4):
 def _nominate(*rows, live=False, **kw):
     """Every nominee for the single-cell board made of ``rows``, in the order confirm will try them."""
     return mcn._nominees(pd.DataFrame(list(rows)), live=live, **kw)
-
-
-def _weighted_row(norm, slack, weight):
-    """A SkewNormal board row carrying the deterministic corner's fitted blend weight."""
-    return {**_sn_row(norm, "crps", "crps", True, slack), "model_weight": weight}
 
 
 def _withheld_meta(board):
@@ -610,47 +613,6 @@ def test_nominees_veto_on_veto_slack_and_rank_on_discounted_slack():
     no_veto = _sn_row("ratio_meanyr", "crps", "nll", False, 0.10)
     no_veto["discounted_slack"] = -0.05
     assert _nominate(no_veto) == []
-
-
-def test_nominees_drop_book_riding_corners_under_min_model_weight():
-    """Gate 1 is free at the book, so on a weak cell the best slack is the lowest blend weight and
-    the board structurally prefers corners that ride the sportsbook. ``min_model_weight`` filters
-    those out of the lane without touching the ordering: ``board_rank`` still reads the board's own
-    best corner, so the walk order over cells is unchanged.
-    """
-    book_rider = _weighted_row("ratio_meanyr", 0.30, 0.05)
-    fitted = _weighted_row("centered_additive_mean10", 0.20, 0.90)
-
-    unfiltered = _nominate(book_rider, fitted)
-    assert [n["slack"] for n in unfiltered if n["source"].startswith("board")] == [0.30, 0.20]
-    assert _nominate(book_rider, fitted, min_model_weight=None) == unfiltered
-
-    filtered = _nominate(book_rider, fitted, min_model_weight=0.3)
-    assert [n["slack"] for n in filtered if n["source"].startswith("board")] == [0.20]
-    assert all(n["board_rank"] == 0.30 for n in filtered)
-
-
-@pytest.mark.parametrize("missing", [float("nan"), pd.NA], ids=["nan", "pd.NA"])
-def test_nominees_keep_bookless_and_pre_weight_corners_under_min_model_weight(missing):
-    """Exactly 1.0 means the cell had no authentic validation quotes to blend against — it is not
-    riding a book — and a missing weight (NaN, or the ``pd.NA`` a disk-read board backfills) is a
-    board swept before the column existed. Neither is evidence of a book-rider, so the floor lets
-    both through.
-    """
-    bookless = _weighted_row("ratio_meanyr", 0.30, 1.0)
-    pre_weight = _weighted_row("centered_additive_mean10", 0.20, missing)
-    kept = _nominate(bookless, pre_weight, min_model_weight=0.3)
-    assert [n["slack"] for n in kept if n["source"].startswith("board")] == [0.30, 0.20]
-
-
-def test_nominees_fall_back_to_seeds_when_every_positive_corner_rides_the_book(monkeypatch):
-    """The floor is a lane filter, not a cell veto: a cell whose only admissible corners are
-    book-riders still nominates its seeds and incumbent, which retrain and are judged at ship time.
-    """
-    _seed_corners(monkeypatch, _sn_controls("ratio_projvol", "nll", "nll"))
-    nominated = _nominate(_weighted_row("ratio_meanyr", 0.30, 0.05), min_model_weight=0.3)
-    assert [n["source"] for n in nominated] == ["seed/incumbent"]
-    assert nominated[0]["board_rank"] == 0.30
 
 
 def test_nominees_break_exact_rank_ties_by_fingerprint():
@@ -1301,6 +1263,8 @@ def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
             "sn_param": "centered",
             "blending": "crps",
         },
+        "priced_tier": "U",
+        "nominee_weight": 0.4,
     }
     assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
     # Persisted: the edits + shipped=devel; no revert, no prune. A shipping centered corner
@@ -1472,34 +1436,6 @@ def test_a_ranked_retry_whose_refit_fails_reverts_its_pin(monkeypatch, tmp_path)
     assert pruned == [("WNBA", "AST")]
 
 
-def test_confirm_one_reverts_a_gate_passing_cell_below_min_model_weight(monkeypatch, tmp_path):
-    """The walk held the pick to the floor on its blind pickle, but the canonical refit fits its own
-    blend, so the floor is checked again on the pickle the cell would actually serve. A 6/6 cell
-    that lands back on the book reverts like any other loser.
-    """
-    original = _sn_original()
-    meta = {"WNBA": {"AST": dict(original)}}
-    _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: [])
-    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, cand: [])
-    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.1)
-    pruned = []
-    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
-
-    cand = {"league": "WNBA", "market": "AST", "edits": {"target_normalization": "ratio_meanyr"}}
-    assert mc._confirm_one(meta, cand, min_model_weight=0.3) == (
-        "WNBA",
-        "AST",
-        "REVERTED",
-        ["w=0.100<0.3"],
-    )
-    assert meta["WNBA"]["AST"] == original
-    assert pruned == [("WNBA", "AST")]
-    # Without the knob the same 6/6 cell still ships — the floor is opt-in.
-    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
-
-
 # --- nominee walk ------------------------------------------------------------------------------
 
 
@@ -1646,22 +1582,113 @@ def test_walk_nominees_holds_a_cell_with_no_blind_passer(monkeypatch):
     )
 
 
-def test_walk_nominees_holds_the_weight_floor_on_the_blind_pickle(monkeypatch):
-    """The floor reads each blind run's own fitted blend weight, so a book-riding passer cannot take
-    the refit from a model-driven one with less slack; unset, slack alone decides.
+def _priced_cell(monkeypatch, shrunk):
+    """Price the cell at tier P1 against the book: each blind dump's shrunk contrast is
+    ``shrunk[sandbox name]`` with s 1.0, and the cell serves no recipe to count axis changes from.
     """
-    nominated = _walk_stubs("board slack +0.300", "board slack +0.200")
-    _stub_blind(
-        monkeypatch,
-        {
-            "board slack +0.300": {"slack": 0.3, "weight": 0.1},
-            "board slack +0.200": {"slack": 0.2, "weight": 0.5},
-        },
-    )
+    baseline = mc.priced_select.Baseline("P1", None, 10.0)
+    monkeypatch.setattr(sweep, "_priced_baseline", lambda context, csv_path: baseline)
+    monkeypatch.setattr(mc, "_incumbent_corner", lambda context: None)
+    monkeypatch.setattr(mc, "load_test_set", lambda path, col: path)
+
+    def read(dump, baseline, cell):
+        value = shrunk[dump.parent.name]
+        return {
+            **dict.fromkeys(mc.priced_select.COLUMNS, 1.0),
+            "priced_tier": baseline.tier,
+            "priced_est": value,
+            "priced_shrunk": value,
+        }
+
+    monkeypatch.setattr(mc.priced_select, "selection_columns", read)
+
+
+def test_priced_walk_refits_the_nominee_whose_shrunk_contrast_clears_the_margin(monkeypatch):
+    """PR-1.6: a priced cell refits its best shrunk contrast with the incumbent, not its best
+    slack, and hands the refit its tier, selection read and blind weight. A best contrast short of
+    the margin keeps the incumbent: the cell is held and its test half never read.
+    """
+    nominated = [
+        {**stub, "strategy_slug": "SkewNormal", "controls": {}}
+        for stub in _walk_stubs("board slack +0.300", "board slack +0.200")
+    ]
+    _stub_blind(monkeypatch, {"board slack +0.200": {"slack": 0.2, "weight": 0.7}})
+    _priced_cell(monkeypatch, {"fp-1__loss": -0.1, "fp-2__loss": -2.0})
     attempt, attempted = _attempt_spy()
-    mc._walk_nominees({}, nominated, attempt, min_model_weight=0.3)
-    mc._walk_nominees({}, nominated, attempt)
-    assert [c["source"] for c in attempted] == ["board slack +0.200", "board slack +0.300"]
+
+    assert mc._walk_nominees({}, nominated, attempt)[4] == "2/2 board slack +0.200"
+    assert attempted[0]["priced_tier"] == "P1"
+    assert attempted[0]["priced_shrunk"] == -2.0
+    assert attempted[0]["nominee_weight"] == 0.7
+
+    _priced_cell(monkeypatch, {"fp-1__loss": -0.4, "fp-2__loss": 0.3})
+    held = mc._walk_nominees({}, nominated, _never_read)
+    assert held[2] == "HELD"
+    assert held[3][0].startswith("tier P1: 1/2 board slack +0.300 short of the margin")
+
+
+def test_priced_guard_meets_the_book_on_a_withheld_cell_and_logs_every_read(monkeypatch, tmp_path):
+    """PR-1.7 against the book (no snapshot): a refit nearer the outcomes than the book's mean
+    keeps its pick, one far worse reverts on +1s and on its interval, one level with the book
+    reverts only once its blend weight drifted from the nominee's, and E1 logs every test-half
+    statistic beside the pick's selection read and both blend weights.
+    """
+    rows = pd.DataFrame(
+        {
+            "Player": [f"p{n // 25}" for n in range(50)],
+            "Date": [f"2026-01-{n % 25 + 1:02d}" for n in range(50)],
+            "Line": 10.5,
+            "Result": [8.0, 13.0] * 25,
+            "QuoteAuthenticity": "authentic",
+            "Odds": 0.5,
+            "Book_EV": 10.5,
+            "P": 0.5,
+        }
+    )
+    cand = {
+        "league": "WNBA",
+        "market": "AST",
+        "corner_fingerprint": "fp-1",
+        "matrix_hash": _MATRIX_SHA,
+        **dict.fromkeys(mc.priced_select.COLUMNS, 0.0),
+        "priced_tier": "P1",
+        "nominee_weight": 0.5,
+    }
+
+    def guard(mean, w_refit):
+        monkeypatch.setattr(mc, "load_test_set", lambda path, col: rows.assign(Blended_EV=mean))
+        return mc._priced_guard(cand, None, w_refit)
+
+    assert guard(rows.Result, 0.45) == []
+    assert [reason.split()[0] for reason in guard(20.0, 0.45)] == ["p1_dmse"] * 2
+    assert guard(rows.Book_EV, 0.45) == []
+    assert guard(rows.Book_EV, 0.9) == ["p1_dmse +0.000 not below 0 after w drift 0.500->0.900"]
+
+    log = pd.read_csv(tmp_path / "priced_picks.csv")
+    assert len(log) == 4 * len(mc.STATISTICS)
+    lead = log[log["statistic"].eq("p1_dmse")]
+    assert lead["estimate"].iloc[0] == pytest.approx(-100.0)
+    assert lead["reverted"].isna().iloc[0] and lead["reverted"].notna().iloc[1]
+    assert lead["sel_tier"].eq("P1").all()
+    assert lead[["w_nominee", "w_refit"]].iloc[0].tolist() == [0.5, 0.45]
+
+
+def test_withheld_priced_pick_reverts_on_the_guard_against_the_book(monkeypatch, tmp_path):
+    original = _sn_original()
+    meta = {"WNBA": {"AST": dict(original)}}
+    _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mcr, "snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mcr, "_cell_artifacts", lambda lg, mkt: [])
+    monkeypatch.setattr(mcr, "confirm_meditate", lambda lg, mkt, cand: [])
+    monkeypatch.setattr(mcr, "served_weight", lambda path: 0.4)
+    monkeypatch.setattr(mc, "_priced_guard", lambda cand, backup, w: [f"against {backup}"])
+    pruned = []
+    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
+    cand = {"league": "WNBA", "market": "AST", "edits": {}, "priced_tier": "P1"}
+    cand["nominee_weight"] = 0.4
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "REVERTED", ["against None"])
+    assert meta["WNBA"]["AST"] == original
+    assert pruned == [("WNBA", "AST")]
 
 
 def _live_verdicts(monkeypatch, passing):
@@ -2246,17 +2273,17 @@ def _shipped_meta():
     }
 
 
-def _supersede_cand():
-    return _nominate(
-        _signed_row(
-            "NBA",
-            "PTS",
-            "SkewNormal",
-            _sn_controls("centered_additive_mean10", "crps", "crps"),
-            True,
-            0.2,
-        )
-    )[0]
+def _supersede_cand(tier="U"):
+    """A live cell's pick as the walk hands it to ``_supersede_one``."""
+    row = _signed_row(
+        "NBA",
+        "PTS",
+        "SkewNormal",
+        _sn_controls("centered_additive_mean10", "crps", "crps"),
+        True,
+        0.2,
+    )
+    return {**_nominate(row)[0], "priced_tier": tier, "nominee_weight": 0.4}
 
 
 def _verdict(*, ship, s1=True, s2=True, s3=True):
@@ -2402,12 +2429,12 @@ def test_walk_lanes_threads_the_run_flags_into_both_lanes(monkeypatch):
     monkeypatch.setattr(mc, "_walk_nominees", walk)
     fresh = [[{"league": "WNBA", "market": "AST", "source": "seed/incumbent"}]]
     live = [[{"league": "NBA", "market": "PTS", "source": "board slack +0.300"}]]
-    mc._walk_lanes({}, fresh, live, None, True, 0.3)
+    mc._walk_lanes({}, fresh, live, None, True)
     assert seen == {
-        "walk AST": {"live": False, "min_model_weight": 0.3},
-        "walk PTS": {"live": True, "min_model_weight": 0.3},
-        "fresh": {"min_model_weight": 0.3},
-        "live": {"auto_promote": True, "min_model_weight": 0.3},
+        "walk AST": {"live": False},
+        "walk PTS": {"live": True},
+        "fresh": {},
+        "live": {"auto_promote": True},
     }
 
 
@@ -2418,63 +2445,26 @@ def _patch_weights(monkeypatch, *, incumbent, candidate):
     )
 
 
-def test_supersede_waives_s2_s3_when_the_incumbent_rides_the_book(monkeypatch, capsys):
-    """A w=0.05 incumbent and its w=0.45 challenger both sit on the book at the line, so their
-    paired Brier difference is ~0 by construction and S2/S3 can never fire. Where the floor
-    separates them, S1 plus that separation is the whole evidence available for the swap.
+def test_priced_supersede_is_decided_by_s1_and_the_harm_guard(monkeypatch, capsys):
+    """PR-1.7: a priced pick's S2 and S3 print but never hold it; S1 and the harm guard against
+    the snapshot do. Both of the pick's blend weights print.
     """
     meta = _shipped_meta()
-    restored, pruned = _patch_supersede_io(
-        monkeypatch, verdict=_verdict(ship=False, s2=False, s3=False)
-    )
-    _patch_weights(monkeypatch, incumbent=0.05, candidate=0.45)
-    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
-    assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
-    assert restored == [] and pruned == []
-    out = capsys.readouterr().out
-    assert "w 0.050→0.450" in out
-    assert "S2/S3 waived" in out
-
-
-def test_supersede_waiver_is_scoped_to_the_pair_it_is_justified_for(monkeypatch):
-    """An incumbent already above the floor keeps the full S1+S2+S3 bar, a failing S1 is never
-    waived, and with the knob off nothing changes — the waiver only buys the book-riding swap.
-    """
-    meta = _shipped_meta()
-    losing = _verdict(ship=False, s2=False, s3=False)
-    _patch_supersede_io(monkeypatch, verdict=losing)
-
+    guard = []
+    monkeypatch.setattr(mc, "_priced_guard", lambda cand, backup, w: guard.append(w) or [])
+    _patch_supersede_io(monkeypatch, verdict=_verdict(ship=False, s2=False, s3=False))
     _patch_weights(monkeypatch, incumbent=0.5, candidate=0.45)
-    fitted_incumbent = mc._supersede_one(
-        meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3
-    )
-    assert fitted_incumbent[:3] == ("NBA", "PTS", "HELD")
-    assert fitted_incumbent[3] == ["S2", "S3"]
+    assert mc._supersede_one(meta, _supersede_cand("P1"), auto_promote=True)[2] == "SUPERSEDED"
+    assert guard == [0.45]
+    assert "w 0.400 (nominee) -> 0.450 (refit)" in capsys.readouterr().out
+    # The same verdict holds a tier-U pick on S2/S3.
+    assert mc._supersede_one(meta, _supersede_cand(), auto_promote=True)[3] == ["S2", "S3"]
 
-    _patch_weights(monkeypatch, incumbent=0.05, candidate=0.45)
-    knob_off = mc._supersede_one(meta, _supersede_cand(), auto_promote=True)
-    assert knob_off[:3] == ("NBA", "PTS", "HELD")
-    assert knob_off[3] == ["S2", "S3"]
-
-    monkeypatch.setattr(
-        mc, "supersede_verdict", lambda *a, **k: _verdict(ship=False, s1=False, s2=False, s3=False)
-    )
-    no_s1 = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
-    assert no_s1[:3] == ("NBA", "PTS", "HELD")
-    assert no_s1[3] == ["S1", "S2", "S3"]
-
-
-def test_supersede_holds_a_candidate_below_min_model_weight(monkeypatch):
-    """The floor is a ship criterion on this lane too: a candidate that rides the book is held even
-    with all three supersession legs passing."""
-    meta = _shipped_meta()
-    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
-    _patch_weights(monkeypatch, incumbent=0.5, candidate=0.2)
-    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True, min_model_weight=0.3)
-    assert result[:3] == ("NBA", "PTS", "HELD")
-    assert result[3] == ["w=0.200<0.3"]
-    assert restored[0][:2] == ("NBA", "PTS")
-    assert pruned == []
+    monkeypatch.setattr(mc, "_priced_guard", lambda cand, backup, w: ["p1_dmse +2.000 above +1s"])
+    held = mc._supersede_one(meta, _supersede_cand("P1"), auto_promote=True)
+    assert held[2:] == ("HELD", ["p1_dmse +2.000 above +1s"])
+    monkeypatch.setattr(mc, "supersede_verdict", lambda *a, **k: _verdict(ship=False, s1=False))
+    assert mc._supersede_one(meta, _supersede_cand("P1"), auto_promote=True)[3][0] == "S1"
 
 
 def test_supersede_pass_but_no_restores_incumbent(monkeypatch):

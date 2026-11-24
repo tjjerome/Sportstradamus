@@ -14,13 +14,17 @@ deterministic trials — it never ships. This module turns a ranked board into s
    baseline every contender meets, so one that never scores holds the cell before the rest train.
    The board's own scorer reads each sandbox dump on the cross-fit validation half, the half the
    board ranks on; the ship holdout stays unread.
-3. Rank the blind rows: a nominee passes on a blind 6/6 above the blend-weight floor — on a live
-   cell, on S1/S2/S3 against the incumbent's own blind run — and passers sort by blind slack. A
-   cell with no passer is held, its ship holdout never read.
-4. Persist the top passer alone (its edits, plus ``shipped="devel"`` on a withheld cell) and refit
+3. Rank the blind rows. A priced cell (rule PR-1,
+   :mod:`sportstradamus.training.model_strategy.priced_select`) picks the eligible nominee whose
+   shrunk priced contrast with the incumbent (the book, on a withheld cell) clears the margin. A
+   tier-U nominee passes on a blind 6/6 — on a live cell, on S1/S2/S3 against the incumbent's own
+   blind run — and passers sort by blind slack. A cell with no pick is held, its ship holdout
+   never read.
+4. Persist the pick alone (its edits, plus ``shipped="devel"`` on a withheld cell) and refit
    it canonically with ``--params-from`` its sandbox pickle, so the booster that ships is the
    booster that ranked. Its ship-holdout verdict is read **once**: a pass keeps the cell on devel
-   (a live cell promotes on S1/S2/S3 against the served incumbent), and a failure ends the cell —
+   (a live cell promotes on S1/S2/S3 against the served incumbent; a priced cell on S1 and the
+   harm guard, S2/S3 reported only), and a failure ends the cell —
    no second nominee is read on the test half. A failure **auto-reverts**: restore the original
    stat_meta entry *and* :func:`prune_model_pickle`. The prune keeps a failed cell's pickle from
    riding a later send; serving reads ``shipped`` (a withheld cell's quoted offers serve the book
@@ -51,17 +55,26 @@ import functools
 import pathlib
 import time
 from copy import deepcopy
+from datetime import UTC, datetime
 
 import click
 import pandas as pd
 import tabulate
 
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path, prune_model_pickle
+from sportstradamus.scripts.priced_score import STATISTICS, p2_rungs
+from sportstradamus.scripts.tail_pricing import price_dumps
 
 # _cell_context is read off sweep at call time, the one binding all three confirm modules share.
-from sportstradamus.training.model_strategy import confirm_nominees, confirm_runs, sweep
+from sportstradamus.training.model_strategy import (
+    confirm_nominees,
+    confirm_runs,
+    priced_select,
+    sweep,
+)
 from sportstradamus.training.model_strategy.identity import corner_fingerprint
 from sportstradamus.training.model_strategy.progress import human_seconds, wrapped
+from sportstradamus.training.model_strategy.registry import CellContext
 from sportstradamus.training.model_strategy.sweep import (
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
@@ -82,29 +95,34 @@ _SHIPPED_DEVEL = "devel"
 _ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
 # Confirm outcomes that leave a shippable cell on devel (vs REVERTED / HELD, which change nothing).
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
+# A guard read prices every test-half rung: no game date precedes this one.
+_EVERY_DATE = "1900-01-01"
+# E1's columns for each test-half statistic of a priced pick (``priced_select.contrast``'s).
+_PICK_LOG_COLUMNS = (
+    "n_rows",
+    "n_dates",
+    "estimate",
+    "lo",
+    "hi",
+    "se",
+    "deff_player",
+    "s",
+    "shrunk",
+)
 
 
-def _floor_failures(weight: float, min_model_weight: float | None) -> list[str]:
-    """The blend-weight floor as a failure reason; empty if the weight clears it or none is set."""
-    if min_model_weight is None or weight >= min_model_weight:
-        return []
-    return [f"w={weight:.3f}<{min_model_weight}"]
-
-
-def _confirm_one(
-    meta: dict, cand: dict, *, min_model_weight: float | None = None
-) -> tuple[str, str, str, list[str]]:
+def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     """Persist and refit the walk's pick, then keep it (devel) or revert it (stat_meta + pickle).
 
     The pickle prune on failure keeps the artifact set honest: serving already prices a
     withheld cell at the book consensus, and a volume denominator (``VOLUME_STATS``) keeps
     its pickle.
 
-    ``min_model_weight`` is the campaign's blend-weight floor. The walk already held the pick to it
-    on its blind pickle, but this refit fits its own blend, so only the served pickle says what the
-    cell would actually blend. A cell under the floor reverts like any other loser; the ledger row
-    written before this check keeps its 6/6 verdict, so the corner is decided on this matrix and
-    walks again only once the matrix hash moves.
+    A priced pick must also clear the harm guard against the book (:func:`_priced_guard`). The
+    refit fits its own blend, so both weights print: the nominee's, which ranked, and the refit's,
+    which would serve. A pick reverted here keeps its ledger row's 6/6 verdict, written before
+    the guard, so the corner is decided on this matrix and walks again only once the matrix hash
+    moves.
     """
     lg, mkt = cand["league"], cand["market"]
     original = deepcopy(meta[lg][mkt])
@@ -117,7 +135,8 @@ def _confirm_one(
         failed = confirm_runs.confirm_meditate(lg, mkt, cand)
         if not failed:
             weight = confirm_runs.served_weight(model_pickle_path(lg, mkt))
-            failed = _floor_failures(weight, min_model_weight)
+            click.echo(f"  w {cand['nominee_weight']:.3f} (nominee) -> {weight:.3f} (refit)")
+            failed = [] if cand["priced_tier"] == "U" else _priced_guard(cand, None, weight)
             if not failed:
                 keep = True
                 click.secho(f"  SHIPPED (devel) {lg} {mkt} w={weight:.3f}", fg="green")
@@ -130,36 +149,92 @@ def _confirm_one(
             prune_model_pickle(lg, mkt)
 
 
+def _priced_guard(cand: dict, backup: pathlib.Path | None, w_refit: float) -> list[str]:
+    """PR-1.7's harm guard on a priced pick's canonical refit; empty keeps it.
+
+    The refit's test half meets the incumbent's snapshot in ``backup``, or the book on authentic
+    rows when ``backup`` is ``None`` (a withheld cell). P1 reads each dump as training served it,
+    as the selection half did. Tier P2 prices both arms' posted rungs through their own pickles,
+    as ``ship priced`` does; a refit whose rungs cannot be replayed reads no ``p2_dbrier`` and
+    reverts. Every read is logged for E1 (:func:`_log_pick`).
+    """
+    lg, mkt = cand["league"], cand["market"]
+    slug = market_file_slug(lg, mkt)
+    refit = _TEST_SETS_ROOT / f"{slug}.csv"
+    baseline = None if backup is None else load_test_set(backup / refit.name, _SHIP_PRED_COL)
+    p2 = None
+    if cand["priced_tier"] == "P2":
+        with sweep._archive_read_only() as con:
+            arms = [
+                price_dumps([dump], con, _EVERY_DATE, models)
+                for dump, models in (
+                    (refit, model_pickle_path(lg, mkt).parent),
+                    (backup / refit.name, backup),
+                )
+            ]
+        for *_, excluded in arms:
+            for reason in excluded.values():
+                click.echo(f"  no P2 rungs: {reason}")
+        p2 = p2_rungs(arms[0][0], arms[1][0])
+    table = priced_select.contrast(
+        priced_select.served(load_test_set(refit, _SHIP_PRED_COL)),
+        None if baseline is None else priced_select.served(baseline),
+        slug,
+        p2,
+    )
+    failed = priced_select.harm(table, cand["priced_tier"], cand["nominee_weight"], w_refit)
+    _log_pick(cand, table, w_refit, failed)
+    for statistic, read in table.iterrows():
+        click.echo(
+            f"  test half {statistic}: {read['estimate']:+.3f} [{read['lo']:+.3f}, "
+            f"{read['hi']:+.3f}] s {read['s']:.3f}, {read['n_dates']} dates"
+        )
+    return failed
+
+
+def _log_pick(cand: dict, table: pd.DataFrame, w_refit: float, failed: list[str]) -> None:
+    """E1's record of a priced pick: its selection-half read beside every test-half statistic.
+
+    One row per ``ship priced`` statistic, blank where the test half has none, appended beside the
+    nominee ledger so the selection-to-confirmation slope and tau0 can be refit on the pairs.
+    """
+    path = sweep.NOMINEE_LEDGER_PATH.with_name("priced_picks.csv")
+    read = table.reindex(index=pd.Index(STATISTICS, name="statistic"), columns=_PICK_LOG_COLUMNS)
+    picks = read.reset_index().assign(
+        logged_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        league=cand["league"],
+        market=cand["market"],
+        corner_fingerprint=cand["corner_fingerprint"],
+        matrix_hash=cand["matrix_hash"],
+        **{f"sel_{key.removeprefix('priced_')}": cand[key] for key in priced_select.COLUMNS},
+        w_nominee=cand["nominee_weight"],
+        w_refit=w_refit,
+        reverted=" ".join(failed),
+    )
+    if path.exists():
+        # Rewritten rather than appended, as the nominee ledger is: a column added later would
+        # land under an old header no reader can parse.
+        picks = pd.concat([pd.read_csv(path), picks], ignore_index=True)
+    picks.to_csv(path, index=False)
+
+
 def _failed_legs(verdict: dict) -> list[str]:
     """The supersession legs a HOLD verdict failed (for the report's failed-gates column)."""
     return [leg for leg in ("S1", "S2", "S3") if not verdict[f"{leg.lower()}_pass"]]
 
 
-def _supersede_failures(
-    verdict: dict, w_in: float, w_out: float, min_model_weight: float | None
-) -> list[str]:
+def _supersede_failures(verdict: dict, w_in: float, w_out: float) -> list[str]:
     """Why an S1/S2/S3 verdict holds the incumbent; empty means the candidate may replace it.
 
-    The walk's blind ranking and the canonical refit's test-half read apply this one rule.
-    ``min_model_weight`` cuts both ways. A candidate under the floor is held whatever the verdict
-    says. Above it, a book-riding incumbent waives S2/S3 for that pair: both models sit on the book
-    at the line, so their paired Brier difference is ~0 by construction and neither test can ever
-    fire — S1 plus the weight separation is the whole evidence available for the swap. An
-    incumbent already above the floor keeps the full S1+S2+S3 bar. Both weights print on the
-    headline whether or not the floor is set.
+    The walk's blind ranking and the canonical refit's test-half read apply this one rule. Both
+    weights, the incumbent's and the candidate's, print on the headline.
     """
     click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
-    floor = _floor_failures(w_out, min_model_weight)
-    if floor:
-        return floor
-    if min_model_weight is not None and verdict["s1_pass"] and min_model_weight > w_in:
-        click.echo("  [S2/S3 waived: incumbent rides the book]")
-        return []
     return _failed_legs(verdict)
 
 
 def _supersede_one(
-    meta: dict, cand: dict, *, auto_promote: bool = False, min_model_weight: float | None = None
+    meta: dict, cand: dict, *, auto_promote: bool = False
 ) -> tuple[str, str, str, list[str]]:
     """Supersession-test the walk's pick on one live cell; promote it or restore the incumbent.
 
@@ -172,8 +247,9 @@ def _supersede_one(
     ``auto_promote`` answers that confirmation yes so an unattended run can swap live cells: the
     S1/S2/S3 verdict and the six gates still decide, only the human veto is gone. Every swap is
     still local and uncommitted, so the review of the ``stat_meta.json`` diff is where a promotion
-    is actually accepted. The weight floor and its waiver are :func:`_supersede_failures`, read
-    against the incumbent's pickle in the snapshot.
+    is actually accepted. A priced pick (PR-1.7) is decided by S1 and the harm guard against the
+    snapshot (:func:`_priced_guard`); its S2 and S3 print but never hold it. Both of the pick's
+    weights print, the nominee's and the refit's.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -197,12 +273,13 @@ def _supersede_one(
             league=lg,
             market=mkt,
         )
+        weight = confirm_runs.served_weight(model_pickle_path(lg, mkt))
         failed = _supersede_failures(
-            verdict,
-            confirm_runs.served_weight(backup / model_pickle_path(lg, mkt).name),
-            confirm_runs.served_weight(model_pickle_path(lg, mkt)),
-            min_model_weight,
+            verdict, confirm_runs.served_weight(backup / model_pickle_path(lg, mkt).name), weight
         )
+        click.echo(f"  w {cand['nominee_weight']:.3f} (nominee) -> {weight:.3f} (refit)")
+        if cand["priced_tier"] != "U":
+            failed = [leg for leg in failed if leg == "S1"] + _priced_guard(cand, backup, weight)
         if failed:
             return (lg, mkt, "HELD", prefix + failed)
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
@@ -306,20 +383,15 @@ def _incumbent_fingerprint(league: str, market: str) -> str | None:
 
 
 def _blind_failures(
-    run: confirm_runs.BlindRun,
-    reference: confirm_runs.BlindRun | None,
-    min_model_weight: float | None,
+    run: confirm_runs.BlindRun, reference: confirm_runs.BlindRun | None
 ) -> list[str]:
-    """Why a blind run cannot be the cell's pick; empty means it passes.
+    """Why a tier-U blind run cannot be the cell's pick; empty means it passes.
 
     ``reference`` is a live cell's incumbent baseline and ``None`` on a withheld cell. A run that
     fails a gate already fails S1, so the gates name the failure on both lanes.
     """
-    if run.failed:
+    if run.failed or reference is None:
         return run.failed
-    weight = float(run.row["model_weight"])
-    if reference is None:
-        return _floor_failures(weight, min_model_weight)
     verdict = supersede_verdict(
         load_test_set(reference.dump, _SHIP_PRED_COL),
         load_test_set(run.dump, _SHIP_PRED_COL),
@@ -328,31 +400,97 @@ def _blind_failures(
         market=run.candidate["market"],
     )
     return _supersede_failures(
-        verdict, float(reference.row["model_weight"]), weight, min_model_weight
+        verdict, float(reference.row["model_weight"]), float(run.row["model_weight"])
     )
+
+
+def _priced_pick(
+    contenders: list[tuple[str, confirm_runs.BlindRun]],
+    baseline: priced_select.Baseline,
+    context: CellContext,
+) -> tuple[str, confirm_runs.BlindRun, dict[str, object]] | str:
+    """PR-1.6's pick among a priced cell's blind runs, each read against ``baseline``.
+
+    A run is eligible (PR-1.4) on a blind 6/6 whose served mean passes the sanity scan. Axis
+    changes, the first tie-break, count the strategy and controls that differ from the cell's
+    stat_meta recipe.
+    """
+    slug = market_file_slug(context.league, context.market)
+    incumbent = _incumbent_corner(context)
+    recipe = {} if incumbent is None else {"strategy": incumbent[0].slug, **incumbent[1]}
+    reads, rows = {}, []
+    for label, run in contenders:
+        if run.row is None:
+            click.echo(f"  {label}: blind FAIL {' '.join(run.failed)}")
+            continue
+        read = priced_select.selection_columns(
+            load_test_set(run.dump, _SHIP_PRED_COL), baseline, slug
+        )
+        sane = read["priced_mean_ratio"] <= priced_select.MEAN_SANITY
+        excluded = [*run.failed, *([] if sane else ["mean scan"])]
+        corner = {"strategy": run.candidate["strategy_slug"], **run.candidate["controls"]}
+        click.echo(
+            f"  {label}: blind {'FAIL ' + ' '.join(excluded) if excluded else 'PASS'}, "
+            f"{read['priced_stat']} {read['priced_est']:+.3f} s {read['priced_se']:.3f} "
+            f"(dates alone {read['priced_se_date']:.3f}), shrunk {read['priced_shrunk']:+.3f}"
+        )
+        reads[label] = read
+        rows.append(
+            {
+                "label": label,
+                "eligible": not excluded,
+                "shrunk": read["priced_shrunk"],
+                "s": read["priced_se"],
+                "axes": sum(corner.get(k) != recipe.get(k) for k in corner.keys() | recipe.keys()),
+                "slack": run.row["slack"],
+            }
+        )
+    label, why = priced_select.pick(
+        pd.DataFrame(rows, columns=["label", *priced_select.NOMINEE_COLUMNS]).set_index("label")
+    )
+    click.echo(f"  tier {baseline.tier}: {why}")
+    if label is None:
+        return f"tier {baseline.tier}: {why}"
+    return label, dict(contenders)[label], reads[label]
+
+
+def _slack_pick(
+    contenders: list[tuple[str, confirm_runs.BlindRun]],
+    reference: confirm_runs.BlindRun | None,
+) -> tuple[str, confirm_runs.BlindRun, dict[str, object]] | str:
+    """A tier-U cell's pick: the passing run with the most blind slack, or why the cell is held.
+
+    Slack is the value the board ranks on, and a strict comparison keeps nomination order on a tie.
+    """
+    best = None
+    for label, run in contenders:
+        failed = _blind_failures(run, reference)
+        click.echo(f"  {label}: blind {'FAIL ' + ' '.join(failed) if failed else 'PASS'}")
+        if not failed and (best is None or run.row["slack"] > best[1].row["slack"]):
+            best = (label, run)
+    return "no blind pass" if best is None else (*best, {"priced_tier": "U"})
 
 
 def _top_blind_passer(
     measured: list[tuple[str, list[confirm_runs.BlindRun]]],
     reference: confirm_runs.BlindRun | None,
-    min_model_weight: float | None,
-) -> tuple[str, confirm_runs.BlindRun] | None:
-    """The cell's pick: the passing run with the most blind slack, or ``None`` when none passes.
+) -> tuple[str, confirm_runs.BlindRun, dict[str, object]] | str:
+    """The cell's pick with its selection-half priced read, or why the cell is held.
 
-    Each nominee's last run ranks. Slack is the value the board ranks on, and a strict comparison
-    keeps nomination order on a tie. The live baseline is never its own contender; an incumbent
-    whose calibrated retry fired still contends through that retry.
+    Each nominee's last run contends. The live baseline is never its own contender; an incumbent
+    whose calibrated retry fired still contends through that retry. The cell's tier comes from the
+    baseline's dump, else the first scored contender's (a withheld cell meets the book): a priced
+    cell picks by PR-1.6 (:func:`_priced_pick`), a tier-U cell on slack (:func:`_slack_pick`).
     """
-    best = None
-    for label, runs in measured:
-        run = runs[-1]
-        if run is reference:
-            continue
-        failed = _blind_failures(run, reference, min_model_weight)
-        click.echo(f"  {label}: blind {'FAIL ' + ' '.join(failed) if failed else 'PASS'}")
-        if not failed and (best is None or run.row["slack"] > best[1].row["slack"]):
-            best = (label, run)
-    return best
+    contenders = [(label, runs[-1]) for label, runs in measured if runs[-1] is not reference]
+    source = reference or next((run for _, run in contenders if run.row is not None), None)
+    baseline = None
+    if source is not None:
+        context = sweep._cell_context(source.candidate["league"], source.candidate["market"])
+        baseline = sweep._priced_baseline(context, source.dump)
+    if baseline is None:
+        return _slack_pick(contenders, reference)
+    return _priced_pick(contenders, baseline, context)
 
 
 def _walk_nominees(
@@ -361,17 +499,17 @@ def _walk_nominees(
     attempt,
     *,
     live: bool = False,
-    min_model_weight: float | None = None,
 ) -> tuple[str, str, str, list[str], str]:
-    """Rank a cell's nominees blind, then read the ship holdout once, for the top passer only.
+    """Rank a cell's nominees blind, then read the ship holdout once, for the pick only.
 
     The cell's training matrix is pinned once here (:func:`confirm_runs.pin_cell_matrix`) and every
     undecided nominee runs blind on it (:func:`confirm_runs.measure_blind`); none touches
     stat_meta.json. ``attempt`` — :func:`_confirm_one` or :func:`_supersede_one` — then persists the
     pick and refits it from its sandbox pickle, and that refit's ship-holdout verdict is the cell's:
     a failure is reverted by ``attempt``'s own ``finally`` and ends the walk, because reading a
-    second nominee on the test half would be selection on the test half again. With no blind passer
-    the cell is held and its test half never read.
+    second nominee on the test half would be selection on the test half again. With no pick
+    (:func:`_top_blind_passer`) the cell is held and its test half never read. The pick carries its
+    tier, its selection-half read and its blind blend weight into ``attempt``.
 
     A live cell measures every nominee against its incumbent's blind run, so its incumbent's recipe
     must be among the undecided nominees; without it (cut by ``--confirm-nominees``, or already
@@ -404,12 +542,14 @@ def _walk_nominees(
             )
             return (lg, mkt, "HELD", ["incumbent baseline", *reference.failed], "-")
     measured = [(label, blind[label]) for label, _ in walkable]
-    pick = _top_blind_passer(measured, reference, min_model_weight)
-    if pick is None:
-        return (lg, mkt, "HELD", ["no blind pass"], "-")
-    label, run = pick
+    pick = _top_blind_passer(measured, reference)
+    if isinstance(pick, str):
+        return (lg, mkt, "HELD", [pick], "-")
+    label, run, read = pick
     click.secho(f"\n  canonical refit of {label} {lg} {mkt}", bold=True)
-    return (*attempt(meta, {**run.candidate, "params_from": run.model}), label)
+    weight = float(run.row["model_weight"])
+    cand = {**run.candidate, "params_from": run.model, "nominee_weight": weight, **read}
+    return (*attempt(meta, cand), label)
 
 
 def _walk_lanes(
@@ -418,7 +558,6 @@ def _walk_lanes(
     shipped: list[list[dict]],
     deadline_hours: float | None,
     auto_promote: bool = False,
-    min_model_weight: float | None = None,
 ) -> list[tuple[str, str, str, list[str], str]]:
     """Walk both lanes cell by cell; past the deadline, remaining cells record SKIPPED instead.
 
@@ -427,23 +566,16 @@ def _walk_lanes(
     at most one cell. :func:`confirm_nominees.candidates` ordered the cells best-first, which is
     what makes the cut land on the weakest tail.
     """
-    confirm = functools.partial(_confirm_one, min_model_weight=min_model_weight)
-    supersede = functools.partial(
-        _supersede_one, auto_promote=auto_promote, min_model_weight=min_model_weight
-    )
+    supersede = functools.partial(_supersede_one, auto_promote=auto_promote)
     deadline = None if deadline_hours is None else time.monotonic() + deadline_hours * 3600
     results = []
-    for lane, attempt, live in ((fresh, confirm, False), (shipped, supersede, True)):
+    for lane, attempt, live in ((fresh, _confirm_one, False), (shipped, supersede, True)):
         for nominated in lane:
             if deadline is not None and time.monotonic() > deadline:
                 lead = nominated[0]
                 results.append((lead["league"], lead["market"], "SKIPPED", ["deadline"], "-"))
                 continue
-            results.append(
-                _walk_nominees(
-                    meta, nominated, attempt, live=live, min_model_weight=min_model_weight
-                )
-            )
+            results.append(_walk_nominees(meta, nominated, attempt, live=live))
     return results
 
 
@@ -455,29 +587,24 @@ def run_confirm(
     deadline_hours: float | None = None,
     fresh_only: bool = False,
     auto_promote: bool = False,
-    min_model_weight: float | None = None,
 ) -> None:
     """Confirm the sweep's winners: rank each cell's nominees blind, then refit the top one.
 
     ``board`` is the in-memory sweep result (a row per corner). Each cell nominates its top corners
     plus any seed and its incumbent. Every nominee runs at full HPO in a research sandbox, scored
-    on the cross-fit validation half, and only the cell's top passer is persisted and refit
-    canonically, its ship holdout read once (:func:`_walk_nominees`). A withheld cell keeps its pick
-    on a clean 6/6 (else reverted+pruned). An already-shipped cell (present when the sweep ran
-    ``--include-shipped``) ranks its nominees on S1/S2/S3 against its incumbent's blind run, and
-    swaps its pick in only on a passing test-half verdict AND an operator yes; any loss restores
-    the incumbent. ``yes`` skips only the upfront gate — live-cell promotions prompt individually
-    unless ``auto_promote`` answers them. ``max_nominees`` caps each cell's walk at its first N
-    nominees; ``deadline_hours`` skips cells not yet started when the budget runs out;
-    ``fresh_only`` drops the live lane for unattended runs. ``min_model_weight`` sets the
-    campaign's blend-weight floor: book-riding corners drop out of every lane, a blind run or
-    canonical refit under the floor fails, and a book-riding incumbent waives S2/S3 against a
-    candidate above it.
+    on the cross-fit validation half, and only the cell's pick is persisted and refit canonically,
+    its ship holdout read once (:func:`_walk_nominees`). A priced cell picks on its priced contrast
+    with the incumbent (rule PR-1); a tier-U cell keeps the slack ranking. A withheld cell keeps
+    its pick on a clean 6/6 and, when priced, the harm guard (else reverted+pruned). An
+    already-shipped cell (present when the sweep ran ``--include-shipped``) swaps its pick in only
+    on a passing test-half verdict (S1/S2/S3 on tier U, S1 and the harm guard when priced) AND an
+    operator yes; any loss restores the incumbent. ``yes`` skips only the upfront gate — live-cell
+    promotions prompt individually unless ``auto_promote`` answers them. ``max_nominees`` caps each
+    cell's walk at its first N nominees; ``deadline_hours`` skips cells not yet started when the
+    budget runs out; ``fresh_only`` drops the live lane for unattended runs.
     """
     meta = load_stat_meta(confirm_runs.STAT_META)
-    ready = confirm_nominees.candidates(
-        board, meta, max_nominees, min_model_weight=min_model_weight
-    )
+    ready = confirm_nominees.candidates(board, meta, max_nominees)
     if not ready:
         click.echo("no confirmable nominees on the board.")
         return
@@ -502,9 +629,7 @@ def run_confirm(
 
     backup = confirm_runs.backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    _print_confirm_report(
-        _walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote, min_model_weight), backup
-    )
+    _print_confirm_report(_walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote), backup)
 
 
 def _print_confirm_report(

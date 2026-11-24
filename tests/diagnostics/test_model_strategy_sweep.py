@@ -158,6 +158,12 @@ def _sandboxed_nominee_ledger(monkeypatch, tmp_path):
     monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
 
 
+@pytest.fixture(autouse=True)
+def _unpriced_cells(monkeypatch):
+    """Search every cell on slack (tier U): the real baseline reads a dump and the odds archive."""
+    monkeypatch.setattr(sweep, "_priced_baseline", lambda context, csv_path: None)
+
+
 def _canned_row(*, ship, g4_pit_ks):
     """A scorecard ship-row where Gate 4 binds the slack (the other gates pass with headroom)."""
     return {
@@ -1140,6 +1146,7 @@ def test_search_cell_evaluates_the_seed_corner_first(monkeypatch):
     independent full-HPO pass, so the seed and the stat_meta incumbent are enqueued ahead of the
     sampler. Assert the seed's position and its uniqueness, not the whole enqueued list: the cell's
     incumbent is whatever it last shipped, so pinning the list would fail on every future ship.
+    The incumbent's own baseline run, ahead of the search, has its own test; it is left out here.
     """
     seed = next(
         controls
@@ -1153,6 +1160,7 @@ def test_search_cell_evaluates_the_seed_corner_first(monkeypatch):
     trained = []
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("ZINB", "NegBin", "DPO"))
     monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+    monkeypatch.setattr(sweep, "_scored_incumbent", lambda *args: ({}, None))
     sweep.search_cell("NFL", "passing tds", max_trials=6)
     assert trained[0] == ("DPO", seed)
 
@@ -1263,7 +1271,14 @@ def test_shaping_probes_cover_the_top_two_bases_with_the_cdf_corrector(monkeypat
     trained = []
     monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
     probes = sweep._shaping_probes(
-        context, ("SkewNormal",), dict(scored), scored, {}, timeout_s=60, progress=_quiet_progress()
+        context,
+        ("SkewNormal",),
+        dict(scored),
+        scored,
+        {},
+        None,
+        timeout_s=60,
+        progress=_quiet_progress(),
     )
 
     assert [c["posthoc"] for _, c in trained] == ["cdf_recal_isotonic"] * 2
@@ -1300,6 +1315,7 @@ def test_shaping_probes_skip_covered_known_and_foreign_anchors(monkeypatch):
         {**scored, probe_fp: probe_row},
         scored,
         {},
+        None,
         timeout_s=60,
         progress=_quiet_progress(),
     )
@@ -1315,6 +1331,7 @@ def test_shaping_probes_skip_covered_known_and_foreign_anchors(monkeypatch):
         {count_fp: count_row},
         {count_fp: count_row},
         {},
+        None,
         timeout_s=60,
         progress=_quiet_progress(),
     )
@@ -2154,15 +2171,12 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
-            seen.update(
-                n=len(board),
-                yes=yes,
-                max_nominees=max_nominees,
-                deadline_hours=deadline_hours,
-                fresh_only=fresh_only,
-                min_model_weight=min_model_weight,
-            )
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: seen.update(
+            n=len(board),
+            yes=yes,
+            max_nominees=max_nominees,
+            deadline_hours=deadline_hours,
+            fresh_only=fresh_only,
         ),
     )
     out = str(tmp_path / "board.csv")
@@ -2184,15 +2198,12 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
             "--confirm-hours",
             "12",
             "--confirm-fresh-only",
-            "--min-model-weight",
-            "0.3",
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["yes"] is True and 0 < seen["n"] <= 5 + 1 + sweep._SHAPING_PROBE_ANCHORS
     assert seen["max_nominees"] == 2
     assert seen["deadline_hours"] == 12.0 and seen["fresh_only"] is True
-    assert seen["min_model_weight"] == 0.3
 
 
 def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_path):
@@ -2222,7 +2233,7 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: (
             confirmed.update(
                 cells=set(zip(board["league"], board["market"], strict=True)),
                 yes=yes,
@@ -2792,7 +2803,6 @@ def test_compress_corner_orders_family_first_and_clamps_to_budget():
         (["--confirm-hours", "4"], "require --confirm"),
         (["--confirm-fresh-only"], "require --confirm"),
         (["--confirm-auto-promote"], "require --confirm"),
-        (["--min-model-weight", "0.3"], "require --confirm"),
         (
             ["--confirm", "--confirm-fresh-only", "--confirm-auto-promote"],
             "only affects the live lane",

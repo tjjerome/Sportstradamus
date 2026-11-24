@@ -185,8 +185,10 @@ class CellSearchState:
             study.stop()
 
 
-def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.Study:
-    """One resumable conditional-TPE study per cell and family pool, journalled under ``research/``.
+def cell_study(
+    league: str, market: str, families: tuple[str, ...], objective: str = "slack"
+) -> optuna.Study:
+    """One resumable conditional-TPE study per cell, family pool and objective, under ``research/``.
 
     ``multivariate=True, group=True`` is the only Optuna configuration that models a conditional
     space — with either off the sampler falls back to independent per-parameter sampling and cannot
@@ -202,6 +204,11 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     family's axis grid is in the key for the same reason: adding a value to an axis (a new posthoc
     slug) changes that categorical's choices and would poison every journal written before it.
 
+    ``objective`` names what the trials' values measure: ``slack`` (negated) or a priced cell's
+    ``priced_shrunk``. A sampler resumed over values in another unit would model nonsense, so any
+    objective but slack keys its own journal; slack keeps the key every journal on disk was
+    written under.
+
     ``multivariate`` and ``group`` are still marked experimental, and each announces itself
     once per cell. The warnings carry nothing actionable — the choices are deliberate, and
     the ``optuna >=4.9,<5`` pin is what stops "the interface can change in the future" from
@@ -210,6 +217,8 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     """
     _STUDY_ROOT.mkdir(parents=True, exist_ok=True)
     space = "|".join(f"{slug}{sorted(get_strategy(slug).axes.items())}" for slug in families)
+    if objective != "slack":
+        space += f"|{objective}"
     pool = hashlib.sha256(space.encode()).hexdigest()[:8]
     path = _STUDY_ROOT / f"{market_file_slug(league, market)}.{pool}.log"
     with warnings.catch_warnings():

@@ -11,6 +11,8 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   first release that allows Pillow 13.
 
 ### Changed
+- `ship sweep` / `--confirm` pick a priced cell's recipe on priced rows (rule PR-1,
+  `model_strategy/priced_select.py`); `--min-model-weight` and its blend-weight floor are gone.
 - `admin backfill-nhl-gamelog` is now `admin backfill-gamelog --league NHL`; `--league MLB`
   fills the MLB pitch columns a season at a time, resuming where a stopped run stopped.
 - A withheld cell's props that a sportsbook quotes serve the book consensus instead of leaving
@@ -22,6 +24,7 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 - Training's SkewNormal push probabilities use the cell's `step`, as serving does.
 
 ### Added
+- `ship priced` prints `deff_player`, the player design effect, beside each interval.
 - MLB pitch counts per player-game from Savant's game feed (`stats/mlb_pitch.py`), and inputs
   built on them (`stats/mlb_profile.py`): pitch-level rates, leash, lineup spot, platoon
   splits and the opposing lineup's rates against the pitcher's hand.

@@ -39,7 +39,6 @@ sportstradamus ship sweep --resume                    # continue a crashed multi
 sportstradamus ship sweep --dry-run --resume          # what it would do, without training
 sportstradamus ship sweep --league WNBA -v            # one line per recipe (-q for less)
 sportstradamus ship sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
-sportstradamus ship sweep --confirm --min-model-weight 0.3   # ship only recipes whose fitted blend weight lands >= 0.3
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
@@ -98,8 +97,9 @@ supersession test: it snapshots the incumbent, retrains the candidate in place, 
 (candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
 prints the comparison and swaps the live cell only when all three pass **and** you confirm the
 promotion; a loss (or a declined prompt) restores the incumbent byte-identical and it keeps serving.
-`--min-model-weight T` makes the fitted blend weight a ship criterion in both lanes; the three
-clauses (nomination, ship-time revert, S1-only waiver) live in [ship_gate.md](ship_gate.md). The
+A cell with 20 game dates of priced validation rows is searched, ranked and confirmed on its error
+there instead (rule PR-1, `model_strategy/priced_select.py`): a pick must beat the incumbent (the
+book, on a withheld cell) by a margin, and its refit is kept on S1 and a harm guard. The
 board's `model_weight` and `n_authentic_validation` columns show each corner's fitted weight and
 the sportsbook-priced (`authentic`) validation rows behind it; `pickem` rows (DFS-only cohorts)
 count for neither.
