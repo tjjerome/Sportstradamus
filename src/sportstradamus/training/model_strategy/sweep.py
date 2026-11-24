@@ -1037,7 +1037,7 @@ def _priced(
     spec: StrategySpec,
     corner: dict[str, str],
 ) -> dict[str, object]:
-    """``row`` with its PR-1 columns, read off the corner's dump before the next corner overwrites it."""
+    """``row`` with PR-1 columns read off the corner's dump before the next corner overwrites it."""
     if baseline is None or "failure" in row:
         return row
     csv_path, _ = _dump_paths(context.league, context.market, corner, spec)
@@ -1047,7 +1047,7 @@ def _priced(
 
 
 def _priced_eligible(row: dict[str, object]) -> bool:
-    """PR-1.4: all six gates pass and no served mean blew past twice the matrix's largest outcome."""
+    """PR-1.4: all six gates pass and no served mean past twice the matrix's largest outcome."""
     ratio = _board_float(row, "priced_mean_ratio")
     return bool(row["ships"]) and ratio is not None and ratio <= priced_select.MEAN_SANITY
 
@@ -1232,9 +1232,10 @@ def search_cell(
             spec, corner = suggest_corner(trial, context, families)
             fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
             row = evaluated.get(fingerprint)
-            # Asked once, before the cache is written: `fingerprint in trained` would answer True
-            # again on a re-proposal of a corner this run already trained, and TPE re-proposes about
-            # a quarter of the time — enough to walk the bar past its total and double-weight the ETA.
+            # Asked once, before the cache is written: `fingerprint in trained` would answer
+            # True again on a re-proposal of a corner this run already trained, and TPE
+            # re-proposes about a quarter of the time — enough to walk the bar past its total
+            # and double-weight the ETA.
             retrained = row is None
             if retrained:
                 if state.abandoned(spec.slug):

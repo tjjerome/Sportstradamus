@@ -83,7 +83,7 @@ class Baseline(NamedTuple):
 
 
 def served(dump: pd.DataFrame) -> pd.DataFrame:
-    """A dump's rows with what training served: ``p``, its ``P``, and ``mean``, the gated ``Blended_EV``.
+    """A dump's rows as training served them: ``p`` is its ``P``, ``mean`` the gated ``Blended_EV``.
 
     The training convention: an authentic row blended at the fitted weight, every other row at 1.
     """
@@ -91,13 +91,13 @@ def served(dump: pd.DataFrame) -> pd.DataFrame:
     return dump.assign(p=dump["P"], mean=mean)
 
 
-def tier(rows: pd.DataFrame, classes: tuple[str, ...], p2_dates: int) -> str:
+def tier(rows: pd.DataFrame, classes: tuple[str, ...], n_p2_dates: int) -> str:
     """PR-1.3's tier from the selection half's counts: ``P2``, ``P1`` or ``U``.
 
     ``classes`` are the quote classes a P1 row may carry (a withheld cell counts authentic rows
-    only); ``p2_dates`` is :func:`p2_dates` of the half's rungs. P2 is checked first, as E0 did.
+    only); ``n_p2_dates`` is :func:`p2_dates` of the half's rungs. P2 is checked first, as E0 did.
     """
-    if p2_dates >= MIN_DATES:
+    if n_p2_dates >= MIN_DATES:
         return "P2"
     priced = rows["QuoteAuthenticity"].isin(classes) & rows["Line"].notna()
     return "P1" if rows.loc[priced, "Date"].nunique() >= MIN_DATES else "U"
@@ -168,7 +168,7 @@ def selection_columns(dump: pd.DataFrame, baseline: Baseline, cell: str) -> dict
     }
 
 
-def pick(nominees: pd.DataFrame) -> tuple[object, str]:
+def pick(nominees: pd.DataFrame) -> tuple[str | None, str]:
     """PR-1.6's switch among a cell's blind nominees, or the incumbent.
 
     ``nominees`` is indexed by label in nomination order, with :data:`NOMINEE_COLUMNS`:
@@ -196,7 +196,7 @@ def pick(nominees: pd.DataFrame) -> tuple[object, str]:
     return chosen, f"switch to {chosen} (tie set: {', '.join(map(str, ties.index))})"
 
 
-def harm(table: pd.DataFrame, tier: str, w_nominee: float, w_refit: float) -> list[str]:
+def harm(table: pd.DataFrame, cell_tier: str, w_nominee: float, w_refit: float) -> list[str]:
     """PR-1.7's guard on a pick's canonical refit: why it reverts, empty to keep it.
 
     ``table`` is the refit's :func:`contrast` with the incumbent on the test half. The pick
@@ -205,7 +205,7 @@ def harm(table: pd.DataFrame, tier: str, w_nominee: float, w_refit: float) -> li
     tier P2's guard's interval lies wholly above zero over ``MIN_DATES`` dates (``ship priced``'s
     KILL leg on those two).
     """
-    primary = PRIMARY[tier]
+    primary = PRIMARY[cell_tier]
     if primary not in table.index:
         return [f"no {primary} on the test half"]
     lead = table.loc[primary]

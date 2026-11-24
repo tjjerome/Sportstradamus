@@ -4,10 +4,11 @@ The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks*
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
 1. For each cell, nominate the top :data:`confirm_nominees._CONFIRM_TOP_K` corners **across the
-   cell's swept families** by ship slack — a count cell's slice carries ZINB, NegBin and DPO
-   corners ranked together — then its seed corners and its incumbent. Every swept axis has a
-   ``stat_meta.json`` field, and each nominee's own family's ``persist`` map builds the edits (so
-   a NegBin corner outranking ZINB persists ``dist=NegBin`` and flips the cell's family).
+   cell's swept families** by ship slack (a priced cell's, by its shrunk priced contrast) — a
+   count cell's slice carries ZINB, NegBin and DPO corners ranked together — then its seed
+   corners and its incumbent. Every swept axis has a ``stat_meta.json`` field, and each
+   nominee's own family's ``persist`` map builds the edits (so a NegBin corner outranking ZINB
+   persists ``dist=NegBin`` and flips the cell's family).
 2. Prompt, then per cell: pin the training matrix and run **every** nominee at full HPO in a
    research sandbox (``meditate --holdout-blind --artifact-output``, each control a flag, so
    stat_meta.json is never written for it). A live cell's incumbent runs first: its run is the
@@ -65,7 +66,8 @@ from sportstradamus.helpers.io import market_file_slug, model_pickle_path, prune
 from sportstradamus.scripts.priced_score import STATISTICS, p2_rungs
 from sportstradamus.scripts.tail_pricing import price_dumps
 
-# _cell_context is read off sweep at call time, the one binding all three confirm modules share.
+# _cell_context, _priced_baseline, _archive_read_only and NOMINEE_LEDGER_PATH are read off sweep at
+# call time, not imported: one binding means one monkeypatch covers every caller.
 from sportstradamus.training.model_strategy import (
     confirm_nominees,
     confirm_runs,
@@ -445,13 +447,13 @@ def _priced_pick(
                 "slack": run.row["slack"],
             }
         )
-    label, why = priced_select.pick(
+    picked, why = priced_select.pick(
         pd.DataFrame(rows, columns=["label", *priced_select.NOMINEE_COLUMNS]).set_index("label")
     )
     click.echo(f"  tier {baseline.tier}: {why}")
-    if label is None:
+    if picked is None:
         return f"tier {baseline.tier}: {why}"
-    return label, dict(contenders)[label], reads[label]
+    return picked, dict(contenders)[picked], reads[picked]
 
 
 def _slack_pick(
