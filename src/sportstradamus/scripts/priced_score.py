@@ -26,6 +26,8 @@ primary on its own rows. A scope whose primary spans fewer dates is NEUTRAL. Oth
 KILL when any judged statistic spanning ``MIN_DATES`` dates has its interval wholly above
 zero, KEEP when the primary's lies wholly below, and NEUTRAL else.
 A value both arms serve alike, to float rounding (``SAME_VALUE_RTOL``), is no change.
+Beside each interval, ``deff_player``: the design effect of the change's clustering by player,
+1 + (sum n_i^2 / N - 1) * ICC, the one-way ICC truncated at 0 (information, never in a verdict).
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ from sportstradamus.scripts.tail_pricing import (
     price_dumps,
     serve_live,
 )
-from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
+from sportstradamus.training.scorecard import _cluster_bootstrap_means
 
 # Whole-game-date resamples behind every interval.
 N_RESAMPLES = 500
@@ -74,7 +76,7 @@ STATISTICS = (*JUDGED, "toward_book")
 _ROW_KEY = ["Player", "Date"]
 _RUNG_KEY = ["League", "cell", "Player", "Date", "Platform", "Line"]
 _P2_COLUMNS = [*_RUNG_KEY, "Result", "p_cand", "p_base"]
-_CHANGE_COLUMNS = ["League", "cell", "Date", "statistic", "change"]
+_CHANGE_COLUMNS = ["League", "cell", "Player", "Date", "statistic", "change"]
 _TABLE_COLUMNS = [
     "league",
     "cell",
@@ -84,6 +86,7 @@ _TABLE_COLUMNS = [
     "estimate",
     "lo",
     "hi",
+    "deff_player",
     "primary",
     "verdict",
 ]
@@ -181,24 +184,44 @@ def row_changes(p1: pd.DataFrame, p2: pd.DataFrame) -> pd.DataFrame:
     return changes.assign(statistic=pd.Categorical(changes["statistic"], STATISTICS))
 
 
+def _player_deff(change: np.ndarray, players: np.ndarray) -> float:
+    """1 + (sum n_i^2 / N - 1) * ICC: the one-way ANOVA ICC of ``change`` by player, floored at 0.
+
+    The unbalanced form, with the n0 average group size; 1 when there is no clustering to
+    measure (one player, or one row each).
+    """
+    _, codes, sizes = np.unique(players, return_inverse=True, return_counts=True)
+    total, groups = len(change), len(sizes)
+    if groups < 2 or total == groups:
+        return 1.0
+    means = np.bincount(codes, weights=change) / sizes
+    between = (sizes * (means - change.mean()) ** 2).sum() / (groups - 1)
+    within = ((change - means[codes]) ** 2).sum() / (total - groups)
+    n0 = (total - (sizes**2).sum() / total) / (groups - 1)
+    denom = between + (n0 - 1) * within
+    icc = max(0.0, (between - within) / denom) if denom > 0 else 0.0
+    return 1 + ((sizes**2).sum() / total - 1) * icc
+
+
 def scope_table(changes: pd.DataFrame, seed: int) -> pd.DataFrame:
     """Each statistic per cell and pooled per league (cell ``ALL``), with its interval.
 
-    Per scope: rows, game dates, the mean change and its 95 % interval from
-    ``N_RESAMPLES`` resamples of whole game dates, each scope drawing from its own
-    generator (``key_rng``).
+    Per scope: rows, game dates, the mean change, its 95 % interval and standard error
+    (``se``) from ``N_RESAMPLES`` resamples of whole game dates, each scope drawing from its
+    own generator (``key_rng``), and ``deff_player`` (:func:`_player_deff`).
     """
     records = []
     for league, league_rows in changes.groupby("League"):
         for cell, scope in [(POOLED, league_rows), *league_rows.groupby("cell")]:
             for statistic, rows in scope.groupby("statistic", observed=True):
-                estimate, lo, hi = _bootstrap_mean_ci_clustered(
-                    rows["change"].to_numpy(float),
+                change = rows["change"].to_numpy(float)
+                draws = _cluster_bootstrap_means(
+                    change,
                     rows["Date"].to_numpy(),
                     key_rng(seed, f"{league}/{cell}/{statistic}"),
-                    n_boot=N_RESAMPLES,
-                    percentiles=CI_PERCENTILES,
+                    N_RESAMPLES,
                 )
+                lo, hi = np.percentile(draws, CI_PERCENTILES)
                 records.append(
                     {
                         "league": league,
@@ -206,9 +229,11 @@ def scope_table(changes: pd.DataFrame, seed: int) -> pd.DataFrame:
                         "statistic": statistic,
                         "n_rows": len(rows),
                         "n_dates": rows["Date"].nunique(),
-                        "estimate": estimate,
+                        "estimate": change.mean(),
                         "lo": lo,
                         "hi": hi,
+                        "se": draws.std(ddof=1),
+                        "deff_player": _player_deff(change, rows["Player"].to_numpy()),
                     }
                 )
     return pd.DataFrame(records)

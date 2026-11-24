@@ -53,6 +53,7 @@ def _p1(**columns) -> pd.DataFrame:
     defaults = {
         "League": "NBA",
         "cell": "NBA_PTS",
+        "Player": "a",
         "Date": "2026-11-01",
         "Line": 2.5,
         "QuoteAuthenticity": "pickem",
@@ -72,6 +73,7 @@ def test_pushes_leave_the_brier_statistics_and_stay_in_dmse():
         {
             "League": "NBA",
             "cell": "NBA_PTS",
+            "Player": "a",
             "Date": "2026-11-01",
             "Result": [3.0, 3.5],
             "Line": 3.5,
@@ -161,6 +163,7 @@ def _dated(statistic: str, n_dates: int, change: np.ndarray) -> pd.DataFrame:
         {
             "League": "NBA",
             "cell": "NBA_PTS",
+            "Player": "a",
             "Date": np.repeat(dates, 2),
             "statistic": statistic,
             "change": change,
@@ -182,6 +185,24 @@ def test_intervals_resample_whole_game_dates_under_the_seed():
     level_only = ps.scope_table(_dated("p1_dmse", 30, levels), seed=7)
     pd.testing.assert_frame_equal(table, level_only)
     assert (table["lo"] < table["estimate"]).all() and (table["estimate"] < table["hi"]).all()
+
+
+def test_deff_player_measures_how_the_change_clusters_by_player():
+    # Three players, ten rows each, one game date per row. Clustered: each player's rows share
+    # a level, so the ICC is ~1 and DEFF ~ sum n^2 / N = 10. Alternating: no player level.
+    levels = np.repeat([-1.0, 0.0, 1.0], 10)
+    noise = np.tile([0.01, -0.01], 15)
+    clustered = _dated("p1_dmse", 30, np.zeros(60)).head(30)
+    clustered = clustered.assign(Player=np.repeat(["a", "b", "c"], 10), change=levels + noise)
+    alternating = clustered.assign(change=np.tile([1.0, -1.0], 15))
+
+    deff = {
+        name: ps.scope_table(frame, ps.DEFAULT_SEED).set_index("cell").loc["NBA_PTS", "deff_player"]
+        for name, frame in (("clustered", clustered), ("alternating", alternating))
+    }
+
+    assert deff["clustered"] == pytest.approx(10.0, abs=0.01)
+    assert deff["alternating"] == 1.0
 
 
 @pytest.mark.parametrize(

@@ -407,6 +407,8 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "QuoteSource",
         "EV",
         "Blended_EV",
+        # The sportsbook's mean, the baseline a withheld cell's recipes are priced against.
+        "Book_EV",
     } & set(df.columns)
     # Per-row distribution params (Operation Ship 75 Step 0.2 G4 audit).
     # ``training/pipeline.py::_step_persist_artifacts`` dumps these at lines
@@ -779,6 +781,14 @@ def _bootstrap_mean_ci_clustered(
     values, cluster_ids = values[finite], cluster_ids[finite]
     if len(values) == 0:
         return float("nan"), float("nan"), float("nan")
+    lo, hi = np.percentile(_cluster_bootstrap_means(values, cluster_ids, rng, n_boot), percentiles)
+    return float(values.mean()), float(lo), float(hi)
+
+
+def _cluster_bootstrap_means(
+    values: np.ndarray, cluster_ids: np.ndarray, rng: np.random.Generator, n_boot: int
+) -> np.ndarray:
+    """``n_boot`` means of ``values`` (finite, non-empty), each over clusters drawn with replacement."""
     uniq = np.unique(cluster_ids)
     groups = [values[cluster_ids == c] for c in uniq]
     n_clusters = len(uniq)
@@ -786,8 +796,7 @@ def _bootstrap_mean_ci_clustered(
     for i in range(n_boot):
         pick = rng.integers(0, n_clusters, n_clusters)
         draws[i] = np.concatenate([groups[j] for j in pick]).mean()
-    lo, hi = np.percentile(draws, percentiles)
-    return float(values.mean()), float(lo), float(hi)
+    return draws
 
 
 def _bootstrap_ratio_ci_clustered(
