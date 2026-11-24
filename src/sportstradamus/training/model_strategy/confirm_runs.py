@@ -17,7 +17,12 @@ from typing import NamedTuple
 import click
 import pandas as pd
 
-from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, model_pickle_path
+from sportstradamus.helpers.io import (
+    MODEL_STATS_PATH,
+    _atomic_tmp,
+    market_file_slug,
+    model_pickle_path,
+)
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training.lineage import (
     MATRIX_BUILDER_VERSION,
@@ -102,11 +107,9 @@ _LEDGER_NAMES: dict[str, str] = {
 
 def atomic_write_meta(meta: dict) -> None:
     """Write stat_meta.json atomically at its native 4-space indent for a minimal review diff."""
-    tmp = STAT_META.with_suffix(".json.tmp")
-    with tmp.open("w") as fh:
+    with _atomic_tmp(STAT_META) as tmp, tmp.open("w") as fh:
         json.dump(meta, fh, indent=4)
         fh.write("\n")
-    tmp.replace(STAT_META)
 
 
 def backup_stat_meta() -> pathlib.Path:

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sportstradamus import creds
+from sportstradamus.helpers.io import _atomic_tmp
 
 # Headers that should never be persisted in a catalog entry —
 # Authorization and Cookie come from creds/keys.json, Referer/Origin/UA are
@@ -125,12 +126,9 @@ def update_keys(updates: dict[str, str], path: Path | None = None) -> Path:
         with target.open() as f:
             existing = json.load(f)
     existing.update(updates)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    with tmp.open("w") as f:
+    with _atomic_tmp(target) as tmp, tmp.open("w") as f:
         json.dump(existing, f, indent=2)
         f.write("\n")
-    tmp.replace(target)
     return target
 
 

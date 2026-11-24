@@ -68,7 +68,7 @@ from urllib.parse import urlsplit
 import pytz
 
 from sportstradamus import creds, data
-from sportstradamus.helpers.io import ODDS_USAGE_LEDGER_PATH, read_league_activity
+from sportstradamus.helpers.io import ODDS_USAGE_LEDGER_PATH, _atomic_tmp, read_league_activity
 
 with (pkg_resources.files(data) / "config" / "odds_api_budget.json").open() as infile:
     BUDGET_CFG: dict = json.load(infile)
@@ -312,10 +312,8 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float], d
 
     keep_cutoff = now - timedelta(days=_LEDGER_RETENTION_DAYS)
     if any(ts < keep_cutoff for ts, _, _ in entries):
-        tmp = ledger.with_suffix(ledger.suffix + ".tmp")
-        with tmp.open("w") as f:
+        with _atomic_tmp(ledger) as tmp, tmp.open("w") as f:
             f.writelines(line for ts, line, _ in entries if ts >= keep_cutoff)
-        tmp.replace(ledger)
 
     return floor_per_day, league_costs, last_paid
 
