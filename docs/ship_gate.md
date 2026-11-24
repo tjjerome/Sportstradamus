@@ -380,9 +380,11 @@ Offline, a refit pickle scores no row dated on or before its `refit_through`
 (`scripts/tail_pricing.out_of_sample`: `ship priced`, the replay's `posted` scope,
 `tail_scorecard`, `admin feature-parity`). A refit is therefore judged on rows after its cut
 only: arms refit at a cut and read the forward window, or a pseudo-forward window at an earlier
-cut, never their own test half. For the same reason a cell carrying the knob takes no P2-tier
-switch under rule PR-1: its confirm refit's test-half rungs are in sample, so the harm guard
-reads none and the pick reverts. Turn the knob off for a confirm walk.
+cut, never their own test half. For the same reason every sweep trial and confirm run is
+knob-off (`model_strategy.registry.meditate_command` passes `--refit none`): the trials are
+holdout-blind, and a confirm's harm guard reads its canonical refit's test half, which a refit
+would have trained on. A knob cell's kept pick therefore serves its 70 % fit until its next
+knob-on retrain (the weekly `meditate` or a send retrain).
 
 ### The books'-lean paper test (`admin books-lean`, report only)
 

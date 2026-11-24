@@ -309,7 +309,12 @@ def distribution_class(distribution: str) -> str:
 
 
 def meditate_command(league: str, market: str, *args: str) -> list[str]:
-    """Build the canonical cell-bound ``meditate`` subprocess command."""
+    """Build the canonical cell-bound ``meditate`` subprocess command.
+
+    Every sweep trial and confirm run is knob-off (``--refit none``): a holdout-blind trial refuses
+    the refit, and the confirm's harm guard reads its canonical refit's test half, which a refit
+    would have trained on.
+    """
     return [
         "poetry",
         "run",
@@ -321,6 +326,8 @@ def meditate_command(league: str, market: str, *args: str) -> list[str]:
         league,
         "--market",
         market,
+        "--refit",
+        "none",
         *args,
     ]
 

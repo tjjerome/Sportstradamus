@@ -14,7 +14,8 @@ has seen it. These pins hold that:
   included, and its test-set dump is byte-identical;
 - model_prob and feature_parity serve the refit alike whichever levels a batch holds, and each
   refit booster has learned the late level;
-- the knob refuses a hurdle cell, an affine-expert strategy and a holdout-blind run.
+- the knob refuses a hurdle cell, an affine-expert strategy and a holdout-blind run;
+- the sweep's and confirm's meditate runs are knob-off, so a knob cell's holdout-blind trial trains.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     MODEL_STRATEGY_MODEL_KEY,
 )
+from sportstradamus.training.model_strategy.registry import meditate_command
 from sportstradamus.training.refit import resolve_refit
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
@@ -340,6 +342,13 @@ def test_the_cell_knob_decides_unless_overridden(monkeypatch):
     assert resolve_refit(LEAGUE, MARKET, None, **SERVABLE) is True
     assert resolve_refit(LEAGUE, MARKET, "none", **SERVABLE) is False
     assert resolve_refit(LEAGUE, "other", None, **SERVABLE) is False
+
+
+def test_sweep_and_confirm_runs_are_knob_off(monkeypatch):
+    monkeypatch.setattr(config, "stat_meta", {LEAGUE: {MARKET: {"refit": "all"}}})
+    command = meditate_command(LEAGUE, MARKET, "--holdout-blind")
+    override = command[command.index("--refit") + 1]
+    assert resolve_refit(LEAGUE, MARKET, override, **{**SERVABLE, "holdout_blind": True}) is False
 
 
 def test_unknown_refit_rejected():
