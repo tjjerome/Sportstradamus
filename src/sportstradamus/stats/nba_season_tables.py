@@ -69,10 +69,8 @@ def read(league: str, season: str | int, day: date) -> tuple[pd.DataFrame, pd.Da
                 date_to_nullable=date_to,
             ).get_dict()["resultSets"],
         }
-        path, tmp = _atomic_tmp(path)
-        with gzip.open(tmp, "wt") as f:
+        with _atomic_tmp(path) as tmp, gzip.open(tmp, "wt") as f:
             json.dump(tables, f)
-        tmp.replace(path)
     shots = tables["shots"]
     return pd.DataFrame(tables["bios"]), pd.DataFrame(
         shots["rowSet"], columns=shots["headers"][1]["columnNames"]

@@ -1,8 +1,9 @@
 """Atomic parquet/JSON IO + schema converters for the data hot path.
 
-All writers stage to a ``<path>.tmp`` and then ``os.replace()`` to the target
-path, so the dashboard never reads a torn file when a pipeline writes
-mid-render.
+All writers stage to a temp file of their own beside the target
+(``<name>.<random hex>.tmp``) and then ``os.replace()`` it onto the target path,
+so the dashboard never reads a torn file when a pipeline writes mid-render, and
+two writers of one target never share a temp file.
 
 Writes target parquet only. The legacy ``.dat`` klepto pickles have been
 removed from the data package; readers no longer fall back to them.
@@ -14,6 +15,9 @@ import hashlib
 import importlib.resources as pkg_resources
 import json
 import math
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.resources.abc import Traversable
 from pathlib import Path
 
@@ -218,22 +222,33 @@ def prune_model_pickle(league: str, market: str) -> bool:
     return existed
 
 
-def _atomic_tmp(path) -> tuple[Path, Path]:
-    """Resolve ``(target, target.tmp)`` for an atomic write, creating the parent.
+@contextmanager
+def _atomic_tmp(path) -> Iterator[Path]:
+    """Yield a fresh temp path beside ``path``; it replaces ``path`` when the block succeeds.
 
-    Snapshot dirs (``runtime/``, ``training/``) are gitignored and so absent on a
-    fresh checkout or install; the write-temp-then-rename fails on a missing
-    parent. Mirrors the mkdir the model-pickle writer does in training/pipeline.py.
+    Each call names its own temp file, so writers racing on one target (parallel re-quotes
+    rewriting a league's ``game_starts.parquet``) never share one: every rename lands a whole
+    file and the last wins. If the block raises, the temp file is removed and the error
+    propagates. The temp file stays in the target's directory so the rename is atomic, and
+    that directory is created first: snapshot dirs (``runtime/``, ``training/``) are
+    gitignored and so absent on a fresh checkout or install. Mirrors the mkdir the
+    model-pickle writer does in training/pipeline.py.
     """
     path = Path(str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, path.with_suffix(path.suffix + ".tmp")
+    # Not tempfile.mkstemp: its 0600 mode would survive the rename and hide the target
+    # from any other user, where a plain write follows the umask.
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        yield tmp
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None) -> None:
-    path, tmp = _atomic_tmp(path)
-    df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
-    tmp.replace(path)
+    with _atomic_tmp(path) as tmp:
+        df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
 
 
 def write_capture_parquet(
@@ -249,16 +264,13 @@ def write_capture_parquet(
 
 
 def _atomic_write_json(obj, path) -> None:
-    path, tmp = _atomic_tmp(path)
-    with tmp.open("w") as f:
+    with _atomic_tmp(path) as tmp, tmp.open("w") as f:
         json.dump(obj, f, indent=2, default=str)
-    tmp.replace(path)
 
 
 def _atomic_write_csv(df: pd.DataFrame, path) -> None:
-    path, tmp = _atomic_tmp(path)
-    df.to_csv(tmp, index=False)
-    tmp.replace(path)
+    with _atomic_tmp(path) as tmp:
+        df.to_csv(tmp, index=False)
 
 
 def read_parquet_safe(path, columns: list[str] | None = None) -> pd.DataFrame:
@@ -622,17 +634,14 @@ def _write_players(players, paths) -> None:
     parquet_path = Path(str(paths["players_parquet"]))
     if isinstance(players, pd.DataFrame):
         # Preserve the index — NFL's players DataFrame is indexed by player name.
-        tmp = parquet_path.with_suffix(parquet_path.suffix + ".tmp")
-        players.to_parquet(tmp, engine="pyarrow", compression="zstd")
-        tmp.replace(parquet_path)
+        with _atomic_tmp(parquet_path) as tmp:
+            players.to_parquet(tmp, engine="pyarrow", compression="zstd")
         if json_path.is_file():
             json_path.unlink()
         return
     payload = _stringify_keys(players if isinstance(players, dict) else {})
-    tmp = json_path.with_suffix(json_path.suffix + ".tmp")
-    with tmp.open("w") as f:
+    with _atomic_tmp(json_path) as tmp, tmp.open("w") as f:
         json.dump(payload, f, default=_json_default)
-    tmp.replace(json_path)
     if parquet_path.is_file():
         parquet_path.unlink()
 
