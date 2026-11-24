@@ -1,4 +1,4 @@
-"""Operation Ship 75 confirm-and-ship loop: rank swept nominees blind at full HPO, ship the top one.
+"""Operation Ship 75 confirm-and-ship loop: rank swept nominees blind at full HPO, ship the pick.
 
 The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
@@ -341,8 +341,8 @@ def _drop_activation_gated(fresh: list[list[dict]]) -> list[list[dict]]:
 def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
     """List the run's plan: each cell's nominees in nomination order, with their source."""
     for label, group, verb in (
-        ("withheld cell", fresh, "rank blind, then confirm the top passer"),
-        ("live cell", shipped, "rank blind against the incumbent, then S1/S2/S3-test the top one"),
+        ("withheld cell", fresh, "rank blind, then confirm the pick"),
+        ("live cell", shipped, "rank blind against the incumbent, then test the pick against it"),
     ):
         if group:
             click.secho(f"\n{len(group)} {label}(s) to {verb}:", bold=True)
@@ -590,7 +590,7 @@ def run_confirm(
     fresh_only: bool = False,
     auto_promote: bool = False,
 ) -> None:
-    """Confirm the sweep's winners: rank each cell's nominees blind, then refit the top one.
+    """Confirm the sweep's winners: rank each cell's nominees blind, then refit the pick.
 
     ``board`` is the in-memory sweep result (a row per corner). Each cell nominates its top corners
     plus any seed and its incumbent. Every nominee runs at full HPO in a research sandbox, scored
@@ -622,7 +622,7 @@ def run_confirm(
     budget = f" (~{human_seconds(each)} each, ~{human_seconds(runs * each)} in all)" if each else ""
     prompt = (
         f"\nRank {len(fresh)} withheld and {len(shipped)} live cell(s) blind — {runs} full-HPO "
-        f"sandbox runs{budget}, plus calibrated retries — then refit each cell's top passer and "
+        f"sandbox runs{budget}, plus calibrated retries — then refit each cell's pick and "
         "read its ship holdout once? Withheld failures auto-revert; live promotions prompt"
     )
     if not yes and not click.confirm(prompt):

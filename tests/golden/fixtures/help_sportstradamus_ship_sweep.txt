@@ -5,7 +5,7 @@ Usage: sportstradamus ship sweep [OPTIONS]
   Naming ``--league`` and ``--market`` sweeps one cell; omitting ``--market``
   sweeps the board (``--league`` narrows it). ``--confirm`` then reruns each
   cell's nominees at full HPO, ranks them on the same cross-fit rows, and refits
-  the top one canonically, reading its ship holdout once.
+  the cell's pick canonically, reading its ship holdout once.
 
 Options:
   --league TEXT                   League code, e.g. WNBA. A single cell also
@@ -39,17 +39,18 @@ Options:
   --confirm                       After ranking, run each cell's nominees at
                                   full HPO in a research sandbox, scored on the
                                   same cross-fit validation half (stat_meta.json
-                                  untouched), and rank them there. Only the top
-                                  passer is persisted to stat_meta.json and
-                                  refit with its ranked booster; its ship-
-                                  holdout verdict is read once, and a failure
-                                  auto-reverts (stat_meta + pickle) and ends the
-                                  cell.
+                                  untouched), and rank them there (a priced cell
+                                  by rule PR-1). Only the cell's pick is
+                                  persisted to stat_meta.json and refit with its
+                                  ranked booster; its ship-holdout verdict is
+                                  read once, and a failure auto-reverts
+                                  (stat_meta + pickle) and ends the cell.
   --yes                           Skip the --confirm prompt (unattended).
                                   Requires --confirm.
   --confirm-nominees INTEGER RANGE
                                   Cap each cell's confirm walk at its first N
-                                  nominees, highest board slack first. Unset
+                                  nominees, best-ranked first (board slack, or a
+                                  priced cell's shrunk priced contrast). Unset
                                   walks every nominee. Requires --confirm.
                                   [x>=1]
   --confirm-hours FLOAT RANGE     Wall-clock budget for the confirm walks; cells

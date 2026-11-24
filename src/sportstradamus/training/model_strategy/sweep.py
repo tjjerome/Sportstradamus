@@ -54,7 +54,7 @@ import tabulate
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.archive import _DEFAULT_DB_PATH
-from sportstradamus.helpers.io import _atomic_write_csv, market_file_slug
+from sportstradamus.helpers.io import _atomic_write_csv, _atomic_write_parquet, market_file_slug
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
     TRAINING_ARTIFACTS_LOCK_FILE,
@@ -1018,9 +1018,14 @@ def _priced_baseline(context: CellContext, csv_path: pathlib.Path) -> priced_sel
                 found = ladder_rungs(con, league, market, keys)
             cache.parent.mkdir(parents=True, exist_ok=True)
             posted = rows.iloc[found["rid"].to_numpy()][["Player", "Date", "Result"]]
-            posted.reset_index(drop=True).assign(
-                Platform=found["platform"], Line=found["line"], last_poll=found["last_poll"]
-            ).to_parquet(cache)
+            # Atomic: a sweep killed mid-write would leave a truncated cache every later sweep
+            # of the cell reads as a hit.
+            _atomic_write_parquet(
+                posted.reset_index(drop=True).assign(
+                    Platform=found["platform"], Line=found["line"], last_poll=found["last_poll"]
+                ),
+                cache,
+            )
         rungs = pd.read_parquet(cache).assign(League=league, Market=market)
         tier = priced_select.tier(rows, PRICED_AUTHENTICITY, priced_select.p2_dates(rungs))
         incumbent = rows
@@ -2385,9 +2390,10 @@ def _note_board_only_flags(
     is_flag=True,
     default=False,
     help="After ranking, run each cell's nominees at full HPO in a research sandbox, scored on the "
-    "same cross-fit validation half (stat_meta.json untouched), and rank them there. Only the top "
-    "passer is persisted to stat_meta.json and refit with its ranked booster; its ship-holdout "
-    "verdict is read once, and a failure auto-reverts (stat_meta + pickle) and ends the cell.",
+    "same cross-fit validation half (stat_meta.json untouched), and rank them there (a priced cell "
+    "by rule PR-1). Only the cell's pick is persisted to stat_meta.json and refit with its ranked "
+    "booster; its ship-holdout verdict is read once, and a failure auto-reverts (stat_meta + "
+    "pickle) and ends the cell.",
 )
 @click.option(
     "--yes",
@@ -2399,7 +2405,8 @@ def _note_board_only_flags(
     "--confirm-nominees",
     type=click.IntRange(min=1),
     default=None,
-    help="Cap each cell's confirm walk at its first N nominees, highest board slack first. "
+    help="Cap each cell's confirm walk at its first N nominees, best-ranked first (board slack, "
+    "or a priced cell's shrunk priced contrast). "
     "Unset walks every nominee. Requires --confirm.",
 )
 @click.option(
@@ -2484,7 +2491,7 @@ def main(
     catalog, each corner scored on a holdout-blind cross-fit gate row. Naming ``--league`` and
     ``--market`` sweeps one cell; omitting ``--market`` sweeps the board (``--league`` narrows it).
     ``--confirm`` then reruns each cell's nominees at full HPO, ranks them on the same cross-fit
-    rows, and refits the top one canonically, reading its ship holdout once.
+    rows, and refits the cell's pick canonically, reading its ship holdout once.
     """
     _reject_inert_flags(
         league,
