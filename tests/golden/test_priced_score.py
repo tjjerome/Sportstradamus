@@ -188,8 +188,9 @@ def test_intervals_resample_whole_game_dates_under_the_seed():
 
 
 def test_deff_player_measures_how_the_change_clusters_by_player():
-    # Three players, ten rows each, one game date per row. Clustered: each player's rows share
-    # a level, so the ICC is ~1 and DEFF ~ sum n^2 / N = 10. Alternating: no player level.
+    # Three players, five game dates each, two rows a date. Clustered: each player's dates share
+    # a level, so the ICC is 1 and DEFF = sum n^2 / N over player-dates = 5. Alternating: each
+    # date's two rows cancel, so no player level survives.
     levels = np.repeat([-1.0, 0.0, 1.0], 10)
     noise = np.tile([0.01, -0.01], 15)
     clustered = _dated("p1_dmse", 30, np.zeros(60)).head(30)
@@ -201,8 +202,33 @@ def test_deff_player_measures_how_the_change_clusters_by_player():
         for name, frame in (("clustered", clustered), ("alternating", alternating))
     }
 
-    assert deff["clustered"] == pytest.approx(10.0, abs=0.01)
+    assert deff["clustered"] == pytest.approx(5.0)
     assert deff["alternating"] == 1.0
+
+
+def test_deff_player_counts_a_players_rows_on_one_date_once():
+    # The same player-dates as one row each and as three rungs each: the date bootstrap already
+    # draws a date's rungs together, so tripling them adds no design effect.
+    dates = pd.date_range("2026-11-01", periods=4).strftime("%Y-%m-%d")
+    units = pd.DataFrame(
+        {
+            "League": "NBA",
+            "cell": "NBA_PTS",
+            "Player": np.repeat(["a", "b", "c"], 4),
+            "Date": np.tile(dates, 3),
+            "statistic": "p2_dbrier",
+            "change": [1.0, 2.0, 1.5, 0.5, -1.0, 0.0, -0.5, -1.5, 0.2, 0.1, -0.2, 0.3],
+        }
+    )
+    rungs = units.loc[units.index.repeat(3)]
+
+    deff = [
+        ps.scope_table(frame, ps.DEFAULT_SEED).set_index("cell").loc["NBA_PTS", "deff_player"]
+        for frame in (units, rungs)
+    ]
+
+    assert deff[0] > 1.0
+    assert deff[1] == pytest.approx(deff[0])
 
 
 @pytest.mark.parametrize(

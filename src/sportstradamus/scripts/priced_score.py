@@ -26,8 +26,9 @@ primary on its own rows. A scope whose primary spans fewer dates is NEUTRAL. Oth
 KILL when any judged statistic spanning ``MIN_DATES`` dates has its interval wholly above
 zero, KEEP when the primary's lies wholly below, and NEUTRAL else.
 A value both arms serve alike, to float rounding (``SAME_VALUE_RTOL``), is no change.
-Beside each interval, ``deff_player``: the design effect of the change's clustering by player,
-1 + (sum n_i^2 / N - 1) * ICC, the one-way ICC truncated at 0 (information, never in a verdict).
+Beside each interval, ``deff_player``: the design effect of the change's clustering by player
+across dates, 1 + (sum n_i^2 / N - 1) * ICC over player-date means, the one-way ICC truncated
+at 0 (information, never in a verdict).
 """
 
 from __future__ import annotations
@@ -184,13 +185,20 @@ def row_changes(p1: pd.DataFrame, p2: pd.DataFrame) -> pd.DataFrame:
     return changes.assign(statistic=pd.Categorical(changes["statistic"], STATISTICS))
 
 
-def _player_deff(change: np.ndarray, players: np.ndarray) -> float:
-    """1 + (sum n_i^2 / N - 1) * ICC: the one-way ANOVA ICC of ``change`` by player, floored at 0.
+def _player_deff(rows: pd.DataFrame) -> float:
+    """1 + (sum n_i^2 / N - 1) * ICC: the one-way ANOVA ICC by player of player-date means.
 
-    The unbalanced form, with the n0 average group size; 1 when there is no clustering to
-    measure (one player, or one row each).
+    The date bootstrap already draws a date's rows together, so the rows a player holds on one
+    date (a prop's rungs) enter as their mean, and the design effect measures only how a
+    player's change persists across dates: per rung, NFL receiving yards' P2 read 7.1 where its
+    player-dates read 1.0. The unbalanced form, with the n0 average group size and the ICC
+    floored at 0; 1 when there is no clustering to measure (one player, or one date each).
     """
-    _, codes, sizes = np.unique(players, return_inverse=True, return_counts=True)
+    units = rows.groupby(["Player", "Date"], observed=True)["change"].mean()
+    change = units.to_numpy(float)
+    _, codes, sizes = np.unique(
+        units.index.get_level_values("Player"), return_inverse=True, return_counts=True
+    )
     total, groups = len(change), len(sizes)
     if groups < 2 or total == groups:
         return 1.0
@@ -233,7 +241,7 @@ def scope_table(changes: pd.DataFrame, seed: int) -> pd.DataFrame:
                         "lo": lo,
                         "hi": hi,
                         "se": draws.std(ddof=1),
-                        "deff_player": _player_deff(change, rows["Player"].to_numpy()),
+                        "deff_player": _player_deff(rows),
                     }
                 )
     return pd.DataFrame(records)
