@@ -101,7 +101,8 @@ default `joint` byte-identical to pre-P2.B).
 [`HurdleZINB`](../src/sportstradamus/hurdle.py):
 
 - Calibrated binary classifier estimates `q = P(Y=0)`
-- NegBin LightGBMLSS on `Y>0` supplies count shape
+- NegBin LightGBMLSS on `Y>0` supplies count shape; it predicts every row, so
+  its mean is capped at the largest positive training count
 - Structural-inflation π derived via
   `π = clip((q − NB(0))/(1 − NB(0)), 0, 1)` (NOT the simpler
   `gate = 1 − p_nonzero` — corrected because downstream `fused_loc`

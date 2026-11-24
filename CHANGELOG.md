@@ -47,6 +47,9 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
   refused pair prices $0, blocks Lock it in! and crosses its stars.
 
 ### Fixed
+- `HurdleZINB` caps its count stage's mean at the largest positive training count: fit on the
+  positive rows only, it read ~480 goals for some NHL low scorers (MLB home runs test MSE +698 %).
+  P(Y = 0) is unchanged; pickles fit before the cap predict as before.
 - MLB pitcher cells drop rows whose player faced no batter (walks allowed held 131 hitters);
   MLB profiles stop seeding the team, age, position z, defense position and defense comps
   columns, which read 0 on every row.
