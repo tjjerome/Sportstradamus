@@ -46,6 +46,11 @@ def _training_stats(league: str, gamelog: pd.DataFrame, **hooks) -> SimpleNamesp
     )
 
 
+def _resolved_quotes(*, archived: bool):
+    """A ``resolve_player_market_odds`` stand-in: every player's quote reads this ``Archived``."""
+    return lambda stats, *_: pd.DataFrame({"Archived": archived}, index=stats.index)
+
+
 def test_training_matrix_skips_gameday_without_reconstructable_stats():
     game_date = date(2024, 9, 8)
     gamelog = pd.DataFrame(
@@ -94,9 +99,7 @@ def test_training_matrix_keeps_a_player_whose_gamelog_name_has_an_accent():
         "NBA",
         gamelog,
         get_stats=get_stats,
-        resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
-            {"Archived": True}, index=stats.index
-        ),
+        resolve_player_market_odds=_resolved_quotes(archived=True),
     )
 
     rebuilt = Stats.get_training_matrix(fake, "market", cutoff_date=date(2024, 1, 1))
@@ -138,9 +141,7 @@ def test_an_append_reads_the_usage_floor_over_the_whole_loaded_window():
         get_stats=lambda _market, offers, _game_date: pd.DataFrame(
             {"Home": [True] * len(offers)}, index=[offer["Player"] for offer in offers]
         ),
-        resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
-            {"Archived": False}, index=stats.index
-        ),
+        resolve_player_market_odds=_resolved_quotes(archived=False),
     )
 
     appended_rows = Stats.get_training_matrix(fake, "market", cutoff_date=built_day)
@@ -180,9 +181,7 @@ def test_an_mlb_quoted_row_needs_a_plate_appearance_or_a_batter_faced(market, ke
         get_stats=lambda _market, offers, _game_date: pd.DataFrame(
             {"Home": [True] * len(offers)}, index=[offer["Player"] for offer in offers]
         ),
-        resolve_player_market_odds=lambda stats, *_: pd.DataFrame(
-            {"Archived": True}, index=stats.index
-        ),
+        resolve_player_market_odds=_resolved_quotes(archived=True),
     )
     # StatsMLB's hitter usage: get_training_matrix reads log_strings["usage"] for hitter markets.
     fake.log_strings = {**LOG_STRINGS, "usage": "plateAppearances"}

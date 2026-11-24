@@ -177,6 +177,10 @@ _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanC
 _TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
 _TRAINING_WINDOW_ROWS_DEFAULT = 21_500
 
+# get_training_matrix builds rows for gamedays up to this many days before today when its
+# caller passes no cutoff_date.
+_TRAINING_WINDOW_DAYS: int = 850
+
 # A player-row counts as usable (trim_gamelog's window, and the bar an unquoted training row
 # clears in get_training_matrix) above this quantile of the league's usage stat.
 _USAGE_FLOOR_QUANTILE: float = 0.15
@@ -2471,7 +2475,7 @@ class Stats:
             market (str): The market type to retrieve training data for.
             cutoff_date (date): Only gamedays after this date and before today yield
                 rows; the usage floor that keeps an unquoted row still reads every loaded
-                gameday before today. Defaults to 850 days before today.
+                gameday before today. Defaults to ``_TRAINING_WINDOW_DAYS`` days before today.
 
         Returns:
             pd.DataFrame: A row is one player on one gameday: the ``get_stats`` features,
@@ -2487,7 +2491,7 @@ class Stats:
         mlb_bookless = []
 
         if cutoff_date is None:
-            cutoff_date = (datetime.today() - timedelta(days=850)).date()
+            cutoff_date = (datetime.today() - timedelta(days=_TRAINING_WINDOW_DAYS)).date()
 
         gamelog = self.gamelog.drop_duplicates(
             subset=[self.log_strings["game"], self.log_strings["player"]], keep="last"
