@@ -72,15 +72,6 @@ def test_paper_side_needs_the_lean_band_and_a_priced_side():
     assert list(picks["fresh"]) == [True, True, True]
 
 
-def test_sequence_radius_at_the_design_sample_and_its_growth():
-    rho = bl.mixture_rho(1000, 0.10)
-    assert abs(rho - 37.7) < 1.0
-    lo, hi = bl.sequence_bounds(np.zeros(1000), 0.10)
-    assert hi == pytest.approx(0.0437, abs=0.001) and lo == pytest.approx(-hi)
-    assert bl.sequence_bounds(np.zeros(400), 0.10)[1] > hi
-    assert bl.sequence_bounds(np.zeros(1000), 0.10 / 3)[1] > hi
-
-
 def test_verdict_rule():
     assert bl.verdict(n=500, dates=30, hit=0.60, excess_lb=0.01, cs_lo=-0.02, cs_hi=0.05) == "open"
     assert (

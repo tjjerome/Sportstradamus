@@ -1,0 +1,17 @@
+Usage: sportstradamus admin play-replay [OPTIONS]
+
+  Score each play's legs, and the engine's own entries, in money over a window
+  of game dates.
+
+Options:
+  --history FILE       The history to score, e.g. a frozen copy (default: this
+                       box's data/runtime/history.parquet).
+  --entries DIRECTORY  Directory of the parlay history's day files (default:
+                       this box's data/runtime/parlay_hist).
+  --since [%Y-%m-%d]   First game date scored. A prop counts once from
+                       COUNT_ONCE_FROM, and history holds both sides' payouts
+                       from 2026-10-05.  [default: 2026-10-09]
+  --until [%Y-%m-%d]   Last game date scored (default: every settled leg).
+  --out DIRECTORY      Directory play_record.parquet and entry_record.parquet
+                       land in.  [default: /tmp/play_replay]
+  --help               Show this message and exit.

@@ -16,7 +16,6 @@ the looks ledger so the sequence is honest about how often it was read.
 
 from __future__ import annotations
 
-import math
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +24,6 @@ import click
 import duckdb
 import numpy as np
 import pandas as pd
-from scipy.optimize import brentq
 
 from sportstradamus import realized
 from sportstradamus.helpers.archive import LADDER_POLL_TOLERANCE_S, archive_market
@@ -37,6 +35,7 @@ from sportstradamus.helpers.io import (
     read_parquet_safe,
 )
 from sportstradamus.helpers.training_quotes import DFS_PLATFORM_BOOKS
+from sportstradamus.plays import sequence_bounds
 from sportstradamus.prediction.book_quotes import rung_book_leg
 from sportstradamus.scripts.tail_information import key_rng
 from sportstradamus.scripts.tail_pricing import open_archive
@@ -182,22 +181,6 @@ def paper_sides(legs: pd.DataFrame) -> pd.DataFrame:
     return picks
 
 
-def mixture_rho(design_legs: int, alpha: float) -> float:
-    """The mixture scale that makes the boundary tightest at the design sample (variance t/4)."""
-    v0 = design_legs / 4
-    # The boundary's derivative in rho vanishes where log((v0 + rho) / (rho alpha^2)) = v0 / rho;
-    # that residual rises monotonically in rho, so the bracket holds its one root.
-    return brentq(lambda rho: math.log((v0 + rho) / (rho * alpha**2)) - v0 / rho, 1e-3, 1e6)
-
-
-def sequence_bounds(excess: np.ndarray, alpha: float) -> tuple[float, float]:
-    """The confidence sequence for the mean excess after these legs: mean +/- u(t/4) / t."""
-    t, rho = len(excess), mixture_rho(CS_DESIGN_LEGS, alpha)
-    v = t / 4
-    radius = math.sqrt((v + rho) * math.log((v + rho) / (rho * alpha**2))) / t
-    return float(excess.mean() - radius), float(excess.mean() + radius)
-
-
 def verdict(n: int, dates: int, hit: float, excess_lb: float, cs_lo: float, cs_hi: float) -> str:
     """The brief's rule: kill first, accept on the sample floors or the sequence, else open."""
     if cs_hi < 0 or (n >= KILL_MIN_LEGS and hit <= KILL_HIT):
@@ -231,7 +214,7 @@ def look_rows(picks: pd.DataFrame, look_at: pd.Timestamp) -> pd.DataFrame:
         mean, lb, _ = _bootstrap_mean_ci_clustered(
             excess, part["Date"].to_numpy(), rng, percentiles=(100 * alpha, 100 * (1 - alpha))
         )
-        cs_lo, cs_hi = sequence_bounds(excess, alpha)
+        cs_lo, cs_hi = sequence_bounds(excess, alpha, CS_DESIGN_LEGS)
         n, dates, hit = len(part), int(part["Date"].nunique()), float(part["hit"].mean())
         rows.append(
             {

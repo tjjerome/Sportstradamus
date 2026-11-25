@@ -189,6 +189,25 @@ def platform_payout(boost, platform):
     return boost * np.where(np.asarray(platform) == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
 
 
+def leg_kind(multiplier, platform) -> np.ndarray:
+    """Pick kind of each DFS side from its own multiplier (``history.parquet`` conventions).
+
+    Underdog's raw multiplier sorts a side into ``underdog_even`` (a pick it neither cuts nor
+    raises), ``underdog_raised`` or ``underdog_cut``; another platform's sides read as the
+    platform's name in lower case. Aligned array-likes.
+    """
+    multiplier, platform = np.asarray(multiplier, dtype=float), np.asarray(platform, dtype=str)
+    return np.select(
+        [
+            platform != "Underdog",
+            multiplier == UNDERDOG_EVEN_PICK_MULTIPLIER,
+            multiplier > UNDERDOG_EVEN_PICK_MULTIPLIER,
+        ],
+        [np.char.lower(platform), "underdog_even", "underdog_raised"],
+        "underdog_cut",
+    )
+
+
 # An unboosted symmetric DFS pick pays the same either way, so it prices even.
 DFS_FAIR_PICK_PROB = 0.5
 

@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, platform_payout, underdog_payouts
+from sportstradamus.helpers import (
+    UNDERDOG_BOOST_BASELINE,
+    leg_kind,
+    platform_payout,
+    underdog_payouts,
+)
 
 # The Underdog Power entry sizes the owner plays; the per-pick value is derived from them.
 _ENTRY_SIZES_PLAYED = (3, 5, 6)
@@ -31,3 +36,10 @@ def test_series_inputs_align_row_by_row():
     out = platform_payout(boost, platform)
     assert list(out.index) == [7, 8, 9]
     np.testing.assert_allclose(out, [UNDERDOG_BOOST_BASELINE, 1.5, 0.56 * UNDERDOG_BOOST_BASELINE])
+
+
+def test_leg_kind_reads_the_sides_own_multiplier():
+    kinds = leg_kind(
+        np.array([1.0, 1.2, 0.82, 1.74]), np.array(["Underdog", "Underdog", "Underdog", "Sleeper"])
+    )
+    assert list(kinds) == ["underdog_even", "underdog_raised", "underdog_cut", "sleeper"]

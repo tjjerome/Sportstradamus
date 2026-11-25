@@ -370,6 +370,7 @@ The old single-file modules no longer exist. Use these paths:
 | `main` (prophecize) CLI, `model_prob`, `find_correlation` | `sportstradamus.prediction` |
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
+| `posted_sides`, `play_record`, `entry_record` (the money tables) | `sportstradamus.plays` |
 
 Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
