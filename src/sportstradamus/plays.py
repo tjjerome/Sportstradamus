@@ -214,7 +214,7 @@ def sequence_bounds(excess: np.ndarray, alpha: float, design_legs: int) -> tuple
 
 
 def _unit_bets_scored(bets: pd.DataFrame, rng: np.random.Generator) -> dict[str, float | str]:
-    """What unit bets returned (``Date``, ``Hit``, ``Breakeven``, ``Unit``): legs and entries alike."""
+    """Score legs and entries alike from their ``Date``, ``Hit``, ``Breakeven`` and ``Unit``."""
     dates = bets["Date"].to_numpy()
     excess = (bets["Hit"] - bets["Breakeven"]).to_numpy(float)
     cs_lo, cs_hi = sequence_bounds(excess, SEQUENCE_ALPHA, SEQUENCE_DESIGN_LEGS)

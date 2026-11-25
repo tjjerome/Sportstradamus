@@ -82,23 +82,23 @@ def main(
     # Count-once reads every row of a prop, so the window is cut after the offers are settled.
     offers = realized.settled_offers(pd.read_parquet(history_path))
     offers = offers[pd.to_datetime(offers["Date"]).between(since, last)]
-    legs = plays.play_record(plays.posted_sides(offers), rng)
+    play_table = plays.play_record(plays.posted_sides(offers), rng)
     entries = pd.concat(
         [pd.read_parquet(day, columns=_ENTRY_COLS) for day in sorted(entries_dir.glob("*.parquet"))]
     )
     entries = entries[pd.to_datetime(entries["Date"]).between(since, last)]
-    graded = plays.entry_record(entries, rng)
+    entry_table = plays.entry_record(entries, rng)
 
     out.mkdir(parents=True, exist_ok=True)
-    _atomic_write_parquet(legs, out / "play_record.parquet")
-    _atomic_write_parquet(graded, out / "entry_record.parquet")
-    power_cols = [col for col in legs.columns if col.startswith("power")]
+    _atomic_write_parquet(play_table, out / "play_record.parquet")
+    _atomic_write_parquet(entry_table, out / "entry_record.parquet")
+    power_cols = [col for col in play_table.columns if col.startswith("power")]
     tables = {
-        "Legs of each play": legs.drop(columns=[*_WINDOW_COLS, *power_cols]),
-        "Power entries those legs could build, one leg a game": legs[
+        "Legs of each play": play_table.drop(columns=[*_WINDOW_COLS, *power_cols]),
+        "Power entries those legs could build, one leg a game": play_table[
             ["play", "league", "kind", *power_cols]
         ],
-        "The engine's own entries": graded.drop(columns=_WINDOW_COLS),
+        "The engine's own entries": entry_table.drop(columns=_WINDOW_COLS),
     }
     for title, table in tables.items():
         click.echo(f"\n{title}")
