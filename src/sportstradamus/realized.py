@@ -21,6 +21,7 @@ import pandas as pd
 
 from sportstradamus.analysis import annotate_offer_outcomes
 from sportstradamus.helpers import MAX_FAVORED_PAYOUT, platform_payout
+from sportstradamus.history_schema import BOOK_FALLBACK_VERSION
 
 # 30 matches the graduation window; 90 gives the payout bands enough legs to read.
 REALIZED_WINDOWS: tuple[int, ...] = (30, 90)
@@ -160,7 +161,10 @@ def settled_offers(history: pd.DataFrame) -> pd.DataFrame:
         Unit=hit * payout - 1,
         Recommended=recommended(offers["Win Prob"], payout),
         Quote=np.select(
-            [offers["Model Version"].eq("book_fallback"), offers["Market Projection"].notna()],
+            [
+                offers["Model Version"].eq(BOOK_FALLBACK_VERSION),
+                offers["Market Projection"].notna(),
+            ],
             ["fallback", "quoted"],
             "unquoted",
         ),

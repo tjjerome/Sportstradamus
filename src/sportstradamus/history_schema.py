@@ -16,6 +16,10 @@ A single ``(Player, League, Date, Market)`` never spans more than one
 
 PREDICTION_KEY = ["Player", "League", "Date", "Market"]
 
+# The ``Model Version`` of a leg scored off devigged book odds: a withheld cell, or one with
+# no trained model.
+BOOK_FALLBACK_VERSION = "book_fallback"
+
 PREDICTION_LEVEL_COLS = [
     "Team",
     "Projection",

@@ -76,8 +76,8 @@ from sportstradamus.helpers.io import (
     read_history,
     resolve_model_version,
 )
+from sportstradamus.history_schema import BOOK_FALLBACK_VERSION
 from sportstradamus.prediction.model_prob import (
-    _BOOK_FALLBACK_VERSION,
     _build_prob_params,
     _decode_model_params,
     _model_over_and_push,
@@ -462,7 +462,7 @@ def served_legs(leagues: tuple[str, ...], start: str, end: str | None) -> pd.Ser
     history = read_history()
     served = (
         history["Actual"].notna()
-        & history["Model Version"].ne(_BOOK_FALLBACK_VERSION)
+        & history["Model Version"].ne(BOOK_FALLBACK_VERSION)
         & history["Date"].ge(start)
     )
     if end:

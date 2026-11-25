@@ -178,7 +178,7 @@ def test_component_sum_serves_an_unquoted_combo(archive, monkeypatch):
 
     assert len(records) == 1
     rec = records[0]
-    assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
+    assert rec["Model Version"] == mp.BOOK_FALLBACK_VERSION
     # Means add regardless of correlation, so the served projection is exactly the two
     # component means -- proof the kernel's mean passed through rather than being
     # re-inverted at the composite line under the composite cell's own family.
@@ -390,7 +390,7 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
         1.0,
         None,
         1.0,
-        mp._BOOK_FALLBACK_VERSION,
+        mp.BOOK_FALLBACK_VERSION,
     )
 
     by_player = {r["Player"]: r for r in records}

@@ -47,6 +47,7 @@ from sportstradamus.helpers.io import (
     resolve_model_version,
 )
 from sportstradamus.helpers.training_quotes import AUTHENTIC, AUTHENTICITY_VALUES
+from sportstradamus.history_schema import BOOK_FALLBACK_VERSION
 from sportstradamus.prediction.book_quotes import (
     annotate_quote_provenance,
     apply_rung_book_leg,
@@ -145,9 +146,6 @@ _OWN_SCALE_MIN: float = 0.1
 # below 9.95 escapes detection; the in-family phi re-clip in _dispersion_calibrate bounds it.
 _DIVERGED_DISPERSION_FLOOR: float = 0.1005
 _DIVERGED_DISPERSION_CEIL: float = 9.95
-
-# Attribution id for a leg scored off devigged book odds (no trained model pickle).
-_BOOK_FALLBACK_VERSION = "book_fallback"
 
 # The two-part validation operator settles every quoted line from these
 # adjacent integer CDF endpoints, independent of the pickle's generic step.
@@ -1402,5 +1400,5 @@ def book_fallback_prob(
     offer_df["Hist Gate"] = hist_gate or 0.0
 
     return finalize_records(
-        offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION
+        offer_df, league, platform, dist, cv, step, None, 1.0, BOOK_FALLBACK_VERSION
     )
