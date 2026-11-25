@@ -58,7 +58,7 @@ _WINDOW_COLS = ["first_date", "last_date"]
     default=realized.COUNT_ONCE_FROM.strftime("%Y-%m-%d"),
     show_default=True,
     help="First game date scored. A prop counts once from COUNT_ONCE_FROM, and history "
-    "holds both sides' payouts from 2026-10-05.",
+    "holds both sides' payouts and the opponent that names a leg's game from 2026-10-05.",
 )
 @click.option(
     "--until",

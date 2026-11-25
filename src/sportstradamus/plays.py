@@ -113,21 +113,20 @@ def posted_sides(offers: pd.DataFrame) -> pd.DataFrame:
     Under`` above zero; history carries both from 2026-10-05).
 
     Returns:
-        Every input column, with ``Side`` (``Over`` / ``Under``), ``Chosen`` (the model's
-        side), ``Multiplier`` (the side's own: Underdog's raw multiplier, Sleeper's decimal
-        payout), ``Kind`` (``helpers.leg_kind``), ``Game`` (the league and its two teams, the
-        same from either team) and, priced per side, ``Payout``, ``Breakeven``, ``Hit``,
-        ``Unit`` and ``Win Prob`` (the model's probability of that side). ``Recommended`` is
-        False on a side the model did not choose.
+        Every input column, with ``Side`` (``Over`` / ``Under``), ``Multiplier`` (the side's
+        own: Underdog's raw multiplier, Sleeper's decimal payout), ``Kind``
+        (``helpers.leg_kind``), ``Game`` (the league and its two teams, the same from either
+        team) and, priced per side, ``Payout``, ``Breakeven``, ``Hit``, ``Unit`` and
+        ``Win Prob`` (the model's probability of that side). ``Recommended`` is False on a
+        side the model did not choose.
     """
     over = offers["Bet"].eq("Over")
     payout_chosen = offers["Payout Over"].where(over, offers["Payout Under"])
     payout_other = offers["Payout Under"].where(over, offers["Payout Over"])
-    chosen = offers.assign(Side=offers["Bet"], Chosen=True, Multiplier=offers["Boost"])
+    chosen = offers.assign(Side=offers["Bet"], Multiplier=offers["Boost"])
     # history_schema: a side's raw multiplier is its payout over the chosen side's, times Boost.
     other = offers.assign(
         Side=np.where(over, "Under", "Over"),
-        Chosen=False,
         Multiplier=payout_other * offers["Boost"] / payout_chosen,
         Recommended=False,
         **{"Win Prob": 1 - offers["Win Prob"]},

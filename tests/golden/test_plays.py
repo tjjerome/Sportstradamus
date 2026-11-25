@@ -36,12 +36,12 @@ def test_posted_sides_grades_the_other_side_at_its_own_payout():
     )
     chosen, other = plays.posted_sides(offers).to_dict("records")
 
-    assert (chosen["Side"], chosen["Chosen"], chosen["Kind"]) == ("Over", True, "underdog_raised")
+    assert (chosen["Side"], chosen["Kind"]) == ("Over", "underdog_raised")
     assert chosen["Payout"] == pytest.approx(2.196)
     assert (chosen["Hit"], chosen["Unit"], chosen["Recommended"]) == (False, -1.0, True)
     assert chosen["Win Prob"] == pytest.approx(0.6)
 
-    assert (other["Side"], other["Chosen"], other["Kind"]) == ("Under", False, "underdog_cut")
+    assert (other["Side"], other["Kind"]) == ("Under", "underdog_cut")
     assert other["Multiplier"] == pytest.approx(0.82)
     assert other["Payout"] == pytest.approx(1.5006)
     assert other["Breakeven"] == pytest.approx(1 / 1.5006)
@@ -74,7 +74,7 @@ def test_play_rules_pick_their_sides():
     picked = {name: sides[rule(sides)] for name, rule in plays.PLAYS.items()}
 
     assert list(picked["model_edge"]["Player"]) == ["A", "C"]
-    assert picked["model_edge"]["Chosen"].all()
+    assert picked["model_edge"]["Side"].eq("Over").all()
     assert sorted(picked["under"]["Player"]) == ["A", "B"]
     assert picked["under"]["Side"].eq("Under").all()
     assert len(picked["all"]) == len(sides) == 6

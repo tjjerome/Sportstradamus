@@ -179,7 +179,10 @@ than the truth. We can measure the truth; the app's `m` shows only in the app.
 - The board lists tonight's candidates with their pay-at-least number and a field for the app's
   payout; the owner reads the slip in the app and types the payout into Lab › Modifiers.
 - A quote of three or more picks is stored whole, per structure. Spreading it evenly over pairs
-  is wrong: the app's cut is not a product of pair cuts.
+  is wrong: the app's cut is not a product of pair cuts. Until phase 3 builds that store, only
+  a 2-pick read is saved through Lab › Modifiers (`helpers/parlay_modifiers.reconcile` spreads a
+  larger slip's cut over its pairs or calls it ambiguous); a read of three or more picks goes in
+  the lane's `STATE.md`.
 - Serving changes only after quotes show a gap.
 
 ### 5.5 Main's money test
