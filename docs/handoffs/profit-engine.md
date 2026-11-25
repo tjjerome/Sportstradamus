@@ -1,8 +1,8 @@
 # Lane brief — profit engine: one EV fitted where we bet, plays scored in money
 
-> Status: ACTIVE. Built: the Modifiers page fix (step 0) and the money table, offline (phase 0).
-> Next: phase 1, the EV fit and the nightly scoreboard (§6). The model lane (§7) opens the day
-> phase 1's first nightly table exists.
+> Status: ACTIVE. Built: the Modifiers page fix (step 0) and the money table, offline (phase 0)
+> and nightly. Next: the rest of phase 1, the EV fit and its weights table (§5.1, §6). The model
+> lane (§7) opens the day phase 1's first nightly weights table exists.
 
 ## 1. Mission & money logic
 
@@ -28,22 +28,25 @@ reproduces the first five rows.
 
 **Where information beyond the app's price comes from.** On settled posted picks, how much weight
 does the data put on a source's disagreement with the app's own price (0: the app already knows
-it; 1: trust the source fully)? Underdog legs fall into three classes; standard errors in
-brackets, clustered by game date.
+it; 1: trust the source fully)? Legs fall into three classes by what the scoring run could see
+of the sportsbooks, in quotes at most 90 minutes old. Standard errors in brackets, clustered by
+game date. The shares and the class-A book weight are Underdog's; the other weights pool both
+apps, and the model's are read on rows a model served
+([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md), E2, E9 and E12).
 
 | Class (share of legs NBA / NFL / NHL) | Sportsbooks | Our model |
 |---|---|---|
-| A: a sportsbook quotes the app's exact line (33 % / 19 % / 48 %) | The plain mean of the books' own prices: NBA 0.80 (.28), NFL 1.39 (.57), NHL 0.83 (.21) | Beside the raw book it adds nothing: NBA −0.09 to 0.07, NFL −0.17 to 0.46, NHL 0.10 to 0.17 |
-| B: a sportsbook quotes another line (39 % / 41 % / 17 %) | Our translation of that quote to the app's line: NBA 0.15 (.10), NFL −0.06 (.10), NHL −0.14 (.28). The information is lost in translation | NBA 0.06, NFL −0.05, NHL 0.52 (.23) |
-| C: no sportsbook quotes the prop (28 % / 39 % / 35 %) | none | NBA 0.01 (.09), NFL 0.20 (.13), NHL 0.59 (.12) |
+| A: a sportsbook quotes the app's exact line (28 % / 18 % / 40 %) | The plain mean of the books' own prices: NBA 0.53 (.23), NFL 1.24 (.47), NHL 0.92 (.23) | Beside the raw book it adds nothing: NBA 0.10 (.15), NFL −0.02 (.17), NHL −0.01 (.13) |
+| B: a sportsbook quotes another line (21 % / 36 % / 14 %) | Our translation of that quote to the app's line: NBA 0.07 (.10), NFL −0.04 (.11), NHL −0.16 (.33). The information is lost in translation | NBA 0.01 (.10), NFL 0.03 (.07), NHL 0.59 (.27) |
+| C: no sportsbook quotes the prop (52 % / 46 % / 47 %) | none | NBA −0.05 (.07), NFL 0.14 (.10), NHL 0.48 (.08) |
 
 Three things follow. Read raw at the same line, the sportsbooks beat the app's price, and the
 engine does not use them that way: its `Market Prob` is the consensus turned into a mean and
-re-priced through our curve, from a quote a median 79 minutes old. The edge the books offer is
-thin, because the app tracks them closely: the 179 even picks a walk-forward fit valued at 1.03
-or more hit .547, which is break-even. The model's own information lives where the books are
-silent (class C, NHL first). Those weights, not the error at the line, are what the model lane
-must move.
+re-priced through our curve, from a quote a median 79 minutes old (§7, M1). The edge the books
+offer is thin, because the app tracks them closely: fitted walk-forward, the books and the model
+together beat the app's price in log loss, and still no set of legs credibly returns 1 or more.
+The model's own information lives where the books are silent or quote another line, NHL first.
+Those weights, not the error at the line, are what the model lane must move.
 
 ## 2. Read first (in order)
 
@@ -98,23 +101,40 @@ build prints:
 
 ### 5.1 EV: one fit on the picks we bet
 
-For each posted side, the win chance behind "EV" is fitted on settled posted picks:
+For each posted offer, the chance behind "EV" is fitted on settled posted picks, as the chance
+that the Over hits:
 
     logit(P) = c + a * logit(app's fair price)
                  + w_book  * (logit(book price)  - logit(app's fair price))
-                 + w_model * (logit(model's P)   - logit(app's fair price))
+                 + w_model * (logit(model's P)   - logit(app's fair price))    a model served
+                 + w_fb    * (logit(model's P)   - logit(app's fair price))    a withheld cell
 
 - **App's fair price**: the posted pair of payouts with the cut removed; one half on an even pick.
 - **Book price**: the plain mean of each sportsbook's own latest price at the app's exact line,
-  as of the scoring run. Present only in class A; a translated price joins class B when the
-  model lane earns it weight (§7, M2).
-- **Model's P**: the served `Win Prob`.
+  at most 90 minutes old, as the scoring run saw it. Present only in class A; a translated price
+  joins class B when the model lane earns it weight (§7, M2).
+- **Model's P**: the served `Win Prob`. A withheld cell serves the book consensus under that
+  name, so its rows carry their own weight `w_fb` and `w_model` reads served models only.
 - One fit per league, pick kind (Underdog even, Underdog modified payout, Sleeper) and class,
-  refit nightly on the trailing 90 days. Below 400 settled legs a fit is not used and the leg
-  takes the no-evidence value, the app's fair price: zero edge, on purpose.
-- `EV` is the fitted win chance times the posted payout. It ranks legs, sets the "+EV" mark
-  (`EV >= 1`) and sizes stakes: `Kelly` is computed from it. `Win Prob` and `Model EV` keep
-  their meaning.
+  refit nightly on the trailing 90 days. A prior worth 4,000 legs pulls every coefficient toward
+  the no-evidence point (c = 0, a = 1, every w = 0), which is the app's fair price. Below 400
+  settled legs a fit is not used and the leg takes that no-evidence value: zero edge, on
+  purpose. An offer with one side posted has no fair price and gets no EV.
+- The side a leg takes stays the model's. The fit values that side; it does not choose it.
+- `EV` is the fitted win chance times the posted payout, and it ranks legs. The "+EV" mark and
+  the stake read the fit's one-sided 95 % lower bound instead: a leg is marked when the bound
+  times the payout reaches 1, and it is staked at half Kelly on the bound. `Win Prob` and
+  `Model EV` keep their meaning.
+
+The prior, the lower bound and the side rule come from the research brief
+([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)), walk-forward over the last 33
+game dates. Without the prior the fit loses to the app's own price out of sample, and in a
+simulated world that holds no edge it still marks about a thousand legs "+EV". With the prior it
+beats the app's price in log loss and is no worse in any league and kind, yet the legs it values
+at 1 or more paid 0.79 to 0.90 on fewer than a hundred legs; the lower bound marks none of them.
+Where the fit's better side differs from the model's, taking it returned 2.7 points less a leg.
+So marks and stakes stay rare until the evidence grows, and the board is carried by rank. The
+brief's six acceptance tests and five kill lines (its §3) are this fit's own.
 
 The fit does not double count the model blend. The served number already passes two trust
 stages, the blend of model and book and the `book_pull` knob; the fit sits after both and is
@@ -127,8 +147,9 @@ the distribution. `book_pull` retires in M1.
 A **play** is a named rule that picks sides from a day's board (`plays.PLAYS`). Registered:
 `model_edge` (the board's rule, `realized.recommended`, so Receipts, the live gap and the replay
 keep their cohort) and two controls that need no model, `under` (every Under on an even pick)
-and `all` (every posted side). `ev_edge` (`EV >= 1` in the same payout band) registers with
-phase 1.
+and `all` (every posted side). Two more register with phase 1: `ev_edge` (the "+EV" mark of
+§5.1 in the same payout band) and `ev_rank` (per date, league and kind, as many legs as
+`model_edge` took, the top ones by EV).
 
 `plays.play_record` scores each play per league and pick kind:
 
@@ -155,7 +176,9 @@ errors, by league, kind and class): the model lane's scoreboard.
 **Keep rule.** The priced-population rule stays as the floor: a change may not make error at the
 posted line worse. Above that floor, a change of any kind (rule, model, feature, data source) is
 kept only if, on later dates, its information weight on the rows it targets rises and its play's
-return does not fall, both read against the control on the same dates.
+return does not fall. Both are read against the control on the same dates, the weight as a
+paired difference on the same legs: that sees a change about half the size two separate reads
+can (0.31 against 0.56 on NBA's class B today).
 
 ### 5.3 The engine reads EV
 
@@ -203,7 +226,7 @@ Gate 2 stays. `devel` is never gated by it.
 |---|---|---|
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
-| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, apply, walk-forward, the weights table); `Book Prob`, `Fit Prob` and `EV` stamped on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; M1 ships inside it. A `research-analyst` brief on the fit comes first | In progress: the nightly `play_record.parquet` is built |
+| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, apply, walk-forward, the weights table); `Book Prob`, `Fit Prob` and `EV` stamped on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; M1 ships inside it. The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and must pass its acceptance tests on the frozen history | In progress: the nightly `play_record.parquet` is built and the brief is in |
 | Phase 2 | The engine reads EV (§5.3), one subagent per module | Queued |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |
@@ -225,19 +248,29 @@ for serving a price; they no longer decide whether model work is paying.
 beside phases 2 to 4. The weekly retrain and defect fixes never stop.
 
 - **M1. Use the books raw** (class A; no retraining). The fit's book input is the plain mean of
-  same-line book prices, widened by any rung two or more books post at the app's exact line. Find
-  why the served quote is a median 79 minutes old; fit per-book weights on outcomes at posted
-  lines; retire `book_pull` and re-read its cells on the money table. Target: `w_book` near 1 in
-  every league.
+  same-line book prices, widened by any rung a book posts at the app's exact line. The served
+  quote is a median 79 minutes old because of the schedule, not the 1-hour training quote: a run
+  reads the newest quote in the archive, usually the last broad poll at :30 of an earlier hour,
+  and the closing capture stamped in the run's own minute lands after the run has taken the
+  archive (397 of 426 runs never saw it). Weights are earned on fresh quotes (M2's slope price
+  reads 0.52 at 20 minutes or less against 0.12 at 45 to 90), so the open question is which
+  schedule puts a fresh quote in front of a run that finishes before the game starts.
+  Then fit per-book weights on outcomes at posted lines, and retire `book_pull` and re-read its
+  cells on the money table. Target: `w_book` near 1 in every league.
 - **M2. Translate a book's price to another line** (class B, and every modified-payout rung): the
-  largest pool of unused information. Step 1 interpolates between a book's two nearest rungs;
-  step 2 anchors at the book's own line and lets the model supply the slope between lines; step 3
-  puts the translated price into the fit. Target: class B's book weight at 0.5 or more in NBA and
-  NFL. Kill line, set before any run: a step that leaves the weight within one standard error of
-  today's is dropped.
-- **M3. Price what no book quotes** (class C). NHL first, where the model already carries 0.59
+  largest pool of unused information. Step 1 interpolates between the same book's two nearest
+  rungs where they bracket the app's line (4 % of class B). Step 2 shifts the nearest quote by
+  that market's own slope between adjacent rungs, built from earlier dates' ladders and never
+  from outcomes (69 % of class B: nine NBA markets and three NFL yardage markets). Step 3 puts
+  the translated price into the fit as class B's book term. The model's own curve is not used
+  for the shift: on a held-out rung it misses by two to four times the book slope's error. NHL
+  has no ladders, so its class B stays without a book term. Target: class B's book weight at 0.5
+  or more in NBA and NFL; the slope reads 0.26 (.16) in NBA against 0.07 (.10) for the engine's
+  number. Kill line, set before any run: a step is dropped when its paired gain over today's
+  number, on the same legs, is under one standard error of that difference.
+- **M3. Price what no book quotes** (class C). NHL first, where the model already carries 0.48
   (blocked shots, skater and goalie fantasy points, points and assists for players the books
-  skip); target 0.8. NBA gets a diagnosis before any build: class C carries 0.01, so split its
+  skip); target 0.8. NBA gets a diagnosis before any build: class C carries −0.05, so split its
   legs by player tier, minutes volatility and market first. NFL: fantasy points and receptions
   for players the books skip. MLB from Opening Day 2027.
 - **M4. A model of the app's price**, trained on posted picks themselves. History has carried
