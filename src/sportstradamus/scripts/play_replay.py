@@ -18,8 +18,6 @@ import pandas as pd
 from sportstradamus import plays, realized
 from sportstradamus.helpers.io import HISTORY_PATH, PARLAY_HIST_DIR, _atomic_write_parquet
 
-# Fixed, so a replay of the same history prints the same bounds.
-REPLAY_SEED = 0
 # The parlay history's columns the entry table reads. Its nested ``legs`` column costs
 # gigabytes to load, so the read is projected to these.
 _ENTRY_COLS = [
@@ -78,7 +76,7 @@ def main(
 ) -> None:
     """Score each play's legs, and the engine's own entries, in money over a window of game dates."""
     last = until or pd.Timestamp.max
-    rng = np.random.default_rng(REPLAY_SEED)
+    rng = np.random.default_rng(plays.RECORD_SEED)
     # Count-once reads every row of a prop, so the window is cut after the offers are settled.
     offers = realized.settled_offers(pd.read_parquet(history_path))
     offers = offers[pd.to_datetime(offers["Date"]).between(since, last)]

@@ -98,6 +98,9 @@ PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
 # Realized hit rate / ROI by bet side at the platform payouts (Receipts reads it to
 # answer whether each side makes money). Written nightly by reflect.
 REALIZED_BY_SIDE_PATH = _RUNTIME_DIR / "realized_by_side.parquet"
+# The money table: what each play's legs returned over the trailing window, per league and
+# pick kind (`plays.trailing_record`). Written nightly by reflect.
+PLAY_RECORD_PATH = _RUNTIME_DIR / "play_record.parquet"
 # Precomputed reliability (prob bin x alt-line split) grid (Receipts reads it instead
 # of re-binning history at page load). Written nightly by reflect.
 CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"

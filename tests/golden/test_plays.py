@@ -1,13 +1,14 @@
 """The money table: posted sides, the play rules and the exact cross-game entry return."""
 
 import math
+from datetime import datetime, timedelta
 from itertools import combinations
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus import plays
+from sportstradamus import plays, realized
 from sportstradamus.helpers import underdog_payouts
 
 
@@ -264,6 +265,42 @@ def test_play_record_of_no_sides_is_empty_with_its_columns():
 
     assert record.empty
     assert list(record.columns) == plays.PLAY_RECORD_COLS
+
+
+def _every_side(record: pd.DataFrame) -> pd.Series:
+    return record.set_index(["play", "league", "kind"]).loc[("all", "all", "all")]
+
+
+def test_trailing_record_scores_the_last_play_window_days():
+    now = datetime(2027, 2, 1)
+    first_day = (now - timedelta(days=plays.PLAY_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    too_old = (now - timedelta(days=plays.PLAY_WINDOW_DAYS + 1)).strftime("%Y-%m-%d")
+    offers = pd.DataFrame(
+        [
+            _offer(Date="2027-01-31"),
+            _offer(Date=first_day, Player="B"),
+            _offer(Date=too_old, Player="C"),
+        ]
+    )
+
+    every = _every_side(plays.trailing_record(offers, now, np.random.default_rng(0)))
+
+    assert (every["n"], every["first_date"], every["last_date"]) == (4, first_day, "2027-01-31")
+
+
+def test_trailing_record_leaves_out_games_from_before_a_prop_counted_once():
+    start = realized.COUNT_ONCE_FROM
+    offers = pd.DataFrame(
+        [
+            _offer(Date=start.strftime("%Y-%m-%d")),
+            _offer(Date=(start - timedelta(days=1)).strftime("%Y-%m-%d"), Player="B"),
+        ]
+    )
+
+    record = plays.trailing_record(offers, start + timedelta(days=30), np.random.default_rng(0))
+
+    assert _every_side(record)["first_date"] == start.strftime("%Y-%m-%d")
+    assert _every_side(record)["n"] == 2
 
 
 def _entry(**fields) -> dict:

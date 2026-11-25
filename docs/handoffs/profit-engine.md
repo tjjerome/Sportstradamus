@@ -144,6 +144,11 @@ phase 1.
 `plays.entry_record` scores the engine's own graded entries the same way. An entry with a pushed
 or ungraded leg is left out until phase 2 fills `Profit` (about one in ten today).
 
+The table is built in two places. Nightly, `reflect` writes `data/runtime/play_record.parquet`
+over the trailing 90 days (`plays.trailing_record`; games before props counted once, 2026-10-09,
+stay out): the window main's money test reads (§5.5). On the dev box, `sportstradamus admin
+play-replay` scores any window of a history, this box's or a frozen copy.
+
 Phase 1 adds the **information weights** of §1 (the fit's coefficients with their standard
 errors, by league, kind and class): the model lane's scoreboard.
 
@@ -198,7 +203,7 @@ Gate 2 stays. `devel` is never gated by it.
 |---|---|---|
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
-| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, apply, walk-forward, the weights table); `Book Prob`, `Fit Prob` and `EV` stamped on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; M1 ships inside it. A `research-analyst` brief on the fit comes first | Next |
+| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, apply, walk-forward, the weights table); `Book Prob`, `Fit Prob` and `EV` stamped on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; M1 ships inside it. A `research-analyst` brief on the fit comes first | In progress: the nightly `play_record.parquet` is built |
 | Phase 2 | The engine reads EV (§5.3), one subagent per module | Queued |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |

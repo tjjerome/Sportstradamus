@@ -7,8 +7,8 @@ Runs after games finish to:
 4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
-7. Persist the realized-by-side, live-gap, profit-sim and calibration summaries; fold the
-   modifier overlay
+7. Persist the realized-by-side, live-gap, money-table, profit-sim and calibration
+   summaries; fold the modifier overlay
 
 Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
 ``docs/OPERATIONS.md``.
@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import clv, data, realized
+from sportstradamus import clv, data, plays, realized
 from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
@@ -41,6 +41,7 @@ from sportstradamus.helpers.io import (
     LIVE_GAP_PATH,
     LIVE_METRICS_PATH,
     PARLAY_HIST_PATH,
+    PLAY_RECORD_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     REALIZED_BY_SIDE_PATH,
     _atomic_write_parquet,
@@ -468,6 +469,14 @@ def _precompute_live_gap(history):
     )
 
 
+def _precompute_play_record(history):
+    record = plays.trailing_record(
+        settled_offers(history), datetime.now(UTC), np.random.default_rng(plays.RECORD_SEED)
+    )
+    _atomic_write_parquet(record, PLAY_RECORD_PATH)
+    logger.info(f"Play record: wrote {len(record)} play rows to {PLAY_RECORD_PATH.name}")
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -502,6 +511,7 @@ def run(league, skip_update, history_only, log_level):
     _warn_calibration_divergence(metrics)
     _precompute_realized_by_side(history)
     _precompute_live_gap(history)
+    _precompute_play_record(history)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)

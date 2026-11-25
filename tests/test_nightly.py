@@ -9,20 +9,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus import nightly
+from sportstradamus import nightly, plays
 from sportstradamus.nightly import (
     _MIN_BETS_FOR_PRECISION,
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
     _precompute_calibration,
+    _precompute_play_record,
     _precompute_realized_by_side,
     _profit_sim_kelly_yield,
     _profit_sim_yield,
     _settled_offers,
     _side_precision,
 )
-from sportstradamus.realized import REALIZED_BY_SIDE_COLS
+from sportstradamus.realized import REALIZED_BY_SIDE_COLS, settled_offers
 
 NOW = datetime(2026, 5, 20, 12, 0, 0)
 
@@ -396,6 +397,24 @@ def test_precompute_realized_by_side_writes_parquet(tmp_path, monkeypatch):
     ledger = pd.read_parquet(path)
     assert list(ledger.columns) == REALIZED_BY_SIDE_COLS
     assert not ledger.empty
+
+
+def test_precompute_play_record_writes_the_money_table(tmp_path, monkeypatch):
+    path = tmp_path / "play_record.parquet"
+    monkeypatch.setattr(nightly, "PLAY_RECORD_PATH", path)
+    # Dated off the wall clock: the table covers the trailing window of today.
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    history = _build_history_fixture().assign(
+        Date=yesterday, Opponent="AWAY", **{"Payout Over": 1.83, "Payout Under": 1.83}
+    )
+
+    _precompute_play_record(history)
+
+    record = pd.read_parquet(path)
+    assert list(record.columns) == plays.PLAY_RECORD_COLS
+    every_side = record.set_index(["play", "league", "kind"]).loc[("all", "all", "all")]
+    assert every_side["n"] == 2 * len(settled_offers(history))
+    assert every_side["last_date"] == yesterday
 
 
 def test_precompute_calibration_writes_the_realized_summary(tmp_path, monkeypatch):

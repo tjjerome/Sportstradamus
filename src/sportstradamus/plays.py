@@ -10,11 +10,13 @@ same way. Pure.
 
 import math
 from collections.abc import Callable
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
+from sportstradamus import realized
 from sportstradamus.helpers import (
     leg_kind,
     platform_payout,
@@ -39,6 +41,12 @@ _POWER_TABLES: dict[str, dict[int, float]] = {
 # picks reach in a 90-day window.
 SEQUENCE_ALPHA = 0.05
 SEQUENCE_DESIGN_LEGS = 1000
+
+# The trailing game dates the nightly money table scores, the window main's money test reads
+# a league's record over (docs/handoffs/profit-engine.md, 5.5).
+PLAY_WINDOW_DAYS = 90
+# Fixed, so the same history prints the same bounds wherever the table is built.
+RECORD_SEED = 0
 
 # The side columns the money table reads. A play's sides are copied once per pooling (by
 # league, by kind, by neither), so the copies carry these alone.
@@ -280,6 +288,17 @@ def play_record(sides: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
                 )
             rows.append(row)
     return pd.DataFrame(rows, columns=PLAY_RECORD_COLS)
+
+
+def trailing_record(offers: pd.DataFrame, now: datetime, rng: np.random.Generator) -> pd.DataFrame:
+    """:func:`play_record` over the trailing ``PLAY_WINDOW_DAYS`` of ``now``: the nightly table.
+
+    ``offers`` is ``realized.settled_offers`` output. Games before ``realized.COUNT_ONCE_FROM``
+    stay out however far the window reaches: a prop there counts at every line it was scored at.
+    """
+    recent = realized.window(offers, PLAY_WINDOW_DAYS, now)
+    recent = recent[pd.to_datetime(recent["Date"]) >= realized.COUNT_ONCE_FROM]
+    return play_record(posted_sides(recent), rng)
 
 
 def entry_record(entries: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
