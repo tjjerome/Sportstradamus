@@ -8,7 +8,9 @@ Runs after games finish to:
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
 7. Persist the realized-by-side, live-gap, profit-sim and calibration summaries; fold the
-   modifier overlay; write the money table last
+   modifier overlay; write the money table
+8. Last: stamp the books' same-line price on history rows no scoring run stamped, and write
+   the EV fit's table
 
 Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
 ``docs/OPERATIONS.md``.
@@ -24,7 +26,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import clv, data, plays, realized
+from sportstradamus import book_stamp, clv, data, live_fit, plays, realized
 from sportstradamus.analysis import (
     _gameday_rows_for,
     _resolve_leg,
@@ -38,6 +40,7 @@ from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
+    LIVE_FIT_PATH,
     LIVE_GAP_PATH,
     LIVE_METRICS_PATH,
     PARLAY_HIST_PATH,
@@ -477,6 +480,19 @@ def _precompute_play_record(history):
     logger.info(f"Play record: wrote {len(record)} play rows to {PLAY_RECORD_PATH.name}")
 
 
+def _precompute_live_fit(history):
+    # Rows scored before the stamp existed get the books' price here, so the fit's window is
+    # full from its first night.
+    history = book_stamp.fill_history(history, Archive())
+    write_history(history)
+    recent = realized.window(settled_offers(history), live_fit.FIT_WINDOW_DAYS, datetime.now(UTC))
+    table = live_fit.fit(recent)
+    _atomic_write_parquet(table, LIVE_FIT_PATH)
+    logger.info(
+        f"EV fit: wrote {len(table)} fits on {table['n_legs'].sum()} legs to {LIVE_FIT_PATH.name}"
+    )
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -522,8 +538,9 @@ def run(league, skip_update, history_only, log_level):
             folded["pairs"],
             folded["rakes"],
         )
-    # Last: the newest table, so a failure in it costs the run no other output.
+    # Last, newest last: a failure in one of these costs the run no older output.
     _precompute_play_record(history)
+    _precompute_live_fit(history)
 
 
 def _load_one_league(lg, cls, skip_update):

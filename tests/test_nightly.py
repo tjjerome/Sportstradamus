@@ -9,13 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus import nightly, plays
+from sportstradamus import live_fit, nightly, plays
 from sportstradamus.nightly import (
     _MIN_BETS_FOR_PRECISION,
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
     _precompute_calibration,
+    _precompute_live_fit,
     _precompute_play_record,
     _precompute_realized_by_side,
     _profit_sim_kelly_yield,
@@ -415,6 +416,42 @@ def test_precompute_play_record_writes_the_money_table(tmp_path, monkeypatch):
     every_side = record.set_index(["play", "league", "kind"]).loc[("all", "all", "all")]
     assert every_side["n"] == 2 * len(settled_offers(history))
     assert every_side["last_date"] == yesterday
+
+
+class _EmptyLadder:
+    """An archive whose ladder holds no quote: every offer reads class C."""
+
+    def get_ladder_rungs(self, league, market, date, entities, *, exclude_books=(), at=None):
+        return pd.DataFrame(columns=["entity", "book", "line", "p_over", "observed_at"])
+
+
+def test_precompute_live_fit_stamps_history_then_writes_the_fit_table(tmp_path, monkeypatch):
+    path = tmp_path / "live_fit.parquet"
+    written = []
+    monkeypatch.setattr(nightly, "LIVE_FIT_PATH", path)
+    monkeypatch.setattr(nightly, "Archive", _EmptyLadder)
+    monkeypatch.setattr(nightly, "write_history", written.append)
+    # Dated off the wall clock: the fit reads the trailing window of today.
+    now = datetime.now()
+    history = _build_history_fixture(now=now, n_per_cell=300).assign(
+        **{
+            "Payout Over": 1.83,
+            "Payout Under": 1.83,
+            "Scored At": pd.Timestamp(now),
+            "Quote Observed At": pd.NaT,
+        }
+    )
+
+    _precompute_live_fit(history)
+
+    [stamped] = written
+    assert stamped["Book Class"].eq("C").all()
+    table = pd.read_parquet(path)
+    assert list(table.columns) == live_fit.FIT_COLS
+    assert table[["league", "kind", "book_class"]].to_numpy().tolist() == [
+        [league, "underdog_even", "C"] for league in ("NBA", "NFL", "WNBA")
+    ]
+    assert table["n_legs"].sum() == len(settled_offers(stamped))
 
 
 def test_precompute_calibration_writes_the_realized_summary(tmp_path, monkeypatch):
