@@ -39,6 +39,10 @@ from sportstradamus.leg_schema import leg_label
 
 _CONFIG_DIR = resources.files(data) / "config"
 
+# Floor of a leg's multiplier box. Cut-payout picks pay below 1x (Underdog posts down to
+# 0.5x), so the floor only keeps the expected quote above zero.
+_MIN_LEG_MULTIPLIER = 0.01
+
 
 def _effective_tables(platform: str) -> tuple[dict, dict]:
     """Committed configs with the runtime overlay merged, string-keyed.
@@ -172,7 +176,7 @@ for i, leg in enumerate(raw_legs):
     )
     mult_val = c_mult.number_input(
         "multiplier",
-        min_value=1.0,
+        min_value=_MIN_LEG_MULTIPLIER,
         value=float(leg.get("boost") or 1.0),
         step=0.01,
         key=f"mod_mult_{source_id}_{i}",

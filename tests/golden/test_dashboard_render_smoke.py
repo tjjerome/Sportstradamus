@@ -690,6 +690,35 @@ def test_lab_modifiers_pair_key_names_a_market_by_the_leagues_own_key(monkeypatc
     ]
 
 
+def test_lab_modifiers_renders_a_cut_payout_leg(monkeypatch, tmp_path):
+    """A leg the app pays below 1x (a cut-payout pick) loads with its own multiplier."""
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).assign(Position="G").to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH",
+        tmp_path / "modifier_overrides.json",
+    )
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(dict(_OFFER_ROWS[0], Boost=0.82)),
+        build_leg(dict(_OFFER_ROWS[0], Player="M. Bridges", Market="AST", Line=5.5)),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert at.number_input(key="mod_mult_rail_0").value == 0.82
+
+
 @pytest.mark.xfail(
     reason=(
         "Order-dependent pre-existing flake, not a product bug: when an earlier test in "
