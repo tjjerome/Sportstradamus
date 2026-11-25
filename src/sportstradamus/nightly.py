@@ -511,7 +511,6 @@ def run(league, skip_update, history_only, log_level):
     _warn_calibration_divergence(metrics)
     _precompute_realized_by_side(history)
     _precompute_live_gap(history)
-    _precompute_play_record(history)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)
@@ -523,6 +522,8 @@ def run(league, skip_update, history_only, log_level):
             folded["pairs"],
             folded["rakes"],
         )
+    # Last: the newest table, so a failure in it costs the run no other output.
+    _precompute_play_record(history)
 
 
 def _load_one_league(lg, cls, skip_update):
