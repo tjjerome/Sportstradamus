@@ -300,7 +300,11 @@ def live_load(
     loaders = {"Underdog": get_ud, "Sleeper": get_sleeper}
 
     offers_df, _ = process_offers(
-        loaders[platform](), platform, stats, contest_variant=config.contest_variants[0]
+        loaders[platform](),
+        platform,
+        stats,
+        scored_at=pd.Timestamp.now("UTC").tz_localize(None),
+        contest_variant=config.contest_variants[0],
     )
     # process_offers doesn't stamp Platform — prophecize adds it to its own copies
     # (prediction/cli.py), and build_leg/parlay pricing require the column here too.

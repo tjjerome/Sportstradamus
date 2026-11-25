@@ -355,21 +355,42 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
 # --- live_load stamps Platform on the scraped offers ---------------------------
 
 
-def _live_load_offers(monkeypatch, platform: str, boost: float) -> pd.DataFrame:
+def _live_load_offers(
+    monkeypatch, platform: str, boost: float, stamps: list | None = None
+) -> pd.DataFrame:
     """``live_load``'s offers frame with the scrape and the search stubbed.
 
-    ``boost`` is what ``process_offers`` hands back for the one offer.
+    ``boost`` is what ``process_offers`` hands back for the one offer. The stub takes the
+    scoring loop's own keywords, so a call the real loop would refuse fails here too, and
+    it appends the run stamp it was given to ``stamps``.
     """
+
+    def process_offers(offer_dict, book, stats, *, scored_at, contest_variant):
+        if stamps is not None:
+            stamps.append(scored_at)
+        return pd.DataFrame([{"Player": "A", "Market": "PTS", "Boost": boost}]), None
+
     monkeypatch.setattr("sportstradamus.books.get_ud", list)
     monkeypatch.setattr("sportstradamus.books.get_sleeper", list)
-    monkeypatch.setattr(
-        "sportstradamus.prediction.scoring.process_offers",
-        lambda *a, **k: (pd.DataFrame([{"Player": "A", "Market": "PTS", "Boost": boost}]), None),
-    )
+    monkeypatch.setattr("sportstradamus.prediction.scoring.process_offers", process_offers)
     monkeypatch.setattr(underdog_pickem, "_parlays_per_variant", lambda *a: {})
 
     _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, platform, {})
     return offers_df
+
+
+def test_live_load_scores_under_its_own_run_stamp(monkeypatch) -> None:
+    """The scoring loop prices the books' quotes as of a run stamp and takes no default
+    for it. ``live_load`` is a scoring run of its own, so it hands over the time it runs,
+    in the tz-naive UTC every other stamp uses."""
+    stamps: list = []
+    before = pd.Timestamp.now("UTC").tz_localize(None)
+
+    _live_load_offers(monkeypatch, "Underdog", boost=UNDERDOG_BOOST_BASELINE, stamps=stamps)
+
+    (stamp,) = stamps
+    assert stamp.tzinfo is None
+    assert before <= stamp <= pd.Timestamp.now("UTC").tz_localize(None)
 
 
 def test_live_load_stamps_platform_on_offers(monkeypatch) -> None:
