@@ -1,4 +1,4 @@
-"""The EV fit: what the sportsbooks said at an offer's line, the fit, and the price it gives."""
+"""The EV fit: the weights it recovers, what its prior holds, and the price it gives."""
 
 import numpy as np
 import pandas as pd
@@ -6,66 +6,7 @@ import pytest
 from scipy.special import expit, logit
 
 from sportstradamus import live_fit
-
-SCORED_AT = pd.Timestamp("2026-11-20 23:50:00")
-
-
-def _rungs(rows):
-    frame = pd.DataFrame(rows, columns=["entity", "book", "line", "p_over", "minutes_old"])
-    frame["observed_at"] = SCORED_AT - pd.to_timedelta(frame.pop("minutes_old"), unit="min")
-    return frame
-
-
-def _book_inputs(rows, players, lines):
-    return live_fit.book_inputs(_rungs(rows), players, np.array(lines, dtype=float), SCORED_AT)
-
-
-def test_book_inputs_average_the_books_at_the_offered_line():
-    inputs = _book_inputs(
-        [
-            ("Ann", "dk", 24.5, 0.50, 10),
-            ("Ann", "fd", 24.5, 0.56, 30),
-            ("Ann", "fd", 25.5, 0.40, 30),
-        ],
-        ["Ann"],
-        [24.5],
-    )
-
-    assert inputs["Book Over"].iat[0] == pytest.approx(0.53)
-    assert inputs["Book Count"].iat[0] == 2
-    assert inputs["Book Observed At"].iat[0] == SCORED_AT - pd.Timedelta(minutes=10)
-    assert inputs["Book Class"].iat[0] == "A"
-
-
-def test_book_inputs_class_b_when_the_books_price_only_another_line():
-    inputs = _book_inputs([("Ann", "dk", 25.5, 0.40, 10)], ["Ann"], [24.5])
-
-    assert np.isnan(inputs["Book Over"].iat[0])
-    assert inputs["Book Count"].iat[0] == 0
-    assert pd.isna(inputs["Book Observed At"].iat[0])
-    assert inputs["Book Class"].iat[0] == "B"
-
-
-def test_book_inputs_class_c_when_no_book_quotes_the_player():
-    inputs = _book_inputs([("Ann", "dk", 24.5, 0.50, 10)], ["Ann", "Bob"], [24.5, 24.5])
-
-    assert inputs["Book Class"].tolist() == ["A", "C"]
-    assert inputs.index.tolist() == [0, 1]
-
-
-def test_book_inputs_ignore_a_quote_older_than_the_freshness_cut():
-    stale = live_fit.BOOK_MAX_AGE / pd.Timedelta(minutes=1) + 1
-    inputs = _book_inputs(
-        [
-            ("Ann", "dk", 24.5, 0.50, stale),
-            ("Ann", "fd", 25.5, 0.40, 10),
-            ("Bob", "dk", 24.5, 0.50, stale),
-        ],
-        ["Ann", "Bob"],
-        [24.5, 24.5],
-    )
-
-    assert inputs["Book Class"].tolist() == ["B", "C"]
+from sportstradamus.helpers.io import read_parquet_safe
 
 
 def _settled(
@@ -273,6 +214,28 @@ def test_score_gives_no_price_to_an_offer_with_one_side_posted():
     scored = live_fit.score(one_sided, table)
 
     assert scored[["Fit Prob", "Fit Prob Low", "EV"]].isna().all(axis=None)
+
+
+def test_score_reads_the_table_as_parquet_stores_it(tmp_path):
+    rng = np.random.default_rng(9)
+    offers = _settled(rng, 3_000, w_book=0.8, w_model=0.3)
+    table = live_fit.fit(offers)
+    table.to_parquet(tmp_path / "live_fit.parquet")
+
+    stored = pd.read_parquet(tmp_path / "live_fit.parquet")
+
+    assert _stratum(table)["w_book"] != 0
+    pd.testing.assert_frame_equal(live_fit.score(offers, stored), live_fit.score(offers, table))
+
+
+def test_score_before_the_first_table_is_the_apps_fair_price(tmp_path):
+    rng = np.random.default_rng(10)
+    offers = _settled(rng, 50)
+
+    scored = live_fit.score(offers, read_parquet_safe(tmp_path / "live_fit.parquet"))
+
+    np.testing.assert_allclose(scored["Fit Prob"], 0.5)
+    np.testing.assert_allclose(scored["Fit Prob Low"], 0.5)
 
 
 def test_walk_forward_scores_a_date_from_earlier_dates_only():

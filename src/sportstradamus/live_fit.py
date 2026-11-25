@@ -2,18 +2,15 @@
 
 One penalized logistic fit per league, pick kind and class of sportsbook coverage gives the
 chance an offer's Over hits (docs/handoffs/profit-engine.md 5.1; the estimator and its
-evidence are docs/archive/researcher_ev_fit.md). ``book_inputs`` reads what the sportsbooks
-said at an offer's line and names its class, ``fit`` estimates the table, ``score`` prices
-offers with it on the side the model took, and ``walk_forward`` prices each game date from
-earlier dates only. Pure.
+evidence are docs/archive/researcher_ev_fit.md). ``fit`` estimates the table, ``score``
+prices offers with it on the side the model took, and ``walk_forward`` prices each game date
+from earlier dates only. Pure.
 
-Every function but ``book_inputs`` reads offers under history's column names: ``League``,
-``Platform``, ``Payout Over`` and ``Payout Under`` (full decimal payouts, 0 on a side the app
-did not post), ``Bet``, ``Win Prob`` and ``Book Prob`` (both of the side ``Bet`` names),
-``Model Version`` and ``Book Class``.
+Offers are read under history's column names: ``League``, ``Platform``, ``Payout Over`` and
+``Payout Under`` (full decimal payouts, 0 on a side the app did not post), ``Bet``,
+``Win Prob`` and ``Book Prob`` (both of the side ``Bet`` names), ``Model Version`` and
+``Book Class`` (the last two as ``book_stamp`` writes them).
 """
-
-from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,9 +32,6 @@ MIN_FIT_LEGS = 400
 FIT_WINDOW_DAYS = 90
 # One-sided 95 %: the bound the "+EV" mark and the stake read.
 LOWER_BOUND_Z = 1.645
-# A sportsbook quote older than this at scoring counts for nothing: the weights are earned on
-# fresh quotes.
-BOOK_MAX_AGE = pd.Timedelta(minutes=90)
 # Earlier game dates a walk-forward needs before it scores one.
 MIN_TRAIN_DATES = 14
 
@@ -62,43 +56,6 @@ _PROB_EPS = 1e-3
 _MIN_MEAN_SQUARE = 1e-6
 _NEWTON_MAX_ITER = 60
 _NEWTON_TOL = 1e-8
-
-
-def book_inputs(
-    rungs: pd.DataFrame, players: Sequence[str], lines: np.ndarray, scored_at: pd.Timestamp
-) -> pd.DataFrame:
-    """What the sportsbooks said about each offer, as its scoring run saw them.
-
-    ``rungs`` is ``Archive.get_ladder_rungs`` output for the offers' game date, sportsbooks
-    only. A quote older than ``BOOK_MAX_AGE`` at ``scored_at`` counts for nothing.
-
-    Returns:
-        Positional over ``players`` and ``lines``: ``Book Over`` (the plain mean of the books'
-        over-probabilities at the offer's own line, NaN when none prices it), ``Book Count``,
-        ``Book Observed At`` (the newest of those quotes) and ``Book Class``: ``A`` when a
-        book prices the line, ``B`` when the books price only other lines, ``C`` when none
-        quotes the player.
-    """
-    offers = pd.DataFrame({"entity": players, "offered": lines})
-    fresh = rungs[scored_at - rungs["observed_at"] <= BOOK_MAX_AGE]
-    quoted = offers.reset_index().merge(fresh, on="entity")
-    at_line = (
-        quoted[np.isclose(quoted["line"], quoted["offered"])]
-        .groupby("index")
-        .agg(over=("p_over", "mean"), count=("book", "size"), newest=("observed_at", "max"))
-        .reindex(offers.index)
-    )
-    count = at_line["count"].fillna(0).astype(int)
-    return pd.DataFrame(
-        {
-            "Book Over": at_line["over"],
-            "Book Count": count,
-            "Book Observed At": pd.to_datetime(at_line["newest"]),
-            "Book Class": np.select(
-                [count > 0, offers.index.isin(quoted["index"])], ["A", "B"], "C"
-            ),
-        }
-    )
 
 
 def _logit(prob) -> np.ndarray:

@@ -101,6 +101,9 @@ REALIZED_BY_SIDE_PATH = _RUNTIME_DIR / "realized_by_side.parquet"
 # The money table: what each play's legs returned over the trailing window, per league and
 # pick kind (`plays.trailing_record`). Written nightly by reflect.
 PLAY_RECORD_PATH = _RUNTIME_DIR / "play_record.parquet"
+# The EV fit's weights per league, pick kind and class of sportsbook coverage
+# (`live_fit.fit`); prophecize prices every offer's EV with it. Written nightly by reflect.
+LIVE_FIT_PATH = _RUNTIME_DIR / "live_fit.parquet"
 # Precomputed reliability (prob bin x alt-line split) grid (Receipts reads it instead
 # of re-binning history at page load). Written nightly by reflect.
 CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"
