@@ -1709,9 +1709,12 @@ class Stats:
             todays_games = self._gamelog_on(date)
             todays_games.index = todays_games[self.log_strings["player"]]
             todays_games = todays_games.loc[~todays_games.index.duplicated()]
-            stats["Home"] = todays_games[self.log_strings["home"]]
-            stats["Moneyline"] = todays_games["moneyline"]
-            stats["Total"] = todays_games["totals"]
+            # Offers come from these same rows, so a KeyError is a name or date mismatch.
+            # Index alignment turned one into a NaN Home, and the matrix build dropped the day.
+            played = todays_games.loc[stats.index]
+            stats["Home"] = played[self.log_strings["home"]]
+            stats["Moneyline"] = played["moneyline"]
+            stats["Total"] = played["totals"]
 
             teams = todays_games[self.log_strings["team"]].to_dict()
             opponents = todays_games[self.log_strings["opponent"]].to_dict()
@@ -2577,21 +2580,20 @@ class Stats:
             stats["Player"] = stats.index
             stats["Date"] = date
             stats["GameTime"] = reads + TRAINING_LOOKBACK
-            if stats["Home"].dtype == bool:
-                if self.league == "MLB":
-                    # Book-first: keep only real-odds rows so book-quoted MLB cells stay
-                    # Archived-only. Hold participation rows aside as a fallback used only
-                    # when the market turns out to have no archived odds at all (below).
-                    # A prop on a player who never batted, or a pitcher who faced no batter,
-                    # cannot settle (Sleeper voids it): pinch runners, starters pulled before
-                    # a batter, the hitters quoted under walks allowed on 2026-03-26.
-                    matrix.extend(stats.loc[stats["Archived"] & (usage > 0)].to_dict("records"))
-                    if not matrix:
-                        mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
-                else:
-                    matrix.extend(
-                        stats.loc[stats["Archived"] | (usage > usage_cutoff)].to_dict("records")
-                    )
+            if self.league == "MLB":
+                # Book-first: keep only real-odds rows so book-quoted MLB cells stay
+                # Archived-only. Hold participation rows aside as a fallback used only
+                # when the market turns out to have no archived odds at all (below).
+                # A prop on a player who never batted, or a pitcher who faced no batter,
+                # cannot settle (Sleeper voids it): pinch runners, starters pulled before
+                # a batter, the hitters quoted under walks allowed on 2026-03-26.
+                matrix.extend(stats.loc[stats["Archived"] & (usage > 0)].to_dict("records"))
+                if not matrix:
+                    mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
+            else:
+                matrix.extend(
+                    stats.loc[stats["Archived"] | (usage > usage_cutoff)].to_dict("records")
+                )
 
         if not matrix:
             # No archived odds anywhere for this MLB market — assemble the book-less cell

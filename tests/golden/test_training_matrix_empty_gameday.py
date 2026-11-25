@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.helpers import remove_accents
-from sportstradamus.stats import game_starts
+from sportstradamus.stats import StatsNBA, game_starts
 from sportstradamus.stats.base import Stats
 
 LOG_STRINGS = {
@@ -189,3 +189,59 @@ def test_an_mlb_quoted_row_needs_a_plate_appearance_or_a_batter_faced(market, ke
     rebuilt = Stats.get_training_matrix(fake, market, cutoff_date=date(2024, 1, 1))
 
     assert rebuilt["Player"].tolist() == kept
+
+
+def test_a_gameday_keeps_its_rows_whatever_its_home_column_holds():
+    """One row's unresolved Home once dropped its whole gameday from the matrix."""
+    game_date = date(2024, 9, 8)
+    gamelog = pd.DataFrame(
+        {
+            "game": "g1",
+            "player": ["Resolved", "Unresolved"],
+            "date": game_date,
+            "team": ["AAA", "BBB"],
+            "opponent": ["BBB", "AAA"],
+            "home": [True, False],
+            "usage": 30,
+            "market": [4, 2],
+        }
+    )
+    fake = _training_stats(
+        "NBA",
+        gamelog,
+        get_stats=lambda _market, offers, _game_date: pd.DataFrame(
+            {"Home": [True, 0]}, index=[offer["Player"] for offer in offers]
+        ),
+        resolve_player_market_odds=_resolved_quotes(archived=True),
+    )
+
+    rebuilt = Stats.get_training_matrix(fake, "market", cutoff_date=date(2024, 1, 1))
+
+    assert rebuilt["Player"].tolist() == ["Resolved", "Unresolved"]
+
+
+def test_a_player_without_a_gamelog_row_that_day_fails_the_build():
+    """Offers and the day's gamelog rows share one source, so a miss is a name or date bug."""
+    stats = StatsNBA()
+    ls = stats.log_strings
+    stats.gamelog = pd.DataFrame(
+        [
+            {
+                ls["date"]: "2024-01-05",
+                ls["game"]: "0022300500",
+                ls["player"]: "Played",
+                ls["team"]: "DEN",
+                ls["opponent"]: "LAL",
+                ls["home"]: True,
+                "moneyline": -150.0,
+                "totals": 118.0,
+            }
+        ]
+    )
+    teams = {"Played": "DEN", "Misnamed": "LAL"}
+    opponents = {"Played": "LAL", "Misnamed": "DEN"}
+
+    with pytest.raises(KeyError, match=r"\['Misnamed'\] not in index"):
+        stats._game_context(
+            pd.DataFrame(index=list(teams)), [], "PTS", date(2024, 1, 5), teams, opponents
+        )
