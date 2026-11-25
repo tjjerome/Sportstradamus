@@ -255,12 +255,13 @@
         },
         "passing yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "prob_recal_book_citl",
             "dist_training_loss": "nll",
             "sn_param": "direct",
-            "blending": "crps_1se"
+            "blending": "crps_1se",
+            "refit": "all"
         },
         "qb tds": {
             "dist": "ZINB",
