@@ -277,3 +277,146 @@ def test_walk_forward_trains_on_the_trailing_window_only():
     in_window = recent[recent["Date"] < last_date]
     expected = live_fit.score(last, live_fit.fit(in_window))
     np.testing.assert_allclose(last["Fit Prob"], expected["Fit Prob"])
+
+
+def _priced(**fields) -> dict:
+    """One settled offer the fit priced: an Underdog even pick the model took Over, and won."""
+    return {
+        "League": "NHL",
+        "Platform": "Underdog",
+        "Date": "2026-11-01",
+        "Payout Over": 1.83,
+        "Payout Under": 1.83,
+        "Bet": "Over",
+        "Win Prob": 0.6,
+        "Model Version": "v1",
+        "Book Prob": np.nan,
+        "Book Class": "C",
+        "Result": "Over",
+        "Fit Prob": 0.56,
+        "Fit Prob Low": 0.53,
+        "EV": 0.56 * 1.83,
+    } | fields
+
+
+def test_fit_gain_is_the_apps_log_loss_less_the_fits_on_the_overs_outcome():
+    modified = {"Payout Over": 1.5, "Payout Under": 2.4}
+    fair_over = (1 / 1.5) / (1 / 1.5 + 1 / 2.4)
+    offers = pd.DataFrame(
+        [
+            _priced(),  # the Over hit: the fit said .56, the app one half
+            _priced(Bet="Under", Date="2026-11-02"),  # the fit said .56 Under, so .44 Over
+            _priced(Result="Under", Date="2026-11-02"),
+            _priced(**modified, **{"Fit Prob": 0.65}),
+            # An Under that hit at a modified price: the fit said .56, the app its fair Under.
+            _priced(League="NBA", Platform="Sleeper", Bet="Under", Result="Under", **modified),
+        ]
+    )
+
+    table = live_fit.fit_gain(offers, np.random.default_rng(0))
+
+    assert table.columns.tolist() == live_fit.GAIN_COLS
+    gain = table.set_index(["league", "kind"])
+    even = [np.log(0.56 / 0.5), np.log(0.44 / 0.5), np.log(0.44 / 0.5)]
+    modified_gain = np.log(0.65 / fair_over)
+    sleeper_gain = np.log(0.56 / (1 - fair_over))
+    assert gain.at[("NHL", "underdog_even"), "gain"] == pytest.approx(np.mean(even))
+    assert gain.at[("NHL", "underdog_modified"), "gain"] == pytest.approx(modified_gain)
+    assert gain.at[("NBA", "sleeper"), "gain"] == pytest.approx(sleeper_gain)
+    assert gain.at[("all", "all"), "gain"] == pytest.approx(
+        np.mean([*even, modified_gain, sleeper_gain])
+    )
+    assert gain["n_legs"].to_dict() == {
+        ("NBA", "sleeper"): 1,
+        ("NHL", "underdog_even"): 3,
+        ("NHL", "underdog_modified"): 1,
+        ("all", "all"): 5,
+    }
+    assert gain.at[("NHL", "underdog_even"), "n_dates"] == 2
+    assert gain.at[("all", "all"), "n_dates"] == 2
+
+
+def test_fit_gain_leaves_out_an_offer_the_fit_did_not_price():
+    unpriced = {"Fit Prob": np.nan, "Fit Prob Low": np.nan, "EV": np.nan}
+    offers = pd.DataFrame(
+        [
+            _priced(),
+            _priced(Date="2026-11-02", **unpriced),  # scored before the fit
+            _priced(Date="2026-11-03", **unpriced, **{"Payout Under": 0.0}),  # one side posted
+        ]
+    )
+
+    (row,) = live_fit.fit_gain(offers, np.random.default_rng(0)).to_dict("records")[-1:]
+
+    assert (row["league"], row["n_legs"], row["n_dates"]) == ("all", 1, 1)
+    assert row["gain"] == pytest.approx(np.log(0.56 / 0.5))
+
+
+def test_fit_gain_bounds_resample_whole_game_dates():
+    rng = np.random.default_rng(11)
+    chances = rng.uniform(0.4, 0.6, 60)
+    one_date = pd.DataFrame([_priced(**{"Fit Prob": chance}) for chance in chances])
+    spread = one_date.assign(Date=[f"2026-11-{1 + leg % 20:02d}" for leg in range(60)])
+
+    alone = live_fit.fit_gain(one_date, np.random.default_rng(0)).iloc[-1]
+    across = live_fit.fit_gain(spread, np.random.default_rng(0)).iloc[-1]
+
+    # One date is one cluster, so every resample is the sample; legs drawn one by one would vary.
+    assert alone["gain_lo"] == alone["gain_hi"] == pytest.approx(alone["gain"])
+    assert across["gain"] == pytest.approx(alone["gain"])
+    assert across["gain_lo"] < across["gain"] < across["gain_hi"]
+
+
+def test_fit_gain_credits_a_walk_forward_whose_model_knows_more_than_the_app():
+    rng = np.random.default_rng(12)
+    offers = _settled(rng, 20_000, book_class="C", w_model=0.8, dates=30)
+    walked = live_fit.walk_forward(offers)
+
+    (row,) = live_fit.fit_gain(walked, np.random.default_rng(0)).to_dict("records")[-1:]
+
+    assert (row["n_legs"], row["n_dates"]) == (len(walked), 30 - live_fit.MIN_TRAIN_DATES)
+    assert row["gain_lo"] > 0
+
+
+def test_ev_bands_set_what_the_fit_said_beside_what_the_models_side_paid():
+    under_at_2_4 = {"Bet": "Under", "Payout Over": 1.5, "Payout Under": 2.4}
+    offers = pd.DataFrame(
+        [
+            _priced(EV=0.85),
+            _priced(EV=0.90, Result="Under"),  # a band holds its lower edge
+            _priced(EV=0.92, Result="Under", **under_at_2_4),  # the Under hit, at its own payout
+            _priced(EV=0.97),
+            _priced(EV=1.00),
+            _priced(EV=1.30, Result="Under"),
+            _priced(EV=np.nan),  # the fit gave it no price
+        ]
+    )
+
+    table = live_fit.ev_bands(offers, np.random.default_rng(0))
+
+    assert table.columns.tolist() == live_fit.BAND_COLS
+    assert table["band"].tolist() == [
+        "[0.0, 0.9)",
+        "[0.9, 0.94)",
+        "[0.94, 0.97)",
+        "[0.97, 1.0)",
+        "[1.0, inf)",
+    ]
+    assert table["n_legs"].tolist() == [1, 2, 0, 1, 2]
+    np.testing.assert_allclose(table["says"], [0.85, 0.91, np.nan, 0.97, 1.15])
+    np.testing.assert_allclose(table["paid"], [1.83, 1.2, np.nan, 1.83, 0.915])
+    assert table.loc[2, ["paid_lo", "paid_hi"]].isna().all()
+
+
+def test_ev_bands_bounds_resample_whole_game_dates():
+    rng = np.random.default_rng(13)
+    results = rng.choice(["Over", "Under"], 60)
+    one_date = pd.DataFrame([_priced(EV=0.95, Result=result) for result in results])
+    spread = one_date.assign(Date=[f"2026-11-{1 + leg % 20:02d}" for leg in range(60)])
+
+    alone = live_fit.ev_bands(one_date, np.random.default_rng(0)).set_index("band")
+    across = live_fit.ev_bands(spread, np.random.default_rng(0)).set_index("band")
+
+    band = "[0.94, 0.97)"
+    assert alone.at[band, "paid_lo"] == alone.at[band, "paid_hi"] == alone.at[band, "paid"]
+    assert across.at[band, "paid_lo"] < across.at[band, "paid"] < across.at[band, "paid_hi"]

@@ -88,11 +88,14 @@ _DTYPES = {
 _CAL_SUMMARY_COLS = ["Cohort", "Alt Line", "Bin", "Predicted", "Actual", "N", "ECE", "ROI"]
 
 
+def in_recommended_band(payout: pd.Series) -> pd.Series:
+    """Whether each payout sits in ``(1, RECOMMENDED_PAYOUT_MAX]``, where a side can be recommended."""
+    return payout.between(1, RECOMMENDED_PAYOUT_MAX, inclusive="right")
+
+
 def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
     """Whether each side is recommended, by the one rule Receipts and the paper ledger share."""
-    return (win_prob * payout - 1 >= RECOMMENDED_EDGE_MIN) & payout.between(
-        1, RECOMMENDED_PAYOUT_MAX, inclusive="right"
-    )
+    return (win_prob * payout - 1 >= RECOMMENDED_EDGE_MIN) & in_recommended_band(payout)
 
 
 def last_scored_lines(history: pd.DataFrame) -> pd.Series:

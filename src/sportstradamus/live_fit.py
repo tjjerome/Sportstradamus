@@ -4,7 +4,8 @@ One penalized logistic fit per league, pick kind and class of sportsbook coverag
 chance an offer's Over hits (docs/handoffs/profit-engine.md 5.1; the estimator and its
 evidence are docs/archive/researcher_ev_fit.md). ``fit`` estimates the table, ``score``
 prices offers with it on the side the model took, and ``walk_forward`` prices each game date
-from earlier dates only. Pure.
+from earlier dates only. ``fit_gain`` and ``ev_bands`` read priced offers against their
+outcomes, for the fit's acceptance tests and kill lines. Pure.
 
 Offers are read under history's column names: ``League``, ``Platform``, ``Payout Over`` and
 ``Payout Under`` (full decimal payouts, 0 on a side the app did not post), ``Bet``,
@@ -34,6 +35,8 @@ FIT_WINDOW_DAYS = 90
 LOWER_BOUND_Z = 1.645
 # Earlier game dates a walk-forward needs before it scores one.
 MIN_TRAIN_DATES = 14
+# The EV bands of the research brief's honesty test (docs/archive/researcher_ev_fit.md, AT3).
+EV_BAND_EDGES: tuple[float, ...] = (0.0, 0.9, 0.94, 0.97, 1.0, np.inf)
 
 FIT_COLS: list[str] = [
     "league",
@@ -48,6 +51,10 @@ FIT_COLS: list[str] = [
     *(f"se_{term}" for term in TERMS),
     "cov",
 ]
+# What ``score`` prices an offer with, each for the side ``Bet`` names.
+SCORE_COLS: list[str] = ["Fit Prob", "Fit Prob Low", "EV"]
+GAIN_COLS: list[str] = ["league", "kind", "n_legs", "n_dates", "gain", "gain_lo", "gain_hi"]
+BAND_COLS: list[str] = ["band", "n_legs", "says", "paid", "paid_lo", "paid_hi"]
 
 _STRATUM = ["League", "Kind", "Book Class"]
 # Probabilities are clipped this far inside (0, 1) before the logit.
@@ -234,3 +241,68 @@ def walk_forward(offers: pd.DataFrame) -> pd.DataFrame:
         today = offers[dates == day]
         scored.append(today.join(score(today, fit(earlier))))
     return pd.concat(scored)
+
+
+def fit_gain(offers: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """How much better than the app's fair price the fit calls the Over, per league and kind.
+
+    ``offers`` is settled and priced: ``walk_forward`` output, or history rows a scoring run
+    stamped with ``SCORE_COLS``. An offer the fit gave no price is left out.
+
+    Returns:
+        ``GAIN_COLS``: one row per league and fit kind, then every leg pooled as ``all``.
+        ``gain`` is the mean over ``n_legs`` of the app's log loss less the fit's, in nats a
+        leg and positive when the fit is the better price; ``gain_lo`` / ``gain_hi`` are 95 %
+        bounds that resample the ``n_dates`` game dates whole.
+    """
+    # Imported here: the training package loads torch, which pricing an offer never needs.
+    from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
+
+    terms = _terms(offers)
+    over_hit = offers["Result"].eq("Over").to_numpy()
+    fit_over = np.where(offers["Bet"].eq("Over"), offers["Fit Prob"], 1 - offers["Fit Prob"])
+    app_over = expit(terms["x0"].to_numpy())
+    # The app's log loss less the fit's: the log of the fit's chance of what happened over the app's.
+    gain = np.log(np.where(over_hit, fit_over / app_over, (1 - fit_over) / (1 - app_over)))
+    legs = terms.assign(Date=offers["Date"].to_numpy(), gain=gain).dropna(subset="gain")
+    pooled = pd.concat([legs, legs.assign(League="all", Kind="all")])
+    rows = [
+        (
+            league,
+            kind,
+            len(part),
+            part["Date"].nunique(),
+            *_bootstrap_mean_ci_clustered(part["gain"].to_numpy(), part["Date"].to_numpy(), rng),
+        )
+        for (league, kind), part in pooled.groupby(["League", "Kind"])
+    ]
+    return pd.DataFrame(rows, columns=GAIN_COLS)
+
+
+def ev_bands(offers: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """What the model's side paid in each band of ``EV``, beside what the fit said it would.
+
+    ``offers`` as :func:`fit_gain` reads them.
+
+    Returns:
+        ``BAND_COLS``: one row per band of ``EV_BAND_EDGES``, each holding its lower edge.
+        ``says`` is the mean ``EV`` of the band's ``n_legs``, and ``paid`` the mean paid back
+        on a unit staked (the side's payout when it won, else 0), with 95 % bounds that
+        resample whole game dates.
+    """
+    # Imported here: the training package loads torch, which pricing an offer never needs.
+    from sportstradamus.training.scorecard import _bootstrap_mean_ci_clustered
+
+    payout = np.where(offers["Bet"].eq("Over"), offers["Payout Over"], offers["Payout Under"])
+    legs = offers[["Date", "EV"]].assign(paid=payout * offers["Bet"].eq(offers["Result"]))
+    bands = pd.cut(legs["EV"], EV_BAND_EDGES, right=False)
+    rows = [
+        (
+            str(band),
+            len(part),
+            part["EV"].mean(),
+            *_bootstrap_mean_ci_clustered(part["paid"].to_numpy(), part["Date"].to_numpy(), rng),
+        )
+        for band, part in legs.groupby(bands, observed=False)
+    ]
+    return pd.DataFrame(rows, columns=BAND_COLS)

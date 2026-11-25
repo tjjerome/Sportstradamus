@@ -15,4 +15,8 @@ Options:
   --until [%Y-%m-%d]   Last game date scored (default: every settled leg).
   --out DIRECTORY      Directory play_record.parquet and entry_record.parquet
                        land in.  [default: /tmp/play_replay]
+  --walk-forward       Price each game date's EV from fits on earlier dates
+                       only, score the plays on the dates so priced, and add the
+                       fit's own checks (fit_gain.parquet, ev_bands.parquet).
+                       Needs a history that carries the book stamp.
   --help               Show this message and exit.

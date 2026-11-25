@@ -19,9 +19,12 @@ from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, platform_payout
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.realized import (
     COUNT_ONCE_FROM,
+    RECOMMENDED_PAYOUT_MAX,
     by_split,
     calibration_summary,
     cohort_summary,
+    in_recommended_band,
+    recommended,
     settled_offers,
     window,
     worst_month,
@@ -175,6 +178,14 @@ def test_legs_price_at_the_platform_payout():
     np.testing.assert_allclose(out["Breakeven"], 1 / out["Payout"])
     assert out["Hit"].tolist() == [True, False]
     np.testing.assert_allclose(out["Unit"], [UNDERDOG_BOOST_BASELINE - 1, -1.0])
+
+
+def test_the_recommended_band_opens_above_even_money_and_closes_at_the_cap():
+    payout = pd.Series([1.0, 1.5, RECOMMENDED_PAYOUT_MAX, RECOMMENDED_PAYOUT_MAX + 0.01])
+    assert in_recommended_band(payout).tolist() == [False, True, True, False]
+    # The board's rule reads the same band: a .9 claim clears its edge floor wherever a side pays.
+    claim = pd.Series(0.9, index=payout.index)
+    assert recommended(claim, payout).tolist() == [False, True, True, False]
 
 
 def test_quote_classes():

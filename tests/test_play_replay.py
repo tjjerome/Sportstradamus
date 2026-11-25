@@ -1,8 +1,11 @@
 """``admin play-replay``: the money tables over a window of a history and its parlay history."""
 
+import numpy as np
 import pandas as pd
+import pytest
 from click.testing import CliRunner
 
+from sportstradamus import live_fit
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.scripts import play_replay
 
@@ -34,6 +37,35 @@ _ENTRY = {
     "Legs Resolved": 2.0,
     "Misses": 0.0,
 }
+# Two Sleeper picks. The board recommends the first (.65 x 1.7 clears its edge floor) and not
+# the second, which the app's own prices value higher: 1 / (1/1.6 + 1/2.2) = .926 against
+# 1 / (1/1.7 + 1/2.0) = .919.
+_SLEEPER = _OFFER | {"Platform": "Sleeper"}
+_RULE_PICK = _SLEEPER | {
+    "Player": "rule",
+    "Boost": 1.7,
+    "Win Prob": 0.65,
+    "Payout Over": 1.7,
+    "Payout Under": 2.0,
+}
+_RANK_PICK = _SLEEPER | {
+    "Player": "rank",
+    "Boost": 1.6,
+    "Win Prob": 0.55,
+    "Payout Over": 1.6,
+    "Payout Under": 2.2,
+}
+
+
+def _replay(tmp_path, history: pd.DataFrame, *flags: str):
+    """Run the replay over ``history`` and one day of entries; the result and its out directory."""
+    history.to_parquet(tmp_path / "history.parquet")
+    entries = tmp_path / "parlay_hist"
+    entries.mkdir()
+    pd.DataFrame([_ENTRY]).to_parquet(entries / "2026-11-01.parquet")
+    args = ["--history", str(tmp_path / "history.parquet"), "--entries", str(entries)]
+    result = CliRunner().invoke(play_replay.main, [*args, "--out", str(tmp_path / "out"), *flags])
+    return result, tmp_path / "out"
 
 
 def test_play_replay_scores_the_window_and_writes_both_tables(tmp_path):
@@ -74,3 +106,82 @@ def test_play_replay_scores_the_window_and_writes_both_tables(tmp_path):
     ]
     assert "model_edge" in result.output
     assert "NFL" in result.output
+
+
+def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path):
+    train = [_OFFER | {"Date": f"2026-10-{day}"} for day in range(10, 24)]
+    # Both picks hit on the 24th and miss on the 25th.
+    walked = [
+        pick | {"Date": date, "Actual": actual}
+        for date, actual in (("2026-10-24", 4.0), ("2026-10-25", 1.0))
+        for pick in (_RULE_PICK, _RANK_PICK)
+    ]
+    # A scoring run's own fit columns, which the walk replaces: kept, they mark every leg "+EV".
+    stale = {"Fit Prob": 0.99, "Fit Prob Low": 0.99, "EV": 9.9}
+    history = pd.DataFrame(train + walked, columns=HISTORY_COLS).assign(
+        **{"Book Prob": np.nan, "Book Class": "C"}, **stale
+    )
+
+    result, out = _replay(tmp_path, history, "--walk-forward")
+
+    assert result.exit_code == 0, result.output
+    legs = pd.read_parquet(out / "play_record.parquet").set_index(["play", "league", "kind"])
+    every = legs.loc[("all", "all", "all")]
+    assert (every["n"], every["first_date"], every["last_date"]) == (8, "2026-10-24", "2026-10-25")
+    assert legs.at[("model_edge", "all", "all"), "roi"] == pytest.approx((0.7 - 1) / 2)
+    assert legs.at[("ev_rank", "all", "all"), "roi"] == pytest.approx((0.6 - 1) / 2)
+    assert "ev_edge" not in legs.index.get_level_values("play")
+
+    # Too few legs for a fit, so each leg is priced at the app's own fair price: no gain.
+    gain = pd.read_parquet(out / "fit_gain.parquet").set_index(["league", "kind"])
+    assert gain.loc[("all", "all"), ["n_legs", "n_dates"]].tolist() == [4, 2]
+    assert gain.at[("all", "all"), "gain"] == pytest.approx(0.0)
+    bands = pd.read_parquet(out / "ev_bands.parquet").set_index("band")
+    assert bands["n_legs"].to_dict() == {
+        "[0.0, 0.9)": 0,
+        "[0.9, 0.94)": 4,
+        "[0.94, 0.97)": 0,
+        "[0.97, 1.0)": 0,
+        "[1.0, inf)": 0,
+    }
+    said = [1 / (1 / 1.7 + 1 / 2.0), 1 / (1 / 1.6 + 1 / 2.2)]
+    assert bands.at["[0.9, 0.94)", "says"] == pytest.approx(np.mean(said))
+    assert bands.at["[0.9, 0.94)", "paid"] == pytest.approx((1.7 + 1.6) / 4)
+
+    assert "x 10,000" in result.output
+    assert '"+EV" marks (Fit Prob Low x payout at least 1): 0 of 4 legs' in result.output
+    # The plays win and lose on the same dates, so a date drawn for both leaves a narrow gap:
+    # -.1 on two 24ths, 0 on two 25ths. Drawn apart, the gap would run from -1.7 to +1.6.
+    assert "ev_rank minus model_edge, return a leg: -0.050 [-0.100, +0.000]" in result.output
+
+
+def test_the_fit_check_marks_by_the_lower_bound_and_prints_the_gain_scaled(tmp_path, monkeypatch):
+    # Three Sleeper picks at 2.0 a side, which the app prices at one half; the model took each
+    # Over and it hit. The walk is stood in for, to set what the fit said of each.
+    pick = _SLEEPER | {"Boost": 2.0, "Payout Over": 2.0, "Payout Under": 2.0}
+    history = pd.DataFrame([pick | {"Player": name} for name in "ABC"], columns=HISTORY_COLS)
+    history = history.assign(**{"Book Prob": np.nan, "Book Class": "C"})
+    said = {"Fit Prob": 0.6, "Fit Prob Low": [0.55, 0.5, 0.45], "EV": 1.2}
+    monkeypatch.setattr(live_fit, "walk_forward", lambda offers: offers.assign(**said))
+
+    result, out = _replay(tmp_path, history, "--walk-forward")
+
+    assert result.exit_code == 0, result.output
+    # A lower bound of .55 or .5 pays 1 or more at 2.0; .45 does not, though the fit's .6 would.
+    assert '"+EV" marks (Fit Prob Low x payout at least 1): 2 of 3 legs' in result.output
+    gain = pd.read_parquet(out / "fit_gain.parquet").set_index(["league", "kind"])
+    assert gain.at[("all", "all"), "gain"] == pytest.approx(np.log(0.6 / 0.5))
+    assert "+1823.2" in result.output
+
+
+def test_walk_forward_refuses_a_history_without_the_book_stamp(tmp_path):
+    history = pd.DataFrame([_OFFER], columns=HISTORY_COLS).drop(
+        columns="Book Class", errors="ignore"
+    )
+
+    result, out = _replay(tmp_path, history, "--walk-forward")
+
+    assert result.exit_code == 2
+    assert result.output.splitlines()[-1].startswith("Error: ")
+    assert "Book Class" in result.output.splitlines()[-1]
+    assert not out.exists()

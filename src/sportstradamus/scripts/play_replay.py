@@ -5,7 +5,9 @@ history, this box's or a frozen copy, and the engine's graded entries over the s
 (``plays.entry_record``) from the parlay history's day files. Prints both tables and writes
 them to a sandbox directory: ``data/runtime`` belongs to the nightly job. Hand-run to read a
 change to a play, or a model version, in money before it ships
-(docs/handoffs/profit-engine.md).
+(docs/handoffs/profit-engine.md). ``--walk-forward`` prices each game date's EV from fits on
+earlier dates only and adds the fit's own checks, the reads behind its acceptance tests and
+kill lines (docs/archive/researcher_ev_fit.md, 3).
 """
 
 from datetime import datetime
@@ -14,9 +16,11 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
-from sportstradamus import plays, realized
+from sportstradamus import live_fit, plays, realized
 from sportstradamus.helpers.io import HISTORY_PATH, PARLAY_HIST_DIR, _atomic_write_parquet
+from sportstradamus.training.scorecard import _CI_HIGH_PCT, _CI_LOW_PCT, _GATE1_N_BOOT
 
 # The parlay history's columns the entry table reads. Its nested ``legs`` column costs
 # gigabytes to load, so the read is projected to these.
@@ -31,6 +35,57 @@ _ENTRY_COLS = [
     "Misses",
 ]
 _WINDOW_COLS = ["first_date", "last_date"]
+# The research brief reads a log-loss gain in nats a leg times this.
+_GAIN_SCALE = 10_000
+
+
+def _rank_gap(sides: pd.DataFrame, rng: np.random.Generator) -> tuple[float, float, float]:
+    """``ev_rank`` less ``model_edge`` in return a leg, with 95 % bounds.
+
+    Each resample draws whole game dates once and scores both plays on them, so what the two
+    share on a date cancels in the bound (the brief's AT5 and K4).
+    """
+    picked = pd.DataFrame(
+        {play: sides["Unit"].where(plays.PLAYS[play](sides)) for play in ("ev_rank", "model_edge")}
+    )
+    # Per game date: the rank play's summed return and legs, then the rule's.
+    by_date = picked.groupby(sides["Date"]).agg(["sum", "count"]).to_numpy()
+
+    def gap(totals: np.ndarray) -> np.ndarray:
+        rank_units, rank_legs, rule_units, rule_legs = totals.T
+        return rank_units / rank_legs - rule_units / rule_legs
+
+    draws = rng.integers(0, len(by_date), (_GATE1_N_BOOT, len(by_date)))
+    lo, hi = np.percentile(gap(by_date[draws].sum(axis=1)), [_CI_LOW_PCT, _CI_HIGH_PCT])
+    return float(gap(by_date.sum(axis=0))), lo, hi
+
+
+def _fit_check(
+    walked: pd.DataFrame, sides: pd.DataFrame, rng: np.random.Generator, out: Path
+) -> None:
+    """The fit check: the walked fit's gain and band tables, its marks and the rank play's gap."""
+    gain = live_fit.fit_gain(walked, rng)
+    bands = live_fit.ev_bands(walked, rng)
+    _atomic_write_parquet(gain, out / "fit_gain.parquet")
+    _atomic_write_parquet(bands, out / "ev_bands.parquet")
+    marks = (walked["Fit Prob Low"] * walked["Payout"] >= 1).sum()
+    gap, gap_lo, gap_hi = _rank_gap(sides, rng)
+    dates = walked["Date"]
+    click.echo(
+        f"\nFit check: {dates.nunique()} game dates, {dates.min()} to {dates.max()}, each "
+        "priced from fits on earlier dates only"
+    )
+    click.echo(
+        f"\nThe fit's log-loss gain over the app's price, x {_GAIN_SCALE:,} (above 0: better)"
+    )
+    click.echo(gain.to_string(index=False, float_format=lambda x: f"{x * _GAIN_SCALE:+.1f}"))
+    click.echo("\nWhat the model's side paid on a unit staked, by band of EV")
+    click.echo(bands.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    click.echo(
+        f'\n"+EV" marks (Fit Prob Low x payout at least 1): {marks:,} of {len(walked):,} legs'
+    )
+    click.echo(f"ev_rank minus model_edge, return a leg: {gap:+.3f} [{gap_lo:+.3f}, {gap_hi:+.3f}]")
+    click.echo(f"\nwrote fit_gain.parquet and ev_bands.parquet to {out}")
 
 
 @click.command()
@@ -71,16 +126,37 @@ _WINDOW_COLS = ["first_date", "last_date"]
     show_default=True,
     help="Directory play_record.parquet and entry_record.parquet land in.",
 )
+@click.option(
+    "--walk-forward",
+    is_flag=True,
+    help="Price each game date's EV from fits on earlier dates only, score the plays on the "
+    "dates so priced, and add the fit's own checks (fit_gain.parquet, ev_bands.parquet). "
+    "Needs a history that carries the book stamp.",
+)
 def main(
-    history_path: Path, entries_dir: Path, since: datetime, until: datetime | None, out: Path
+    history_path: Path,
+    entries_dir: Path,
+    since: datetime,
+    until: datetime | None,
+    out: Path,
+    walk_forward: bool,
 ) -> None:
     """Score each play's legs, and the engine's own entries, in money over a window of game dates."""
     last = until or pd.Timestamp.max
     rng = np.random.default_rng(plays.RECORD_SEED)
+    # Asked of the file's schema: the history itself takes a minute and gigabytes to load.
+    if walk_forward and "Book Class" not in pq.read_schema(history_path).names:
+        raise click.UsageError(
+            "--walk-forward needs the book stamp, and this history has no Book Class column."
+        )
     # Count-once reads every row of a prop, so the window is cut after the offers are settled.
     offers = realized.settled_offers(pd.read_parquet(history_path))
     offers = offers[pd.to_datetime(offers["Date"]).between(since, last)]
-    play_table = plays.play_record(plays.posted_sides(offers), rng)
+    if walk_forward:
+        # A scoring run's prices go first: the walk joins its own under the same names.
+        offers = live_fit.walk_forward(offers.drop(columns=live_fit.SCORE_COLS, errors="ignore"))
+    sides = plays.posted_sides(offers)
+    play_table = plays.play_record(sides, rng)
     entries = pd.concat(
         [pd.read_parquet(day, columns=_ENTRY_COLS) for day in sorted(entries_dir.glob("*.parquet"))]
     )
@@ -102,3 +178,5 @@ def main(
         click.echo(f"\n{title}")
         click.echo(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     click.echo(f"\nwrote play_record.parquet and entry_record.parquet to {out}")
+    if walk_forward:
+        _fit_check(offers, sides, rng, out)

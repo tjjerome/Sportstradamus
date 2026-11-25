@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
-from sportstradamus import realized
+from sportstradamus import live_fit, realized
 from sportstradamus.helpers import (
     leg_kind,
     platform_payout,
@@ -103,13 +103,31 @@ ENTRY_RECORD_COLS: list[str] = [
     "roi_hi",
 ]
 
+
+def _ev_rank(sides: pd.DataFrame) -> pd.Series:
+    """As many legs as ``model_edge`` took on each date, league and kind: the highest ``EV``."""
+    slate = sides.groupby(["Date", "League", "Kind"])
+    taken = slate["Recommended"].transform("sum")
+    # Ties keep row order, and a side the fit did not price has no rank.
+    return slate["EV"].rank(method="first", ascending=False) <= taken
+
+
 # ``model_edge`` is the board's own rule (``realized.recommended``), the cohort Receipts and
 # the live gap read. ``under`` and ``all`` are controls that need no model: what the app's
 # cut costs a bettor who takes every Under on an even pick, or every side it posts.
+# ``ev_edge`` is the "+EV" mark inside the board's payout band: the fit's lower bound on the
+# win chance, times the payout, reaches 1. ``ev_rank`` spends the board's leg count on the
+# highest ``EV`` instead. A new play goes last: ``play_record`` draws its bounds in this
+# order, so the plays before it keep their numbers.
 PLAYS: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     "model_edge": lambda sides: sides["Recommended"],
     "under": lambda sides: sides["Side"].eq("Under") & sides["Kind"].eq("underdog_even"),
     "all": lambda sides: pd.Series(True, index=sides.index),
+    "ev_edge": lambda sides: (
+        (sides["Fit Prob Low"] * sides["Payout"] >= 1)
+        & realized.in_recommended_band(sides["Payout"])
+    ),
+    "ev_rank": _ev_rank,
 }
 
 
@@ -126,7 +144,9 @@ def posted_sides(offers: pd.DataFrame) -> pd.DataFrame:
         (``helpers.leg_kind``), ``Game`` (the league and its two teams, the same from either
         team) and, priced per side, ``Payout``, ``Breakeven``, ``Hit``, ``Unit`` and
         ``Win Prob`` (the model's probability of that side). ``Recommended`` is False on a
-        side the model did not choose.
+        side the model did not choose. The EV fit prices the model's side alone, so
+        ``live_fit.SCORE_COLS`` are NaN on the other side, and on every side of offers
+        scored before the fit.
     """
     over = offers["Bet"].eq("Over")
     payout_chosen = offers["Payout Over"].where(over, offers["Payout Under"])
@@ -138,6 +158,7 @@ def posted_sides(offers: pd.DataFrame) -> pd.DataFrame:
         Multiplier=payout_other * offers["Boost"] / payout_chosen,
         Recommended=False,
         **{"Win Prob": 1 - offers["Win Prob"]},
+        **dict.fromkeys(live_fit.SCORE_COLS, np.nan),
     )
     sides = pd.concat([chosen, other[other["Multiplier"] > 0]], ignore_index=True)
     payout = platform_payout(sides["Multiplier"], sides["Platform"])

@@ -31,6 +31,10 @@ def _offer(**fields) -> dict:
     } | fields
 
 
+# What the EV fit priced the model's side at: a .56 chance, .53 at its lower bound.
+_FIT = {"Fit Prob": 0.56, "Fit Prob Low": 0.53, "EV": 1.02}
+
+
 def test_posted_sides_grades_the_other_side_at_its_own_payout():
     offers = pd.DataFrame(
         [_offer(Boost=1.2, Result="Under", **{"Payout Over": 2.196, "Payout Under": 1.5006})]
@@ -49,6 +53,14 @@ def test_posted_sides_grades_the_other_side_at_its_own_payout():
     assert (other["Hit"], other["Recommended"]) == (True, False)
     assert other["Unit"] == pytest.approx(0.5006)
     assert other["Win Prob"] == pytest.approx(0.4)
+
+
+def test_posted_sides_keeps_the_fit_on_the_side_the_model_took():
+    offers = pd.DataFrame([_offer(**_FIT)])
+    chosen, other = plays.posted_sides(offers)[list(_FIT)].to_dict("records")
+
+    assert chosen == _FIT
+    assert np.isnan(list(other.values())).all()
 
 
 @pytest.mark.parametrize("unposted", [0.0, np.nan])
@@ -79,6 +91,107 @@ def test_play_rules_pick_their_sides():
     assert sorted(picked["under"]["Player"]) == ["A", "B"]
     assert picked["under"]["Side"].eq("Under").all()
     assert len(picked["all"]) == len(sides) == 6
+
+
+def test_ev_edge_marks_a_models_side_whose_lower_bound_pays_inside_the_recommended_band():
+    cap = realized.RECOMMENDED_PAYOUT_MAX
+
+    def even(player, bound, **fields):
+        return _offer(Player=player, **_FIT | {"Fit Prob Low": bound}, **fields)
+
+    def sleeper(player, payout):
+        return even(player, 0.5, Platform="Sleeper", Boost=payout, **{"Payout Over": payout})
+
+    offers = pd.DataFrame(
+        [
+            even("A", 0.55),  # .55 x 1.83 = 1.0065
+            even("B", 0.54),  # .54 x 1.83 = .9882
+            # The mark does not read the board's own rule.
+            even("C", 0.55, Recommended=False),
+            sleeper("D", 2.0),  # exactly 1
+            sleeper("E", cap),
+            sleeper("F", cap + 0.1),
+            _offer(Player="G"),  # the fit gave it no price
+        ]
+    )
+    sides = plays.posted_sides(offers)
+    marked = sides[plays.PLAYS["ev_edge"](sides)]
+
+    assert list(marked["Player"]) == ["A", "C", "D", "E"]
+    # Every offer here has both sides posted, and the fit prices the model's alone.
+    assert marked["Side"].eq("Over").all()
+
+
+def test_ev_rank_takes_as_many_legs_as_model_edge_on_each_date_league_and_kind():
+    def leg(player, ev, recommended=False, **fields):
+        return _offer(Player=player, Recommended=recommended, **_FIT | {"EV": ev}, **fields)
+
+    raised = {"Boost": 1.2, "Payout Over": 2.196, "Payout Under": 1.5006}
+    offers = pd.DataFrame(
+        [
+            # NHL even picks on the 1st: the board took two, and two others carry the highest EV.
+            leg("rule1", 0.90, recommended=True),
+            leg("rule2", 0.91, recommended=True),
+            leg("top1", 0.97),
+            leg("top2", 0.95),
+            leg("low", 0.80),
+            # The board took none of these, so neither does the rank play, whatever their EV.
+            leg("other league", 1.20, League="NBA"),
+            leg("other kind", 1.10, **raised),
+            # The 2nd: one leg, and a tie goes to the earlier row.
+            leg("tie1", 0.85, Date="2026-11-02"),
+            leg("tie2", 0.85, recommended=True, Date="2026-11-02"),
+            # The 3rd: the board took two the fit did not price, and one priced leg is left.
+            leg("unpriced1", np.nan, recommended=True, Date="2026-11-03"),
+            leg("unpriced2", np.nan, recommended=True, Date="2026-11-03"),
+            leg("priced", 0.70, Date="2026-11-03"),
+        ]
+    )
+    sides = plays.posted_sides(offers)
+    ranked = sides[plays.PLAYS["ev_rank"](sides)]
+
+    assert list(ranked["Player"]) == ["top1", "top2", "tie1", "priced"]
+    assert ranked["Side"].eq("Over").all()
+
+
+def test_a_history_from_before_the_fit_scores_and_the_ev_plays_pick_nothing():
+    sides = plays.posted_sides(_four_recommended_offers())
+    record = plays.play_record(sides, np.random.default_rng(0))
+
+    assert not plays.PLAYS["ev_edge"](sides).any()
+    assert not plays.PLAYS["ev_rank"](sides).any()
+    assert set(record["play"]) == {"model_edge", "under", "all"}
+
+
+def test_the_ev_plays_draw_after_the_plays_registered_before_them(monkeypatch):
+    rng = np.random.default_rng(5)
+    # Sleeper legs at payouts all their own, so a bound moves with the draws behind it.
+    offers = pd.DataFrame(
+        [
+            _offer(
+                Date=f"2026-11-{day:02d}",
+                Player=f"P{pick}",
+                Team=f"T{pick}",
+                Opponent=f"O{pick}",
+                Platform="Sleeper",
+                Boost=payout,
+                Result=rng.choice(["Over", "Under"]),
+                Recommended=pick == 0,
+                **{"Payout Over": payout, "Payout Under": rng.uniform(1.5, 2.4)},
+                **_FIT | {"Fit Prob Low": 0.7 if pick == 1 else 0.3, "EV": 0.9 + pick / 100},
+            )
+            for day in range(1, 13)
+            for pick, payout in enumerate(rng.uniform(1.5, 2.4, 3))
+        ]
+    )
+    sides = plays.posted_sides(offers)
+    record = plays.play_record(sides, np.random.default_rng(0))
+    earlier = ["model_edge", "under", "all"]
+    monkeypatch.setattr(plays, "PLAYS", {name: plays.PLAYS[name] for name in earlier})
+    before = plays.play_record(sides, np.random.default_rng(0))
+
+    assert {"ev_edge", "ev_rank"} <= set(record["play"])
+    pd.testing.assert_frame_equal(record[record["play"].isin(earlier)], before)
 
 
 def test_power_entry_returns_equal_brute_force_over_every_one_leg_per_game_entry():
