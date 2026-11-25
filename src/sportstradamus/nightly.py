@@ -7,8 +7,8 @@ Runs after games finish to:
 4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
-7. Persist the realized-by-side, live-gap, money-table, profit-sim and calibration
-   summaries; fold the modifier overlay
+7. Persist the realized-by-side, live-gap, profit-sim and calibration summaries; fold the
+   modifier overlay; write the money table last
 
 Cron runs it through ``scripts/run_job.sh reflect``; the schedule is in
 ``docs/OPERATIONS.md``.
