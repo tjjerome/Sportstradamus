@@ -197,31 +197,38 @@ def _fill_one_group(history: pd.DataFrame, archive, key, idx, commence_time) -> 
         _fill_offer_rows(history, line_idx, close_under)
 
 
-def commence_times(history: pd.DataFrame) -> pd.Series:
-    """Each row's kickoff: the instant its close is gated on and read as of.
+def known_commence_times(history: pd.DataFrame) -> pd.Series:
+    """Each row's kickoff where the frame holds one, NaT elsewhere.
 
     Naive UTC, the convention of the archive's ``observed_at``. A row's own ``Commence``
     where it parses, else the latest kickoff among the rows of its (League, Date, Team),
     since Sleeper posts none. The rows of one ``PREDICTION_KEY`` group then share the
-    latest kickoff any of them holds, so a group is read from the archive once, at one
-    instant, however its rows differ (a doubleheader, a row filed under another team).
-    A group with no kickoff at all, and every row of a frame without a ``Commence``
-    column, gets :data:`_COMMENCE_DEFAULT_OFFSET` past its game date: NaT where that
-    date does not parse.
+    latest kickoff any of them holds (a doubleheader, a row filed under another team).
     """
-    stand_in = (
-        pd.to_datetime(history["Date"], format="%Y-%m-%d", errors="coerce")
-        + _COMMENCE_DEFAULT_OFFSET
-    )
     if "Commence" not in history.columns:
-        return stand_in
+        return pd.Series(pd.NaT, index=history.index)
     kickoff = pd.to_datetime(
         history["Commence"], format="ISO8601", utc=True, errors="coerce"
     ).dt.tz_localize(None)
     team_day = kickoff.groupby([history[col] for col in ("League", "Date", "Team")])
     kickoff = kickoff.fillna(team_day.transform("max"))
     prediction = kickoff.groupby([history[col] for col in PREDICTION_KEY], dropna=False)
-    return prediction.transform("max").fillna(stand_in)
+    return prediction.transform("max")
+
+
+def commence_times(history: pd.DataFrame) -> pd.Series:
+    """Each row's kickoff: the instant its close is gated on and read as of.
+
+    :func:`known_commence_times`, so a ``PREDICTION_KEY`` group is read from the archive
+    once, at one instant, however its rows differ. A group with no kickoff at all, and
+    every row of a frame without a ``Commence`` column, gets
+    :data:`_COMMENCE_DEFAULT_OFFSET` past its game date: NaT where that date does not parse.
+    """
+    stand_in = (
+        pd.to_datetime(history["Date"], format="%Y-%m-%d", errors="coerce")
+        + _COMMENCE_DEFAULT_OFFSET
+    )
+    return known_commence_times(history).fillna(stand_in)
 
 
 def fill_from_archive(

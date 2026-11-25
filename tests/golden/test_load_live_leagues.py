@@ -133,17 +133,19 @@ _WRITER_PREFIXES = ("write_", "_write_", "upsert_", "trim_", "prune_", "snapshot
 _EMPTY_SLATE = pd.DataFrame(columns=["League", "Market", "Boost", "Boost_Over", "Boost_Under"])
 
 
-def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE):
+def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE, writers=None):
     """Run ``prophecize`` with both platforms scoring ``offers``; return its result and
     one mock holding its writers and its ``process_offers`` calls.
 
     The one loaded league is a bare name: no slate here has a row of that league, so
-    nothing reads its ``Stats``.
+    nothing reads its ``Stats``. A test that needs a writer to do something passes its
+    own ``writers`` mock.
     """
     monkeypatch.chdir(tmp_path)  # get_logger opens its JSONL under the cwd
     # main rebinds tqdm.__init__ for the whole process; this hands it back afterwards.
     monkeypatch.setattr(prediction_cli.tqdm, "__init__", prediction_cli.tqdm.__init__)
-    writers = Mock()
+    if writers is None:
+        writers = Mock()
     for name in list(vars(prediction_cli)):
         if name.startswith(_WRITER_PREFIXES):
             monkeypatch.setattr(prediction_cli, name, getattr(writers, name))
@@ -262,3 +264,55 @@ def test_history_rows_keep_the_ev_stamp_a_scored_leg_carries(monkeypatch, tmp_pa
 
     (row,) = writers.write_history.call_args.args[0][EV_STAMP_COLS].to_dict("records")
     assert row == stamp
+
+
+def _utc_now() -> pd.Timestamp:
+    return pd.Timestamp.now("UTC").tz_localize(None)
+
+
+def _slate_starting_in(lead: pd.Timedelta) -> pd.DataFrame:
+    """The NHL leg, its game ``lead`` from now under the start time Underdog posts."""
+    kickoff = (_utc_now() + lead).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _nhl_assists_slate().assign(Commence=kickoff)
+
+
+def test_a_board_that_lands_before_the_game_is_recorded(monkeypatch, tmp_path):
+    slate = _slate_starting_in(pd.Timedelta(hours=1))
+
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[], offers=slate)
+
+    assert len(writers.write_history.call_args.args[0]) == 1
+
+
+def test_a_board_that_lands_after_the_game_started_records_none_of_it(monkeypatch, tmp_path):
+    """History is the record of what could be bet: the board still shows the leg, and
+    no bettor could have acted on it."""
+    slate = _slate_starting_in(-pd.Timedelta(hours=1))
+
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[], offers=slate)
+
+    assert len(writers.write_current_offers.call_args.args[0]) == 2
+    assert writers.write_history.call_args.args[0].empty
+
+
+def test_what_could_be_bet_is_judged_from_when_the_board_went_out(monkeypatch, tmp_path):
+    """A run publishes once, at its end, some twenty minutes after its stamp. A leg is
+    bettable only from then, so the clock is read after the board's last write."""
+    clock = {}
+    writers = Mock()
+    writers.write_current_offer_details.side_effect = lambda *args: clock.setdefault(
+        "board_out", _utc_now()
+    )
+    recordable = prediction_cli._recordable
+
+    def spy(history, new_df, published_at):
+        clock["published_at"] = published_at
+        return recordable(history, new_df, published_at)
+
+    monkeypatch.setattr(prediction_cli, "_recordable", spy)
+
+    _run_board(
+        monkeypatch, tmp_path, updates_failed=[], offers=_nhl_assists_slate(), writers=writers
+    )
+
+    assert clock["published_at"] >= clock["board_out"]

@@ -6,11 +6,12 @@ another model file. Diagnostics only: the dashboard never reads it, and no row r
 ``history.parquet`` or a ``current_*`` snapshot.
 
 Layout is ``FEATURE_LOG_DIR/date=<game date>/<LEAGUE>_<market>.parquet``, keyed by
-:data:`FEATURE_LOG_KEY`. A rescoring replaces the row, so the latest scoring wins as in
-``history.parquet``; it is not always ``prophecize``'s, because the live loads behind
-``ledger-commit`` and ``bet pickem`` score through ``model_prob`` too. ``Market`` is the
-model cell, which names the pickle. History carries the same code except on NBA and
-WNBA, whose ``... underdog`` markets are served by the ``... prizepicks`` cell.
+:data:`FEATURE_LOG_KEY`. A rescoring replaces the row, so the latest scoring wins, where
+``history.parquet`` stops at the last board published before the game; it is not always
+``prophecize``'s, because the live loads behind ``ledger-commit`` and ``bet pickem`` score
+through ``model_prob`` too. ``Market`` is the model cell, which names the pickle. History
+carries the same code except on NBA and WNBA, whose ``... underdog`` markets are served by
+the ``... prizepicks`` cell.
 
 Beside the key, a row carries what ``model_prob`` prices a leg from, apart from the
 pickle, the committed ``stat_meta`` book shapes and the offer's line:

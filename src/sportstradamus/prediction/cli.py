@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import data
+from sportstradamus import clv, data
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.collectors.injury_capture import capture_injuries
 from sportstradamus.collectors.lineup_capture import capture_lineups
@@ -78,6 +78,8 @@ os.environ["LINE_PROFILE"] = "0"
 archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
+# What a bettor needs to read the board and place an entry before the game locks.
+_BET_MARGIN = pd.Timedelta(minutes=5)
 
 # Alt-Line flag ladder/alt rungs vs the standard line: count stats move in 0.5
 # steps, continuous (yardage) lines drift +/-1-2 without being a different rung.
@@ -384,6 +386,8 @@ def main(progress, contest_variant, log_level):
     write_current_game_context(game_context)
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
+    # The board is out: history records a row only if its game was still ahead of this.
+    published_at = pd.Timestamp.now("UTC").tz_localize(None)
 
     if not parlay_df.empty:
         upsert_parlay_hist(parlay_df, dedup_subset=["Model EV", "Market EV"])
@@ -431,7 +435,7 @@ def main(progress, contest_variant, log_level):
     else:
         new_df = pd.DataFrame()
 
-    history = _upsert_history(history, new_df)
+    history = _upsert_history(history, _recordable(history, new_df, published_at))
 
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -456,6 +460,28 @@ def main(progress, contest_variant, log_level):
     if updates_failed or platforms_failed:
         raise SystemExit(1)
     logger.info("Success!")
+
+
+def _recordable(
+    history: pd.DataFrame, new_df: pd.DataFrame, published_at: pd.Timestamp
+) -> pd.DataFrame:
+    """This run's rows a bettor could still act on when its board was published.
+
+    History is the record of what could be bet. A row whose game starts within
+    ``_BET_MARGIN`` of ``published_at``, or has started, is left out: its key keeps the
+    row of the last run that landed in time, and a key first seen this late is never
+    stored. Kickoffs are read over the stored rows of the same game dates beside this
+    run's: Sleeper posts no start time and Underdog drops a game's offers once it locks,
+    so on a late run only a stored row may still hold one. A row with no kickoff anywhere
+    is kept.
+    """
+    if new_df.empty:
+        return new_df
+    cols = ["Commence", "Team", *PREDICTION_KEY]
+    stored = history.loc[history["Date"].isin(new_df["Date"]), cols]
+    kickoff = clv.known_commence_times(pd.concat([stored, new_df[cols]], ignore_index=True))
+    too_late = kickoff.iloc[len(stored) :] < published_at + _BET_MARGIN
+    return new_df[~too_late.to_numpy()]
 
 
 def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:

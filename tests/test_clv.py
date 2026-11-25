@@ -602,6 +602,29 @@ def test_fill_from_archive_frame_without_commence_column_reads_at_the_stand_in()
     assert archive.asked_at == [("Player A", _CUT), ("Player B", _CUT)]
 
 
+def test_known_commence_times_leaves_a_row_with_no_kickoff_unset():
+    """The stand-in is the closing read's guess. A caller asking whether a game has
+    started gets no answer where the frame holds none."""
+    history = _kickoff_history(
+        ("Player A", "Underdog", "BOS", "2026-05-04T17:00:00Z"),
+        ("Player B", "Sleeper", "BOS", ""),
+        ("Player C", "Sleeper", "NYK", ""),
+    )
+
+    kickoff = clv.known_commence_times(history)
+
+    assert kickoff[:2].tolist() == [_EARLY_KICKOFF, _EARLY_KICKOFF]
+    assert pd.isna(kickoff[2])
+    assert clv.commence_times(history).tolist() == [_EARLY_KICKOFF, _EARLY_KICKOFF, _CUT]
+
+
+def test_known_commence_times_of_a_frame_without_the_column_are_all_unset():
+    history = _build_history()
+
+    assert clv.known_commence_times(history).isna().all()
+    assert clv.commence_times(history).tolist() == [_CUT, _CUT]
+
+
 def test_row_without_parseable_date_is_read_with_no_cutoff_rather_than_nat():
     """NaT must not reach the archive: DuckDB binds it as NULL, which matches no quote."""
     history = _build_history()

@@ -63,8 +63,10 @@ OFFER_LEVEL_COLS = [
 # Offer-level, NaN on rows written before the column existed, and never backfilled, the
 # EV stamp's four Book columns excepted.
 DECISION_COLS = [
-    # One UTC stamp per prophecize run, so a row joins the archive state that run saw.
-    # realized.settled_offers counts a prop at the lines its last scoring still held.
+    # One UTC stamp per prophecize run, so a row joins the archive state that run saw. A
+    # row is the last scoring whose board went out before its game
+    # (prediction.cli._recordable); realized.settled_offers counts a prop at the lines
+    # that scoring still held.
     "Scored At",
     # The sportsbook consensus line, NaN when no sportsbook posts one.
     "Consensus Line",
