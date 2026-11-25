@@ -2,7 +2,8 @@
 
 :func:`process_offers` is the outer loop: it archives every league/market pair
 in the scraped offer dict, scores each league one game date at a time
-(:func:`_match_league_offers`), and finally passes all scored offers through
+(:func:`_match_league_offers`), stamps the scored offers with the books' price and
+the fit's EV (:func:`stamp_records`), and finally passes them through
 :func:`find_correlation` to annotate correlations and build parlays. A market's
 feature matrix comes from :func:`match_offers` and is scored by :func:`model_prob`,
 or by :func:`book_fallback_prob` when the matrix comes back empty.
@@ -29,6 +30,7 @@ from sportstradamus import data
 from sportstradamus.helpers import LazyArchive, odds_budget, stat_map, stat_meta
 from sportstradamus.helpers.io import VOLUME_STATS
 from sportstradamus.prediction.correlation import find_correlation
+from sportstradamus.prediction.ev_stamp import stamp_records
 from sportstradamus.prediction.model_prob import book_fallback_prob, model_prob, normalize_market
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import earliest_last
@@ -45,6 +47,7 @@ def process_offers(
     book,
     stats,
     *,
+    scored_at,
     contest_variant="pooled",
     corr_sink=None,
     story_sink=None,
@@ -53,13 +56,15 @@ def process_offers(
 
     Iterates every league/market pair in ``offer_dict``, adds DFS lines to
     the archive, builds feature matrices via ``Stats.get_stats``, scores
-    each matrix with :func:`model_prob`, then calls :func:`find_correlation`
-    to annotate correlations and enumerate parlays.
+    each matrix with :func:`model_prob`, stamps each scored record with the
+    books' price and the fit's EV (:func:`stamp_records`), then calls
+    :func:`find_correlation` to annotate correlations and enumerate parlays.
 
     Args:
         offer_dict: ``{league: {market: [offer, ...]}}`` from the scraper.
         book: DFS platform name (e.g. ``"Underdog"``).
         stats: ``{league: Stats}`` dict for currently active leagues.
+        scored_at: The run's stamp, which a sportsbook quote's age is measured from.
         contest_variant: Underdog contest variant; passed to find_correlation.
         corr_sink: Optional list the per-game correlation slices accumulate into;
             forwarded to find_correlation. See its docstring.
@@ -76,6 +81,9 @@ def process_offers(
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
             for league, markets in offer_dict.items():
                 new_offers.extend(_match_league_offers(league, markets, stats, book, pbar))
+
+    if new_offers:
+        stamp_records(new_offers, book, scored_at, archive)
 
     offer_df, parlays = find_correlation(
         new_offers,

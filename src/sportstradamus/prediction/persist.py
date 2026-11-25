@@ -27,6 +27,7 @@ from sportstradamus.helpers.io import (
     _atomic_write_json,
     _atomic_write_parquet,
 )
+from sportstradamus.prediction.ev_stamp import EV_STAMP_COLS
 from sportstradamus.prediction.stories import STORIES_VERSION
 
 # Display columns kept in current_offers.parquet. The dashboard reads:
@@ -45,6 +46,8 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups); Model Version (identity of the model that scored the leg)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
+# - EV stamp (EV_STAMP_COLS): the sportsbooks' price at the offer's own line and the fit's EV.
+#   No page reads them yet.
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
 # Market Prob, Player position (numeric depth slot — the resolved label rides in Position).
@@ -94,6 +97,7 @@ _OFFER_KEEP_COLS = [
     "Model Skew",
     "Model Phi",
     "Model PIT Recal",
+    *EV_STAMP_COLS,
 ]
 
 # A row with no boost, no model edge, and no book edge carries no signal —

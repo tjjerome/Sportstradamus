@@ -22,6 +22,7 @@ import pandas as pd
 from click.testing import CliRunner
 
 from sportstradamus.prediction import cli as prediction_cli
+from sportstradamus.prediction.ev_stamp import EV_STAMP_COLS
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.stats import live
 
@@ -134,7 +135,7 @@ _EMPTY_SLATE = pd.DataFrame(columns=["League", "Market", "Boost", "Boost_Over", 
 
 def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE):
     """Run ``prophecize`` with both platforms scoring ``offers``; return its result and
-    its writers as mocks.
+    one mock holding its writers and its ``process_offers`` calls.
 
     The one loaded league is a bare name: no slate here has a row of that league, so
     nothing reads its ``Stats``.
@@ -148,9 +149,8 @@ def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE):
             monkeypatch.setattr(prediction_cli, name, getattr(writers, name))
     stats = dict.fromkeys(["NFL"])
     monkeypatch.setattr(prediction_cli, "load_live_leagues", lambda: (stats, updates_failed))
-    monkeypatch.setattr(
-        prediction_cli, "process_offers", lambda *args, **kwargs: (offers.copy(), pd.DataFrame())
-    )
+    writers.process_offers.side_effect = lambda *args, **kwargs: (offers.copy(), pd.DataFrame())
+    monkeypatch.setattr(prediction_cli, "process_offers", writers.process_offers)
     monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None, scored_at=None: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
     monkeypatch.setattr(prediction_cli, "read_history", pd.DataFrame)
@@ -198,7 +198,9 @@ def test_board_run_builds_no_pickem_snapshot(monkeypatch, tmp_path):
 
 def _nhl_assists_slate() -> pd.DataFrame:
     """One NHL leg as ``process_offers`` hands it back, its market under Underdog's label."""
-    leg = dict.fromkeys([*SCORED_RECORD_COLS, "Corr Same", "Corr Opp", "Position", "Game"], np.nan)
+    leg = dict.fromkeys(
+        [*SCORED_RECORD_COLS, *EV_STAMP_COLS, "Corr Same", "Corr Opp", "Position", "Game"], np.nan
+    )
     leg.update(
         {
             "League": "NHL",
@@ -232,3 +234,31 @@ def test_board_stat_is_the_leagues_own_key_and_market_the_boards_name(monkeypatc
     assert board.loc["Underdog", ["Market", "Stat"]].tolist() == ["AST", "assists"]
     # Sleeper's map holds no "Assists" label: a market with no board name has no key.
     assert board.loc["Sleeper", ["Market", "Stat"]].isna().all()
+
+
+def test_both_platforms_are_scored_under_the_stamp_their_history_rows_carry(monkeypatch, tmp_path):
+    """One stamp per run: a sportsbook quote is aged against the ``Scored At`` its leg is
+    stored with, not against a clock read again for each platform."""
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[], offers=_nhl_assists_slate())
+
+    (scored_at,) = writers.write_history.call_args.args[0]["Scored At"]
+    scoring_stamps = [call.kwargs["scored_at"] for call in writers.process_offers.call_args_list]
+    assert scoring_stamps == [scored_at, scored_at]
+
+
+def test_history_rows_keep_the_ev_stamp_a_scored_leg_carries(monkeypatch, tmp_path):
+    stamp = {
+        "Book Prob": 0.56,
+        "Book Count": 2,
+        "Book Class": "A",
+        "Book Observed At": pd.Timestamp("2026-10-12T17:40:00"),
+        "Fit Prob": 0.53,
+        "Fit Prob Low": 0.5,
+        "EV": 0.97,
+    }
+    slate = _nhl_assists_slate().assign(**stamp)
+
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[], offers=slate)
+
+    (row,) = writers.write_history.call_args.args[0][EV_STAMP_COLS].to_dict("records")
+    assert row == stamp

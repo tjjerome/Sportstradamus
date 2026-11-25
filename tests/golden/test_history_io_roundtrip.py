@@ -14,6 +14,7 @@ import pandas as pd
 
 from sportstradamus.helpers import io
 from sportstradamus.history_schema import HISTORY_COLS
+from sportstradamus.prediction.ev_stamp import EV_STAMP_COLS
 
 
 def _patch_path(tmp_path, monkeypatch):
@@ -93,6 +94,28 @@ def test_write_then_read_preserves_flat_shape_and_values(tmp_path, monkeypatch):
     assert bool(back.loc[1, "Alt Line"]) is True
     assert back.loc[0, "Payout Over"] == 1.78
     assert back.loc[1, "Payout Under"] == 1.9
+
+
+def test_the_ev_stamp_columns_keep_their_types(tmp_path, monkeypatch):
+    """As one run writes them: a leg a sportsbook prices beside one none quotes."""
+    _patch_path(tmp_path, monkeypatch)
+    stamp = pd.DataFrame(
+        {
+            "Book Prob": [0.56, np.nan],
+            "Book Count": [2, 0],
+            "Book Class": ["A", "C"],
+            "Book Observed At": [pd.Timestamp("2026-05-04T17:45:00"), pd.NaT],
+            "Fit Prob": [0.53, 0.5],
+            "Fit Prob Low": [0.5, 0.5],
+            "EV": [0.97, 0.89],
+        }
+    )
+    io.write_history(_flat_history().join(stamp))
+
+    back = io.read_history()
+
+    # Dtypes too: whole-number counts stay integers and a missing quote time stays NaT.
+    pd.testing.assert_frame_equal(back[EV_STAMP_COLS], stamp)
 
 
 def test_two_offer_rows_for_same_prediction_key_both_persist(tmp_path, monkeypatch):

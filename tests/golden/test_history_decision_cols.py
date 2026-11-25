@@ -9,6 +9,7 @@ import pandas as pd
 from sportstradamus.helpers import config, io
 from sportstradamus.history_schema import DECISION_COLS, HISTORY_COLS, OFFER_LEVEL_COLS
 from sportstradamus.prediction.cli import _stamp_alt_line, _upsert_history
+from sportstradamus.prediction.ev_stamp import EV_STAMP_COLS
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 
 
@@ -40,9 +41,15 @@ def test_decision_cols_sit_between_offer_cols_and_actual():
 
 def test_scored_record_supplies_every_decision_col_the_writer_does_not_stamp():
     # cli.py stamps Scored At, First Scored At and Consensus Line itself; everything else must
-    # come off the scored record, or the writer's strict column selection raises.
+    # come off the scored record, the EV stamp process_offers lays on it included, or the
+    # writer's strict column selection raises.
     stamped = {"Scored At", "First Scored At", "Consensus Line"}
-    assert set(DECISION_COLS) - stamped <= set(SCORED_RECORD_COLS)
+    assert set(DECISION_COLS) - stamped <= {*SCORED_RECORD_COLS, *EV_STAMP_COLS}
+
+
+def test_history_keeps_every_column_of_the_ev_stamp():
+    # history_schema spells the seven out: importing them would close an import cycle.
+    assert set(EV_STAMP_COLS) <= set(DECISION_COLS)
 
 
 def test_upsert_over_pre_schema_rows_round_trips(tmp_path, monkeypatch):
@@ -81,6 +88,43 @@ def test_upsert_over_pre_schema_rows_round_trips(tmp_path, monkeypatch):
     assert pd.isna(back.loc["Underdog", "First Scored At"])
     assert pd.isna(back.loc["Underdog", "Market Prob Implied"])
     assert np.isnan(back.loc["Underdog", "Model Weight"])
+
+
+_STAMP = {
+    "Book Prob": 0.56,
+    "Book Count": 2,
+    "Book Class": "A",
+    "Book Observed At": pd.Timestamp("2026-10-04T18:20:00"),
+    "Fit Prob": 0.53,
+    "Fit Prob Low": 0.5,
+    "EV": 0.97,
+}
+
+
+def test_a_history_stored_before_the_ev_stamp_takes_stamped_rows(tmp_path, monkeypatch):
+    """The first run after the stamp ships: stored rows hold every column but its seven."""
+    monkeypatch.setattr(io, "HISTORY_PATH", tmp_path / "history.parquet")
+    stored = pd.DataFrame([_row(24.5, "Underdog"), _row(25.5, "Underdog")]).drop(
+        columns=EV_STAMP_COLS
+    )
+    unquoted = _STAMP | {
+        "Book Prob": np.nan,
+        "Book Count": 0,
+        "Book Class": "C",
+        "Book Observed At": pd.NaT,
+    }
+    # A re-score of a stored key, and a key new this run that no sportsbook quotes.
+    scored = pd.DataFrame([_row(24.5, "Underdog", **_STAMP), _row(23.5, "Underdog", **unquoted)])
+
+    io.write_history(_upsert_history(stored, scored))
+    back = io.read_history().set_index("Line")[EV_STAMP_COLS]
+
+    assert back.loc[24.5].to_dict() == _STAMP
+    assert back.loc[23.5, ["Book Count", "Book Class", "EV"]].tolist() == [0, "C", 0.97]
+    assert back.loc[23.5, ["Book Prob", "Book Observed At"]].isna().all()
+    # The stored key this run did not re-score reads unstamped.
+    assert back.loc[25.5].isna().all()
+    assert back["Book Observed At"].dtype == "datetime64[ns]"
 
 
 _FIRST = pd.Timestamp("2026-10-03T13:50:00")
