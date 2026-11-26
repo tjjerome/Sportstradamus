@@ -46,8 +46,9 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups); Model Version (identity of the model that scored the leg)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
-# - EV stamp (EV_STAMP_COLS): the sportsbooks' price at the offer's own line and the fit's EV.
-#   No page reads them yet.
+#
+# Kept though no page reads them yet: EV_STAMP_COLS, the sportsbooks' price at the offer's own
+# line and the fit's EV.
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
 # Market Prob, Player position (numeric depth slot — the resolved label rides in Position).
