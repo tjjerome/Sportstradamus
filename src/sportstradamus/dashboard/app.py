@@ -99,6 +99,12 @@ pg = st.navigation(
                 url_path="lab-diagnostics",
             ),
             st.Page(
+                str(_surfaces / "lab_ev_fit.py"),
+                title="EV Fit",
+                icon=":material/balance:",
+                url_path="lab-ev-fit",
+            ),
+            st.Page(
                 str(_surfaces / "lab_correlations.py"),
                 title="Correlations",
                 icon=":material/hub:",
