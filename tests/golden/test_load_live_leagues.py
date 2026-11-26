@@ -133,9 +133,12 @@ _WRITER_PREFIXES = ("write_", "_write_", "upsert_", "trim_", "prune_", "snapshot
 _EMPTY_SLATE = pd.DataFrame(columns=["League", "Market", "Boost", "Boost_Over", "Boost_Under"])
 
 
-def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE, writers=None):
-    """Run ``prophecize`` with both platforms scoring ``offers``; return its result and
-    one mock holding its writers and its ``process_offers`` calls.
+def _run_board(
+    monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE, writers=None, parlays=None
+):
+    """Run ``prophecize`` with both platforms scoring ``offers`` and building ``parlays``
+    (none unless given); return its result and one mock holding its writers and its
+    ``process_offers`` calls.
 
     The one loaded league is a bare name: no slate here has a row of that league, so
     nothing reads its ``Stats``. A test that needs a writer to do something passes its
@@ -151,7 +154,9 @@ def _run_board(monkeypatch, tmp_path, updates_failed, offers=_EMPTY_SLATE, write
             monkeypatch.setattr(prediction_cli, name, getattr(writers, name))
     stats = dict.fromkeys(["NFL"])
     monkeypatch.setattr(prediction_cli, "load_live_leagues", lambda: (stats, updates_failed))
-    writers.process_offers.side_effect = lambda *args, **kwargs: (offers.copy(), pd.DataFrame())
+    if parlays is None:
+        parlays = pd.DataFrame()
+    writers.process_offers.side_effect = lambda *args, **kwargs: (offers.copy(), parlays.copy())
     monkeypatch.setattr(prediction_cli, "process_offers", writers.process_offers)
     monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None, scored_at=None: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
@@ -265,6 +270,26 @@ def test_history_rows_keep_the_ev_stamp_a_scored_leg_carries(monkeypatch, tmp_pa
 
     (row,) = writers.write_history.call_args.args[0][EV_STAMP_COLS].to_dict("records")
     assert row == stamp
+
+
+def test_the_boards_entries_go_out_highest_ev_first(monkeypatch, tmp_path):
+    """The board's entries reach the snapshot and the parlay history in one order, by the
+    fitted ``EV``, whatever the model claims for them."""
+    entries = pd.DataFrame(
+        {
+            "League": "NHL",
+            "Date": "2026-10-12",
+            "EV": [0.9, 1.1, 1.0],
+            "Model EV": [3.0, 1.0, 2.0],
+            "Market EV": 1.0,
+            "legs": [[], [], []],
+        }
+    )
+
+    _, writers = _run_board(monkeypatch, tmp_path, updates_failed=[], parlays=entries)
+
+    assert writers.write_current_offers.call_args.args[1]["EV"].tolist() == [1.1, 1.0, 0.9]
+    assert writers.upsert_parlay_hist.call_args.args[0]["EV"].tolist() == [1.1, 1.0, 0.9]
 
 
 def _utc_now() -> pd.Timestamp:

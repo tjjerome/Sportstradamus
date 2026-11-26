@@ -212,9 +212,10 @@ def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
 
 
 # Characterization snapshot of the offer_df correlation annotations under the synthetic c_map
-# above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
-# the c_map is fixed — 10/12 legs annotate, with the Corr Same and Corr Opp columns both
-# exercised. Each partner is the structured record ``_annotate_correlation_columns`` writes
+# above. Deterministic (pure-numpy grids, no SciPy randomness) and stable run-to-run because
+# the c_map is fixed. All twelve legs are in the pool and each annotates, with the Corr Same
+# and Corr Opp columns both exercised; a multiplier is exp(rho x V) at the legs' fitted
+# chances. Each partner is the structured record ``_annotate_correlation_columns`` writes
 # (player/market/bet/line/mult, plus a ``league`` the test adds: NBA on every leg here) —
 # ``leg_schema.leg_label`` renders it to a string on demand, so the test pins the structured
 # fields directly rather than a formatted label.
@@ -230,16 +231,18 @@ _EXPECTED_OFFER_CORR = [
                 "line": 3.5,
                 "mult": 1.11,
             },
-            {"player": "Luke Kornet", "market": "REB", "bet": "Over", "line": 3.5, "mult": 1.02},
+            {"player": "Luke Kornet", "market": "REB", "bet": "Over", "line": 3.5, "mult": 1.03},
         ],
         [
+            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.08},
             {
                 "player": "Mitchell Robinson",
                 "market": "PRA",
                 "bet": "Over",
                 "line": 9.5,
                 "mult": 1.06,
-            }
+            },
+            {"player": "Jose Alvarado", "market": "STL", "bet": "Under", "line": 0.5, "mult": 1.03},
         ],
     ),
     (
@@ -251,12 +254,12 @@ _EXPECTED_OFFER_CORR = [
                 "market": "BLK",
                 "bet": "Over",
                 "line": 3.5,
-                "mult": 1.09,
+                "mult": 1.1,
             },
-            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.04},
         ],
         [
-            {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.08},
+            {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.09},
             {
                 "player": "Mitchell Robinson",
                 "market": "REB",
@@ -264,27 +267,60 @@ _EXPECTED_OFFER_CORR = [
                 "line": 5.5,
                 "mult": 1.06,
             },
+            {"player": "Jalen Brunson", "market": "AST", "bet": "Under", "line": 6.5, "mult": 1.03},
         ],
     ),
-    ("Jalen Brunson", "AST", [], []),
     (
         "Jalen Brunson",
-        "FTM",
+        "AST",
         [],
         [
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.03},
             {
                 "player": "Victor Wembanyama",
                 "market": "BLST",
                 "bet": "Under",
                 "line": 4.5,
-                "mult": 1.04,
-            }
+                "mult": 1.02,
+            },
+        ],
+    ),
+    (
+        "Jalen Brunson",
+        "FTM",
+        [
+            {"player": "Jose Alvarado", "market": "STL", "bet": "Under", "line": 0.5, "mult": 1.08},
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.05,
+            },
+        ],
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.08},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.05,
+            },
         ],
     ),
     (
         "Jose Alvarado",
         "PTS",
-        [],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.07,
+            }
+        ],
         [
             {
                 "player": "Victor Wembanyama",
@@ -293,10 +329,34 @@ _EXPECTED_OFFER_CORR = [
                 "line": 4.5,
                 "mult": 1.09,
             },
-            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.08},
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.09},
         ],
     ),
-    ("Jose Alvarado", "STL", [], []),
+    (
+        "Jose Alvarado",
+        "STL",
+        [
+            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.08},
+            {
+                "player": "Mitchell Robinson",
+                "market": "REB",
+                "bet": "Over",
+                "line": 5.5,
+                "mult": 1.04,
+            },
+        ],
+        [
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.11},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.05,
+            },
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03},
+        ],
+    ),
     (
         "Luke Kornet",
         "PR",
@@ -306,25 +366,26 @@ _EXPECTED_OFFER_CORR = [
                 "market": "BLK",
                 "bet": "Over",
                 "line": 3.5,
-                "mult": 1.09,
+                "mult": 1.1,
             },
-            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.03},
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.04},
         ],
         [
+            {"player": "Jose Alvarado", "market": "STL", "bet": "Under", "line": 0.5, "mult": 1.11},
             {
                 "player": "Mitchell Robinson",
                 "market": "PRA",
                 "bet": "Over",
                 "line": 9.5,
                 "mult": 1.03,
-            }
+            },
         ],
     ),
     (
         "Luke Kornet",
         "REB",
         [
-            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.02},
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03},
             {
                 "player": "Victor Wembanyama",
                 "market": "BLK",
@@ -338,7 +399,10 @@ _EXPECTED_OFFER_CORR = [
     (
         "Mitchell Robinson",
         "PRA",
-        [],
+        [
+            {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.07},
+            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.05},
+        ],
         [
             {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.06},
             {
@@ -354,7 +418,7 @@ _EXPECTED_OFFER_CORR = [
     (
         "Mitchell Robinson",
         "REB",
-        [],
+        [{"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.05}],
         [{"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.06}],
     ),
     (
@@ -362,17 +426,17 @@ _EXPECTED_OFFER_CORR = [
         "BLK",
         [
             {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.11},
-            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.09},
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.1},
         ],
         [],
     ),
     (
         "Victor Wembanyama",
         "BLST",
-        [{"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03}],
+        [{"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.04}],
         [
             {"player": "Jose Alvarado", "market": "PTS", "bet": "Over", "line": 2.5, "mult": 1.09},
-            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.04},
+            {"player": "Jalen Brunson", "market": "FTM", "bet": "Over", "line": 4.5, "mult": 1.05},
             {
                 "player": "Mitchell Robinson",
                 "market": "PRA",
@@ -579,6 +643,60 @@ def test_find_correlation_hands_back_the_searchs_kept_rows(monkeypatch) -> None:
     assert parlay._KEPT_PER_SIZE == 3
     assert none_built.empty
     assert list(none_built.columns) == list(parlay_df.columns)
+
+
+def test_find_correlation_lists_the_slate_by_ev_then_the_unpriced_by_model_ev(monkeypatch) -> None:
+    """The board's order: the legs the fit priced, highest ``EV`` first, then the ones it
+    did not, by the model's value. The model ranks the six in another order, and the two
+    unpriced legs are listed lower-valued first."""
+    ev_by_player = {
+        "Aja Wilson": 0.80,
+        "Jackie Young": 0.90,
+        "Kelsey Plum": np.nan,
+        "Sabrina Ionescu": 0.85,
+        "Breanna Stewart": 0.95,
+        "Jonquel Jones": np.nan,
+    }
+    offers = [
+        offer | {"EV": ev, "Fit Prob": ev / offer["Boost"]}
+        for offer, ev in zip(_wnba_offers(), ev_by_player.values(), strict=True)
+    ]
+    stats = _wnba_slate(monkeypatch, offers)
+
+    offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
+
+    assert offer_df["Player"].tolist() == [
+        "Breanna Stewart",
+        "Jackie Young",
+        "Sabrina Ionescu",
+        "Aja Wilson",
+        "Jonquel Jones",
+        "Kelsey Plum",
+    ]
+    by_model = offer_df.set_index("Player")["Model EV"]
+    assert by_model["Jonquel Jones"] > by_model["Kelsey Plum"] > by_model["Breanna Stewart"]
+
+
+def test_a_flex_only_search_builds_the_entries_the_fit_values_most(monkeypatch) -> None:
+    """A Flex-only payout list pays nothing at 2 picks. Scaled by that payout the pair grid
+    ranked no set above another, and the floor it fed kept none, so the variant built no
+    entry at all. It still builds none at 2 picks, and from 3 up the ones worth most at the
+    fitted chances: here the best three-leg entry is the last of its size by leg order,
+    behind more sets than a size exact-prices.
+    """
+    rising = np.linspace(0.35, 0.60, 6)
+    offers = [
+        offer | {"Fit Prob": fit_prob, "EV": fit_prob * offer["Boost"]}
+        for offer, fit_prob in zip(_wnba_offers(), rising, strict=True)
+    ]
+    stats = _wnba_slate(monkeypatch, offers)
+
+    _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="flex")
+
+    assert set(parlay_df["Bet Size"]) == {3, 4, 5, 6}
+    triples = parlay_df.loc[parlay_df["Bet Size"] == 3]
+    best = triples.loc[triples["EV"].idxmax(), "legs"]
+    assert {leg["player"] for leg in best} == {"Kelsey Plum", "Breanna Stewart", "Jonquel Jones"}
 
 
 @_needs_wnba_corr
@@ -1108,7 +1226,8 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
 
 
 def test_build_correlation_matrices_structure_and_values() -> None:
-    """C/M are symmetric leg matrices; EV follows the documented closed form."""
+    """C/M are symmetric leg matrices; the pair grid follows its closed form at the legs'
+    fitted chances, not the model's."""
     game_df, game_dict = _matrix_game()
     c_map = {("G1.PTS", "G2.AST"): 0.4, ("G2.AST", "C1.REB"): 0.2}
 
@@ -1127,11 +1246,41 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     assert M[0, 1] == pytest.approx(1.0)  # different players, no banned mod
 
     assert np.allclose(p_push, 0.0)  # no Push P column → zeros
-    # EV[0,1] = exp(C·V) · P · (boost·M·boost) · payout[0], hand-checked.
-    v01 = np.sqrt(0.6 * 0.4 * 0.5 * 0.5)
-    assert EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.3 * 1.0 * 3.0)
+    # EV[0,1] = exp(C·V) · P · (boost·M·boost) at fitted chances 0.52 and 0.49, hand-checked.
+    v01 = np.sqrt(0.52 * 0.48 * 0.49 * 0.51)
+    assert g.V[0, 1] == pytest.approx(v01)
+    assert EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.52 * 0.49)
     assert np.allclose(EV, EV.T)
     assert EVb.shape == (3, 3)
+
+
+def test_the_pair_grid_reads_the_models_chance_for_a_leg_the_fit_did_not_price() -> None:
+    """Such a leg is in no pool, and the board still lists its correlated partners."""
+    game_df, game_dict = _matrix_game()
+    game_df["Fit Prob"] = [0.52, np.nan, 0.55]
+    c_map = {("G1.PTS", "G2.AST"): 0.4}
+
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+
+    v01 = np.sqrt(0.52 * 0.48 * 0.5 * 0.5)
+    assert g.V[0, 1] == pytest.approx(v01)
+    assert g.EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.52 * 0.5)
+    assert not np.isnan(g.EV).any()
+
+
+def test_the_pair_grid_ranks_alike_whatever_the_smallest_entry_pays() -> None:
+    """The grid only ranks leg sets, so no payout scales it. A Flex-only list pays nothing
+    at 2 picks: scaled by that payout the grid was all zeros and ranked no set above
+    another."""
+    game_df, game_dict = _matrix_game()
+
+    def grid(search_payouts: list[float]) -> np.ndarray:
+        return _build_correlation_matrices(
+            game_df, game_dict, {}, {}, {}, search_payouts, "Underdog", "NBA", {}
+        ).EV
+
+    np.testing.assert_array_equal(grid([0.0, 3.25]), grid([3.5, 6.5]))
+    assert grid([0.0, 3.25])[0, 1] == pytest.approx(0.52 * 0.49)
 
 
 def test_build_correlation_matrices_carry_each_legs_fitted_chance() -> None:
@@ -1175,7 +1324,7 @@ def test_annotate_names_a_partners_market_the_way_the_board_does() -> None:
     df = game_df.assign(**{"Corr Same": None, "Corr Opp": None})
 
     # Of the fixture's Test1..Test3 labels the map holds only A's.
-    _annotate_correlation_columns(df, game_df, g, {"Test1": "PTS"})
+    _annotate_correlation_columns(df, game_df, game_df, g, {"Test1": "PTS"})
 
     same, opp = df.loc[2, ["Corr Same", "Corr Opp"]]
     assert [(partner["player"], partner["market"]) for partner in same] == [("A", "PTS")]
@@ -1191,10 +1340,65 @@ def test_annotate_leaves_a_players_row_of_another_date_alone() -> None:
         **{"Corr Same": None, "Corr Opp": None}
     )
 
-    _annotate_correlation_columns(df, game_df, g, {})
+    _annotate_correlation_columns(df, game_df, game_df, g, {})
 
     assert df.loc[df["Date"] == "2026-06-03", "Corr Same"].notna().all()
     assert df.loc[df["Date"] == "2026-06-05", ["Corr Same", "Corr Opp"]].isna().all(axis=None)
+
+
+def test_a_legs_partners_are_the_pools_legs_it_correlates_with() -> None:
+    """Partners come from the game's pool: its legs correlated with this one above the
+    display floor, best multiplier first, one a player, never the leg's own player.
+
+    Ann's first leg correlates most with her own second leg and with Cy's, which the fit
+    did not price and the pool does not hold, so neither is listed. Bob's better leg stands
+    for him, ahead of Fay's, which is listed before it. Eve's sits under the floor. Cy's
+    leg, outside the pool, still gets its own partner.
+    """
+    legs = [
+        # player, team, correlation with Ann's first leg
+        ("Ann", "NYK", None),
+        ("Fay", "NYK", 0.35),
+        ("Bob", "NYK", 0.30),
+        ("Bob", "NYK", 0.40),
+        ("Cy", "SAS", 0.50),
+        ("Dee", "SAS", 0.20),
+        ("Ann", "NYK", 0.60),
+        ("Eve", "SAS", 0.03),
+    ]
+    game_df = pd.DataFrame(
+        {
+            "Player": [player for player, _, _ in legs],
+            "Team": [team for _, team, _ in legs],
+            "Market": [f"Test{i}" for i in range(len(legs))],
+            "cMarket": [[f"K{i}.M"] for i in range(len(legs))],
+            "Win Prob": 0.6,
+            "Fit Prob": 0.5,
+            "Market Prob": 0.55,
+            "Boost": 1.0,
+            "Bet": "Over",
+            "Line": 0.5,
+            "League": "NBA",
+            "Date": "2026-06-03",
+        }
+    )
+    game_df.loc[4, "Fit Prob"] = np.nan
+    c_map = {("K0.M", f"K{i}.M"): rho for i, (_, _, rho) in enumerate(legs) if rho}
+    g = _build_correlation_matrices(
+        game_df, game_df.to_dict("index"), c_map, {}, {}, [3.0], "Underdog", "NBA", {}
+    )
+    df = game_df.assign(**{"Corr Same": None, "Corr Opp": None})
+
+    _annotate_correlation_columns(df, game_df, game_df.drop(index=4), g, {})
+
+    def partners(leg: int, column: str) -> list[tuple[str, str]]:
+        return [(partner["player"], partner["market"]) for partner in df.at[leg, column]]
+
+    assert partners(0, "Corr Same") == [("Bob", "Test3"), ("Fay", "Test1")]
+    assert partners(0, "Corr Opp") == [("Dee", "Test5")]
+    assert df.at[0, "Corr Same"][0]["mult"] == round(float(np.exp(0.40 * 0.25)), 2)
+    assert partners(4, "Corr Same") == []
+    assert partners(4, "Corr Opp") == [("Ann", "Test0")]
 
 
 @pytest.mark.parametrize(

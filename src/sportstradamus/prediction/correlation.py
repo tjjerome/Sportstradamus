@@ -54,11 +54,8 @@ _MAX_OFFERS_PER_PLAYER: int = 2
 _MAX_OFFERS_PER_TEAM: int = 12
 _MAX_OFFERS_PER_GAME: int = 24
 
-# Display-correlation gates: when annotating an offer with top correlated legs,
-# surface only partners whose EV / correlation clear these display thresholds.
-_DISPLAY_MODEL_EV_FLOOR: float = 0.95
+# A pool leg is listed as an offer's correlated partner above this correlation.
 _DISPLAY_CORR_FLOOR: float = 0.05
-_DISPLAY_BOOKS_EV_FLOOR: float = 0.9
 
 # Per-league player-position resolution (consumed by _resolve_player_positions):
 # the usage-profile stat that ranks players within a (team, position) group, its
@@ -246,16 +243,19 @@ def _build_correlation_matrices(
     league,
     shrinkage_cache,
 ):
-    """Per-game leg×leg correlation (C) / boost (M) matrices and EV grids.
+    """Per-game leg×leg correlation (C) / boost (M) matrices and pair-value grids.
 
     Returns a :class:`GameArrays` bundling the symmetric leg matrices ``C``/``M``,
-    the model/book pairwise expected values ``EV``/``EVb``, the model std-dev
-    outer product ``V``, and the per-leg probability / boost vectors beam search
-    consumes.
+    the pair grid ``EV`` beam search ranks leg sets by and its std-dev outer
+    product ``V``, the book grid ``EVb``, and the per-leg probability / boost
+    vectors beam search consumes. ``EV`` and ``V`` are built on each leg's lead
+    chance: the fitted one, and the model's for a leg the fit did not price.
     """
     C = np.eye(len(game_dict))
     M = np.zeros([len(game_dict), len(game_dict)])
     p_model = game_df["Win Prob"].to_numpy()
+    p_fit = game_df["Fit Prob"].to_numpy()
+    p_lead = np.where(np.isnan(p_fit), p_model, p_fit)
     p_books = game_df["Market Prob"].to_numpy()
     # ``Push P`` is added by :func:`model_prob` for integer-line discrete markets;
     # missing for combo legs etc. — fill 0.0 so the analytical mvn.cdf path runs.
@@ -266,10 +266,10 @@ def _build_correlation_matrices(
     boosts = game_df["Boost"].to_numpy()
     opp_boost = _leg_opp_boost(game_df, platform)
     shrinkage = _leg_shrinkage(game_df, platform, league, shrinkage_cache)
-    V = p_model * (1 - p_model)
+    V = p_lead * (1 - p_lead)
     V = V.reshape(len(game_dict), 1) * V
     V = np.sqrt(V)
-    P = p_model.reshape(len(p_model), 1) * p_model
+    P = p_lead.reshape(len(p_lead), 1) * p_lead
     Vb = p_books * (1 - p_books)
     Vb = Vb.reshape(len(game_dict), 1) * Vb
     Vb = np.sqrt(Vb)
@@ -281,12 +281,10 @@ def _build_correlation_matrices(
         C[i, j] = C[j, i] = rho
         M[i, j] = M[j, i] = boost
 
-    EV = (
-        np.multiply(
-            np.multiply(np.exp(np.multiply(C, V)), P),
-            boosts.reshape(len(boosts), 1) * M * boosts,
-        )
-        * search_payouts[0]
+    # No payout scales EV: it only ranks leg sets, and a Flex-only list pays 0 at 2 picks.
+    EV = np.multiply(
+        np.multiply(np.exp(np.multiply(C, V)), P),
+        boosts.reshape(len(boosts), 1) * M * boosts,
     )
     EVb = (
         np.multiply(
@@ -302,7 +300,7 @@ def _build_correlation_matrices(
         EVb=EVb,
         V=V,
         p_model=p_model,
-        p_fit=game_df["Fit Prob"].to_numpy(),
+        p_fit=p_fit,
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,
@@ -487,21 +485,20 @@ def _corr_partners(legs: pd.DataFrame, market_map: dict[str, str]) -> list[dict]
     ]
 
 
-def _annotate_correlation_columns(df, game_df, g, market_map):
+def _annotate_correlation_columns(df, game_df, pool, g, market_map):
     """Fill each offer's ``Corr Same`` / ``Corr Opp`` correlated-partner columns in ``df``.
 
-    For every leg, surface its top correlated same-team and opponent partners
-    (one per player) that clear the display EV / correlation gates. Each partner
+    Every leg of the game, in the pool or not, gets its same-team and opponent
+    partners: the legs of ``pool`` it correlates with above ``_DISPLAY_CORR_FLOOR``
+    and can share an entry with, best multiplier first, one per player. Each partner
     is a structured record (player/market/bet/line/league/mult), not a display
     string — ``leg_schema.leg_label`` renders it on demand.
     """
-    EV, EVb, C, V = g.EV, g.EVb, g.C, g.V
+    C, V = g.C, g.V
+    in_pool = game_df.index.isin(pool.index)
     for i, offer in game_df.iterrows():
-        indices = (
-            (EV[:, i] > _DISPLAY_MODEL_EV_FLOOR)
-            & (C[:, i] > _DISPLAY_CORR_FLOOR)
-            & (EVb[:, i] > _DISPLAY_BOOKS_EV_FLOOR)
-        )
+        # M is 0 on the leg itself, on its player's other legs and on a banned pair.
+        indices = in_pool & (C[:, i] > _DISPLAY_CORR_FLOOR) & (g.M[:, i] > 0)
         corr = game_df.loc[indices].copy()
         corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
@@ -641,7 +638,7 @@ def _process_league_games(
             league,
             shrinkage_cache,
         )
-        _annotate_correlation_columns(df, game_df, g, market_map)
+        _annotate_correlation_columns(df, game_df, idx, g, market_map)
 
         game = "/".join(sorted([team, opp]))
         if corr_sink is not None:
@@ -735,9 +732,10 @@ def find_correlation(
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
-            ``offer_df`` is the full scored slate sorted by ``Model EV`` and
-            ``parlay_df`` has beam-search parlay candidates. An empty ``offers``
-            list returns empty frames carrying the same offer columns.
+            ``offer_df`` is the full scored slate, the legs the fit priced first by
+            ``EV`` and the rest after them by ``Model EV``, and ``parlay_df`` has each
+            game's kept entries. An empty ``offers`` list returns empty frames
+            carrying the same offer columns.
     """
     if not offers:
         # cli.py maps Market and divides Boost before it checks .empty, so a platform
@@ -851,4 +849,5 @@ def find_correlation(
             stat_map[platform],
         )
 
-    return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df
+    scored = df.dropna(subset="Model EV")
+    return scored.sort_values(["EV", "Model EV"], ascending=False), parlay_df

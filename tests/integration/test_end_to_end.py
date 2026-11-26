@@ -498,10 +498,10 @@ def _synthetic_parlays(book: str) -> pd.DataFrame:
                 "Date": "2026-05-08",
                 "Game": "LVA@NYL",
                 "Family": "WNBA-PTS",
+                "EV": 0.92,
                 "Model EV": 1.45,
                 "Market EV": 1.10,
-                "Rec Bet": 5.0,
-                "Fun": 0.8,
+                "Rec Bet": 0.0,
                 "P": 0.42,
                 "PB": 0.30,
                 "Legs": (

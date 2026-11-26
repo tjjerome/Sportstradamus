@@ -109,8 +109,8 @@ _OFFER_SIGNAL_COLS = ["Boost", "Model EV", "Market EV"]
 # scoring artifacts not useful for human review. `Indep P` is kept (independence
 # joint probability) so users can compare against the correlation-aware joint.
 # `Bet ID` is an internal join key (leg-index tuple), not useful for human
-# review; `Fun` only drives the beam-search ranking sort, not display.
-_PARLAY_DROP_COLS = ["Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID", "Fun"]
+# review.
+_PARLAY_DROP_COLS = ["Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID"]
 
 
 def write_current_offers(
@@ -287,6 +287,4 @@ def _normalize_parlays(parlays: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     df = parlays.drop(columns=[c for c in _PARLAY_DROP_COLS if c in parlays.columns])
     df = df.replace([np.inf, -np.inf], np.nan)
-    if "Model EV" in df.columns:
-        df = df.sort_values("Model EV", ascending=False, ignore_index=True)
-    return df
+    return df.sort_values("EV", ascending=False, ignore_index=True)

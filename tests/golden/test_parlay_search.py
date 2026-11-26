@@ -25,7 +25,7 @@ from scipy.optimize import brentq
 
 from sportstradamus.helpers import no_vig_odds, sleeper_payouts, underdog_payouts
 from sportstradamus.leg_schema import leg_label
-from sportstradamus.prediction import parlay
+from sportstradamus.prediction import parlay, persist
 from sportstradamus.prediction.joint import _nearest_psd
 from sportstradamus.prediction.parlay import (
     GameArrays,
@@ -263,7 +263,7 @@ def _beam_inputs(p_fit=(0.82,) * 4, p_model=None, payouts=(3.0, 6.0, 10.0)) -> d
     P = p_fit.reshape(n, 1) * p_fit
     var = p_fit * (1 - p_fit)
     V = np.sqrt(var.reshape(n, 1) * var)
-    EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts) * payouts[0]
+    EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts)
     bet_df = {
         i: {
             "Player": f"P{i}",
@@ -374,6 +374,26 @@ def test_each_size_exact_prices_the_head_of_the_beam_and_keeps_its_best_few(monk
         assert kept == sorted(head, key=product)[:n_kept]
     assert len(priced) == 3 * (n_priced + n_kept)
     assert [r["EV"] for r in res] == sorted((r["EV"] for r in res), reverse=True)
+
+
+def test_the_parlay_snapshot_lists_entries_highest_ev_first() -> None:
+    """``current_parlays`` is the search's rows by their fitted value, less the internal
+    columns the board does not show. The model values these entries in another order: its
+    highest, the four-leg one, is worth least at the fitted chances."""
+    rows = beam_search_parlays(
+        **_beam_inputs(p_fit=(0.51, 0.52, 0.54, 0.56), p_model=(0.76, 0.74, 0.72, 0.70))
+    )
+    lowest_first = pd.DataFrame(rows[::-1])
+
+    snapshot = persist._normalize_parlays(lowest_first)
+
+    assert snapshot["EV"].tolist() == [row["EV"] for row in rows]
+    assert snapshot["Model EV"].idxmax() == len(rows) - 1
+    assert list(snapshot.columns) == [
+        column
+        for column in rows[0]
+        if column not in ("Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID")
+    ]
 
 
 def test_resolve_leg_stat_uses_market_map_when_present() -> None:
@@ -895,7 +915,7 @@ def _sleeper_flex_beam_inputs(*, m_pair: float = 1.0, p_push_leg0: float = 0.0) 
     search, full_payouts = payout_curve_for("Sleeper", "pooled")
     search = search[:3]
     full_payouts = {sz: v for sz, v in full_payouts.items() if sz <= 4}
-    EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts) * search[0]
+    EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts)
     p_push = np.zeros(n)
     p_push[0] = p_push_leg0
     bet_df = {

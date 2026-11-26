@@ -323,7 +323,7 @@ def main(progress, contest_variant, log_level):
 
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
-        parlay_df.sort_values("Model EV", ascending=False, inplace=True)
+        parlay_df.sort_values("EV", ascending=False, inplace=True)
         # subset excludes "legs" (list[dict]) — unhashable, so a full-row dedup
         # would raise; every other column agreeing implies the same legs too.
         dedup_cols = [c for c in parlay_df.columns if c != "legs"]
