@@ -4,8 +4,8 @@ decomposition of :func:`find_correlation`.
 Two complementary fixtures, because the function has two output halves with
 different determinism:
 
-* **offer_df correlation columns** are a pure function of the c_map + each leg's
-  Model P / Boost — fully deterministic for a *fixed* c_map. The real NBA offer
+* **offer_df correlation columns** are a pure function of the c_map, the game's pool
+  and each leg's lead chance — fully deterministic for a *fixed* c_map. The real NBA offer
   slate (``NYK/SAS``, 2026-06-03 from ``current_offers.parquet``) is the input,
   but the correlation source is a FIXED synthetic c_map (:func:`_synthetic_offer_cmap`),
   not the gitignored, periodically-regenerated corr parquets — pinning against those

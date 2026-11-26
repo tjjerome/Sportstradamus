@@ -102,11 +102,15 @@ payout-curve length.
 
 The beam carries inadmissible sets like any other (one team only, boost product
 outside the band): admissibility is checked on the finished size, not while a set
-grows. A size therefore builds no entry when its beam holds no admissible set. On a
-synthetic game whose pool was mostly legs paying above 1.0, six-leg sets ran over
-`_MAX_BOOST_UNDERDOG` and filled 958 of the beam's 1,000 places; a 250-wide beam held
-no admissible six-leg set at all. Disposition: open — how often a real slate's size
-comes up short has not been measured.
+grows. A size therefore builds no entry when its beam holds no admissible set, which
+happens when the highest-ranked legs pay far from 1.0: their sets run over
+`_MAX_BOOST_UNDERDOG` or under `_MIN_PRODUCT_BOOST`. On synthetic 80-leg games every
+game built its 2- and 3-leg entries. The six-leg size came up empty in 4 games of 30
+with 70 % even picks, in 6 of 30 with one real NBA slate's multipliers (0.39 to 1.42)
+on every leg, and in 29 of 30 once boosted legs filled that pool. Disposition: open —
+not measured on a real slate. Reading the first admissible sets from every extension
+of the previous beam, not only from the 1,000 carried forward, recovered 3, 2 and 2 of
+those games.
 
 ### 2.2 Per-step scoring and PSD handling
 
@@ -234,7 +238,7 @@ justifies unparking it early.
 |---|---|---|---|
 | MVN cdf default tolerances at d=5–6 (§1.1) | real, cheap | parked behind D3 | here + parlay-dependence §6 stage-3 scope |
 | Beam heuristic unbounded (§1.1) | ranking-only EV leak | parked | here + same stage-3 scope |
-| Beam can hold no admissible set at a size (§2.1) | seen on a synthetic pool of boosted legs | open — measure on a real slate | here |
+| Beam can hold no admissible set at a size (§2.1) | seen at the larger sizes on synthetic games | open — measure on a real slate | here |
 | Cross-game ρ=0 (§1.1) | accepted for player-only slips | mixed-slip case → dfs-products | here + dfs-products brief |
 | PSD-repair distortion (§2.2) | drop-bias fixed; distortion unmeasured | YES — read-only rider on production re-run | hygiene-closeout stage 2 + here |
 | Payout staleness (§2.4) | Underdog table at the owner-confirmed live terms (October 2026); still static config | recurring per-season re-verify | hygiene stage 3 + sleeper-parity stage 0 |
