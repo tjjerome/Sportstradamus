@@ -217,9 +217,9 @@ def story_dek(
     valid whichever mode chip is active. ``index`` is ``legs.offer_index`` of
     the offers frame, built once per game by the menu. A led story's dek is
     about ``lead_player``'s own leg, like its headline; an unled one (``""``)
-    keeps the core leg with the highest fitted chance. Clause-guarded and empty-safe — a
-    sub-2-leg core carries no cluster clause and missing offer facts drop their
-    clauses; everything deterministic via the md5 rotation.
+    keeps the core leg with the highest fitted chance. Clause-guarded and
+    empty-safe — a sub-2-leg core carries no cluster clause and missing offer
+    facts drop their clauses; everything deterministic via the md5 rotation.
     """
     # The label reads the display Market, so the seed needs no platform map to
     # resolve the slug lower_leg carries for enrich_legs.

@@ -46,7 +46,11 @@ def _independent(bet_id: Sequence[int], sctx: GameScoringContext) -> float:
 
 
 def copula_ev(bet_id: Sequence[int], sctx: GameScoringContext, p: np.ndarray) -> float:
-    """Value of a unit staked on ``bet_id`` when each leg wins with its chance in ``p``."""
+    """Value of a unit staked on ``bet_id`` when each leg wins with its chance in ``p``.
+
+    ``bet_id`` holds positions into the game's arrays, and ``p`` is one of those
+    arrays whole (``g.p_fit`` or ``g.p_model``), not a slice for the subset.
+    """
     size = len(bet_id)
     g = sctx.g
     arr = np.asarray(bet_id)

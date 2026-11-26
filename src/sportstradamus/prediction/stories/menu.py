@@ -26,11 +26,8 @@ prominent Under (``lead.lead_seeds``), the lead sits in both presets, led storie
 rank first, and ``lead.assign_leads`` flags the one each menu headlines.
 
 Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Every
-valid subset is enumerated, but only some pay for the real Gaussian-copula scorer
-(``joint.parlay_payout_prob``): every Power subset is priced exactly through its
-analytical ``mvn.cdf``, while an independent-joint proxy ranks the larger ones
-and only the top few run the flex branch's 50k-sample Monte-Carlo
-(``pricing.shortlist``). The picks always read the exact score.
+valid subset is enumerated, but ``pricing.shortlist`` bounds how many pay for the
+real Gaussian-copula scorer, and the picks always read that exact score.
 """
 
 from __future__ import annotations
@@ -245,6 +242,8 @@ def _grow_cluster(
     remaining legs stay in the pool for a later cluster. Same-player legs
     correlate near 1, so without the rule one hot player's five markets fill the
     cap and ``validate_parlay_legs`` (distinct players) finds no valid subset.
+    The seed and every attached leg are discarded from ``remaining`` in place;
+    the unled pass of ``_cluster_legs`` loops until that is empty.
     """
     cluster = [seed]
     claimed = {players[seed]}
