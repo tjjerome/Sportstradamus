@@ -4,26 +4,33 @@
 captured by ``find_correlation``'s ``story_sink``) into up to five data-driven
 *stories* — correlation clusters of the game's story legs, which are its pool legs
 (``leg_indices``) ordered by ``EV``, with no floor. Each story emits two starting
-parlays over its cluster's legs (legs may be shared):
+parlays over its cluster's legs (legs may be shared), both picked by ``ev``, the
+fitted value of a unit staked (the copula joint of the legs' fitted win chances
+times the payout):
 
-* **Bankroll Builder** — the leg-subset with the highest single-bet full-Kelly
-  *log-growth* ``G`` (the bet that compounds bankroll fastest, not the biggest
-  stake). Tends to the tight 2-3-leg core.
-* **Shoot the Moon** — the leg-subset with the highest *model EV* inside the
-  play-type cap (the widest high-edge set; usually a flex extension of Builder).
+* **Bankroll Builder** — the Power-sized subset (two legs up to
+  ``payouts.POWER_MAX_SIZE``) with the highest ``ev``; a tie goes to the smaller.
+* **Shoot the Moon** — the larger subset, up to the play-type cap, with the
+  highest ``ev``; a tie goes to the larger. A cluster with no valid larger subset
+  repeats the Builder.
 
-Ranked on EV alone a menu opens on whichever leg values highest, star or not, so
-two stories per game are *led*: one grows from the most prominent Over (only in a
-shootout or a blowout, ``lead.OVER_LEAD_SHAPES``) and one from the most prominent
-Under (``lead.lead_seeds``), the lead sits in both presets, led stories rank
-first, and ``lead.assign_leads`` flags the one each menu headlines.
+The picks rank rather than clear a bar, so every cluster with a valid parlay is a
+story whatever its value, and the menu orders its stories by the Builder's
+``ev``. Each row also prices the same entry on the model's claimed chances
+(``model_ev``) and stakes nothing (``kelly_stake`` is 0).
 
-Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Subsets
-are enumerated but scored in two phases (``pricing``) — a cheap independent-joint
-proxy ranks every subset, then only a shortlist is priced through the real
-Gaussian-copula scorer (``joint.parlay_payout_prob``), whose flex branch runs a
-50k-sample Monte-Carlo. The final argmax always uses the exact score, so fidelity
-holds while the expensive MC stays bounded.
+Ranked on value alone a menu opens on whichever story values highest, star or
+not, so two stories per game are *led*: one grows from the most prominent Over
+(only in a shootout or a blowout, ``lead.OVER_LEAD_SHAPES``) and one from the most
+prominent Under (``lead.lead_seeds``), the lead sits in both presets, led stories
+rank first, and ``lead.assign_leads`` flags the one each menu headlines.
+
+Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Every
+valid subset is enumerated, but only some pay for the real Gaussian-copula scorer
+(``joint.parlay_payout_prob``): every Power subset is priced exactly through its
+analytical ``mvn.cdf``, while an independent-joint proxy ranks the larger ones
+and only the top few run the flex branch's 50k-sample Monte-Carlo
+(``pricing.shortlist``). The picks always read the exact score.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.prediction.parlay import GameScoringContext, leg_market_map
+from sportstradamus.prediction.payouts import POWER_MAX_SIZE
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
 from sportstradamus.prediction.stories.lead import LEAD_SIDES, assign_leads, lead_seeds
@@ -45,7 +53,7 @@ from sportstradamus.prediction.stories.legs import (
     offer_index,
     validate_parlay_legs,
 )
-from sportstradamus.prediction.stories.pricing import independent, score_subset, shortlist
+from sportstradamus.prediction.stories.pricing import copula_ev, score_subset, shortlist
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
@@ -56,8 +64,6 @@ _CLUSTER_RHO_FLOOR: float = 0.05
 _MAX_CLUSTER_LEGS: int = 8
 # Owner-locked menu cap: at most five stories per (platform, game).
 _MAX_STORIES: int = 5
-# Drop a cluster whose best Shoot-the-Moon subset can't clear breakeven EV.
-_MENU_MIN_MOON_EV: float = 1.0
 
 # ``lead`` is written by ``assign_leads`` over the finished frame, not per row.
 _STORY_COLS = [
@@ -69,6 +75,7 @@ _STORY_COLS = [
     "headline",
     "legs",
     "joint_p",
+    "ev",
     "model_ev",
     "kelly_stake",
     "bet_size",
@@ -139,10 +146,8 @@ def _stories_for_game(
         )
         if priced is not None:
             scored.append((*priced, side, lead))
-    # Led stories first, between themselves by Moon EV; then the rest by EV.
-    scored.sort(
-        key=lambda s: (s[3] == "", -s[2]["model_ev"], -max(ev[i] for i in s[0]), s[2]["bet_id"])
-    )
+    # Led stories first, then each group by the Builder's fitted value.
+    scored.sort(key=lambda s: (s[3] == "", -s[1]["ev"], -max(ev[i] for i in s[0]), s[1]["bet_id"]))
     rows: list[dict] = []
     for rank, (_cluster, builder, moon, side, lead) in enumerate(scored[:_MAX_STORIES]):
         headline, dek = _story_prose(
@@ -156,8 +161,14 @@ def _stories_for_game(
             "lead_player": lead,
             "star": max(stars[i] for i in set(builder["bet_id"]) | set(moon["bet_id"])),
         }
-        rows.append(_row(sctx, "builder", builder, story))
-        rows.append(_row(sctx, "moon", moon, story))
+        # Each distinct preset is priced once: the copula scorer is noisy, so a Moon
+        # that repeats the Builder would otherwise print two claims for one entry.
+        claimed = {
+            bet_id: copula_ev(bet_id, sctx, sctx.g.p_model)
+            for bet_id in {builder["bet_id"], moon["bet_id"]}
+        }
+        rows.append(_row(sctx, "builder", builder, claimed[builder["bet_id"]], story))
+        rows.append(_row(sctx, "moon", moon, claimed[moon["bet_id"]], story))
     return rows
 
 
@@ -262,20 +273,21 @@ def _best_subsets(
     require_both_teams: bool = True,
     must_include: int | None = None,
 ) -> tuple[dict | None, dict | None]:
-    """The (Builder, Moon) parlays for one cluster, or (None, None) if degenerate.
+    """The (Builder, Moon) parlays for one cluster, or (None, None) if no valid parlay.
 
     Only **valid** parlays are enumerated, so the Builder/Moon picks are valid by
     construction. With ``require_both_teams`` (a two-team game) a one-team cluster
     yields ``(None, None)``; a one-sided game relaxes that, so its single-team
     cluster still produces a preset. ``must_include`` (a led cluster's lead)
-    restricts the enumeration to subsets carrying that leg, so both presets stay
-    true argmaxes and the lead sits in their shared core by construction. Phase 1
-    ranks every candidate by a pure-numpy independent-joint proxy; phase 2
-    exact-scores only the shortlist (top-K by each objective ∪ all cheap Power
-    subsets) through the copula scorer.
+    restricts the enumeration to subsets carrying that leg, so the lead sits in
+    both presets by construction. Both rank on ``ev`` whatever its level: the
+    Builder is the best Power subset (a tie goes to the smaller subset, then the
+    lower ``bet_id``) and the Moon the best larger one (a tie goes to the larger),
+    else the Builder's own. Any valid subset holds a valid Power one, so the
+    Builder always exists. ``pricing.shortlist`` bounds the exact scoring.
     """
-    proxies = [
-        (combo, *independent(combo, sctx))
+    combos = [
+        combo
         for size in range(2, min(len(cluster), sctx.max_size) + 1)
         for combo in combinations(cluster, size)
         if (must_include is None or must_include in combo)
@@ -283,13 +295,18 @@ def _best_subsets(
             [sctx.bet_df[i] for i in combo], require_both_teams=require_both_teams
         )[0]
     ]
-    if not proxies:
+    if not combos:
         return None, None
-    scored = [score_subset(bet_id, sctx, stat_by_label) for bet_id in shortlist(proxies)]
-    builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], s["bet_id"]))
-    moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], s["bet_id"]))
-    if moon["model_ev"] <= _MENU_MIN_MOON_EV:
-        return None, None
+    scored = [score_subset(bet_id, sctx, stat_by_label) for bet_id in shortlist(combos, sctx)]
+    builder = min(
+        (s for s in scored if s["bet_size"] <= POWER_MAX_SIZE),
+        key=lambda s: (-s["ev"], s["bet_size"], s["bet_id"]),
+    )
+    moon = min(
+        (s for s in scored if s["bet_size"] > POWER_MAX_SIZE),
+        key=lambda s: (-s["ev"], -s["bet_size"], s["bet_id"]),
+        default=builder,
+    )
     return builder, moon
 
 
@@ -323,8 +340,14 @@ def _price_cluster(
     return cluster, builder, moon
 
 
-def _row(sctx: GameScoringContext, objective: str, sub: Mapping, story: Mapping) -> dict:
-    """One preset row: the subset's numbers under the story's shared prose and lead fields."""
+def _row(
+    sctx: GameScoringContext, objective: str, sub: Mapping, model_ev: float, story: Mapping
+) -> dict:
+    """One preset row: the subset's numbers under the story's shared prose and lead fields.
+
+    ``joint_p`` and ``ev`` are the entry's fitted chance and value; ``model_ev`` is
+    the value the model claims for it.
+    """
     return {
         "platform": sctx.platform,
         "League": sctx.league,
@@ -332,8 +355,11 @@ def _row(sctx: GameScoringContext, objective: str, sub: Mapping, story: Mapping)
         "objective": objective,
         "legs": sub["legs"],
         "joint_p": sub["win_prob"],
-        "model_ev": sub["model_ev"],
-        "kelly_stake": sub["kelly_stake"],
+        "ev": sub["ev"],
+        "model_ev": model_ev,
+        # An entry gets no stake until the entries' money record supports one
+        # (docs/handoffs/profit-engine.md §5.3).
+        "kelly_stake": 0.0,
         "bet_size": sub["bet_size"],
         "Date": sctx.date,
         **story,

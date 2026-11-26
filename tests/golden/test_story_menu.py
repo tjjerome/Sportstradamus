@@ -4,17 +4,17 @@ Exercises ``prediction.stories.menu.build_game_stories`` on hand-built
 ``GameScoringContext`` fixtures (synthetic ``GameArrays`` with explicit
 correlation / probabilities, the same shape ``find_correlation`` hands the
 generator). Pins the owner-locked acceptance criteria: ≤5 correlation-cluster
-stories per game, no-signal games yield nothing, the two objectives are the true
-argmaxes, the play-type cap holds, platforms are independent, the EV is the
-real copula scorer (not a reimplementation), and each side's most prominent
-leg leads a story that ranks ahead of the unled ones. An Over leads only in a
-shootout or a blowout. A game's story legs are its pool legs, ordered by ``EV``.
+stories per game, no-signal games yield nothing, the two presets are the best
+fitted value at their sizes, the play-type cap holds, platforms are independent,
+the EV is the real copula scorer (not a reimplementation), and each side's most
+prominent leg leads a story that ranks ahead of the unled ones. An Over leads
+only in a shootout or a blowout. A game's story legs are its pool legs, ordered
+by ``EV``, and no value floor drops a leg or a story.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import math
 import re
 from itertools import combinations
 
@@ -24,16 +24,37 @@ import pytest
 
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.parlay import GameArrays, GameScoringContext, leg_market_map
-from sportstradamus.prediction.payouts import payout_curve_for
+from sportstradamus.prediction.payouts import POWER_MAX_SIZE, payout_curve_for
 from sportstradamus.prediction.stories import menu as menu_mod
 from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 from sportstradamus.prediction.stories.menu import _story_prose, build_game_stories
-from sportstradamus.prediction.stories.pricing import _log_growth, score_subset
+from sportstradamus.prediction.stories.pricing import score_subset, shortlist
 
 
 def _leg_keys(legs: list[dict]) -> frozenset:
     return frozenset((leg["player"], leg["bet"], leg["line"], leg["market"]) for leg in legs)
+
+
+def _bet_id(legs: list[dict]) -> tuple[int, ...]:
+    """A row's legs back to their fixture positions (``_ctx`` names leg i ``Player{i}``)."""
+    return tuple(int(leg["player"].removeprefix("Player")) for leg in legs)
+
+
+def _priced(sctx, bet_id, p) -> float:
+    """The copula scorer called directly: the value of a unit staked when the legs win with ``p``.
+
+    ``_ctx`` sets every pick multiplier and pair modifier to 1, so the payout is the
+    size's base.
+    """
+    g = sctx.g
+    arr = np.asarray(bet_id)
+    size = len(bet_id)
+    payout = sctx.payout_base_by_size[size]
+    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
+    return float(
+        parlay_payout_prob(p[arr], g.p_push[arr], sig, size, 1.0, payout, sctx.full_payouts, payout)
+    )
 
 
 def _ctx(
@@ -184,6 +205,22 @@ def test_every_pool_leg_is_a_story_leg_at_its_ev():
     assert menu_mod._leg_evs(pool) == {2: 0.93, 0: 0.78}
 
 
+def test_a_game_whose_every_leg_sits_under_ev_1_gets_a_menu():
+    """No value floor on either number: every leg's EV and both presets' fitted and
+    claimed values sit under 1, as on the live board, and the game keeps its story."""
+    sctx, offers = _ctx(
+        [0.42, 0.41, 0.40],
+        _block_diag_corr([3], 0.3),
+        fits=[0.40, 0.39, 0.38],
+        evs=[0.77, 0.75, 0.73],
+        teams=["AAA", "BBB", "AAA"],
+    )
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert out["story_id"].nunique() == 1
+    assert (out["ev"] < 1).all()
+    assert (out["model_ev"] < 1).all()
+
+
 def test_correlation_cluster_forms_over_exact_legs():
     corr = np.eye(2)
     corr[0, 1] = corr[1, 0] = 0.45
@@ -217,24 +254,27 @@ def test_cluster_holds_one_leg_per_player():
 
 def test_each_side_leads_a_story_and_led_stories_rank_first():
     # Over block {0,1,2} seeds on the star Player0 and Under block {3,4,5} on the
-    # brighter Player4; the unled pair {6,7} is the richest cluster in the game.
+    # brighter Player4; the unled pair {6,7} is the richest cluster in the game by the
+    # fit and the poorest by the claim, whose order the two led blocks reverse too.
     corr = _block_diag_corr([3, 3, 2], 0.3)
     sctx, offers = _ctx(
-        [0.66, 0.65, 0.64, 0.70, 0.69, 0.68, 0.95, 0.95],
+        [0.70, 0.69, 0.68, 0.66, 0.65, 0.64, 0.50, 0.50],
         corr,
+        fits=[0.66, 0.65, 0.64, 0.70, 0.69, 0.68, 0.95, 0.95],
         teams=["AAA", "BBB"] * 4,
         bets=["Over"] * 3 + ["Under"] * 3 + ["Over"] * 2,
         stars=[2.0, 0.0, 0.0, 0.0, 2.5, 0.0, 0.0, 0.0],
     )
     out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
-    moon = out[out["objective"] == "moon"].set_index("story_id")
-    assert moon.index.tolist() == ["AAA/BBB#0", "AAA/BBB#1", "AAA/BBB#2"]
-    # Led stories first, ordered between themselves by Moon EV; the unled story
-    # out-earns both yet ranks last, so EV alone no longer orders the menu.
-    assert moon["lead_side"].tolist() == ["Under", "Over", ""]
-    assert moon["lead_player"].tolist() == ["Player4", "Player0", ""]
-    assert moon["star"].tolist() == [2.5, 2.0, 0.0]
-    assert moon["model_ev"].iloc[2] > moon["model_ev"].iloc[0] > moon["model_ev"].iloc[1]
+    builder = out[out["objective"] == "builder"].set_index("story_id")
+    assert builder.index.tolist() == ["AAA/BBB#0", "AAA/BBB#1", "AAA/BBB#2"]
+    # Led stories first, ordered between themselves by the Builder's ev; the unled
+    # story out-values both yet ranks last, so ev alone does not order the menu.
+    assert builder["lead_side"].tolist() == ["Under", "Over", ""]
+    assert builder["lead_player"].tolist() == ["Player4", "Player0", ""]
+    assert builder["star"].tolist() == [2.5, 2.0, 0.0]
+    assert builder["ev"].iloc[2] > builder["ev"].iloc[0] > builder["ev"].iloc[1]
+    assert builder["model_ev"].iloc[1] > builder["model_ev"].iloc[0] > builder["model_ev"].iloc[2]
     # The lead sits in both presets of its story, on the side it leads.
     for _sid, grp in out[out["lead_side"] != ""].groupby("story_id"):
         side, player = grp["lead_side"].iloc[0], grp["lead_player"].iloc[0]
@@ -245,6 +285,29 @@ def test_each_side_leads_a_story_and_led_stories_rank_first():
     assert flagged["story_id"].nunique() == 1
     assert len(flagged) == 2
     assert flagged["lead_side"].iloc[0] != ""
+
+
+def test_unled_stories_rank_by_the_builders_ev():
+    """Between unled stories the Builder's fitted value decides, not the Moon's or the claim.
+
+    Six-leg cluster Y (Players 0-5) forms first; three-leg cluster X (Players 6-8)
+    has the better Builder by the fit. Y's six-pick Moon out-values X, and the claim
+    prefers Y's legs, so either of those orders would put Y first.
+    """
+    sctx, offers = _ctx(
+        [0.90] * 6 + [0.50] * 3,
+        _block_diag_corr([6, 3], 0.3),
+        fits=[0.80] * 6 + [0.85] * 3,
+        teams=["AAA", "BBB"] * 4 + ["AAA"],
+    )
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    builder = out[out["objective"] == "builder"].set_index("story_id")
+    moon = out[out["objective"] == "moon"].set_index("story_id")
+    x, y = "AAA/BBB#0", "AAA/BBB#1"
+    assert {leg["player"] for leg in builder.loc[x, "legs"]} == {"Player6", "Player7", "Player8"}
+    assert builder.loc[x, "ev"] > builder.loc[y, "ev"]
+    assert moon.loc[y, "ev"] > moon.loc[x, "ev"]
+    assert builder.loc[y, "model_ev"] > builder.loc[x, "model_ev"]
 
 
 def test_led_story_headline_is_routed_to_its_lead(monkeypatch):
@@ -392,60 +455,76 @@ def test_commence_by_game_takes_the_first_non_empty_commence(monkeypatch):
     }
 
 
-def test_objectives_are_true_argmaxes_and_share_legs():
-    # Power-only cluster (sizes 2-3 ⇒ analytical mvn.cdf ⇒ deterministic; the flex
-    # 4+ path is a 50k-sample Monte-Carlo whose EV jitters between scorings). A
-    # strong anchor plus two thin legs makes the objectives diverge: the tight
-    # high-prob pair compounds (Builder) while the wider set shoots the moon.
-    corr = _block_diag_corr([3], 0.1)
-    sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
-    out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
-    builder = out[out["objective"] == "builder"].iloc[0]
-    moon = out[out["objective"] == "moon"].iloc[0]
+def test_builder_and_moon_are_the_best_fitted_value_at_their_sizes():
+    """Builder is the best ``ev`` among the Power sizes, Moon the best among the larger.
 
-    # scipy's mvn.cdf is randomized QMC for dim ≥ 3, so EV carries ~1e-4 noise
-    # between scorings; compare the chosen leg-SET (stable when the gap ≫ noise),
-    # not exact EV. The 2-leg vs 3-leg EV gap here is ~0.24, far above the noise.
-    # The menu argmaxes over *valid* subsets carrying the story's lead, so the
-    # oracle must too — otherwise a single-team or lead-less subset could pose
-    # as the "expected" argmax.
-    assert (builder["lead_side"], builder["lead_player"]) == ("Over", "Player0")
+    The claimed chances run against the fitted ones, so presets picked on the claim
+    would hold Player0 and Player1. The 4-pick Moon is a 50k-sample Monte-Carlo whose
+    value jitters by about 0.01 between scorings; the fixture's best larger subset
+    leads the next by 0.15, so the oracle's own scoring lands on the same legs.
+    """
+    sctx, offers = _ctx(
+        [0.80, 0.75, 0.70, 0.45, 0.40],
+        _block_diag_corr([5], 0.1),
+        fits=[0.40, 0.45, 0.70, 0.75, 0.80],
+        teams=["AAA", "BBB", "AAA", "BBB", "AAA"],
+    )
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None).set_index("objective")
     stat_by_label = leg_market_map(sctx.league, sctx.platform)
-    all_scores = [
+    valid = [
         score_subset(c, sctx, stat_by_label)
-        for size in range(2, min(len(sctx.leg_indices), sctx.max_size) + 1)
-        for c in combinations(sctx.leg_indices, size)
+        for size in range(2, 6)
+        for c in combinations(range(5), size)
         if validate_parlay_legs([sctx.bet_df[i] for i in c])[0]
-        and builder["lead_player"] in {sctx.bet_df[i]["Player"] for i in c}
     ]
-    builder_legs = _leg_keys(builder["legs"])
-    moon_legs = _leg_keys(moon["legs"])
-    assert builder["model_ev"] <= moon["model_ev"]  # both from one scoring pass: Moon EV ≥ Builder
-    assert moon_legs == _leg_keys(
-        max(all_scores, key=lambda s: s["model_ev"])["legs"]
-    )  # global EV argmax
-    assert builder_legs == _leg_keys(
-        max(all_scores, key=lambda s: s["G"])["legs"]
-    )  # global log-growth argmax
-    # This fixture diverges: tight strong pair builds, wider set shoots the moon.
-    assert builder["bet_size"] < moon["bet_size"]
-    assert builder_legs <= moon_legs  # shared legs allowed
+    best_power = max((s for s in valid if s["bet_size"] <= POWER_MAX_SIZE), key=lambda s: s["ev"])
+    best_larger = max((s for s in valid if s["bet_size"] > POWER_MAX_SIZE), key=lambda s: s["ev"])
+    assert _leg_keys(out.loc["builder", "legs"]) == _leg_keys(best_power["legs"])
+    assert _leg_keys(out.loc["moon", "legs"]) == _leg_keys(best_larger["legs"])
+    assert set(_bet_id(out.loc["builder", "legs"])) == {2, 3, 4}
+    assert set(_bet_id(out.loc["moon", "legs"])) == {1, 2, 3, 4}
 
 
-def test_log_growth_closed_form():
-    # p=0.55, payout=3.0 ⇒ b=2, full-Kelly f*=(0.55·3−1)/2=0.325, G=p·ln(1+b·f)+(1−p)·ln(1−f).
-    p, payout = 0.55, 3.0
-    b = payout - 1.0
-    f = (p * payout - 1.0) / b
-    expected = p * math.log(1.0 + b * f) + (1.0 - p) * math.log(1.0 - f)
-    assert _log_growth(p, payout) == pytest.approx(expected)
-    assert _log_growth(0.30, 3.0) == 0.0  # no edge ⇒ no growth
+def test_preset_ties_go_to_the_smaller_builder_and_the_larger_moon(monkeypatch):
+    """Ties on ``ev``: Builder takes the smaller subset, then the lower ``bet_id``; Moon
+    takes the larger subset. The scorer is stubbed so the ties are exact."""
+    values = {(0, 1, 4): 2.0, (2, 3): 2.0, (0, 3): 2.0, (0, 1, 2, 3): 3.0, (0, 1, 2, 3, 4): 3.0}
+    monkeypatch.setattr(
+        menu_mod,
+        "score_subset",
+        lambda bet_id, _sctx, _labels: {
+            "bet_id": bet_id,
+            "bet_size": len(bet_id),
+            "ev": values.get(bet_id, 1.0),
+        },
+    )
+    sctx, _offers = _ctx([0.66] * 5, np.eye(5), teams=["AAA", "BBB", "AAA", "BBB", "AAA"])
+    builder, moon = menu_mod._best_subsets([0, 1, 2, 3, 4], sctx, {})
+    assert builder["bet_id"] == (0, 3)
+    assert moon["bet_id"] == (0, 1, 2, 3, 4)
+
+
+def test_shortlist_prices_every_power_subset_and_the_top_larger_ones():
+    """Every Power subset reaches the exact scorer; of the larger ones, the eight with the
+    best independent proxy on the fitted chances, which run against the claimed ones."""
+    sctx, _offers = _ctx(
+        [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90],
+        np.eye(7),
+        fits=[0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60],
+    )
+    combos = [c for size in range(2, 7) for c in combinations(range(7), size)]
+    larger = [c for c in combos if len(c) > POWER_MAX_SIZE]
+    proxy = {c: np.prod(sctx.g.p_fit[list(c)]) * sctx.payout_base_by_size[len(c)] for c in larger}
+    top = sorted(larger, key=lambda c: -proxy[c])[:8]
+    assert proxy[top[-1]] > proxy[sorted(larger, key=lambda c: -proxy[c])[8]]
+    picked = shortlist(combos, sctx)
+    assert sorted(picked) == sorted([c for c in combos if len(c) <= POWER_MAX_SIZE] + top)
 
 
 def test_play_type_cap_honored():
     corr = _block_diag_corr([6], 0.25)
-    # Every pick sits above 0.64, where the 6-pick Flex's all-hit proxy (25 p^6) outranks
-    # the 3-pick Power's (6.5 p^3) and so reaches the exact scorer through the shortlist.
+    # Every pick sits high enough that the 6-pick Flex out-values the 4- and 5-pick ones,
+    # so Moon takes all six.
     probs = [0.71, 0.70, 0.69, 0.68, 0.67, 0.66]
     # Underdog pooled reaches the 6-leg flex.
     ud = build_game_stories([_ctx(probs, corr)[0]], _ctx(probs, corr)[1], pd.DataFrame(), None)
@@ -461,35 +540,58 @@ def test_platforms_are_independent():
     ud_sctx, offers = _ctx([0.72, 0.70, 0.68], corr, platform="Underdog")
     sl_sctx, _ = _ctx([0.72, 0.70, 0.68], corr, platform="Sleeper")
     out = build_game_stories([ud_sctx, sl_sctx], offers, pd.DataFrame(), None)
-    # Underdog menu present; Sleeper's [1.0, 1.0] placeholder can't clear breakeven.
-    assert (out["platform"] == "Underdog").any()
-    assert not (out["platform"] == "Sleeper").any()
+    # Each platform prices the same legs on its own table. Sleeper pays each pick's own
+    # multiplier, neutral here, so its presets value under 1 and it keeps its menu all
+    # the same; Underdog's table pays 3.5x and 6.5x.
+    by_platform = out.groupby("platform")["ev"]
+    assert by_platform.max()["Sleeper"] < 1 < by_platform.min()["Underdog"]
 
 
-def test_model_ev_is_the_real_copula_scorer():
-    corr = _block_diag_corr([2], 0.4)
-    sctx, _ = _ctx([0.66, 0.64], corr)
-    bet_id = (0, 1)
+def test_ev_is_the_copula_scorer_on_the_fitted_chances():
+    sctx, _ = _ctx([0.66, 0.64], _block_diag_corr([2], 0.4), fits=[0.55, 0.58])
     stat_by_label = leg_market_map(sctx.league, sctx.platform)
-    scored = score_subset(bet_id, sctx, stat_by_label)
-    g = sctx.g
-    arr = np.asarray(bet_id)
-    boost = float(g.M[0, 1] * g.boosts[0] * g.boosts[1])
-    payout = float(np.clip(boost * sctx.payout_base_by_size[2], 1.0, 100.0))
-    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
-    direct = float(
-        parlay_payout_prob(
-            g.p_model[arr],
-            g.p_push[arr],
-            sig,
-            2,
-            boost,
-            payout,
-            sctx.full_payouts,
-            sctx.payout_base_by_size[2],
-        )
+    scored = score_subset((0, 1), sctx, stat_by_label)
+    direct = _priced(sctx, (0, 1), sctx.g.p_fit)
+    assert scored["ev"] == direct
+    assert scored["win_prob"] == direct / sctx.payout_base_by_size[2]
+    assert direct < _priced(sctx, (0, 1), sctx.g.p_model)
+
+
+def test_rows_price_the_fit_beside_the_claim_and_stake_nothing():
+    """``ev`` and ``joint_p`` price a preset on the fitted chances and ``model_ev`` prices
+    the same legs on the claimed ones, so the two differ wherever the chances do. Each
+    preset's fitted value clears 1, where full Kelly would stake it, yet ``kelly_stake``
+    is 0.0: an entry gets no stake until the entries' money record supports one."""
+    sctx, offers = _ctx(
+        [0.70, 0.65, 0.60],
+        _block_diag_corr([3], 0.3),
+        fits=[0.50, 0.55, 0.60],
+        teams=["AAA", "BBB", "AAA"],
     )
-    assert scored["model_ev"] == direct
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert len(out) == 2
+    for row in out.to_dict("records"):
+        bet_id = _bet_id(row["legs"])
+        assert row["ev"] == pytest.approx(_priced(sctx, bet_id, sctx.g.p_fit), rel=1e-3)
+        assert row["model_ev"] == pytest.approx(_priced(sctx, bet_id, sctx.g.p_model), rel=1e-3)
+        assert row["joint_p"] == pytest.approx(row["ev"] / sctx.payout_base_by_size[len(bet_id)])
+        assert 1 < row["ev"] < row["model_ev"] - 0.5
+        assert row["kelly_stake"] == 0.0
+
+
+def test_a_cluster_with_no_valid_larger_subset_gives_both_presets_the_same_legs():
+    # Three legs hold no subset above Power's three picks, so Moon repeats the Builder,
+    # numbers and all: one entry, priced once.
+    sctx, offers = _ctx(
+        [0.70, 0.65, 0.60],
+        _block_diag_corr([3], 0.3),
+        fits=[0.50, 0.55, 0.60],
+        teams=["AAA", "BBB", "AAA"],
+    )
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None).set_index("objective")
+    assert _leg_keys(out.loc["builder", "legs"]) == _leg_keys(out.loc["moon", "legs"])
+    numbers = ["ev", "model_ev", "joint_p", "bet_size"]
+    assert out.loc["builder", numbers].tolist() == out.loc["moon", numbers].tolist()
 
 
 def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier():
@@ -503,7 +605,7 @@ def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier()
     scored = score_subset((0, 1, 2, 3), sctx, stat_by_label)
 
     one_loss_tier = sctx.full_payouts[4][1]
-    assert scored["model_ev"] == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
+    assert scored["ev"] == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -585,11 +687,16 @@ def test_unled_single_team_cluster_in_two_team_game_emits_no_story():
         assert {team_of[p] for p in players} == {"AAA", "BBB"}
 
 
+def _divergent_presets():
+    """One story whose Builder is three Power picks and whose Moon adds a fourth."""
+    corr = _block_diag_corr([4], 0.1)
+    sctx, offers = _ctx([0.90, 0.75, 0.70, 0.65], corr, teams=["AAA", "BBB"] * 2)
+    return build_game_stories([sctx], offers, pd.DataFrame(), None)
+
+
 def test_builder_and_moon_share_headline_and_dek():
     """One story, one headline, one dek — the mode chip must never swap the prose."""
-    corr = _block_diag_corr([3], 0.1)
-    sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = _divergent_presets()
     builder = out[out["objective"] == "builder"].iloc[0]
     moon = out[out["objective"] == "moon"].iloc[0]
     assert _leg_keys(builder["legs"]) != _leg_keys(moon["legs"])  # divergent presets
@@ -599,9 +706,7 @@ def test_builder_and_moon_share_headline_and_dek():
 
 
 def test_headline_names_only_players_shared_by_both_presets():
-    corr = _block_diag_corr([3], 0.1)
-    sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    out = _divergent_presets()
     for _sid, grp in out.groupby("story_id"):
         shared = set.intersection(*(set(_row_players(legs)) for legs in grp["legs"]))
         named = set(re.findall(r"Player\d+", grp["headline"].iloc[0]))

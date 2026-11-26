@@ -1,14 +1,17 @@
 """Subset pricing for the story menu: the exact copula score and its cheap proxy.
 
-``score_subset`` prices one leg-subset through ``joint.parlay_payout_prob`` (the
-parlay search's gate-free scorer) while ``independent`` and ``shortlist`` rank
-every subset by an independent-joint proxy so only a few finalists pay for the
-exact score.
+Every price here is the value of a unit staked on a leg-subset: the copula joint
+of its legs times the payout, through ``joint.parlay_payout_prob`` (the parlay
+search's gate-free scorer). ``score_subset`` prices on the fitted win chances
+(``GameArrays.p_fit``); ``copula_ev`` prices on any chances, which is how the menu
+reads the model's claim (``p_model``) for the presets it keeps. ``shortlist``
+bounds the exact scoring: every Power subset is cheap (the analytical
+``mvn.cdf``), and the larger ones are ranked by an independent-joint proxy so
+only the top few pay for the flex Monte-Carlo.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 
 import numpy as np
@@ -22,39 +25,37 @@ from sportstradamus.prediction.payouts import (
     POWER_MAX_SIZE,
 )
 
-# Exact-scored flex finalists per objective per cluster (Power subsets are all
-# exact-scored cheaply via the analytical mvn.cdf, so they bypass the shortlist).
+# Exact-scored larger (flex) finalists per cluster; Power subsets are all
+# exact-scored cheaply via the analytical mvn.cdf, so they bypass the cut.
 _SHORTLIST_K: int = 8
 
 
-def shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
-    """Distinct subsets worth an exact score: top-K by EV ∪ top-K by G ∪ all Power."""
-    by_ev = sorted(proxies, key=lambda x: -x[1])[:_SHORTLIST_K]
-    by_g = sorted(proxies, key=lambda x: -x[2])[:_SHORTLIST_K]
-    power = [p for p in proxies if len(p[0]) <= POWER_MAX_SIZE]
-    picked = {p[0]: None for p in (*by_ev, *by_g, *power)}
-    return list(picked)
+def shortlist(combos: Sequence[tuple[int, ...]], sctx: GameScoringContext) -> list[tuple[int, ...]]:
+    """Subsets worth an exact score: every Power subset, then the top-K larger ones by proxy."""
+    power = [c for c in combos if len(c) <= POWER_MAX_SIZE]
+    larger = sorted(
+        (c for c in combos if len(c) > POWER_MAX_SIZE), key=lambda c: -_independent(c, sctx)
+    )
+    return power + larger[:_SHORTLIST_K]
 
 
-def independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
-    """Cheap proxy: (independent EV, independent log-growth) — no copula, no MC."""
-    p_ind = float(np.prod(sctx.g.p_model[np.asarray(bet_id)]))
+def _independent(bet_id: Sequence[int], sctx: GameScoringContext) -> float:
+    """Cheap proxy for the fitted value: independent all-hit chance times the payout."""
     _pair_modifier, payout = _modifier_payout(bet_id, sctx)
-    return p_ind * payout, _log_growth(p_ind, payout)
+    return float(np.prod(sctx.g.p_fit[np.asarray(bet_id)])) * payout
 
 
-def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, stat_by_label: dict) -> dict:
-    """Exact copula score for one subset (reuses parlay's gate-free scorer)."""
+def copula_ev(bet_id: Sequence[int], sctx: GameScoringContext, p: np.ndarray) -> float:
+    """Value of a unit staked on ``bet_id`` when each leg wins with its chance in ``p``."""
     size = len(bet_id)
     g = sctx.g
     arr = np.asarray(bet_id)
     pair_modifier, payout = _modifier_payout(bet_id, sctx)
-    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
-    model_ev = float(
+    return float(
         parlay_payout_prob(
-            g.p_model[arr],
+            p[arr],
             g.p_push[arr],
-            sig,
+            psd_or_none(g.C[np.ix_(bet_id, bet_id)]),
             size,
             g.boosts[arr],
             payout,
@@ -63,14 +64,21 @@ def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, stat_by_label:
             pair_modifier=pair_modifier,
         )
     )
-    win_prob = model_ev / payout if payout > 0 else 0.0
+
+
+def score_subset(bet_id: Sequence[int], sctx: GameScoringContext, stat_by_label: dict) -> dict:
+    """Exact copula score for one subset on the fitted chances, with its canonical legs.
+
+    ``ev`` is the fitted value of a unit staked and ``win_prob`` that value over
+    the payout.
+    """
+    ev = copula_ev(bet_id, sctx, sctx.g.p_fit)
+    _pair_modifier, payout = _modifier_payout(bet_id, sctx)
     return {
         "bet_id": tuple(bet_id),
-        "bet_size": size,
-        "model_ev": model_ev,
-        "win_prob": win_prob,
-        "G": _log_growth(win_prob, payout),
-        "kelly_stake": _kelly_fraction(win_prob, payout),
+        "bet_size": len(bet_id),
+        "ev": ev,
+        "win_prob": ev / payout,
         "legs": [
             build_leg(
                 {
@@ -95,20 +103,3 @@ def _modifier_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[f
     boost = pair_modifier * np.prod(g.boosts[np.asarray(bet_id)])
     payout = float(np.clip(boost * sctx.payout_base_by_size[size], PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
     return pair_modifier, payout
-
-
-def _kelly_fraction(p: float, payout: float) -> float:
-    """Full-Kelly fraction of bankroll for a single bet; 0 when there's no edge."""
-    b = payout - 1.0
-    if b <= 0.0:
-        return 0.0
-    return max(0.0, (p * (b + 1.0) - 1.0) / b)
-
-
-def _log_growth(p: float, payout: float) -> float:
-    """Expected log-growth of a single parlay bet at its own full-Kelly fraction."""
-    f = _kelly_fraction(p, payout)
-    if f <= 0.0:
-        return 0.0
-    b = payout - 1.0
-    return p * math.log1p(b * f) + (1.0 - p) * math.log1p(-f)
