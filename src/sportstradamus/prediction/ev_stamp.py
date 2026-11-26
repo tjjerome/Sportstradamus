@@ -47,8 +47,7 @@ def stamp_records(records: list[dict], platform: str, scored_at: pd.Timestamp, a
         .rename(columns={"Boost_Over": "Payout Over", "Boost_Under": "Payout Under"})
         .assign(Platform=platform)
     )
-    priced = live_fit.score(posted, read_parquet_safe(LIVE_FIT_PATH))
-    picks = live_fit.picks(posted.join(priced))
-    stamps = books.join(priced).assign(Pick=picks)[EV_STAMP_COLS].to_dict("records")
+    priced = posted.join(live_fit.score(posted, read_parquet_safe(LIVE_FIT_PATH)))
+    stamps = priced.assign(Pick=live_fit.picks(priced))[EV_STAMP_COLS].to_dict("records")
     for record, stamp in zip(records, stamps, strict=True):
         record.update(stamp)

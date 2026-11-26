@@ -5,7 +5,8 @@ chance an offer's Over hits (docs/handoffs/profit-engine.md 5.1; the estimator a
 evidence are docs/archive/researcher_ev_fit.md). ``fit`` estimates the table, ``score``
 prices offers with it on the side the model took, and ``walk_forward`` prices each game date
 from earlier dates only. ``fit_gain`` and ``ev_bands`` read priced offers against their
-outcomes, for the fit's acceptance tests and kill lines. Pure.
+outcomes, for the fit's acceptance tests and kill lines. ``picks`` ranks priced offers by
+``EV`` to flag the board's picks (docs/handoffs/profit-engine.md 5.3). Pure.
 
 Offers are read under history's column names: ``League``, ``Platform``, ``Payout Over`` and
 ``Payout Under`` (full decimal payouts, 0 on a side the app did not post), ``Bet``,
@@ -248,8 +249,8 @@ def picks(offers: pd.DataFrame) -> np.ndarray:
 
     A slate is one league's game date on one platform, with a place for each of its teams up
     to ``PICKS_PER_SLATE``. Per pick kind (:func:`pick_kind`) each player's highest-``EV``
-    offer competes for the places, wherever on the slate it sits. An offer with no ``EV`` is
-    never a pick.
+    offer competes for the places, wherever on the slate it sits, and a tie goes to the
+    earlier offer. An offer with no ``EV`` is never a pick.
 
     Args:
         offers: Offers as the module reads them, with ``Date``, ``Team``, ``Player`` and

@@ -122,8 +122,8 @@ DECISION_COLS = [
     "Fit Prob Low",
     # Fit Prob times the Bet side's payout.
     "EV",
-    # True on the rows the board called picks: per league, game date and pick kind, the
-    # players with the highest EV, each at their highest-EV offer (live_fit.picks).
+    # True on the rows the board called picks: per platform, league, game date and pick kind,
+    # the players with the highest EV, each at their highest-EV offer (live_fit.picks).
     "Pick",
 ]
 
