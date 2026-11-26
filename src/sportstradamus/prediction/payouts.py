@@ -80,9 +80,9 @@ def _sleeper_curve(
     Flex (SLEEPER_MAX_SIZE+1..SLEEPER_FLEX_CAP): pulls from
     sleeper_payouts["flex"] -- NOT the priced value (see sleeper_flex_payout_curve),
     just a coarse composition-independent stand-in (sum of the real K(n,k)
-    constants) used by beam search's pre-filter ranking before the exact
-    per-candidate price is computed. Unpopulated sizes pad to [0.0] so beam
-    search's EV floors reject them instead of mispricing on invented
+    constants) that tells beam search the size pays before the exact
+    per-candidate price is computed. Unpopulated sizes pad to [0.0], where
+    beam search builds no entry, instead of mispricing on invented
     numbers -- not exercised today since sizes 4-6 are populated, but kept
     as the safety behavior if a future size is ever added unpopulated.
 
@@ -95,8 +95,8 @@ def _sleeper_curve(
     instead of exploring up through SLEEPER_FLEX_CAP on every variant call.
     ``"flex"`` returns its own range plus zero-padded keys below
     SLEEPER_MAX_SIZE+1 -- ``payout_curve_for``'s search list always indexes
-    from size 2, so those keys must exist, just priced at 0.0 so the EV
-    floor rejects them (mirrors the "unpopulated sizes pad to 0.0" behavior
+    from size 2, so those keys must exist, just priced at 0.0 so beam search
+    builds no entry there (mirrors the "unpopulated sizes pad to 0.0" behavior
     above, applied below the variant's range instead of within it).
     """
     curve: dict[int, list[float]] = {}
@@ -160,7 +160,7 @@ def payout_curve_for(
         }
 
     # Flex starts at 3 picks: zero-pad below a variant's minimum so the search
-    # list indexes by ``size - 2`` and the EV pre-checks reject the padded size.
+    # list indexes by ``size - 2`` and beam search builds no entry at the padded size.
     for sz in range(2, UNDERDOG_FLEX_CAP + 1):
         full_curve.setdefault(sz, [0.0])
     search = [full_curve[sz][0] for sz in range(2, UNDERDOG_FLEX_CAP + 1)]
@@ -274,7 +274,7 @@ def expected_payout_with_pushes(
         pair_modifier: Product of the slip's same-game pair modifiers.
 
     Returns:
-        float: Expected payout, ready to be compared against the EV floor.
+        float: Expected payout per unit staked.
     """
     rng = rng if rng is not None else np.random.default_rng()
     samples = rng.multivariate_normal(np.zeros(bet_size), sigma, size=_PUSH_MC_SAMPLES)

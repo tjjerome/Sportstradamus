@@ -18,9 +18,9 @@ different determinism:
   correlation submatrix is non-diagonal — so exact parlay EVs are *not*
   reproducible run to run. We therefore only assert parlay-assembly *structure*
   (non-empty, well-formed columns, plausible bet sizes) on a synthetic WNBA
-  slate tuned to clear the beam gates. The parlay engine's numeric output is
-  pinned separately, on identity correlation, by
-  ``tests/golden/test_parlay_search.py::test_beam_search_characterization``.
+  slate. The parlay engine's numeric output is pinned separately, on identity
+  correlation, by ``tests/golden/test_parlay_search.py``
+  (``test_beam_search_keeps_each_sizes_best_entries_by_fitted_value``).
 
 The kernel unit tests below (`_leg_pair_corr_boost`, `_build_correlation_matrices`)
 drive a *real* ``c_map`` built from the NBA parquet via ``_build_game_corr_map``,
@@ -41,7 +41,7 @@ import pytest
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.leg_schema import LEG_FIELDS
-from sportstradamus.prediction import correlation
+from sportstradamus.prediction import correlation, parlay
 from sportstradamus.prediction.correlation import (
     _annotate_correlation_columns,
     _build_cmarket,
@@ -51,6 +51,7 @@ from sportstradamus.prediction.correlation import (
     _leg_pair_corr_boost,
     _leg_shrinkage,
     _resolve_player_positions,
+    _select_bet_offers,
     find_correlation,
 )
 from sportstradamus.prediction.parlay import GameArrays
@@ -386,8 +387,13 @@ _EXPECTED_OFFER_CORR = [
 
 def _stamped(offers: list[dict]) -> list[dict]:
     """``offers`` as a scoring run hands them to ``find_correlation``: each with the EV
-    stamp's fitted chance (``prediction/ev_stamp.py``), here a notch under the model's."""
-    return [offer | {"Fit Prob": round(offer["Win Prob"] - 0.05, 4)} for offer in offers]
+    stamp's fitted chance (``prediction/ev_stamp.py``), here a notch under the model's, and
+    the ``EV`` that chance is worth at the leg's own payout."""
+    stamped = []
+    for offer in offers:
+        fit_prob = round(offer["Win Prob"] - 0.05, 4)
+        stamped.append(offer | {"Fit Prob": fit_prob, "EV": fit_prob * offer["Boost"]})
+    return stamped
 
 
 def _stub_corr_sources(monkeypatch, c_map: dict[tuple[str, str], float]) -> None:
@@ -434,8 +440,8 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
 # --- synthetic WNBA slate (parlay-assembly structure) -----------------------
 
 
-# Uniform-ish high win probs + Boost == UNDERDOG_BOOST_BASELINE (post-normalize
-# 1.0) clear the beam-search EV gates so the assembly path actually runs.
+# Three legs a team, each its own player, Boost == UNDERDOG_BOOST_BASELINE
+# (post-normalize 1.0): enough for an entry at every size the search builds.
 def _wnba_offers() -> list[dict]:
     raw = [
         ("Aja Wilson", "LVA", "NYL", "PTS", 22.5, 3, 0.82),
@@ -474,9 +480,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     Structural only (parlay EVs are non-deterministic on correlated legs); the
     guard is that the assembly path runs and produces sane rows. ``legs`` (the
     P8 structured-leg schema) replaces the retired ``Leg 1..6`` / ``Legs`` /
-    ``Desc`` / ``Family`` columns; ``Fun`` survives as a sort key the parlay
-    history stores: ``persist._PARLAY_DROP_COLS`` strips it from
-    ``current_parlays.parquet`` only.
+    ``Desc`` / ``Family`` columns.
     """
     offers = _stamped(_wnba_offers())
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
@@ -549,6 +553,32 @@ def test_find_correlation_builds_one_game_frame_per_game_date(monkeypatch) -> No
         partners = leg["Corr Same"] + leg["Corr Opp"]
         assert partners
         assert {(p["player"], p["line"]) for p in partners} <= lines_on[leg["Date"]]
+
+
+def _wnba_slate(monkeypatch, offers: list[dict]) -> dict:
+    """Stats for a slate of the WNBA fixture's players, every pair of its legs correlated 0.2."""
+    _stub_corr_sources(monkeypatch, dict.fromkeys(permutations(_WNBA_TOKENS, 2), 0.2))
+    return {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
+
+
+def test_find_correlation_hands_back_the_searchs_kept_rows(monkeypatch) -> None:
+    """The parlay frame is each game's kept entries as the search returned them: the fitted
+    ``EV`` beside ``Model EV``, every column filled but the search's own ``Bet ID``, and no
+    more than ``_KEPT_PER_SIZE`` a size. A slate that builds none names the same columns,
+    which the board run sorts by before it looks for rows."""
+    offers = _stamped(_wnba_offers())
+    stats = _wnba_slate(monkeypatch, offers)
+
+    _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
+    _, none_built = find_correlation(offers[:1], stats, "Underdog", contest_variant="power")
+
+    assert parlay_df["EV"].lt(parlay_df["Model EV"]).all()
+    assert parlay_df.drop(columns="Bet ID").notna().all(axis=None)
+    # Three legs a team: one six-leg entry, and more than three at every smaller size.
+    assert parlay_df["Bet Size"].value_counts().to_dict() == {2: 3, 3: 3, 4: 3, 5: 3, 6: 1}
+    assert parlay._KEPT_PER_SIZE == 3
+    assert none_built.empty
+    assert list(none_built.columns) == list(parlay_df.columns)
 
 
 @_needs_wnba_corr
@@ -884,6 +914,70 @@ def test_collect_game_corr_carries_platform_and_modifier() -> None:
     assert by_pair[tuple(sorted(["A. Wilson|REB|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(
         0.83
     )
+
+
+# --- the pool the entry search draws from -----------------------------------
+
+
+def test_the_pool_is_the_games_priced_legs_highest_ev_first() -> None:
+    """A leg enters the pool on its fitted value alone. Every leg here sits under EV 1, and
+    several under the floors on the model's and the books' value this replaced. The leg the
+    fit did not price stays out though the model values it most, and of a line's two sides
+    the one worth more stays. That side, the best leg of the game, is listed last."""
+    game_df = pd.DataFrame(_nba_offers())
+    game_df["EV"] = np.linspace(0.80, 0.91, len(game_df))
+    game_df.loc[7, "EV"] = np.nan
+    other_side = game_df.loc[[11]].assign(Bet="Over", EV=0.95)
+    game_df = pd.concat([game_df, other_side], ignore_index=True)
+
+    pool = _select_bet_offers(game_df)
+
+    assert game_df.loc[7, "Model EV"] == game_df["Model EV"].max()
+    assert list(pool.index) == [12, 10, 9, 8, 6, 5, 4, 3, 2, 1, 0]
+
+
+def _pool_legs(legs: list[tuple[str, str, float]]) -> pd.DataFrame:
+    """A game frame of ``(team, player, EV)`` legs, each on a market of its own."""
+    return pd.DataFrame(
+        [
+            {"Team": team, "Player": player, "Market": f"M{i}", "Line": 0.5, "EV": ev}
+            for i, (team, player, ev) in enumerate(legs)
+        ]
+    )
+
+
+@pytest.fixture
+def small_caps(monkeypatch) -> None:
+    """Two legs a player, three a team, five a game."""
+    monkeypatch.setattr(correlation, "_MAX_OFFERS_PER_PLAYER", 2)
+    monkeypatch.setattr(correlation, "_MAX_OFFERS_PER_TEAM", 3)
+    monkeypatch.setattr(correlation, "_MAX_OFFERS_PER_GAME", 5)
+
+
+# In each cap test the leg the cap leaves out is the lowest-EV one and is listed first.
+
+
+def test_the_pool_holds_a_players_best_legs_up_to_the_player_cap(small_caps) -> None:
+    game_df = _pool_legs(
+        [("A", "Ann", 0.80), ("A", "Ann", 0.85), ("A", "Ann", 0.90), ("B", "Bob", 0.50)]
+    )
+
+    assert sorted(_select_bet_offers(game_df).index) == [1, 2, 3]
+
+
+def test_the_pool_holds_a_teams_best_legs_up_to_the_team_cap(small_caps) -> None:
+    team_a = [("A", "A1", 0.60), ("A", "A2", 0.65), ("A", "A3", 0.70), ("A", "A4", 0.75)]
+    game_df = _pool_legs([*team_a, ("B", "B1", 0.50)])
+
+    assert sorted(_select_bet_offers(game_df).index) == [1, 2, 3, 4]
+
+
+def test_the_pool_holds_the_games_best_legs_up_to_the_game_cap(small_caps) -> None:
+    team_a = [("A", "A1", 0.60), ("A", "A2", 0.61), ("A", "A3", 0.62)]
+    team_b = [("B", "B1", 0.70), ("B", "B2", 0.71), ("B", "B3", 0.72)]
+    game_df = _pool_legs([*team_a, *team_b])
+
+    assert sorted(_select_bet_offers(game_df).index) == [1, 2, 3, 4, 5]
 
 
 # --- pure-kernel unit tests -------------------------------------------------

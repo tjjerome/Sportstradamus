@@ -311,9 +311,9 @@ def test_kelly_edge_matches_fractional_kelly_stake_core():
 
 
 def test_kelly_units_uses_shrinkage_and_max_fraction_cap():
-    # Direct test of parlay.py's units formula's pure-math half: shrinkage
-    # genuinely discounts the edge vs full trust, and units scale by
-    # DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL.
+    # The pure-math half of the units formula the entry search once scored Rec Bet by
+    # (src/deprecated/parlay_search_orphans.py): shrinkage genuinely discounts the edge
+    # vs full trust, and units scale by DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL.
     # Half trust sits halfway between the book's implied 1/3 and the model's 0.7:
     # p = 1/3 + (0.7 - 1/3) * 0.5 = 0.516667, raw = (2p - (1-p)) / 2 = 0.275.
     raw_full_trust = kelly_edge(win_prob=0.7, payout_multiplier=3.0, model_shrinkage=1.0)
@@ -338,22 +338,3 @@ def test_zero_shrinkage_is_exactly_zero_edge_at_every_payout():
     # Trust scales the edge away from the book's line rather than toward 0.5.
     assert kelly_edge(win_prob=0.9, payout_multiplier=3.0, model_shrinkage=1.0) > 0
     assert kelly_edge(win_prob=0.1, payout_multiplier=3.0, model_shrinkage=1.0) < 0
-
-
-def test_parlay_kelly_units_rejects_no_evidence_leg():
-    # One no-evidence leg (shrinkage at the floor) must reject the whole
-    # candidate: the coin-flip anchor would otherwise score POSITIVE units
-    # at any payout > 2x and rank garbage parlays as recommendable.
-    import numpy as np
-
-    from sportstradamus.prediction.parlay import _parlay_kelly_units
-
-    class _G:
-        shrinkage = np.array([0.0, 0.5])
-
-    assert _parlay_kelly_units(_G, [0, 1], p=2.0, payout=4.0) == -1.0
-
-    class _GTrusted:
-        shrinkage = np.array([0.4, 0.5])
-
-    assert _parlay_kelly_units(_GTrusted, [0, 1], p=2.0, payout=4.0) > 0

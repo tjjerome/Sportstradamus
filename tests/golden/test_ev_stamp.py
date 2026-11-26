@@ -312,7 +312,7 @@ def test_process_offers_leaves_a_platform_with_no_records_alone(monkeypatch):
     assert set(EV_STAMP_COLS) <= set(offers.columns)
 
 
-def test_find_correlation_carries_the_stamp_and_ranks_by_none_of_it(monkeypatch):
+def test_find_correlation_carries_the_stamp_and_builds_entries_from_it(monkeypatch):
     _stub_corr_sources(monkeypatch, dict.fromkeys(permutations(_WNBA_TOKENS, 2), 0.2))
     even_pick = {
         "Boost_Over": UNDERDOG_BOOST_BASELINE,
@@ -326,9 +326,11 @@ def test_find_correlation_carries_the_stamp_and_ranks_by_none_of_it(monkeypatch)
     stamp_records(records, "Underdog", SCORED_AT, ladder)
     stats = {"WNBA": _stats_for([leg["Player"] for leg in records], "MIN short", "USG_PCT short")}
 
-    offers, parlays = find_correlation(records, stats, "Underdog", contest_variant="power")
+    def search(slate):
+        return find_correlation(slate, stats, "Underdog", contest_variant="power")
 
-    assert not parlays.empty
+    offers, parlays = search(records)
+
     by_player = offers.set_index("Player")
     assert by_player["Book Class"].to_dict() == {
         "Aja Wilson": "A",
@@ -337,6 +339,10 @@ def test_find_correlation_carries_the_stamp_and_ranks_by_none_of_it(monkeypatch)
     assert by_player.at["Aja Wilson", "Book Observed At"] == SCORED_AT - pd.Timedelta(minutes=10)
     assert offers[["Fit Prob", "Fit Prob Low", "EV"]].notna().all(axis=None)
     assert len(offers) == len(records)
+    # No fit table yet, so each even pick prices at the app's fair half: every leg sits under
+    # break-even, and the game still builds its entries.
+    assert offers["EV"].max() < 1
+    assert not parlays.empty
     for leg in parlays["legs"].iloc[0]:
         stamped = by_player.loc[leg["player"]]
         assert (leg["fit_prob"], leg["ev"], leg["pick"]) == (
@@ -344,20 +350,27 @@ def test_find_correlation_carries_the_stamp_and_ranks_by_none_of_it(monkeypatch)
             stamped["EV"],
             stamped["Pick"],
         )
-    # Nothing ranks by the stamp yet: a slate the fit did not price ranks and builds its
-    # parlays the same.
+
+    # The search reads the fitted number. The legs pay and correlate alike, so the best
+    # two-leg entry is each team's leg the fit likes most: turn the fitted chances around
+    # and it is two other players. By the model's chances it would be Wilson and Jones both times.
+    def best_pair(fit_probs):
+        refit = [
+            record | {"Fit Prob": fit_prob, "EV": fit_prob * record["Boost"]}
+            for record, fit_prob in zip(records, fit_probs, strict=True)
+        ]
+        pairs = search(refit)[1].query("`Bet Size` == 2")
+        return {leg["player"] for leg in pairs.loc[pairs["EV"].idxmax(), "legs"]}
+
+    rising = np.linspace(0.45, 0.55, len(records))
+    assert best_pair(rising) == {"Kelsey Plum", "Jonquel Jones"}
+    assert best_pair(rising[::-1]) == {"Aja Wilson", "Sabrina Ionescu"}
+
+    # A slate the fit did not price keeps its place on the board and builds no entry.
     unpriced = [record | dict.fromkeys(live_fit.SCORE_COLS, np.nan) for record in records]
-    bare_offers, bare_parlays = find_correlation(
-        unpriced, stats, "Underdog", contest_variant="power"
-    )
-    pd.testing.assert_frame_equal(
-        offers.drop(columns=EV_STAMP_COLS), bare_offers.drop(columns=EV_STAMP_COLS)
-    )
-    # scipy integrates the joint chance of three or more legs by sampling, so such a parlay's
-    # price repeats to about four digits from one search to the next.
-    pd.testing.assert_frame_equal(
-        parlays.drop(columns="legs"), bare_parlays.drop(columns="legs"), rtol=1e-3
-    )
+    bare_offers, bare_parlays = search(unpriced)
+    assert len(bare_offers) == len(records)
+    assert bare_parlays.empty
 
 
 def _model_led_fit(fit_path) -> None:

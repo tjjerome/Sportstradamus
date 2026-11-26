@@ -49,27 +49,16 @@ _MAX_BOOST_UNDERDOG: float = 2.5
 _MAX_BOOST_OTHER: float = 60.0
 
 
-# Pre-filter gates for offers entering the per-game beam search. Hand-tuned to
-# keep only book-supported, model-favored legs out of the cartesian explosion.
-_OFFER_BOOKS_EV_FLOOR: float = 0.85
-_OFFER_BOOKS_PROB_FLOOR: float = 0.25
-_OFFER_MODEL_EV_FLOOR: float = 1.0
-_OFFER_MODEL_PROB_FLOOR: float = 0.3
-
-# Per-grouping caps that bound the candidate set fed to beam search.
-_MAX_OFFERS_PER_PLAYER: int = 6
-_MAX_OFFERS_PER_TEAM: int = 30
-_MAX_OFFERS_PER_GAME: int = 40
+# Caps on a game's pool, the legs its beam search and story menu draw from.
+_MAX_OFFERS_PER_PLAYER: int = 2
+_MAX_OFFERS_PER_TEAM: int = 12
+_MAX_OFFERS_PER_GAME: int = 24
 
 # Display-correlation gates: when annotating an offer with top correlated legs,
 # surface only partners whose EV / correlation clear these display thresholds.
 _DISPLAY_MODEL_EV_FLOOR: float = 0.95
 _DISPLAY_CORR_FLOOR: float = 0.05
 _DISPLAY_BOOKS_EV_FLOOR: float = 0.9
-
-# Top-N retained per sort key (Model EV / Rec Bet / Fun) before dedup.
-# Three sort views deduped → up to ~3× this many survivors.
-_PARLAY_TOP_N_PER_SORT: int = 300
 
 # Per-league player-position resolution (consumed by _resolve_player_positions):
 # the usage-profile stat that ranks players within a (team, position) group, its
@@ -462,31 +451,19 @@ def _game_frames(league_df):
 
 
 def _select_bet_offers(game_df):
-    """Pre-filter and cap the legs that enter the beam search.
+    """The game's pool, the legs its entries and stories are built from.
 
-    Keep only book-supported, model-favored legs, dedup, then bound the candidate
-    set per player / team / game so the cartesian parlay enumeration stays
-    tractable.
+    The legs the fit priced, highest ``EV`` first: one side of a line, then as many as the
+    per-player, per-team and per-game caps allow. No floor applies, so a game whose every
+    leg sits under break-even still fills its pool.
     """
-    idx = game_df.loc[
-        (game_df["Market EV"] > _OFFER_BOOKS_EV_FLOOR)
-        & (game_df["Market Prob"] >= _OFFER_BOOKS_PROB_FLOOR)
-        & (game_df["Model EV"] > _OFFER_MODEL_EV_FLOOR)
-        & (game_df["Win Prob"] >= _OFFER_MODEL_PROB_FLOOR)
-    ].sort_values("Kelly", ascending=False)
-    idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
-    idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
-    idx = (
-        idx.sort_values(["Model EV", "Market EV"], ascending=False)
-        .groupby("Team")
-        .head(_MAX_OFFERS_PER_TEAM)
-        .sort_values(["Team", "Player"])
+    ranked = (
+        game_df.dropna(subset="EV")
+        .sort_values("EV", ascending=False, kind="stable")
+        .drop_duplicates(subset=["Player", "Team", "Market", "Line"])
     )
-    return (
-        idx.sort_values(["Model EV", "Market EV"], ascending=False)
-        .head(_MAX_OFFERS_PER_GAME)
-        .sort_values(["Team", "Player"])
-    )
+    ranked = ranked.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
+    return ranked.groupby("Team").head(_MAX_OFFERS_PER_TEAM).head(_MAX_OFFERS_PER_GAME)
 
 
 def _corr_partners(legs: pd.DataFrame, market_map: dict[str, str]) -> list[dict]:
@@ -581,29 +558,6 @@ def _collect_game_corr(game_df, C, M, platform, league, game_label, market_map):
             }
         )
     return rows
-
-
-def _append_parlay_rows(parlay_df, best_bets):
-    """Dedup beam-search bets across the three sort views and append.
-
-    Keeps the top ``_PARLAY_TOP_N_PER_SORT`` by Model EV / Rec Bet / Fun, dedups
-    the union on parlay identity (``Bet ID``), and concatenates onto ``parlay_df``.
-    """
-    bets = pd.DataFrame(best_bets)
-    df5 = (
-        pd.concat(
-            [
-                bets.sort_values("Model EV", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
-                bets.sort_values("Rec Bet", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
-                bets.sort_values("Fun", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
-            ]
-        )
-        # subset=["Bet ID"]: a parlay's identity is its leg-index tuple. Full-row
-        # dedup no longer works once ``legs`` (list[dict]) rides along — unhashable.
-        .drop_duplicates(subset=["Bet ID"])
-        .sort_values("Model EV", ascending=False)
-    )
-    return pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
 
 def _append_story_context(
@@ -738,7 +692,9 @@ def _process_league_games(
             full_refund_below_size=full_refund_below_size,
         )
         if best_bets:
-            parlay_df = _append_parlay_rows(parlay_df, best_bets)
+            parlay_df = pd.concat(
+                [parlay_df, pd.DataFrame(best_bets).drop(columns="Bet ID")], ignore_index=True
+            )
     return parlay_df
 
 
@@ -829,6 +785,7 @@ def find_correlation(
             "Date",
             "League",
             "Platform",
+            "EV",
             "Model EV",
             "Market EV",
             "Boost",
@@ -837,7 +794,6 @@ def find_correlation(
             "Bet ID",
             "P",
             "PB",
-            "Fun",
             "Bet Size",
             "Corr Pairs",
             "Boost Pairs",

@@ -14,6 +14,8 @@ Covers the four targets from ``docs/PARLAY_AUDIT.md`` remediation:
 
 from __future__ import annotations
 
+from dataclasses import replace
+from itertools import combinations
 from math import comb
 
 import numpy as np
@@ -21,15 +23,14 @@ import pandas as pd
 import pytest
 from scipy.optimize import brentq
 
-from sportstradamus.helpers import sleeper_payouts, stat_cv, stat_std, underdog_payouts
+from sportstradamus.helpers import no_vig_odds, sleeper_payouts, underdog_payouts
 from sportstradamus.leg_schema import leg_label
+from sportstradamus.prediction import parlay
 from sportstradamus.prediction.joint import _nearest_psd
 from sportstradamus.prediction.parlay import (
     GameArrays,
     _leg_boost_payout,
-    _parlay_fun,
     beam_search_parlays,
-    leg_market_map,
     resolve_leg_stat,
 )
 from sportstradamus.prediction.payouts import (
@@ -244,29 +245,29 @@ def test_psd_repair_keeps_correlation_units_diagonal() -> None:
     assert -1.0 - 1e-9 <= repaired[0, 1] <= 1.0 + 1e-9
 
 
-def _beam_inputs() -> dict:
-    """A 4-leg / 2-team game whose legs clear every beam-search EV gate.
+def _beam_inputs(p_fit=(0.82,) * 4, p_model=None, payouts=(3.0, 6.0, 10.0)) -> dict:
+    """A two-team game, the first half of its legs on team A, each its own player.
 
-    Identity correlation (PSD, analytical mvn.cdf path) + zero pushes + a
-    single-tier power curve keep the output fully deterministic, so it pins
-    ``beam_search_parlays`` end-to-end without touching the stochastic
-    push-aware Monte-Carlo branch (covered separately above).
+    ``p_model`` is the fitted chance unless given. The pair grid is built on the fitted
+    chances, as ``_build_correlation_matrices`` builds it. Identity correlation (PSD,
+    analytical mvn.cdf path) + zero pushes + a single-tier power curve keep the output
+    fully deterministic, so it pins ``beam_search_parlays`` end-to-end without touching
+    the stochastic push-aware Monte-Carlo branch (covered separately above).
     """
-    n = 4
-    p_model = np.array([0.82, 0.82, 0.82, 0.82])
-    p_books = np.array([0.62, 0.62, 0.62, 0.62])
+    p_fit = np.asarray(p_fit, dtype=float)
+    p_model = p_fit if p_model is None else np.asarray(p_model, dtype=float)
+    n = len(p_fit)
     boosts = np.ones(n)
     C = np.eye(n)
     M = np.ones((n, n))
-    P = p_model.reshape(n, 1) * p_model
-    var = p_model * (1 - p_model)
+    P = p_fit.reshape(n, 1) * p_fit
+    var = p_fit * (1 - p_fit)
     V = np.sqrt(var.reshape(n, 1) * var)
-    payouts = [3.0, 6.0, 10.0]
     EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts) * payouts[0]
     bet_df = {
         i: {
             "Player": f"P{i}",
-            "Team": "A" if i < 2 else "B",
+            "Team": "A" if i < n // 2 else "B",
             "League": "NBA",
             "Game": "A/B",
             "Date": "2026-01-01",
@@ -285,10 +286,10 @@ def _beam_inputs() -> dict:
         M=M,
         EV=EV,
         EVb=np.zeros((n, n)),
-        V=V,  # EVb is annotation-only, unused here
+        V=V,
         p_model=p_model,
-        p_fit=p_model,
-        p_books=p_books,
+        p_fit=p_fit,
+        p_books=p_model - 0.2,
         p_push=np.zeros(n),
         boosts=boosts,
         shrinkage=np.ones(n),
@@ -297,14 +298,82 @@ def _beam_inputs() -> dict:
     return {
         "idx": idx,
         "g": g,
-        "payouts": payouts,
-        "full_payouts": {2: [3.0, 0.0], 3: [6.0, 0.0], 4: [10.0, 0.0]},
+        "payouts": list(payouts),
+        "full_payouts": {size: [mult, 0.0] for size, mult in enumerate(payouts, start=2)},
         "max_boost": 10.0,
         "bet_df": bet_df,
         "info": {"Game": "A/B", "Date": "2026-01-01", "League": "NBA", "Platform": "Underdog"},
         "team": "A",
         "opp": "B",
     }
+
+
+def test_a_game_with_every_entry_under_break_even_still_builds_one_at_each_size() -> None:
+    """Selection is by rank: no floor on an entry's value stands between the beam and the
+    board. The floors this replaced kept no entry the model put under 2 for 1."""
+    res = beam_search_parlays(**_beam_inputs(p_fit=(0.5,) * 4, p_model=(0.55,) * 4))
+
+    assert {r["Bet Size"] for r in res} == {2, 3, 4}
+    assert max(r["Model EV"] for r in res) < 1
+
+
+def test_an_entry_carries_its_fitted_value_beside_the_models_claim() -> None:
+    """``EV`` prices an entry on its legs' fitted chances and ``Model EV`` on the model's:
+    with independent legs, the size's payout times the product of each."""
+    inputs = _beam_inputs(p_fit=(0.50, 0.52, 0.54, 0.56), p_model=(0.76, 0.74, 0.72, 0.70))
+    g, payouts = inputs["g"], inputs["payouts"]
+
+    res = beam_search_parlays(**inputs)
+
+    assert {r["Bet Size"] for r in res} == {2, 3, 4}
+    for row in res:
+        legs = list(row["Bet ID"])
+        payout = payouts[len(legs) - 2]
+        assert row["EV"] == pytest.approx(payout * g.p_fit[legs].prod(), rel=1e-4)
+        assert row["Model EV"] == pytest.approx(payout * g.p_model[legs].prod(), rel=1e-4)
+
+
+def test_each_size_exact_prices_the_head_of_the_beam_and_keeps_its_best_few(monkeypatch) -> None:
+    """Per size the search exact-prices the first ``_EXACT_PRICED_PER_SIZE`` admissible
+    candidates of the beam on the fitted chances, keeps the ``_KEPT_PER_SIZE`` that price
+    highest, prices only those again on the model's chances, and returns the rows best
+    fitted value first.
+
+    The legs are independent, so the pair grid ranks a set by the product of its fitted
+    chances. The stand-in pricer values a set higher the lower that product, the reverse of
+    the beam's order: keeping the head of the beam, or pricing every candidate, picks other
+    sets. The stronger team's legs come last, so the head of each beam is one-team sets
+    the search has to pass over without counting them.
+    """
+    n_priced, n_kept = 5, 2
+    monkeypatch.setattr(parlay, "_EXACT_PRICED_PER_SIZE", n_priced)
+    monkeypatch.setattr(parlay, "_KEPT_PER_SIZE", n_kept)
+    p_fit = np.array([0.46, 0.48, 0.50, 0.52, 0.64, 0.66, 0.68, 0.70])
+    inputs = _beam_inputs(p_fit=p_fit, p_model=p_fit + 0.25)
+    priced = []
+
+    def low_chances_price_high(p, *args, **kwargs):
+        priced.append(tuple(p))
+        return 2.0 - float(np.prod(p))
+
+    monkeypatch.setattr(parlay, "parlay_payout_prob", low_chances_price_high)
+
+    res = beam_search_parlays(**inputs)
+
+    def product(legs):
+        return p_fit[list(legs)].prod()
+
+    for size in (2, 3, 4):
+        both_teams = [c for c in combinations(range(8), size) if c[0] < 4 <= c[-1]]
+        head = sorted(both_teams, key=product, reverse=True)[:n_priced]
+        on_fit = {p for p in priced if len(p) == size and set(p) <= set(p_fit)}
+        on_model = [p for p in priced if len(p) == size and not set(p) <= set(p_fit)]
+        assert on_fit == {tuple(p_fit[list(c)]) for c in head}
+        assert len(on_model) == n_kept
+        kept = [r["Bet ID"] for r in res if r["Bet Size"] == size]
+        assert kept == sorted(head, key=product)[:n_kept]
+    assert len(priced) == 3 * (n_priced + n_kept)
+    assert [r["EV"] for r in res] == sorted((r["EV"] for r in res), reverse=True)
 
 
 def test_resolve_leg_stat_uses_market_map_when_present() -> None:
@@ -320,28 +389,9 @@ def test_resolve_leg_stat_strips_h2h_prefix_before_lookup() -> None:
     assert resolve_leg_stat("H2H Points", stat_by_label) == "points"
 
 
-def test_parlay_fun_reads_a_markets_spread_under_the_leagues_own_name(monkeypatch) -> None:
-    """A leg names its market by the platform's label and the spread is filed under the
-    league's own key: Underdog's NHL ``Assists`` is the ``assists`` cell. A cell meditate
-    has not calibrated holds no std, and scores on a unit one."""
-    monkeypatch.setitem(stat_std, "NHL", {"assists": 0.75, "points": None})
-    monkeypatch.setitem(stat_cv, "NHL", {"assists": 0.5, "points": 1.0})
-    stat_by_label = leg_market_map("NHL", "Underdog")
-
-    def fun(market: str, line: float, bet: str) -> float:
-        return _parlay_fun([{"Market": market, "Line": line, "Bet": bet}], "NHL", stat_by_label)
-
-    assert fun("Assists", 1.5, "Over") == pytest.approx(2 - 1 / 0.5 + 1.5 / 0.75)
-    assert fun("H2H Assists", -1.5, "Under") == pytest.approx(3 - 1.5 / 0.75)
-    assert fun("Points", 1.5, "Over") == pytest.approx(2 - 1 / 1.0 + 1.5 / 1)
-    assert fun("Assists", 1.5, "Under") == 0
-
-
-def test_beam_search_scores_fun_on_the_leagues_own_spread(monkeypatch) -> None:
-    """The search hands its label map to the Fun score: looked up under the platform's
-    label, every leg fell back to a unit spread."""
-    monkeypatch.setitem(stat_std, "NHL", {"assists": 0.75})
-    monkeypatch.setitem(stat_cv, "NHL", {"assists": 0.5})
+def test_a_rows_legs_carry_the_leagues_own_stat_key() -> None:
+    """The search hands its label map to each leg: Underdog's NHL ``Assists`` is the
+    ``assists`` cell, the key a leg's ``stat`` holds beside the platform's label."""
     inputs = _beam_inputs()
     inputs["info"]["League"] = "NHL"
     for leg in inputs["bet_df"].values():
@@ -349,59 +399,97 @@ def test_beam_search_scores_fun_on_the_leagues_own_spread(monkeypatch) -> None:
 
     res = beam_search_parlays(**inputs)
 
-    per_leg = 2 - 1 / 0.5 + 1.5 / 0.75
-    assert {r["Bet Size"]: r["Fun"] for r in res} == pytest.approx(
-        {2: 2 * per_leg, 3: 3 * per_leg, 4: 4 * per_leg}
-    )
-
-
-def test_beam_search_characterization() -> None:
-    """Pin beam_search_parlays output on a deterministic slate (decomposition guard).
-
-    ``Rec Bet`` (units) hand-derivation under the sleeper-parity §5
-    shrinkage-aware Kelly gate, with the fixture's full-trust
-    ``shrinkage=np.ones(n)`` (a no-op — ``kelly_edge``'s effective
-    ``p`` equals ``win_prob`` exactly) and ``DEFAULT_KELLY_FRACTION=0.25``,
-    ``MAX_FRACTION_OF_BANKROLL=0.005``:
-
-    ``win_prob = p / payout``; ``b = payout - 1``;
-    ``raw_kelly = (b*win_prob - (1-win_prob)) / b``;
-    ``units = raw_kelly * 0.25 / 0.005 = raw_kelly * 50``.
-
-    - size 2: p=2.0172, payout=3.0 → win_prob=0.6724, b=2.0,
-      raw_kelly=(2*0.6724-0.3276)/2=0.5086 → units=0.5086*50=25.43
-    - size 3: p=3.308208, payout=6.0 → win_prob=0.551368, b=5.0,
-      raw_kelly=(5*0.551368-0.448632)/5=0.4616416 → units=23.08208
-    - size 4: p=4.5212176, payout=10.0 → win_prob=0.45212176, b=9.0,
-      raw_kelly=(9*0.45212176-0.54787824)/9=0.3912464 → units=19.56232
-    """
-    res = beam_search_parlays(**_beam_inputs())
-
-    def sig(r):
-        return (
-            r["Bet Size"],
-            round(r["Model EV"], 6),
-            round(r["Market EV"], 6),
-            round(r["Rec Bet"], 6),
-            round(r["P"], 6),
-            round(r["PB"], 6),
-            round(r["Boost"], 6),
-        )
-
-    expected = (
-        [(2, 2.0172, 1.1532, 25.43, 2.0172, 1.1532, 3.0)] * 4
-        + [(3, 3.308208, 1.429968, 23.08208, 3.308208, 1.429968, 6.0)] * 4
-        + [(4, 4.521218, 1.477634, 19.56232, 4.521218, 1.477634, 10.0)]
-    )
-    assert sorted(map(sig, res)) == sorted(expected)
-    # Each size-2 parlay must span both teams (covers-team/opp gate).
-    legs2 = {tuple(leg_label(leg) for leg in r["legs"]) for r in res if r["Bet Size"] == 2}
-    assert legs2 == {
-        ("P0 Over 1.5 Market0", "P2 Over 1.5 Market2"),
-        ("P0 Over 1.5 Market0", "P3 Over 1.5 Market3"),
-        ("P1 Over 1.5 Market1", "P2 Over 1.5 Market2"),
-        ("P1 Over 1.5 Market1", "P3 Over 1.5 Market3"),
+    assert {(leg["market"], leg["stat"]) for row in res for leg in row["legs"]} == {
+        ("Assists", "assists")
     }
+
+
+def test_a_row_carries_these_columns() -> None:
+    """The row contract ``find_correlation``'s empty frame and the parlay history follow:
+    the fitted ``EV`` beside the model's ``Model EV``, and no sort-view score."""
+    row = beam_search_parlays(**_beam_inputs())[0]
+
+    assert list(row) == [
+        "Game",
+        "Date",
+        "League",
+        "Platform",
+        "EV",
+        "Model EV",
+        "Market EV",
+        "Boost",
+        "Rec Bet",
+        "legs",
+        "Bet ID",
+        "P",
+        "PB",
+        "Bet Size",
+        "Corr Pairs",
+        "Boost Pairs",
+        "Indep P",
+        "Indep PB",
+    ]
+
+
+def test_beam_search_keeps_each_sizes_best_entries_by_fitted_value() -> None:
+    """Pin ``beam_search_parlays`` on a deterministic slate: which entries each size keeps,
+    the order they come back in, and what a row's value columns hold.
+
+    Independent legs on a single-tier curve, so an entry is worth its size's payout times
+    the product of its legs' chances. Sizes 2 and 3 each have four entries holding a leg of
+    both teams and keep the three worth most at the fitted chances; size 4 has one. The
+    best leg is last, so the entry a size drops is its first by leg order.
+    """
+    fit = np.array([0.80, 0.82, 0.84, 0.86])
+    claim = fit + 0.04
+    book = claim - 0.2
+    inputs = _beam_inputs(p_fit=fit, p_model=claim)
+
+    res = beam_search_parlays(**inputs)
+
+    kept = [(0, 1, 2, 3), (1, 2, 3), (0, 2, 3), (0, 1, 3), (1, 3), (1, 2), (0, 3)]
+    assert [r["Bet ID"] for r in res] == kept
+    for row, bet_id in zip(res, kept, strict=True):
+        legs = list(bet_id)
+        payout = inputs["payouts"][len(legs) - 2]
+        assert row["Bet Size"] == len(legs)
+        assert row["Boost"] == payout
+        assert row["EV"] == pytest.approx(payout * fit[legs].prod(), rel=1e-4)
+        assert row["Model EV"] == pytest.approx(payout * claim[legs].prod(), rel=1e-4)
+        assert row["Market EV"] == pytest.approx(payout * book[legs].prod(), rel=1e-4)
+        assert row["P"] == pytest.approx(payout * claim[legs].prod())
+        assert row["PB"] == pytest.approx(payout * book[legs].prod())
+        assert [leg_label(leg) for leg in row["legs"]] == [f"P{i} Over 1.5 Market{i}" for i in legs]
+    assert res[0]["EV"] == pytest.approx(10.0 * 0.80 * 0.82 * 0.84 * 0.86, rel=1e-4)
+    assert res[-1]["EV"] == pytest.approx(3.0 * 0.80 * 0.86, rel=1e-4)
+
+
+def test_fitted_value_equals_the_models_claim_where_the_chances_agree() -> None:
+    """One pricing run on two chance vectors: where the fitted chance is the model's on
+    every leg, ``EV`` is ``Model EV``."""
+    res = beam_search_parlays(**_beam_inputs(p_fit=(0.60, 0.70, 0.65, 0.75)))
+
+    assert len(res) == 7
+    assert [r["EV"] for r in res] == pytest.approx([r["Model EV"] for r in res], rel=1e-4)
+
+
+def test_no_entry_carries_a_stake() -> None:
+    """``Rec Bet`` is 0 on every row, entries the fit values above break-even included: an
+    entry gets no stake until the entries' money record supports one
+    (docs/handoffs/profit-engine.md 5.3)."""
+    res = beam_search_parlays(**_beam_inputs(p_fit=(0.82,) * 4))
+
+    assert min(r["EV"] for r in res) > 1
+    assert [r["Rec Bet"] for r in res] == [0.0] * len(res)
+
+
+def test_a_size_the_table_pays_nothing_at_builds_no_entry() -> None:
+    """A variant's payout list is zero-padded below its smallest entry: Underdog Flex starts
+    at 3 picks. The search builds nothing at a padded size and still reaches the sizes
+    that pay."""
+    res = beam_search_parlays(**_beam_inputs(payouts=(0.0, 6.0, 10.0)))
+
+    assert {r["Bet Size"] for r in res} == {3, 4}
 
 
 # --- Sleeper payout curve (§1/§2) -------------------------------------------
@@ -880,6 +968,28 @@ def test_sleeper_flex_bypasses_boost_product_mechanism() -> None:
     row_bumped = _size4_row(res_bumped)
     assert row_neutral["Boost"] == pytest.approx(row_bumped["Boost"])
     assert row_neutral["Model EV"] == pytest.approx(row_bumped["Model EV"], rel=0.05)
+
+
+def test_sleeper_flex_values_an_entry_on_the_fitted_chances() -> None:
+    """The Flex dispatch prices on the chances it is handed: ``EV`` at the fitted 0.60 a
+    leg, ``Model EV`` at the model's 0.85, both on the entry's own devigged curve.
+
+    Independent legs, so each is the 0-miss tier times P(all four hit) plus the 1-miss tier
+    times P(exactly three hit). Both are 50k-draw Monte-Carlo estimates, hence the loose
+    tolerance.
+    """
+    inputs = _sleeper_flex_beam_inputs()
+    inputs["g"] = replace(inputs["g"], p_fit=np.full(4, 0.60))
+    devigged = np.full(4, no_vig_odds(1.8, 2.2)[0])
+    all_hit, one_miss = sleeper_flex_payout_curve(devigged, sleeper_payouts["flex_k"])[4][:2]
+
+    def value(p: float) -> float:
+        return all_hit * p**4 + one_miss * 4 * p**3 * (1 - p)
+
+    row = _size4_row(beam_search_parlays(**inputs))
+
+    assert row["EV"] == pytest.approx(value(0.60), rel=0.05)
+    assert row["Model EV"] == pytest.approx(value(0.85), rel=0.05)
 
 
 def test_sleeper_flex_ignores_push_probability_by_design() -> None:

@@ -8,14 +8,7 @@ from operator import itemgetter
 import numpy as np
 from tqdm import tqdm
 
-from sportstradamus.helpers import (
-    cell_market,
-    no_vig_odds,
-    sleeper_payouts,
-    stat_cv,
-    stat_map,
-    stat_std,
-)
+from sportstradamus.helpers import cell_market, no_vig_odds, sleeper_payouts, stat_map
 from sportstradamus.leg_schema import build_leg
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.payouts import (
@@ -23,11 +16,6 @@ from sportstradamus.prediction.payouts import (
     PAYOUT_CLIP_LO,
     SLEEPER_FLEX_MIN_SIZE,
     sleeper_flex_payout_curve,
-)
-from sportstradamus.strategies.kelly import (
-    DEFAULT_KELLY_FRACTION,
-    MAX_FRACTION_OF_BANKROLL,
-    kelly_edge,
 )
 
 
@@ -84,24 +72,15 @@ class GameScoringContext:
 # enough that the survivors at sizes 5/6 don't get pruned by ranking jitter.
 _BEAM_WIDTH: int = 1000
 
-# Per-step pairwise-EV floor. Below this, the candidate is too noisy to keep.
-_PARLAY_GEO_MEAN_FLOOR: float = 1.05
-
 # Boost-product gates: drop entries whose modifier product implies hard-banned
 # pairs (low) or runaway promo stacking (high).
 _MIN_PRODUCT_BOOST: float = 0.7
 
-# Final EV gates (post-copula evaluation).
-_BOOKS_EV_FLOOR: float = 0.9
-_MODEL_EV_PRECHECK_FLOOR: float = 1.5
-_MODEL_EV_FINAL_FLOOR: float = 2.0
+# Admissible candidates exact-priced per entry size, from the head of the beam.
+_EXACT_PRICED_PER_SIZE: int = 12
 
-# Minimum Kelly-fraction multiple of the hard bankroll cap (MAX_FRACTION_OF_BANKROLL)
-# required to keep a candidate. NOTE: this constant's meaning shifted with the
-# sleeper-parity §5 shrinkage-aware Kelly-gate rewrite -- it used to mean "how
-# many 5%-bankroll units," now means "how many multiples of the 0.5% hard cap."
-# Value kept unchanged this stage; revisiting the threshold itself is a follow-up.
-_KELLY_UNITS_FLOOR: float = 0.5
+# Entries a game keeps per size: the exact-priced candidates worth most at the fitted chances.
+_KEPT_PER_SIZE: int = 3
 
 
 def _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, k):
@@ -120,10 +99,7 @@ def _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, k)
             extended = (*parlay, new_leg)
             n_pairs = target_size * (target_size - 1) // 2
             ev_prod = np.prod(EV[np.ix_(extended, extended)][np.triu_indices(target_size, 1)])
-            geo_mean = ev_prod ** (1 / n_pairs)
-            if geo_mean < _PARLAY_GEO_MEAN_FLOOR:
-                continue
-            next_candidates.append((extended, geo_mean))
+            next_candidates.append((extended, ev_prod ** (1 / n_pairs)))
     next_candidates.sort(key=lambda x: x[1], reverse=True)
     return [parlay for parlay, _ in next_candidates[:k]]
 
@@ -139,25 +115,6 @@ def _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_bo
     if boost <= _MIN_PRODUCT_BOOST or boost > max_boost:
         return None
     return boost
-
-
-def _parlay_fun(bet, league, stat_by_label):
-    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count.
-
-    A market's spread is filed under the league's own key, not the label the leg
-    carries. A cell with no stored spread scores on a unit one.
-    """
-    stds, cvs = stat_std.get(league, {}), stat_cv.get(league, {})
-    fun = 0.0
-    for leg in bet:
-        stat = resolve_leg_stat(leg["Market"], stat_by_label)
-        # stat_std holds None for a cell meditate has not calibrated yet.
-        line_in_stds = leg["Line"] / (stds.get(stat) or 1)
-        if "H2H" in leg["Market"]:
-            fun += 3 - abs(line_in_stds)
-        elif leg["Bet"] == "Over":
-            fun += 2 - 1 / cvs.get(stat, 1) + line_in_stds
-    return fun
 
 
 def leg_market_map(league: str, platform: str) -> dict[str, str]:
@@ -230,78 +187,38 @@ def _leg_boost_payout(
     )
 
 
-def _parlay_kelly_units(g, bet_id, p, payout):
-    """Shrinkage-aware Kelly ranking score for one evaluated candidate.
-
-    win_prob is exact on the no-push analytical fast path (p = payout *
-    P(all hit) there, so division recovers P(all hit) exactly) but only an
-    approximation on the push-aware MC path. units is a ranking/filter score,
-    not a final stake, so the approximation is acceptable here.
-    """
-    parlay_shrinkage = float(np.min(g.shrinkage[np.ix_(bet_id)]))
-    win_prob = p / payout
-    raw_kelly = kelly_edge(win_prob, payout, parlay_shrinkage)
-    if raw_kelly <= 0:
-        return -1.0
-    return raw_kelly * DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL
-
-
-def _evaluate_parlay(
-    bet_id,
-    bet_size,
-    payout_base,
-    g,
-    full_payouts,
-    max_boost,
-    bet_df,
-    info,
-    team,
-    opp,
-    leg_teams,
-    stat_by_label,
-    full_refund_below_size=None,
+def _price_parlay(
+    g, p, bet_id, boost, sig, payout_base, info, full_payouts, full_refund_below_size
 ):
-    """Score one parlay candidate; return its row dict, or None if it fails a gate."""
-    C, M, p_model, p_books, boosts = g.C, g.M, g.p_model, g.p_books, g.boosts
-    boost = _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost)
-    if boost is None:
-        return None
-
-    pb = p_books[np.ix_(bet_id)]
-    prev_pb = np.prod(pb) * boost * payout_base
-    if prev_pb < _BOOKS_EV_FLOOR:
-        return None
-
-    p = p_model[np.ix_(bet_id)]
-    prev_p = np.prod(p) * boost * payout_base
-    if prev_p < _MODEL_EV_PRECHECK_FLOOR:
-        return None
-
-    SIG = psd_or_none(C[np.ix_(bet_id, bet_id)])
-
-    payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
+    """``(payout, value of a unit staked)`` for one admissible candidate at leg chances ``p``."""
+    bet_size = len(bet_id)
+    p_legs = p[np.ix_(bet_id)]
     if _is_sleeper_flex_candidate(info, bet_size):
-        payout, p = _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG)
-    else:
-        p = _leg_boost_payout(
-            g,
-            bet_id,
-            bet_size,
-            boost,
-            payout,
-            p,
-            SIG,
-            full_payouts,
-            payout_base,
-            full_refund_below_size,
-        )
-    pb = p / prev_p * prev_pb
+        return _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p_legs, sig)
+    payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
+    value = _leg_boost_payout(
+        g,
+        bet_id,
+        bet_size,
+        boost,
+        payout,
+        p_legs,
+        sig,
+        full_payouts,
+        payout_base,
+        full_refund_below_size,
+    )
+    return payout, value
 
-    units = _parlay_kelly_units(g, bet_id, p, payout)
-    if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
-        return None
 
-    bet = itemgetter(*bet_id)(bet_df)
+def _parlay_row(
+    g, bet_id, boost, sig, payout_base, payout, ev, model_ev, bet_df, info, stat_by_label
+):
+    """The board row of one kept entry: its fitted value beside the model's claim."""
+    bet_size = len(bet_id)
+    p_model, p_books = g.p_model[np.ix_(bet_id)], g.p_books[np.ix_(bet_id)]
+    prev_p = np.prod(p_model) * boost * payout_base
+    prev_pb = np.prod(p_books) * boost * payout_base
     legs = [
         build_leg(
             {
@@ -310,28 +227,27 @@ def _evaluate_parlay(
                 "Stat": resolve_leg_stat(leg["Market"], stat_by_label),
             }
         )
-        for leg in bet
+        for leg in itemgetter(*bet_id)(bet_df)
     ]
     return info | {
-        "Model EV": p,
-        "Market EV": pb,
+        "EV": ev,
+        "Model EV": model_ev,
+        "Market EV": model_ev / prev_p * prev_pb,
         # Display Boost: the payout-inclusive value, so the column matches the
         # EV that drove ranking.
         "Boost": payout,
-        "Rec Bet": units,
+        # An entry gets no stake, and no "+EV" mark, until the entries' money record
+        # supports one (docs/handoffs/profit-engine.md 5.3).
+        "Rec Bet": 0.0,
         "legs": legs,
         "Bet ID": bet_id,
         "P": prev_p,
         "PB": prev_pb,
-        # One of the three sort keys _append_parlay_rows keeps the top rows by. Stored
-        # in the parlay history; persist._PARLAY_DROP_COLS drops it only from
-        # current_parlays.parquet.
-        "Fun": _parlay_fun(bet, info["League"], stat_by_label),
         "Bet Size": bet_size,
-        "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
-        "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
-        "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),
-        "Indep PB": float(np.prod(p_books[np.ix_(bet_id)]) * payout),
+        "Corr Pairs": tuple(sig[np.triu_indices(bet_size, 1)]),
+        "Boost Pairs": tuple(g.M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
+        "Indep P": float(np.prod(p_model) * payout),
+        "Indep PB": float(np.prod(p_books) * payout),
     }
 
 
@@ -348,19 +264,22 @@ def beam_search_parlays(
     *,
     full_refund_below_size: int | None = None,
 ):
-    """Enumerate top parlay combinations via beam search.
+    """Build a game's entries: a beam ranks leg sets, the fitted chances price the best.
 
-    Extends parlays leg-by-leg up to ``len(payouts) + 1`` legs, keeping
-    only the top ``_BEAM_WIDTH`` candidates at each size by geometric-mean EV.
-    Full correlated-probability evaluation runs on the survivors.
+    Extends leg sets one leg at a time up to ``len(payouts) + 1`` legs, carrying the
+    ``_BEAM_WIDTH`` sets of each size with the highest geometric-mean pair value
+    (``g.EV``). At each size the first ``_EXACT_PRICED_PER_SIZE`` admissible sets of the
+    beam (a leg of each team, boost product in range) are priced on the fitted chances
+    through the copula, and the ``_KEPT_PER_SIZE`` worth most become rows. No value floor
+    applies: an entry's rank decides.
 
     Args:
-        idx: DataFrame of candidate legs (filtered from the game DataFrame).
-        g: Per-game leg arrays (correlation/boost matrices, EV grid, per-leg
-            model/book/push probabilities and boosts). See :class:`GameArrays`.
+        idx: DataFrame of candidate legs (filtered from the game DataFrame); every one
+            carries a fitted chance.
+        g: Per-game leg arrays (correlation/boost matrices, pair-value grid, per-leg
+            model/fitted/book/push probabilities and boosts). See :class:`GameArrays`.
         payouts: Search-list payout multipliers (length = max_size - 1),
-            indexed by ``bet_size - 2``. Drives the ranking heuristic and the
-            books-EV pre-check.
+            indexed by ``bet_size - 2``.
         full_payouts: Per-(size, miss-count) payout curve. Drives push-aware
             EV and the displayed ``Boost`` column.
         max_boost: Max allowed product boost for a parlay.
@@ -374,7 +293,9 @@ def beam_search_parlays(
             drop-and-reprice rule at every size.
 
     Returns:
-        list[dict]: Parlay candidate dicts ready for DataFrame construction.
+        list[dict]: One row per kept entry, highest ``EV`` first. ``EV`` is the value of
+        a unit staked at the fitted chances; ``Model EV`` is the same pricing at the
+        model's own chances.
     """
     max_bet_size = len(payouts) + 1
     leg_indices = sorted(idx.index.to_numpy())
@@ -388,28 +309,43 @@ def beam_search_parlays(
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
-        top_candidates = _expand_candidates(
+        candidates = _expand_candidates(
             candidates, leg_indices, leg_players, g.EV, target_size, _BEAM_WIDTH
         )
         payout_base = payouts[target_size - 2]
-        for parlay in top_candidates:
-            row = _evaluate_parlay(
-                parlay,
-                target_size,
-                payout_base,
-                g,
-                full_payouts,
-                max_boost,
-                bet_df,
-                info,
-                team,
-                opp,
-                leg_teams,
-                stat_by_label,
-                full_refund_below_size,
+        if payout_base == 0:
+            # A variant's list is zero-padded at the sizes it does not offer.
+            continue
+        pricing = (payout_base, info, full_payouts, full_refund_below_size)
+        priced = []
+        for bet_id in candidates:
+            boost = _parlay_admissible(
+                bet_id, leg_teams, team, opp, g.M, g.boosts, target_size, max_boost
             )
-            if row is not None:
-                parlay_rows.append(row)
-        candidates = top_candidates
+            if boost is None:
+                continue
+            sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
+            payout, ev = _price_parlay(g, g.p_fit, bet_id, boost, sig, *pricing)
+            priced.append((ev, payout, bet_id, boost, sig))
+            if len(priced) == _EXACT_PRICED_PER_SIZE:
+                break
+        priced.sort(key=itemgetter(0), reverse=True)
+        for ev, payout, bet_id, boost, sig in priced[:_KEPT_PER_SIZE]:
+            _, model_ev = _price_parlay(g, g.p_model, bet_id, boost, sig, *pricing)
+            parlay_rows.append(
+                _parlay_row(
+                    g,
+                    bet_id,
+                    boost,
+                    sig,
+                    payout_base,
+                    payout,
+                    ev,
+                    model_ev,
+                    bet_df,
+                    info,
+                    stat_by_label,
+                )
+            )
 
-    return parlay_rows
+    return sorted(parlay_rows, key=itemgetter("EV"), reverse=True)
