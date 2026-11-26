@@ -1,11 +1,13 @@
 """Board prophecy lenses — one-click preset filter views over the offers frame.
 
-You play against DFS, so both EV columns are scored against the app's payout: ``Model EV``
-is the model's return per $1 and ``Market EV`` the consensus book's return at the same
-payout, each break-even at 1.00. The lenses sort offers by betting stance — your edge,
-high-payout longshots, and whether the book agrees the line is soft (Consensus) or not
-(Contrarian) — before the manual filters apply. Pure: ``apply_lens(df, lens)`` returns a
-filtered frame; the registry order is the control's display order.
+"Picks" is the board's picks (``Pick``, set by ``live_fit.picks``) and the Board's default.
+The rest are views of the model's stance. You play against DFS, so both EV columns they read
+are scored against the app's payout: ``Model EV`` is the model's return per $1 and ``Market
+EV`` the consensus book's return at the same payout, each break-even at 1.00. They sort
+offers by betting stance — the model's edge, high-payout longshots, and whether the book
+agrees the line is soft (Consensus) or not (Contrarian) — before the manual filters apply.
+Pure: ``apply_lens(df, lens)`` returns a filtered frame; the registry order is the control's
+display order.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ def _tonight(df: pd.DataFrame) -> pd.DataFrame:
 
 
 LENSES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
+    "Picks": lambda df: df[df["Pick"]],
     "All": lambda df: df,
     "Tonight": _tonight,
     "Sharp edges": _sharp,

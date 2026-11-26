@@ -17,11 +17,13 @@ from sportstradamus.dashboard.data import (
     load_current_offers,
     load_game_ctxs,
     load_pair_modifiers,
+    load_play_record,
     sport_filtered,
 )
+from sportstradamus.dashboard.legs import record_line
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
 from sportstradamus.dashboard.viewport import is_mobile
-from sportstradamus.helpers import market_display_name
+from sportstradamus.helpers import leg_kind, market_display_name
 
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
@@ -45,13 +47,15 @@ MAIN_COLS = [
     "Line",
     columns.MOVE,
     "Boost",
+    "Fit Prob",
+    "EV",
     "Win Prob",
-    "Model Edge",
-    "Consensus Edge",
+    "Model EV",
+    columns.CONSENSUS_EDGE,
     "Platform",
 ]
 
-RANGE_COLS = ["Win Prob", columns.MODEL_EDGE, columns.CONSENSUS_EDGE]
+RANGE_COLS = ["EV", "Model EV", columns.CONSENSUS_EDGE]
 
 signal_cols = [c for c in ["Boost", "Model EV", "Market EV"] if c in offers.columns]
 if signal_cols:
@@ -64,9 +68,9 @@ lens_col, side_col = st.columns([3, 1])
 with lens_col:
     lens = (
         st.segmented_control(
-            "Prophecy lens", list(LENSES), default="Tonight", key="board_lens", wrap=True
+            "Prophecy lens", list(LENSES), default="Picks", key="board_lens", wrap=True
         )
-        or "Tonight"
+        or "Picks"
     )
 with side_col:
     side = st.segmented_control(
@@ -113,8 +117,8 @@ if player_query:
 if side and side != "All" and "Bet" in filtered.columns:
     filtered = filtered.loc[filtered["Bet"] == side]
 
-# Derive Model/Consensus Edge before the sliders so they filter on edge, not raw EV.
-filtered = columns.add_edges(filtered)
+# Derive Consensus Edge before the sliders so its slider filters on the edge, not Market EV.
+filtered = columns.add_consensus_edge(filtered)
 
 range_cols = [c for c in RANGE_COLS if c in filtered.columns]
 if range_cols:
@@ -135,11 +139,20 @@ if range_cols:
             vals = pd.to_numeric(filtered[col], errors="coerce")
             filtered = filtered.loc[vals.between(sel[0], sel[1]) | vals.isna()]
 
-if "Model EV" in filtered.columns:
-    filtered = filtered.sort_values("Model EV", ascending=False)
+# EV ranks the board; a leg the fit did not price follows, by the model's own EV.
+filtered = filtered.sort_values(["EV", "Model EV"], ascending=False, na_position="last")
 
 filtered = filtered.reset_index(drop=True)
 st.caption(f"Showing **{len(filtered):,}** of {len(offers):,} offers")
+
+picks = filtered.loc[filtered["Pick"]]
+if not picks.empty:
+    record = load_play_record()
+    kinds = leg_kind(picks["Boost"], picks["Platform"])
+    with st.expander("Pick record", expanded=True):
+        for league, kind in sorted(set(zip(picks["League"], kinds, strict=True))):
+            line, hover = record_line(record, league, kind)
+            st.caption(line, help=hover)
 
 init_detail_state()
 
@@ -160,46 +173,34 @@ grid_df = filtered[display_cols].copy()
 if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
 
-if "Win Prob" in grid_df.columns:
-    # Kept numeric (0–100) so the column click-sorts; the "%" is a display-only
-    # valueFormatter (percent_cols below), same as the edge columns.
-    grid_df["Win Prob"] = (pd.to_numeric(grid_df["Win Prob"], errors="coerce") * 100).round(1)
-# Model/Consensus Edge are edge-vs-DFS percentages (EV - 1, x100); kept numeric so the
-# heatmap can bucket Model Edge and the grid sorts them — the "%" is a display suffix
-# (percent_cols below), not baked into the value.
-for col in (columns.MODEL_EDGE, columns.CONSENSUS_EDGE):
+# The win chances and Consensus Edge (Market EV − 1) are kept numeric (0–100) so the
+# columns click-sort; the "%" is a display-only valueFormatter (percent_cols below).
+for col in ("Fit Prob", "Win Prob", columns.CONSENSUS_EDGE):
     if col in grid_df.columns:
         grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
-if "Boost" in grid_df.columns:
-    grid_df["Boost"] = pd.to_numeric(grid_df["Boost"], errors="coerce").round(2)
+for col in ("Boost", "EV", "Model EV"):
+    if col in grid_df.columns:
+        grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
 grid_df = grid_df.rename(columns=columns.LABELS)
 
-# columns.LABELS renames Consensus Edge -> Cons Edge before the grid ever sees the
-# frame, so every lookup below keys off the post-rename name, same as "Win %" already
-# does for Win Prob.
+# columns.LABELS renames the columns before the grid ever sees the frame, so every lookup
+# below keys off the post-rename name (Fit Prob -> Win %, Consensus Edge -> Cons Edge).
 numeric_cols = [
     c
-    for c in ("Line", columns.MOVE, "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge")
+    for c in ("Line", columns.MOVE, "Boost", "Win %", "EV", "Model win %", "Model EV", "Cons Edge")
     if c in grid_df.columns
 ]
 if mobile:
-    # Cards read the pre-rename filtered frame (raw 0–1 Win Prob; Model Edge ×100
-    # below, matching the grid path's percent convention).
+    # Cards read the pre-rename filtered frame: raw 0–1 win chances and EVs.
     selected_rows = []
-    cards_df = filtered.copy()
-    cards_df[columns.MODEL_EDGE] = (
-        pd.to_numeric(cards_df[columns.MODEL_EDGE], errors="coerce") * 100
-    ).round(1)
-    render_offer_cards(cards_df)
+    render_offer_cards(filtered)
 else:
     selected_rows = render_themed_grid(
         grid_df,
         numeric_cols=numeric_cols,
-        heatmap_col=columns.MODEL_EDGE,
-        heatmap_center=0.0,
         header_help=columns.HELP,
-        percent_cols=["Win %"],
-        signed_percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
+        percent_cols=["Win %", "Model win %"],
+        signed_percent_cols=["Cons Edge"],
         arrow_col="Line",
         spark_col=columns.MOVE,
         spark_svg_col=columns.MOVE_SPARK,

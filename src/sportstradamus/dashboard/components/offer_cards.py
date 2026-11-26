@@ -1,8 +1,8 @@
 """The Board's mobile card list — one bordered card per offer (Phase M spec §4.3).
 
-The phone replacement for the 11-column AG-Grid, which can't fit a 390px
+The phone replacement for the Board's AG-Grid, which can't fit a 390px
 viewport. Each card carries the row's read (player, market, line/side, Win %,
-Model Edge, platform, any line movement) with numerals in the mono code face,
+EV, Model EV, platform, any line movement) with numerals in the mono code face,
 plus the grid's two actions: Detail (the deep-dive dialog, via the shared
 ``detail_stack``) and Add to slip (the same ``add_to_simple_slip`` path the grid
 selection uses). Pages ``_PAGE_SIZE`` at a time — a slate can run hundreds of
@@ -26,8 +26,7 @@ _SHOWN = "offer_cards_shown"
 def render_offer_cards(offers: pd.DataFrame) -> None:
     """Render the paged card list over a filtered, scored offers frame.
 
-    ``Win Prob`` arrives as the raw 0–1 probability; ``Model Edge`` arrives
-    ×100 (the grid path's own percent convention).
+    ``Fit Prob`` arrives as the raw 0–1 probability, ``EV`` and ``Model EV`` as returns per $1.
     """
     shown = st.session_state.setdefault(_SHOWN, _PAGE_SIZE)
     for idx, row in offers.head(shown).iterrows():
@@ -41,8 +40,10 @@ def render_offer_cards(offers: pd.DataFrame) -> None:
 
 def _render_card(idx, row: pd.Series) -> None:
     arrow = "▲" if str(row.get("Bet", "")).lower().startswith("o") else "▼"
-    win = float(row.get("Win Prob") or 0.0)
-    edge = float(row.get("Model Edge") or 0.0)
+    # A leg the fit did not price has no win chance or EV of its own: it shows the model's.
+    fitted = (
+        "No EV" if pd.isna(row["EV"]) else f"Win `{row['Fit Prob']:.0%}` · EV `{row['EV']:.2f}`"
+    )
     market = row.get("Market Display") or row.get("Market", "")
     # A 78px sparkline is unreadable at 390px, so the phone reads the posted line's move as
     # text instead — and reads nothing when that line held, which on a same-day board is
@@ -52,7 +53,7 @@ def _render_card(idx, row: pd.Series) -> None:
     with st.container(border=True):
         st.markdown(
             f"**{row['Player']}** · {market} {arrow} `{row['Line']:.10g}`  \n"
-            f"Win `{win:.0%}` · Edge `{edge:+.1f}%` · {row.get('Platform', '')} · "
+            f"{fitted} · Model EV `{row['Model EV']:.2f}` · {row.get('Platform', '')} · "
             f"{row.get('League', '')}{moved}"
         )
         detail_col, add_col = st.columns(2)

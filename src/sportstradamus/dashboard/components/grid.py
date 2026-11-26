@@ -22,7 +22,7 @@ _RIGHT_STYLE = {"textAlign": "right", "fontFamily": _MONO}
 # Same style as a JS object literal, for the heatmap expression's null / neutral branches.
 _RIGHT_EXPR = "{'textAlign':'right','fontFamily':'IBM Plex Mono, monospace'}"
 # Append a "%" to a numeric cell for display only — the underlying value stays numeric so
-# sorting and the heatmap still see the number (the Board's edge columns are EV − 1, x100).
+# sorting and the heatmap still see the number (the Board's percent columns are kept x100).
 _PERCENT_FORMATTER = JsCode(
     "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(1)+'%';}"
 )
@@ -60,7 +60,7 @@ _HEAT_TEXT = "#E6E9EF"
 _NEG_STRONG, _NEG_MILD = theme.DIVERGING_COLORS[1], theme.DIVERGING_COLORS[2]
 _POS_MILD, _POS_STRONG = theme.DIVERGING_COLORS[6], theme.DIVERGING_COLORS[7]
 # Absolute |edge − centre| thresholds (in the heatmap column's own units — percentage
-# points for the Board's Model Edge) that split the buckets: below MILD stays unpainted,
+# points for the by-side panel's ROI) that split the buckets: below MILD stays unpainted,
 # MILD..STRONG paints the mild bucket, at/beyond STRONG the saturated one. Absolute, not a
 # fraction of the column max — the old fraction scheme painted the whole first screen the
 # moment the board was edge-sorted (the max set the scale, so everything looked extreme).

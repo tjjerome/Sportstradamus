@@ -1,13 +1,14 @@
 """Scoring-column semantics — the one home for what the snapshot's score columns mean.
 
-You play against DFS (Underdog payout table / Sleeper boost), not against the book. So
-``Model EV`` (``Win % × Boost``) is already your expected return per $1 staked on the app,
-and the edge you capture is ``Model EV − 1`` (**Model Edge**). ``Market EV`` is the same
-payout scored with the consensus book's probability, so ``Market EV − 1`` (**Consensus
-Edge**) is how soft the book thinks the DFS line is — above 0 it agrees, below 0 you're
-contrarian. This module relabels ``Win Prob`` to **Win %**, attaches header tooltips, and
-derives the two edge columns plus the Board's matchup, market-name, and line-movement
-columns. Display-only: the raw snapshot columns are unchanged.
+You play against DFS (Underdog payout table / Sleeper boost), not against the book, so each
+EV here is the average return per $1 staked on the app at the leg's payout, break-even at
+1.00. ``EV`` prices the win chance fitted to how past posted picks settled (``Fit Prob``,
+shown as **Win %**); ``Model EV`` prices the model's own chance (``Win Prob``, shown as
+**Model win %**). ``Market EV`` is the same payout scored with the consensus book's
+probability, so ``Market EV − 1`` (**Consensus Edge**) is how soft the book thinks the DFS
+line is — above 0 it agrees, below 0 you're contrarian. This module relabels the columns,
+attaches header tooltips, and derives Consensus Edge plus the Board's matchup, market-name,
+and line-movement columns. Display-only: the raw snapshot columns are unchanged.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ from sportstradamus.dashboard.narrative import match_label
 from sportstradamus.helpers import market_display_name
 from sportstradamus.helpers.io import LINE_MOVEMENT_KEYS
 
-MODEL_EDGE = "Model Edge"
 CONSENSUS_EDGE = "Consensus Edge"
 MOVE = "Move"
 MOVE_SPARK = "Move Spark"
@@ -30,16 +30,22 @@ MOVE_SUMMARY = "Move Summary"
 MOVE_TEXT = "Move Text"
 _EV_BREAK_EVEN = 1.0
 
-LABELS = {"Win Prob": "Win %", CONSENSUS_EDGE: "Cons Edge", "Market Display": "Market"}
+LABELS = {
+    "Fit Prob": "Win %",
+    "Win Prob": "Model win %",
+    CONSENSUS_EDGE: "Cons Edge",
+    "Market Display": "Market",
+}
 
 HELP = {
-    "Win %": "Model's probability the pick hits.",
-    MODEL_EDGE: "Your edge vs the DFS payout: Model EV − 1 (Win % × Boost − 1). +6% means $1 "
-    "returns $1.06 on average against the app. This is what Kelly sizes.",
+    "Win %": "The chance this side wins, fitted to how past posted picks settled.",
+    "EV": "What $1 on this leg returns on average at its payout and the fitted Win %; 1.00 "
+    "breaks even.",
+    "Model win %": "The model's own chance this side wins.",
+    "Model EV": "What $1 on this leg would return on average at its payout if the model's own "
+    "win chance were right; 1.00 breaks even.",
     "Cons Edge": "The consensus book's edge at the same DFS payout: Market EV − 1. Above 0% "
     "the book agrees the line is soft; below 0% the book disagrees (you're contrarian).",
-    "Kelly": "Kelly edge — the bankroll fraction full-Kelly would stake on this leg; 0 when "
-    "the payout is at or below 1× or above the 2.5× favored cap.",
     MOVE: "How far the fair line has moved since the offer opened, in the stat's own units, on "
     "this row's Platform — the DFS app you'd bet, not the consensus. The fair line is where "
     "the app's price would be even money, so a multiplier change counts even while the posted "
@@ -49,19 +55,11 @@ HELP = {
 }
 
 
-def _edge(df: pd.DataFrame, ev_col: str) -> pd.Series:
-    return pd.to_numeric(df[ev_col], errors="coerce") - _EV_BREAK_EVEN
-
-
-def add_edges(df: pd.DataFrame) -> pd.DataFrame:
-    """Append the derived ``Model Edge`` (``Model EV − 1``) and ``Consensus Edge``
-    (``Market EV − 1``) columns, each only when its source EV column is present.
-    """
+def add_consensus_edge(df: pd.DataFrame) -> pd.DataFrame:
+    """Append the derived ``Consensus Edge`` (``Market EV − 1``) when ``Market EV`` is present."""
     df = df.copy()
-    if "Model EV" in df.columns:
-        df[MODEL_EDGE] = _edge(df, "Model EV")
     if "Market EV" in df.columns:
-        df[CONSENSUS_EDGE] = _edge(df, "Market EV")
+        df[CONSENSUS_EDGE] = pd.to_numeric(df["Market EV"], errors="coerce") - _EV_BREAK_EVEN
     return df
 
 

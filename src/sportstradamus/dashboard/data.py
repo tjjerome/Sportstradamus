@@ -32,6 +32,7 @@ from sportstradamus.helpers.io import (
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
     LINE_MOVEMENT_COLS,
+    LINE_MOVEMENT_KEYS,
     LIVE_FIT_PATH,
     MODEL_STATS_PATH,
     PAIR_MODIFIER_COLS,
@@ -428,7 +429,9 @@ def load_slate_shapes(date: str) -> dict[str, GameShape]:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading line movement...")
 def _load_current_line_movement_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path).reindex(columns=LINE_MOVEMENT_COLS)
+    # An absent export reindexes to float keys, which an empty board's string keys refuse.
+    movement = read_parquet_safe(path).reindex(columns=LINE_MOVEMENT_COLS)
+    return movement.astype(dict.fromkeys(LINE_MOVEMENT_KEYS, object))
 
 
 def load_current_line_movement() -> pd.DataFrame:

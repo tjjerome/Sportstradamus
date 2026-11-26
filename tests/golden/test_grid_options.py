@@ -3,8 +3,8 @@
 ``dashboard/components/grid.py`` is the one place the stat grids turn a frame into
 ``gridOptions``. These goldens hold its three promises: numbers never center (DESIGN.md §4),
 every color it paints is a committed design token, and the board lenses / edge derivation
-read the EV columns as edge-vs-DFS (Model Edge = ``Model EV − 1``, Consensus Edge =
-``Market EV − 1``; lens book-agreement keys off ``Market EV``).
+read the EV columns as edge-vs-DFS (Consensus Edge = ``Market EV − 1``; lens book-agreement
+keys off ``Market EV``), with the board's picks a lens of their own.
 """
 
 from __future__ import annotations
@@ -19,12 +19,11 @@ from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.columns import (
     CONSENSUS_EDGE,
     LABELS,
-    MODEL_EDGE,
     MOVE,
     MOVE_SPARK,
     MOVE_SUMMARY,
     MOVE_TEXT,
-    add_edges,
+    add_consensus_edge,
     add_line_movement,
     add_market_display,
     add_match_column,
@@ -41,15 +40,17 @@ from sportstradamus.dashboard.lenses import LENSES, apply_lens
 from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
+# A signed percent column the generic grid tests paint as the heatmap.
+_EDGE = "Edge"
 _GRID_DF = pd.DataFrame(
     {
         "Player": ["A", "B", "C", "D"],
-        MODEL_EDGE: [0.18, -0.05, 0.00, 0.50],
+        _EDGE: [0.18, -0.05, 0.00, 0.50],
         CONSENSUS_EDGE: [0.02, 0.00, 0.05, -0.10],
         "Kelly": [0.10, 0.00, 0.02, 0.25],
     }
 )
-_NUMERIC = [MODEL_EDGE, CONSENSUS_EDGE, "Kelly"]
+_NUMERIC = [_EDGE, CONSENSUS_EDGE, "Kelly"]
 
 
 def _dumps(options: dict) -> str:
@@ -67,7 +68,7 @@ def _cellstyle_text(cell_style) -> str:
 
 
 def test_numeric_cols_right_aligned_never_centered() -> None:
-    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE)
+    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=_EDGE)
     defs = _column_defs(options)
     for col in _NUMERIC:
         style = _cellstyle_text(defs[col]["cellStyle"])
@@ -78,7 +79,7 @@ def test_numeric_cols_right_aligned_never_centered() -> None:
 
 
 def test_grid_hexes_are_design_tokens() -> None:
-    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE)
+    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=_EDGE)
     allowed = set(theme.DIVERGING_COLORS) | {_HEAT_TEXT}
     found = set(_HEX.findall(_dumps(options)))
     assert found, "heatmap baked no colors — expected the diverging ramp"
@@ -86,12 +87,12 @@ def test_grid_hexes_are_design_tokens() -> None:
 
 
 def test_heatmap_is_jscode_on_its_column_only() -> None:
-    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE)
+    options = build_themed_grid_options(_GRID_DF, numeric_cols=_NUMERIC, heatmap_col=_EDGE)
     defs = _column_defs(options)
     # The heatmap column must be a JsCode function (st_aggrid needs allow_unsafe_jscode);
     # a plain dict here means the heatmap silently never renders.
-    assert hasattr(defs[MODEL_EDGE]["cellStyle"], "js_code"), "heatmap cellStyle is not JsCode"
-    assert "backgroundColor" in defs[MODEL_EDGE]["cellStyle"].js_code
+    assert hasattr(defs[_EDGE]["cellStyle"], "js_code"), "heatmap cellStyle is not JsCode"
+    assert "backgroundColor" in defs[_EDGE]["cellStyle"].js_code
     for col in (CONSENSUS_EDGE, "Kelly"):
         assert "backgroundColor" not in _cellstyle_text(defs[col]["cellStyle"]), (
             f"{col} is painted but only the heatmap column should be"
@@ -102,11 +103,11 @@ def test_percent_cols_get_a_value_formatter_value_stays_numeric() -> None:
     options = build_themed_grid_options(
         _GRID_DF,
         numeric_cols=_NUMERIC,
-        heatmap_col=MODEL_EDGE,
-        percent_cols=[MODEL_EDGE, CONSENSUS_EDGE],
+        heatmap_col=_EDGE,
+        percent_cols=[_EDGE, CONSENSUS_EDGE],
     )
     defs = _column_defs(options)
-    for col in (MODEL_EDGE, CONSENSUS_EDGE):
+    for col in (_EDGE, CONSENSUS_EDGE):
         fmt = defs[col].get("valueFormatter")
         assert fmt is not None and "%" in fmt.js_code  # display-only suffix
     assert "valueFormatter" not in defs["Kelly"]  # only percent_cols get it
@@ -116,11 +117,11 @@ def test_signed_percent_cols_get_a_sign_prefixed_formatter() -> None:
     options = build_themed_grid_options(
         _GRID_DF,
         numeric_cols=_NUMERIC,
-        signed_percent_cols=[MODEL_EDGE],
+        signed_percent_cols=[_EDGE],
         percent_cols=[CONSENSUS_EDGE],
     )
     defs = _column_defs(options)
-    signed = defs[MODEL_EDGE]["valueFormatter"].js_code
+    signed = defs[_EDGE]["valueFormatter"].js_code
     plain = defs[CONSENSUS_EDGE]["valueFormatter"].js_code
     # The signed formatter (edge columns) prefixes a "+" on positives; the plain one doesn't.
     assert ">0?'+'" in signed
@@ -144,9 +145,9 @@ def test_decimal_cols_get_a_three_decimal_formatter_value_stays_numeric() -> Non
 
 def test_heatmap_thresholds_are_absolute_not_fraction_of_max() -> None:
     options = build_themed_grid_options(
-        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE, heatmap_center=0.0
+        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=_EDGE, heatmap_center=0.0
     )
-    js = _column_defs(options)[MODEL_EDGE]["cellStyle"].js_code
+    js = _column_defs(options)[_EDGE]["cellStyle"].js_code
     # Bucket boundaries are the fixed ±MILD/±STRONG edges baked absolutely, independent of
     # the column's own max — so an edge-sorted first screen no longer paints solid (the old
     # fraction-of-column-max bug, where the max set the scale and everything looked extreme).
@@ -155,12 +156,12 @@ def test_heatmap_thresholds_are_absolute_not_fraction_of_max() -> None:
 
 
 def test_header_tooltips_attached() -> None:
-    help_map = {MODEL_EDGE: "your edge vs DFS", CONSENSUS_EDGE: "book's view"}
+    help_map = {_EDGE: "your edge vs DFS", CONSENSUS_EDGE: "book's view"}
     options = build_themed_grid_options(
-        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE, header_help=help_map
+        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=_EDGE, header_help=help_map
     )
     defs = _column_defs(options)
-    assert defs[MODEL_EDGE]["headerTooltip"] == "your edge vs DFS"
+    assert defs[_EDGE]["headerTooltip"] == "your edge vs DFS"
     assert defs[CONSENSUS_EDGE]["headerTooltip"] == "book's view"
 
 
@@ -171,6 +172,7 @@ def test_apply_lens_each_narrows() -> None:
             "Market EV": [1.02, 1.00, 1.05, 0.90, 0.98],
             "Boost": [1.0, 1.0, 1.0, 3.0, 1.0],
             "Date": ["2026-07-04", "2026-07-04", "2026-07-05", "2026-07-04", "2026-07-05"],
+            "Pick": [False, True, False, False, True],
         }
     )
     assert apply_lens(df, "All").equals(df)
@@ -182,6 +184,8 @@ def test_apply_lens_each_narrows() -> None:
         assert len(out) < len(df), f"{lens} did not narrow the board"
     # You play against DFS: Contrarian = model +EV vs DFS where the book is under break-even;
     # Consensus = both the model and the book score it over break-even.
+    # Picks = the board's picks, whatever the model's EV says of them.
+    assert set(apply_lens(df, "Picks").index) == {1, 4}
     assert set(apply_lens(df, "Contrarian").index) == {3, 4}
     assert set(apply_lens(df, "Consensus").index) == {0, 2}
     # Tonight = the soonest slate date present, so it degrades without wall-clock/timezone
@@ -200,16 +204,11 @@ def test_tonight_lens_missing_date_col_unchanged() -> None:
     assert apply_lens(df, "Tonight").equals(df)
 
 
-def test_add_edges_are_ev_minus_one() -> None:
+def test_add_consensus_edge_is_market_ev_minus_one() -> None:
     df = pd.DataFrame({"Model EV": [1.20, 1.00], "Market EV": [1.05, 0.90]})
-    out = add_edges(df)
-    assert out[MODEL_EDGE].tolist() == [pytest.approx(0.20), pytest.approx(0.00)]
+    out = add_consensus_edge(df)
     assert out[CONSENSUS_EDGE].tolist() == [pytest.approx(0.05), pytest.approx(-0.10)]
-    # Each edge needs only its own EV column.
-    assert MODEL_EDGE in add_edges(df.drop(columns=["Market EV"])).columns
-    assert CONSENSUS_EDGE not in add_edges(df.drop(columns=["Market EV"])).columns
-    assert CONSENSUS_EDGE in add_edges(df.drop(columns=["Model EV"])).columns
-    assert MODEL_EDGE not in add_edges(df.drop(columns=["Model EV"])).columns
+    assert CONSENSUS_EDGE not in add_consensus_edge(df.drop(columns=["Market EV"])).columns
 
 
 def test_add_match_column_player_team_first() -> None:
@@ -303,11 +302,11 @@ def test_spark_col_formatter_is_a_plain_signed_number_not_a_percent() -> None:
     decimals: a price-only move on a TD prop shifts the fair line by hundredths, which one
     decimal would round to "+0.0".
     """
-    df = pd.DataFrame({MOVE: [1.5], MODEL_EDGE: [6.0], MOVE_SPARK: ["<svg/>"]})
+    df = pd.DataFrame({MOVE: [1.5], _EDGE: [6.0], MOVE_SPARK: ["<svg/>"]})
     options = build_themed_grid_options(
         df,
-        numeric_cols=[MOVE, MODEL_EDGE],
-        signed_percent_cols=[MODEL_EDGE],
+        numeric_cols=[MOVE, _EDGE],
+        signed_percent_cols=[_EDGE],
         spark_col=MOVE,
         spark_svg_col=MOVE_SPARK,
     )
@@ -315,7 +314,7 @@ def test_spark_col_formatter_is_a_plain_signed_number_not_a_percent() -> None:
     spark_fmt = defs[MOVE]["valueFormatter"].js_code
     assert ">0?'+'" in spark_fmt and "%" not in spark_fmt
     assert "toFixed(2)" in spark_fmt
-    assert "%" in defs[MODEL_EDGE]["valueFormatter"].js_code
+    assert "%" in defs[_EDGE]["valueFormatter"].js_code
 
 
 def test_spark_svg_colors_stay_out_of_grid_options() -> None:
@@ -517,6 +516,14 @@ def test_line_movement_loader_reindexes_an_old_snapshot_onto_the_current_schema(
     assert absent.empty and absent.columns.tolist() == LINE_MOVEMENT_COLS
 
 
+def test_an_empty_board_joins_an_absent_export(tmp_path) -> None:
+    """The Board opens on its picks, so a snapshot with none renders an empty board, and the
+    absent export's keys must still join that board's string keys."""
+    absent = _load_current_line_movement_cached(tmp_path / "absent.parquet", 0.0)
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]).iloc[:0], absent)
+    assert out.empty and MOVE in out.columns
+
+
 def test_arrow_col_noop_without_bet_column() -> None:
     df = pd.DataFrame({"Line": [23.5, 8.5]})
     options = build_themed_grid_options(df, numeric_cols=["Line"], arrow_col="Line")
@@ -647,7 +654,7 @@ def test_glyph_cols_noop_without_kwarg() -> None:
 def test_market_display_labels_back_to_market_header() -> None:
     """Market Display carries the slug's prose label but the grid header reads "Market"
     (mockup ``docs/mockups/p8-board.html:104``) — columns.LABELS renames it back, same
-    mechanism as Consensus Edge -> Cons Edge and Win Prob -> Win %.
+    mechanism as Consensus Edge -> Cons Edge and Fit Prob -> Win %.
     """
     assert LABELS["Market Display"] == "Market"
     df = pd.DataFrame({"Market Display": ["Points", "Assists"]}).rename(columns=LABELS)
@@ -671,8 +678,10 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
         "Line",
         MOVE,
         "Boost",
+        "Fit Prob",
+        "EV",
         "Win Prob",
-        "Model Edge",
+        "Model EV",
         "Consensus Edge",
         "Platform",
     ]
