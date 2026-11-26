@@ -681,7 +681,8 @@
   // --- Hover card --------------------------------------------------------------
   function showCard(hit) {
     clearTimeout(hideTimer);
-    const cd = hit.star.points[hit.i]; // [key, player, market, bet, line, win, boost, kelly, inSlip]
+    // [key, player, market, bet, line, win, boost, ev, model_win, model_ev, inSlip]
+    const cd = hit.star.points[hit.i];
     activeKey = cd[0];
     card.innerHTML = cardHtml(cd);
     card.querySelector(".cst-btn.cst-detail").addEventListener("click", function () {
