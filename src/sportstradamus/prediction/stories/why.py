@@ -217,7 +217,7 @@ def story_dek(
     valid whichever mode chip is active. ``index`` is ``legs.offer_index`` of
     the offers frame, built once per game by the menu. A led story's dek is
     about ``lead_player``'s own leg, like its headline; an unled one (``""``)
-    keeps the core's highest-conviction leg. Clause-guarded and empty-safe — a
+    keeps the core leg with the highest fitted chance. Clause-guarded and empty-safe — a
     sub-2-leg core carries no cluster clause and missing offer facts drop their
     clauses; everything deterministic via the md5 rotation.
     """
@@ -289,12 +289,12 @@ def _dek_lineup_clause(player: str, match: Mapping, seed_tail: str) -> str:
 def _dek_anchor(
     core_bet_ids: Sequence[int], sctx, index: Mapping[tuple, Mapping], lead_player: str
 ) -> tuple[str, Mapping] | None:
-    """The dek's subject and its offer record: the lead's leg, else the highest-conviction one."""
+    """The dek's subject and its offer record: the lead's leg, else the highest fitted chance."""
     if not core_bet_ids:
         return None
     anchor_id = max(
         core_bet_ids,
-        key=lambda i: (sctx.bet_df[i]["Player"] == lead_player, float(sctx.g.p_model[i])),
+        key=lambda i: (sctx.bet_df[i]["Player"] == lead_player, float(sctx.g.p_fit[i])),
     )
     row = sctx.bet_df[anchor_id]
     match = index.get((row["Player"], row["Bet"], row["Line"]))

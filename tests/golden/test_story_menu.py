@@ -789,16 +789,26 @@ def test_dek_is_deterministic_and_reads_core_correlation():
     assert dek
     assert "0.45" in dek  # the 2-leg core's mean pairwise rho, slot-formatted :.2f
     # The anchor's form/matchup clauses render only if offer_index keeps the
-    # "Avg 5"/"DVPOA" facts — Player0 is the Over lead and the max-p_model leg,
-    # so it is the dek's subject either way.
+    # "Avg 5"/"DVPOA" facts — Player0 is the Over lead and the leg with the highest
+    # fitted chance, so it is the dek's subject either way.
     assert "Player0" in dek
+
+
+def test_unled_dek_features_the_core_leg_with_the_highest_fitted_chance():
+    """The claim ranks Player0's leg first and the fit Player1's; the dek features the fit's."""
+    corr = np.eye(2)
+    corr[0, 1] = corr[1, 0] = 0.45
+    sctx, offers = _ctx([0.70, 0.60], corr, fits=[0.55, 0.65])
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert out["lead_side"].eq("").all()
+    assert set(re.findall(r"Player\d", out["dek"].iloc[0])) == {"Player1"}
 
 
 def _led_pair_stories() -> pd.DataFrame:
     """One story per story_id on a slate led on both sides by the pair {Player0, Player1}.
 
     Each led cluster borrows the other team's leg, so both led stories price that
-    pair; Player1's Under carries the higher ``p_model``. Every offer runs 2.0 above
+    pair; Player1's Under carries the higher fitted chance. Every offer runs 2.0 above
     its line in a matchup that gives the stat (``_ctx``), so those facts back an
     Over and cut against an Under.
     """
@@ -815,8 +825,8 @@ def _led_pair_stories() -> pd.DataFrame:
 
 def test_led_story_dek_is_about_its_lead():
     """A led story's dek names its lead and nobody else; an unled story keeps the
-    highest-conviction anchor, which an anchor picked on conviction alone would
-    make the Over-led dek's subject too (Player1)."""
+    anchor with the highest fitted chance, which an anchor picked on that chance
+    alone would make the Over-led dek's subject too (Player1)."""
     stories = _led_pair_stories()
     named = {
         (row["lead_side"], row["lead_player"]): set(re.findall(r"Player\d", row["dek"]))

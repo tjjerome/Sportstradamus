@@ -855,13 +855,13 @@ def test_pitcher_case_is_unchanged_by_the_lineup_columns():
 def test_dek_names_the_posted_batting_slot():
     """A hitter-anchored story's subhead carries the batting order and the starter's hand.
 
-    ``story_dek`` reads only ``date``, ``bet_df``, and ``g.p_model`` off the
+    ``story_dek`` reads only ``date``, ``bet_df``, and ``g.p_fit`` off the
     scoring context for a single-leg core (the cluster clause needs two legs).
     """
     sctx = SimpleNamespace(
         date=_DATE,
         bet_df={0: {"Player": "Aaron Judge", "Bet": "Over", "Line": 1.5, "Market": "total bases"}},
-        g=SimpleNamespace(p_model=[0.61]),
+        g=SimpleNamespace(p_fit=[0.61]),
     )
     dek = story_dek([0], sctx, offer_index(_mlb_offer()), "")
     assert "Aaron Judge" in dek
