@@ -78,6 +78,7 @@ def _ctx(
         EVb=np.zeros((n, n)),
         V=np.zeros((n, n)),
         p_model=probs,
+        p_fit=probs.copy(),
         p_books=probs.copy(),
         p_push=np.zeros(n),
         boosts=np.ones(n),

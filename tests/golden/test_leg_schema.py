@@ -1,5 +1,7 @@
 """Golden pins for the canonical structured-leg schema."""
 
+import json
+
 import pandas as pd
 
 from sportstradamus.leg_schema import LEG_FIELDS, build_leg, leg_field, leg_label
@@ -63,6 +65,26 @@ def test_build_leg_defaults_nan_and_missing_numeric():
     leg = build_leg(row)
     assert leg["stat"] == "PTS"
     assert leg["kelly"] == 0.0
+
+
+def test_build_leg_carries_the_fit_and_the_pick_flag():
+    leg = build_leg({**OFFER_ROW, "Fit Prob": 0.52, "EV": 0.93, "Pick": True})
+    assert (leg["fit_prob"], leg["ev"], leg["pick"]) == (0.52, 0.93, True)
+
+
+def test_a_leg_the_fit_did_not_price_reads_none_and_is_no_pick():
+    # One side posted: the stamp leaves NaN. A snapshot older than the stamp has no column.
+    one_sided = {**OFFER_ROW, "Fit Prob": float("nan"), "EV": float("nan"), "Pick": False}
+    for row in (one_sided, OFFER_ROW):
+        leg = build_leg(row)
+        assert leg["fit_prob"] is None and leg["ev"] is None and leg["pick"] is False
+
+
+def test_a_leg_built_from_a_frame_row_is_json():
+    # The dashboard's components and the ledger serialise legs, and numpy's bool is not JSON.
+    board = pd.DataFrame([{**OFFER_ROW, "Fit Prob": 0.52, "EV": 0.93, "Pick": True}])
+    leg = json.loads(json.dumps(build_leg(board.iloc[0])))
+    assert (leg["fit_prob"], leg["ev"], leg["pick"]) == (0.52, 0.93, True)
 
 
 def test_leg_field_reads_canonical_lowercase_leg():

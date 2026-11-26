@@ -384,6 +384,12 @@ _EXPECTED_OFFER_CORR = [
 ]
 
 
+def _stamped(offers: list[dict]) -> list[dict]:
+    """``offers`` as a scoring run hands them to ``find_correlation``: each with the EV
+    stamp's fitted chance (``prediction/ev_stamp.py``), here a notch under the model's."""
+    return [offer | {"Fit Prob": round(offer["Win Prob"] - 0.05, 4)} for offer in offers]
+
+
 def _stub_corr_sources(monkeypatch, c_map: dict[tuple[str, str], float]) -> None:
     """Stand a fixed ``c_map`` in for every game's, and an empty frame for the gitignored
     corr parquets it is built from, so a slate scores the same on any box."""
@@ -404,7 +410,7 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
     the drifting, gitignored correlation parquets and runs everywhere (no real data needed)."""
     _stub_corr_sources(monkeypatch, _synthetic_offer_cmap())
 
-    offers = _nba_offers()
+    offers = _stamped(_nba_offers())
     stats = {"NBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
 
     offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
@@ -472,7 +478,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     history stores: ``persist._PARLAY_DROP_COLS`` strips it from
     ``current_parlays.parquet`` only.
     """
-    offers = _wnba_offers()
+    offers = _stamped(_wnba_offers())
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
 
     _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
@@ -510,7 +516,7 @@ def test_find_correlation_builds_one_game_frame_per_game_date(monkeypatch) -> No
     because the stored correlation slice keeps the first of two rows for a game and
     leg pair."""
     _stub_corr_sources(monkeypatch, dict.fromkeys(permutations(_WNBA_TOKENS, 2), 0.2))
-    first = _wnba_offers()
+    first = _stamped(_wnba_offers())
     later = [{**leg, "Date": "2026-05-09", "Line": leg["Line"] + 1.0} for leg in first]
     later[0]["Line"] = first[0]["Line"]
     offers = later + first
@@ -553,7 +559,7 @@ def test_find_correlation_writes_position_labels_wnba() -> None:
     slice that the function discards; v2 writes them back as a ``Position``
     column so ``build_game_context`` can aggregate positional matchup edges.
     """
-    offers = _wnba_offers()
+    offers = _stamped(_wnba_offers())
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
 
     offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
@@ -743,7 +749,7 @@ def test_find_correlation_mlb_position_stays_a_string_column() -> None:
         }
     )
 
-    offer_df, _ = find_correlation(_mlb_offers(), {"MLB": stat_data}, "Underdog")
+    offer_df, _ = find_correlation(_stamped(_mlb_offers()), {"MLB": stat_data}, "Underdog")
 
     assert all(isinstance(p, str) for p in offer_df["Position"])
     labels = dict(zip(offer_df["Player"], offer_df["Position"], strict=True))
@@ -993,6 +999,7 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
     game_df = pd.DataFrame(
         {
             "Win Prob": [0.6, 0.5, 0.7],
+            "Fit Prob": [0.52, 0.49, 0.55],
             "Market Prob": [0.55, 0.48, 0.66],
             "Boost": [1.0, 1.0, 1.0],
             "Player": ["A", "B", "C"],
@@ -1031,6 +1038,16 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     assert EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.3 * 1.0 * 3.0)
     assert np.allclose(EV, EV.T)
     assert EVb.shape == (3, 3)
+
+
+def test_build_correlation_matrices_carry_each_legs_fitted_chance() -> None:
+    """``p_fit`` is the stamp's ``Fit Prob``, NaN kept on a leg the fit did not price."""
+    game_df, game_dict = _matrix_game()
+    game_df["Fit Prob"] = [0.52, np.nan, 0.47]
+
+    g = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {})
+
+    np.testing.assert_array_equal(g.p_fit, [0.52, np.nan, 0.47])
 
 
 def test_build_correlation_matrices_honors_push_column() -> None:

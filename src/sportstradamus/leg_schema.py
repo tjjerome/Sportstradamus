@@ -26,6 +26,11 @@ LEG_FIELDS = (
     "boost",
     "push_prob",
     "kelly",
+    # The EV stamp's read of the leg (prediction/ev_stamp.py): the fitted win chance and
+    # its EV, None on a leg the fit did not price, and whether the board called it a pick.
+    "fit_prob",
+    "ev",
+    "pick",
 )
 
 _OFFER_KEYS = {
@@ -88,7 +93,7 @@ def is_model_liked(leg: Mapping) -> bool:
     return leg_field_float(leg, "kelly") > 0
 
 
-def _numeric_or_default(row: Mapping, col: str, default: float) -> float:
+def _numeric_or_default(row: Mapping, col: str, default: float | None) -> float | None:
     """Read a numeric offer column, treating a missing key or NaN as default."""
     value = row.get(col, default)
     return default if pd.isna(value) else float(value)
@@ -105,6 +110,10 @@ def build_leg(row: Mapping) -> dict:
     leg["boost"] = _numeric_or_default(row, "Boost", 1.0)
     leg["push_prob"] = _numeric_or_default(row, "Push Prob", 0.0)
     leg["kelly"] = _numeric_or_default(row, "Kelly", 0.0)
+    leg["fit_prob"] = _numeric_or_default(row, "Fit Prob", None)
+    leg["ev"] = _numeric_or_default(row, "EV", None)
+    pick = row.get("Pick")
+    leg["pick"] = bool(pd.notna(pick) and pick)
     return leg
 
 

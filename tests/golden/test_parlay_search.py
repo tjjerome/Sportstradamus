@@ -287,6 +287,7 @@ def _beam_inputs() -> dict:
         EVb=np.zeros((n, n)),
         V=V,  # EVb is annotation-only, unused here
         p_model=p_model,
+        p_fit=p_model,
         p_books=p_books,
         p_push=np.zeros(n),
         boosts=boosts,
@@ -833,6 +834,7 @@ def _sleeper_flex_beam_inputs(*, m_pair: float = 1.0, p_push_leg0: float = 0.0) 
         EVb=np.zeros((n, n)),
         V=V,
         p_model=p_model,
+        p_fit=p_model,
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,

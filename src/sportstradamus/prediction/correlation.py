@@ -313,6 +313,7 @@ def _build_correlation_matrices(
         EVb=EVb,
         V=V,
         p_model=p_model,
+        p_fit=game_df["Fit Prob"].to_numpy(),
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,

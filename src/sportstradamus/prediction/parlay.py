@@ -45,6 +45,7 @@ class GameArrays:
     EVb: np.ndarray  # leg×leg book pairwise EV
     V: np.ndarray  # model std-dev outer product
     p_model: np.ndarray
+    p_fit: np.ndarray  # the EV stamp's Fit Prob; nan on a leg the fit did not price
     p_books: np.ndarray
     p_push: np.ndarray
     boosts: np.ndarray

@@ -312,7 +312,7 @@ def test_process_offers_leaves_a_platform_with_no_records_alone(monkeypatch):
     assert set(EV_STAMP_COLS) <= set(offers.columns)
 
 
-def test_find_correlation_carries_the_stamp_and_reads_none_of_it(monkeypatch):
+def test_find_correlation_carries_the_stamp_and_ranks_by_none_of_it(monkeypatch):
     _stub_corr_sources(monkeypatch, dict.fromkeys(permutations(_WNBA_TOKENS, 2), 0.2))
     even_pick = {
         "Boost_Over": UNDERDOG_BOOST_BASELINE,
@@ -320,7 +320,6 @@ def test_find_correlation_carries_the_stamp_and_reads_none_of_it(monkeypatch):
         "Model Version": "v1",
     }
     records = [leg | even_pick for leg in _wnba_offers()]
-    unstamped = [dict(record) for record in records]
     ladder = _Ladder(
         {("WNBA", "PTS", "2026-05-08"): _rungs([("Aja Wilson", "dk", 22.5, 0.60, 10)])}
     )
@@ -338,14 +337,27 @@ def test_find_correlation_carries_the_stamp_and_reads_none_of_it(monkeypatch):
     assert by_player.at["Aja Wilson", "Book Observed At"] == SCORED_AT - pd.Timedelta(minutes=10)
     assert offers[["Fit Prob", "Fit Prob Low", "EV"]].notna().all(axis=None)
     assert len(offers) == len(records)
-    # Nothing reads the stamp yet: the slate ranks and builds its parlays as it does unstamped.
+    for leg in parlays["legs"].iloc[0]:
+        stamped = by_player.loc[leg["player"]]
+        assert (leg["fit_prob"], leg["ev"], leg["pick"]) == (
+            stamped["Fit Prob"],
+            stamped["EV"],
+            stamped["Pick"],
+        )
+    # Nothing ranks by the stamp yet: a slate the fit did not price ranks and builds its
+    # parlays the same.
+    unpriced = [record | dict.fromkeys(live_fit.SCORE_COLS, np.nan) for record in records]
     bare_offers, bare_parlays = find_correlation(
-        unstamped, stats, "Underdog", contest_variant="power"
+        unpriced, stats, "Underdog", contest_variant="power"
     )
-    pd.testing.assert_frame_equal(offers.drop(columns=EV_STAMP_COLS), bare_offers)
+    pd.testing.assert_frame_equal(
+        offers.drop(columns=EV_STAMP_COLS), bare_offers.drop(columns=EV_STAMP_COLS)
+    )
     # scipy integrates the joint chance of three or more legs by sampling, so such a parlay's
     # price repeats to about four digits from one search to the next.
-    pd.testing.assert_frame_equal(parlays, bare_parlays, rtol=1e-3)
+    pd.testing.assert_frame_equal(
+        parlays.drop(columns="legs"), bare_parlays.drop(columns="legs"), rtol=1e-3
+    )
 
 
 def _model_led_fit(fit_path) -> None:
