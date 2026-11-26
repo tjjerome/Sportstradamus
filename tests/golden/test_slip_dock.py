@@ -16,6 +16,7 @@ from streamlit.testing.v1 import AppTest
 
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
+from sportstradamus.leg_schema import leg_label
 
 _SCRIPT = """
 import streamlit as st
@@ -64,11 +65,40 @@ def test_empty_slip_renders_nothing():
     assert not any("slip_dock" in (b.key or "") for b in at.button)
 
 
-def test_bar_summarizes_slip():
+def test_bar_leads_with_ev_beside_model_ev():
+    """The legs' fitted .55 prices the slip at 3.5 x .55² and their claimed .60 at 3.5 x .6²,
+    so reading one for the other fails."""
     at = _dock_test([_leg("Jalen Brunson", "PTS", "NYK"), _leg("Jayson Tatum", "PTS", "BOS")])
     assert any(b.key == "slip_dock_toggle" for b in at.button)
     summary = " ".join(m.value for m in at.markdown)
-    assert "2 legs" in summary
+    assert "2 legs · EV 1.06 · Model EV 1.26 · $" in summary
+
+
+def test_sheet_leads_with_ev_then_the_payout_to_check():
+    at = _dock_test(
+        [_leg("Jalen Brunson", "PTS", "NYK"), _leg("Jayson Tatum", "PTS", "BOS")],
+        open_sheet=True,
+    )
+    captions = [c.value for c in at.caption]
+    assert captions[0].startswith("EV 1.06 · Model EV 1.26 · Kelly stake $")
+    assert captions[0].endswith(" · joint 30%")
+    assert captions[1:] == [
+        "Worth a bet if the app pays at least 3.31x (we assume 3.50x).",
+        "Legs here share a game, so this value is unproven until you check the app's payout "
+        "against that number.",
+    ]
+
+
+def test_unpriced_slip_names_its_leg_and_still_locks():
+    unpriced = _leg("Jayson Tatum", "PTS", "BOS") | {"fit_prob": None, "ev": None}
+    at = _dock_test([_leg("Jalen Brunson", "PTS", "NYK"), unpriced], open_sheet=True)
+    summary = " ".join(m.value for m in at.markdown)
+    assert "2 legs · not priced · Model EV 1.26 · $0" in summary
+    assert [c.value for c in at.caption] == [
+        "Model EV 1.26 · Kelly stake $0",
+        f"Not priced: only one side is posted for {leg_label(unpriced)}.",
+    ]
+    assert not at.button(key="slip_dock_lock").disabled
 
 
 def test_sheet_lists_legs_and_remove_works():

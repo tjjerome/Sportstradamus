@@ -20,6 +20,7 @@ import streamlit as st
 
 from sportstradamus.dashboard.components.pair_note import render_pair_note
 from sportstradamus.dashboard.components.slip_builder import slip_shrinkage
+from sportstradamus.dashboard.components.slip_readout import ev_text, rail_lines
 from sportstradamus.dashboard.components.slip_state import (
     _BANKROLL,
     _LEGS,
@@ -104,10 +105,8 @@ def _summary(legs: Sequence[dict], score: SlipScore | None) -> str:
         return f"{len(legs)} leg · add another to price"
     if score.banned:
         return f"{len(legs)} legs · won't pair · $0"
-    return (
-        f"{len(legs)} legs · {float(score.payout):.2f}x · "
-        f"EV {float(score.model_ev) - 1:+.0%} · ${score.stake}"
-    )
+    priced = "" if score.ev is not None else "not priced · "
+    return f"{len(legs)} legs · {priced}{ev_text(score.ev, score.model_ev)} · ${score.stake}"
 
 
 def _render_sheet(legs: Sequence[dict], score: SlipScore | None) -> None:
@@ -129,11 +128,8 @@ def _render_sheet(legs: Sequence[dict], score: SlipScore | None) -> None:
     if not valid:
         st.warning(reason)
     render_pair_note(score, legs, st.session_state[_PLATFORM])
-    st.markdown(
-        f'<div class="slip-dock-line">Kelly stake ${score.stake} · '
-        f"joint {float(score.joint_p):.0%}</div>",
-        unsafe_allow_html=True,
-    )
+    for line in rail_lines(score, legs):
+        st.caption(line)
     lock_col, clear_col = st.columns(2)
     if lock_col.button(
         "Lock it in!", key="slip_dock_lock", type="primary", disabled=not valid or score.banned

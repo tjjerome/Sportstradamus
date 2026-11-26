@@ -36,6 +36,7 @@ from sportstradamus.dashboard.components.satellite_picker import (
     render_added_legs,
     satellite_groups,
 )
+from sportstradamus.dashboard.components.slip_readout import rail_lines
 from sportstradamus.dashboard.components.slip_state import (
     _BANKROLL,
     _BUILDER,
@@ -235,7 +236,7 @@ def _render_price(
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
-    _render_metrics(score, key_prefix=key_prefix)
+    _render_metrics(score, legs, key_prefix=key_prefix)
     render_pair_note(score, legs, platform)
     _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid and not score.banned)
 
@@ -439,15 +440,15 @@ def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
     return None
 
 
-def _render_metrics(score: SlipScore, *, key_prefix: str) -> None:
-    """Draw the astrolabe readout and the Kelly stake under it.
+def _render_metrics(score: SlipScore, legs: Sequence[Mapping], *, key_prefix: str) -> None:
+    """Draw the astrolabe readout and the slip's numbers under it (``rail_lines``).
 
     The astrolabe tweens from its current pose on every render and snaps only on first
     mount, so an unrelated rerun that recomputes the identical ``SlipScore`` is a no-op.
     """
     render_astrolabe(astrolabe_payload(score), key=f"{key_prefix}_astrolabe")
-    bankroll = float(st.session_state[_BANKROLL])
-    st.caption(f"Kelly stake ${score.stake} of ${bankroll:,.0f}")
+    for line in rail_lines(score, legs):
+        st.caption(line)
 
 
 def _render_lock_in(

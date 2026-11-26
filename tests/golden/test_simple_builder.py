@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.slip_engine import modifier_map
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
+from sportstradamus.leg_schema import leg_label
 
 _SCRIPT = """
 import pandas as pd
@@ -90,3 +91,23 @@ def test_refused_pair_says_why_it_cannot_lock():
     assert len(at.warning) == 1
     assert "Underdog won't pair" in at.warning[0].value
     assert at.button(key="sb_lock").disabled
+
+
+def test_metrics_lead_with_ev_then_the_payout_to_check():
+    """The legs' fitted .55 and claimed .60 price the slip apart, so the caption reads the
+    fit as EV and the claim as Model EV."""
+    legs = [_leg("Jalen Brunson", "PTS", "NYK"), _leg("Jayson Tatum", "PTS", "BOS")]
+    at = _builder(legs, {})
+    captions = [c.value for c in at.caption]
+    assert captions[0].startswith("EV 1.06 · Model EV 1.26 · Kelly stake $")
+    assert "Worth a bet if the app pays at least 3.31x (we assume 3.50x)." in captions
+
+
+def test_unpriced_slip_says_so_and_still_locks():
+    unpriced = _leg("Jayson Tatum", "PTS", "BOS") | {"fit_prob": None, "ev": None}
+    at = _builder([_leg("Jalen Brunson", "PTS", "NYK"), unpriced], {})
+    assert [c.value for c in at.caption] == [
+        "Model EV 1.26 · Kelly stake $0",
+        f"Not priced: only one side is posted for {leg_label(unpriced)}.",
+    ]
+    assert not at.button(key="sb_lock").disabled
