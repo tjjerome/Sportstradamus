@@ -4,10 +4,12 @@ Orchestrates the full prediction pipeline:
 
 1. Load and update ``Stats`` objects for active leagues
 2. Scrape DFS offers (Underdog, Sleeper)
-3. Score via :func:`process_offers` (feature extraction + distributional model)
+3. Score via :func:`process_offers` (feature extraction + distributional model, then
+   the EV stamp)
 4. Snapshot scored offers + parlays as parquet for the Streamlit dashboard
-5. Persist a rolling year of predictions to ``data/runtime/history.parquet`` and
-   the new parlays to the ``data/runtime/parlay_hist/`` day partitions
+5. Persist a rolling year of predictions to ``data/runtime/history.parquet``, a row only
+   while its game is still ahead of the board (:func:`_recordable`), and the new parlays
+   to the ``data/runtime/parlay_hist/`` day partitions
 """
 
 from __future__ import annotations
