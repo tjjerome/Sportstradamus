@@ -12,6 +12,8 @@ import importlib
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.legs import record_line
+
 
 def _loaders(monkeypatch, tmp_path, *, offers_rows, stories_rows):
     data_module = importlib.import_module("sportstradamus.dashboard.data")
@@ -79,3 +81,15 @@ def test_stories_loader_backfills_lead_columns(monkeypatch, tmp_path):
     assert stories["lead"].tolist() == [False]
     assert stories["lead_side"].tolist() == [""]
     assert data_module.load_current_offers()["Star"].tolist() == [2.4]
+
+
+def test_before_the_nightly_job_runs_every_league_and_kind_reads_no_picks_settled(
+    monkeypatch, tmp_path
+):
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "PLAY_RECORD_PATH", tmp_path / "play_record.parquet")
+    st.cache_data.clear()
+    assert record_line(data_module.load_play_record(), "NHL", "underdog_even") == (
+        "NHL even picks: 0 legs yet",
+        None,
+    )

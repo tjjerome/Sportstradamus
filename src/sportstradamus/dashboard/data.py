@@ -32,9 +32,11 @@ from sportstradamus.helpers.io import (
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
     LINE_MOVEMENT_COLS,
+    LIVE_FIT_PATH,
     MODEL_STATS_PATH,
     PAIR_MODIFIER_COLS,
     PARLAY_HIST_PATH,
+    PLAY_RECORD_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     USER_SLIPS_PATH,
     parlay_hist_mtime,
@@ -328,6 +330,26 @@ def load_calibration_summary() -> pd.DataFrame:
     return _load_calibration_summary_cached(
         CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH)
     )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_nightly_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
+
+
+def load_play_record() -> pd.DataFrame:
+    """Each play's record by league and pick kind (``plays.PLAY_RECORD_COLS``) from the
+    nightly job; before its first run, a record with no rows.
+    """
+    record = _load_nightly_cached(PLAY_RECORD_PATH, _mtime(PLAY_RECORD_PATH))
+    return record if not record.empty else pd.DataFrame(columns=["play", "league", "kind"])
+
+
+def load_live_fit() -> pd.DataFrame:
+    """The EV fit's weights by league, pick kind and book class (``live_fit.FIT_COLS``) from
+    the nightly job; empty before its first run.
+    """
+    return _load_nightly_cached(LIVE_FIT_PATH, _mtime(LIVE_FIT_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")

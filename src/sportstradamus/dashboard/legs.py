@@ -1,13 +1,59 @@
-"""Lookup helpers for parlay legs: the offer row, the correlation key and the model cell."""
+"""Leg helpers every surface shares.
+
+The offer row, the correlation key, the model cell, the "+EV" mark and the picks' record line.
+"""
 
 from collections.abc import Mapping
 
 import pandas as pd
 
-from sportstradamus.helpers import archive_market
+from sportstradamus.helpers import archive_market, platform_payout
 from sportstradamus.leg_schema import leg_field
+from sportstradamus.realized import in_recommended_band
 
-__all__ = ["corr_key", "find_offer_idx", "leg_cell_market"]
+__all__ = ["corr_key", "ev_marked", "find_offer_idx", "leg_cell_market", "record_line"]
+
+# How the record line names each kind of the play record (``helpers.leg_kind``) to a bettor.
+_KIND_WORDS = {
+    "sleeper": "Sleeper",
+    "underdog_even": "even",
+    "underdog_raised": "raised-payout",
+    "underdog_cut": "reduced-payout",
+}
+
+
+def ev_marked(offers: pd.DataFrame) -> pd.Series:
+    """Which offers wear the "+EV" mark: the fit's lower bound on the win chance (``Fit Prob
+    Low``) times the side's payout reaches 1, at a payout inside the recommended band.
+
+    The play ``ev_edge`` in ``plays.PLAYS`` is the same rule. ``EV`` never marks a leg on its
+    own, and a leg the fit did not price has no bound, so it is never marked.
+    """
+    payout = platform_payout(offers["Boost"], offers["Platform"])
+    return (offers["Fit Prob Low"] * payout >= 1) & in_recommended_band(payout)
+
+
+def record_line(record: pd.DataFrame, league: str, kind: str) -> tuple[str, str | None]:
+    """The board's picks' record in ``league`` and ``kind`` as one line, and its hover text.
+
+    ``record`` is ``play_record.parquet``; only its ``ev_pick`` row counts, so a league and
+    kind with no pick settled yet reads "0 legs yet" with no hover, never another play's
+    record.
+    """
+    title = f"{league} {_KIND_WORDS[kind]} picks"
+    row = record[
+        record["play"].eq("ev_pick") & record["league"].eq(league) & record["kind"].eq(kind)
+    ]
+    if row.empty:
+        return f"{title}: 0 legs yet", None
+    row = row.iloc[0]
+    hover = (
+        f"Settled {row['first_date']} to {row['last_date']}: won {row['hit_rate']:.1%} against "
+        f"the {row['breakeven_rate']:.1%} their payouts needed. Return per $1 on each leg "
+        f"{row['roi']:+.1%}, 95% range {row['roi_lo']:+.1%} to {row['roi_hi']:+.1%}."
+    )
+    plural = "s" if row["n"] != 1 else ""
+    return f"{title}: {row['n']:,} leg{plural}, {row['roi']:+.1%}", hover
 
 
 def corr_key(leg: Mapping) -> str:
