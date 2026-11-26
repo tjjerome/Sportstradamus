@@ -13,7 +13,8 @@ from sportstradamus.helpers.io import LIVE_FIT_PATH, read_parquet_safe
 from sportstradamus.prediction.model_prob import normalize_market
 
 # What a scoring run stamps on each record: ``book_stamp.stamp``'s columns, then
-# ``live_fit.score``'s. ``history_schema.DECISION_COLS`` spells the same seven out.
+# ``live_fit.score``'s. ``history_schema.DECISION_COLS`` spells the same seven out; importing
+# them from here would be a cycle, as ``live_fit`` imports ``history_schema``.
 EV_STAMP_COLS: list[str] = [*book_stamp.COLS, *live_fit.SCORE_COLS]
 
 
@@ -39,12 +40,12 @@ def stamp_records(records: list[dict], platform: str, scored_at: pd.Timestamp, a
         for league, label in zip(offers["League"], offers["Market"], strict=True)
     ]
     books = book_stamp.stamp(offers.assign(Market=archive_names), archive, scored_at)
-    fit = live_fit.score(
+    priced = live_fit.score(
         offers.join(books)
         .rename(columns={"Boost_Over": "Payout Over", "Boost_Under": "Payout Under"})
         .assign(Platform=platform),
         read_parquet_safe(LIVE_FIT_PATH),
     )
-    stamps = books.join(fit)[EV_STAMP_COLS].to_dict("records")
+    stamps = books.join(priced)[EV_STAMP_COLS].to_dict("records")
     for record, stamp in zip(records, stamps, strict=True):
         record.update(stamp)
