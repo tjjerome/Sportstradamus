@@ -47,7 +47,7 @@ def process_offers(
     book,
     stats,
     *,
-    scored_at,
+    scored_at: pd.Timestamp,
     contest_variant="pooled",
     corr_sink=None,
     story_sink=None,
