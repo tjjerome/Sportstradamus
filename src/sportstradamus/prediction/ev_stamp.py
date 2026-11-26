@@ -14,7 +14,7 @@ from sportstradamus.prediction.model_prob import normalize_market
 
 # What a scoring run stamps on each record: ``book_stamp.stamp``'s columns, then
 # ``live_fit.score``'s. ``history_schema.DECISION_COLS`` spells the same seven out.
-EV_STAMP_COLS: list[str] = [*book_stamp.COLS, "Fit Prob", "Fit Prob Low", "EV"]
+EV_STAMP_COLS: list[str] = [*book_stamp.COLS, *live_fit.SCORE_COLS]
 
 
 def stamp_records(records: list[dict], platform: str, scored_at: pd.Timestamp, archive) -> None:
