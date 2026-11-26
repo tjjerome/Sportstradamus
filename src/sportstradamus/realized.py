@@ -89,7 +89,7 @@ _CAL_SUMMARY_COLS = ["Cohort", "Alt Line", "Bin", "Predicted", "Actual", "N", "E
 
 
 def in_recommended_band(payout: pd.Series) -> pd.Series:
-    """Whether each payout sits in ``(1, RECOMMENDED_PAYOUT_MAX]``, where a side can be recommended."""
+    """Whether each payout sits where a side can be recommended: ``(1, RECOMMENDED_PAYOUT_MAX]``."""
     return payout.between(1, RECOMMENDED_PAYOUT_MAX, inclusive="right")
 
 
