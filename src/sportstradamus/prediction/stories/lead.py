@@ -1,8 +1,8 @@
 """Star prominence and the lead story each game's menu headlines.
 
-Ranked on EV alone, a game's menu anchors on whichever leg values highest, star
-or not. These pure pieces re-anchor it on the game's stars from snapshot columns
-alone, no new data:
+Ranked on value alone, a game's menu anchors on whichever story values highest,
+star or not. These pure pieces re-anchor it on the game's stars from snapshot
+columns alone, no new data:
 ``attach_prominence`` scores every offer's player, ``lead_seeds`` picks the leg
 an Over-led and an Under-led story grow from, and ``assign_leads`` flags the one
 story per ``(platform, Game, Date)`` the Games and Tonight tabs headline, with
@@ -98,24 +98,24 @@ def assign_leads(
     ``_pick_sides`` gives each ``(Date, Game)`` one side for both platforms,
     with Over leads filling toward half of each date's games. Each platform
     flags its story led on that side, else its story led on the other side,
-    else its best Shoot-the-Moon EV story, on both objective rows, so both
-    platforms agree whenever both offer the side. ``commence_by_game`` is each
-    game's tip keyed ``(Date, Game)``, ``""`` when untimed, so a series posting
-    one Game on two dates reads each date's own tip. Flags read only the frame
-    and those tips, so reruns reproduce them. The frame is mutated in place and
-    returned.
+    else its story whose Bankroll Builder has the highest ``ev`` (the order the
+    menu ranks its stories in), on both objective rows, so both platforms agree
+    whenever both offer the side. ``commence_by_game`` is each game's tip keyed
+    ``(Date, Game)``, ``""`` when untimed, so a series posting one Game on two
+    dates reads each date's own tip. Flags read only the frame and those tips, so
+    reruns reproduce them. The frame is mutated in place and returned.
     """
-    moon = stories[stories["objective"] == "moon"]
-    picks = _pick_sides(moon, commence_by_game)
+    builder = stories[stories["objective"] == "builder"]
+    picks = _pick_sides(builder, commence_by_game)
     on_pick = [
         side == picks[date, game]
-        for side, date, game in zip(moon["lead_side"], moon["Date"], moon["Game"], strict=True)
+        for side, date, game in zip(
+            builder["lead_side"], builder["Date"], builder["Game"], strict=True
+        )
     ]
     top = (
-        moon.assign(on_pick=on_pick, led=moon["lead_side"] != "")
-        .sort_values(
-            ["on_pick", "led", "model_ev", "story_id"], ascending=[False, False, False, True]
-        )
+        builder.assign(on_pick=on_pick, led=builder["lead_side"] != "")
+        .sort_values(["on_pick", "led", "ev", "story_id"], ascending=[False, False, False, True])
         .drop_duplicates(["platform", "Date", "Game"])
     )
     story_key = ["platform", "Date", "story_id"]
@@ -126,11 +126,11 @@ def assign_leads(
 
 
 def _pick_sides(
-    moon: pd.DataFrame, commence_by_game: Mapping[tuple[str, str], str]
+    builder: pd.DataFrame, commence_by_game: Mapping[tuple[str, str], str]
 ) -> dict[tuple[str, str], str | None]:
     """The side each ``(Date, Game)`` leads on: Over leads fill toward half of each date's games.
 
-    ``moon`` is the Shoot-the-Moon row of every story, and a game is led on a
+    ``builder`` is the Bankroll Builder row of every story, and a game is led on a
     side when either platform has a story led on it. A game led on one side
     keeps that side, and a game led on neither maps to ``None``. Games led on
     both take Over until the date's Over leads reach half of its games, and the
@@ -142,7 +142,7 @@ def _pick_sides(
     then by game key.
     """
     picks: dict[tuple[str, str], str | None] = {}
-    for date, day in moon.groupby("Date"):
+    for date, day in builder.groupby("Date"):
         sides_by_game = day.groupby("Game")["lead_side"].agg(set).map(lambda sides: sides - {""})
         over_star = day[day["lead_side"] == "Over"].groupby("Game")["star"].max()
         two_sided = sorted(

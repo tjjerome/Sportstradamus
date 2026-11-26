@@ -292,7 +292,8 @@ def test_unled_stories_rank_by_the_builders_ev():
 
     Six-leg cluster Y (Players 0-5) forms first; three-leg cluster X (Players 6-8)
     has the better Builder by the fit. Y's six-pick Moon out-values X, and the claim
-    prefers Y's legs, so either of those orders would put Y first.
+    prefers Y's legs, so either of those orders would put Y first. The slate pass
+    flags the story the menu ranks first.
     """
     sctx, offers = _ctx(
         [0.90] * 6 + [0.50] * 3,
@@ -308,6 +309,7 @@ def test_unled_stories_rank_by_the_builders_ev():
     assert builder.loc[x, "ev"] > builder.loc[y, "ev"]
     assert moon.loc[y, "ev"] > moon.loc[x, "ev"]
     assert builder.loc[y, "model_ev"] > builder.loc[x, "model_ev"]
+    assert out.loc[out["lead"], "story_id"].unique().tolist() == [x]
 
 
 def test_led_story_headline_is_routed_to_its_lead(monkeypatch):

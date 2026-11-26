@@ -23,6 +23,8 @@ from sportstradamus.prediction.stories.lead import (
 )
 
 DAY, NEXT_DAY = "2026-10-03", "2026-10-04"
+# Reflects a story's Builder value into its Moon's and its claims, keeping all positive.
+_MIRROR = 5.0
 
 
 def _offers(*rows):
@@ -204,9 +206,10 @@ def test_an_over_seed_needs_a_shootout_or_a_blowout(shape, seeds):
 
 
 def _stories(*stories):
-    """``(platform, game, date, rank, lead_side, moon_ev, star)`` per story -> builder + moon rows.
+    """``(platform, game, date, rank, lead_side, ev, star)`` per story -> builder + moon rows.
 
-    Builder rows sit at breakeven, so only the moon EV can rank stories.
+    ``ev`` is the Builder's fitted value. The Moon's and both claims (``model_ev``)
+    run the other way, so only the Builder's ``ev`` ranks stories as the menu does.
     """
     return pd.DataFrame(
         [
@@ -216,14 +219,15 @@ def _stories(*stories):
                 "Game": game,
                 "story_id": f"{game}#{rank}",
                 "objective": objective,
-                "model_ev": ev,
+                "ev": value,
+                "model_ev": _MIRROR - ev,
                 "Date": date,
                 "lead_side": lead_side,
                 "star": star,
                 "lead": False,
             }
-            for platform, game, date, rank, lead_side, moon_ev, star in stories
-            for objective, ev in (("builder", 1.0), ("moon", moon_ev))
+            for platform, game, date, rank, lead_side, ev, star in stories
+            for objective, value in (("builder", ev), ("moon", _MIRROR - ev))
         ]
     )
 
@@ -359,7 +363,7 @@ def test_over_only_games_count_toward_the_half(n_over_only, two_sided_sides):
     ]
 
 
-def test_unled_game_flags_its_best_moon_story():
+def test_unled_game_flags_the_story_with_the_best_builder_ev():
     stories = _stories(
         ("Underdog", "G1", DAY, 0, "", 1.6, 1.0),
         ("Underdog", "G1", DAY, 1, "", 2.4, 1.0),
@@ -442,7 +446,10 @@ def test_replay_of_a_production_slate_leads_over_in_14_of_29_games(fixtures_dir)
     over = (pd.Series(_pick_sides(moon, tips)) == "Over").groupby(level=0)
     # Over leads of games per date, 14 of 29 in all.
     assert over.agg(["sum", "size"]).to_numpy().tolist() == [[6, 12], [1, 2], [7, 14], [0, 1]]
-    stories = assign_leads(moon.assign(objective="moon"), tips)
+    # A story's rows share their side columns, so the moon rows stand in for the
+    # Builder rows the flag reads. Every menu here has a led story, so no flag
+    # reads the value, and the run's claim stands in for the later ``ev``.
+    stories = assign_leads(moon.assign(objective="builder", ev=moon["model_ev"]), tips)
     assert stories[stories["lead"]].groupby(["platform", "lead_side"]).size().to_dict() == {
         ("Sleeper", "Over"): 11,
         ("Sleeper", "Under"): 15,
@@ -453,7 +460,7 @@ def test_replay_of_a_production_slate_leads_over_in_14_of_29_games(fixtures_dir)
 
 def test_empty_story_frame_gains_a_bool_lead():
     # build_game_stories hands over an empty frame when no game yields a story.
-    columns = ["platform", "Game", "story_id", "objective", "model_ev", "Date", "lead_side", "star"]
+    columns = ["platform", "Game", "story_id", "objective", "ev", "Date", "lead_side", "star"]
     out = assign_leads(pd.DataFrame(columns=columns), {})
     assert out.empty
     assert out["lead"].dtype == bool
