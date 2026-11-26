@@ -10,8 +10,11 @@ of the precompute-first rule — both the same-game constellation builder and th
 cross-game simple builder call it (a cross-game slip just makes the off-blocks
 zero, so the joint collapses to the independent product).
 
-Per-leg win/push probabilities and boosts are snapshotted from ``current_offers``
-into the leg dicts, so scoring never re-reads the offers frame. Platform pricing:
+Per-leg win chances (the fit's and the model's), push probabilities and boosts are
+snapshotted from ``current_offers`` into the leg dicts, so scoring never re-reads the
+offers frame. The slip's lead number ``ev`` prices the legs' fitted chances
+(``fit_prob``); ``model_ev`` prices the model's claim (``win_prob``) the same way, and a
+slip holding a leg the fit did not price has only the claim. Platform pricing:
 both platforms read a real pooled payout schedule (Underdog Power/Flex, Sleeper
 Max/Flex) that the boost product multiplies on top of. That product also carries
 the platform's same-game pair modifiers from ``current_pair_modifiers`` — the same
@@ -29,7 +32,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from itertools import combinations
 
@@ -71,15 +74,21 @@ REFUSED_MODIFIER: float = 0.0
 
 @dataclass(frozen=True)
 class SlipScore:
-    """Live pricing of one user slip (≤6 legs)."""
+    """Live pricing of one user slip (≤6 legs).
 
-    indep_p: float  # independent all-hit joint, ∏ per-leg p
-    joint_p: float  # correlation-adjusted all-hit joint (Gaussian copula)
+    ``ev``, ``indep_p`` and ``joint_p`` read the legs' fitted chances and are ``None`` on a
+    slip holding a leg the fit did not price; ``model_ev`` is the same pricing on the
+    model's claimed chances.
+    """
+
+    ev: float | None  # fitted expected payout per $1 (push/flex-aware): the lead number
+    indep_p: float | None  # fitted independent all-hit joint, ∏ per-leg p
+    joint_p: float | None  # fitted correlation-adjusted all-hit joint (Gaussian copula)
     payout: float  # payout multiplier per $1 staked
-    model_ev: float  # expected payout per $1 (push/flex-aware)
+    model_ev: float  # the model's claim: the same pricing on each leg's win_prob
     bet_size: int
     play_type: str  # Power | Max | Flex
-    stake: Decimal  # fractional-Kelly stake in dollars
+    stake: Decimal  # fractional-Kelly stake on ev, in dollars; 0 on an unpriced slip
     payout_approximate: bool  # always False; kept for the astrolabe JSON contract
     pair_mods: tuple[tuple[int, int, float], ...] = ()  # (i, j, modifier) per pair on record
 
@@ -107,48 +116,73 @@ def score_slip(
     lift its 0.0 back to 1x.
     """
     n = len(legs)
-    p = np.clip(np.array([float(leg["win_prob"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
-    indep_p = float(np.prod(p))
-    play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
-    pair_mods = tuple(_same_game_pairs(legs, mods.get(platform, {})))
-    unpriced = SlipScore(
-        indep_p, indep_p, 0.0, 0.0, n, play_type, Decimal("0"), payout_approximate, pair_mods
+    claim = np.clip([float(leg["win_prob"]) for leg in legs], _PROB_EPS, 1 - _PROB_EPS)
+    fitted = all(leg["fit_prob"] is not None for leg in legs)
+    fit = (
+        np.clip([float(leg["fit_prob"]) for leg in legs], _PROB_EPS, 1 - _PROB_EPS)
+        if fitted
+        else None
     )
-    if n < 2 or base <= 0.0 or unpriced.banned:
-        return unpriced
+    indep_p = float(np.prod(fit)) if fitted else None
+    play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
+    zero = SlipScore(
+        ev=0.0 if fitted else None,
+        indep_p=indep_p,
+        joint_p=indep_p,
+        payout=0.0,
+        model_ev=0.0,
+        bet_size=n,
+        play_type=play_type,
+        stake=Decimal("0"),
+        payout_approximate=payout_approximate,
+        pair_mods=tuple(_same_game_pairs(legs, mods.get(platform, {}))),
+    )
+    if n < 2 or base <= 0.0 or zero.banned:
+        return zero
 
     sig = psd_or_none(_block_diagonal_sig(legs, ctxs))
-    joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
     leg_boosts = np.array([float(leg["boost"]) for leg in legs])
-    pair_modifier = float(np.prod([m for _, _, m in pair_mods]))
+    pair_modifier = float(np.prod([m for _, _, m in zero.pair_mods]))
     payout = float(
         np.clip(leg_boosts.prod() * pair_modifier * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
     )
     push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
     full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
-    model_ev = float(
-        parlay_payout_prob(
-            p,
-            push,
-            sig,
-            n,
-            leg_boosts,
-            payout,
-            full_payouts,
-            base,
-            full_refund_below_size=full_refund_below_size,
-            pair_modifier=pair_modifier,
+
+    def value(p: np.ndarray) -> float:
+        """Expected payout per $1 staked when the legs win with chances ``p``."""
+        return float(
+            parlay_payout_prob(
+                p,
+                push,
+                sig,
+                n,
+                leg_boosts,
+                payout,
+                full_payouts,
+                base,
+                full_refund_below_size=full_refund_below_size,
+                pair_modifier=pair_modifier,
+            )
         )
-    )
-    kelly_win = model_ev / payout if payout > 0 else 0.0
+
+    model_ev = value(claim)
+    if not fitted:
+        return replace(zero, payout=payout, model_ev=model_ev)
+    ev = value(fit)
     stake = fractional_kelly_stake(
         bankroll=bankroll,
-        win_prob=kelly_win,
+        win_prob=ev / payout,
         payout_multiplier=Decimal(repr(payout)),
         model_shrinkage=shrinkage,
     )
-    return SlipScore(
-        indep_p, joint_p, payout, model_ev, n, play_type, stake, payout_approximate, pair_mods
+    return replace(
+        zero,
+        ev=ev,
+        joint_p=float(multivariate_normal.cdf(norm.ppf(fit), np.zeros(n), sig)),
+        payout=payout,
+        model_ev=model_ev,
+        stake=stake,
     )
 
 
@@ -221,12 +255,15 @@ def modifier_map(mods: pd.DataFrame) -> dict[str, dict[str, dict[frozenset, floa
 
 
 def astrolabe_payload(score: SlipScore) -> dict:
-    """JSON contract for the astrolabe component.
+    """JSON contract for the astrolabe component: the dials draw the fitted numbers.
 
     Crowns are the fixed shared reference maxima (spec §4.4c): Win 30% /
-    EV +12% / Kelly 3%.
+    EV +12% / Kelly 3%. A slip the fit did not price draws no dials: it gets the bare
+    ``{"legs": n}`` rest payload the builder sends below two legs.
     """
-    kelly = (score.model_ev - 1) / (score.payout - 1) if score.payout > 1 else 0.0
+    if score.ev is None:
+        return {"legs": score.bet_size}
+    kelly = (score.ev - 1) / (score.payout - 1) if score.payout > 1 else 0.0
     return {
         "legs": score.bet_size,
         "play_type": score.play_type,
@@ -234,7 +271,7 @@ def astrolabe_payload(score: SlipScore) -> dict:
         "payout_approximate": score.payout_approximate,
         "win_corr": score.joint_p,
         "win_indep": score.indep_p,
-        "ev": score.model_ev - 1,
+        "ev": score.ev - 1,
         "kelly": max(kelly, 0.0),
         "crowns": {"win": _CROWN_WIN, "ev": _CROWN_EV, "kelly": _CROWN_KELLY},
     }

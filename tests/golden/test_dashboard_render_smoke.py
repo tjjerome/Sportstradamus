@@ -947,6 +947,9 @@ def test_app_boots_mobile_with_dock(monkeypatch, tmp_path):
             "boost": 1.0,
             "push_prob": 0.0,
             "kelly": 0.05,
+            "fit_prob": 0.55,
+            "ev": 0.95,
+            "pick": False,
         },
         {
             "player": "Jayson Tatum",
@@ -963,6 +966,9 @@ def test_app_boots_mobile_with_dock(monkeypatch, tmp_path):
             "boost": 1.0,
             "push_prob": 0.0,
             "kelly": 0.04,
+            "fit_prob": 0.53,
+            "ev": 0.92,
+            "pick": False,
         },
     ]
     at.run()

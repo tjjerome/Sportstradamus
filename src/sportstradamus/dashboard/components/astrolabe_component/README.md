@@ -30,12 +30,14 @@ Python passes one of two plain-JSON dicts straight through as `payload` — unli
 `render_constellation`'s `figure_json` there is nothing to pre-serialize; the
 component-argument marshalling handles the encoding.
 
-- **Priced** (2+ legs): `slip_engine.astrolabe_payload(score)`'s dict — legs, play type,
-  payout, `win_corr`, `win_indep`, `ev`, `kelly` and the `crowns` scale. `payout_approximate`
-  rides along undrawn.
-- **Rest** (0–1 legs): `{"legs": n}`. Every dial number eases to 0 — both win dots and the EV
-  dot at their value-0 poses, a zero-length lift arc, the gem at its minimum, both crown glows
-  off. Legs shows the count; the other readouts show "—" with no sign colour.
+- **Priced** (2+ legs, each one the fit priced): `slip_engine.astrolabe_payload(score)`'s
+  dict — legs, play type, payout, `win_corr`, `win_indep`, `ev`, `kelly` (all three dials on
+  the legs' fitted chances) and the `crowns` scale. `payout_approximate` rides along undrawn.
+- **Rest** (0–1 legs, or a slip holding a leg the fit did not price): `{"legs": n}`, from
+  the builder below two legs and from `astrolabe_payload` above. Every dial number eases to
+  0 — both win dots and the EV dot at their value-0 poses, a zero-length lift arc, the gem
+  at its minimum, both crown glows off. Legs shows the count; the other readouts show "—"
+  with no sign colour.
 
 `main.js` tells the two apart by `crowns`, which only a priced payload carries.
 

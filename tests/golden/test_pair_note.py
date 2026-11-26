@@ -20,7 +20,16 @@ from sportstradamus.dashboard.components.pair_note import render_pair_note
 from sportstradamus.dashboard.slip_engine import SlipScore
 
 score = SlipScore(
-    0.2, 0.2, 3.0, 0.9, 3, "Power", Decimal("0"), False, st.session_state["pair_mods"]
+    ev=0.8,
+    indep_p=0.2,
+    joint_p=0.2,
+    payout=3.0,
+    model_ev=0.9,
+    bet_size=3,
+    play_type="Power",
+    stake=Decimal("0"),
+    payout_approximate=False,
+    pair_mods=st.session_state["pair_mods"],
 )
 render_pair_note(score, st.session_state["legs"], "Underdog")
 """

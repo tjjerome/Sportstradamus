@@ -68,7 +68,7 @@
   const TWEENED = ["win_corr", "win_indep", "ev", "kelly", "payout"];
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-  let priced = false; // false at rest (0-1 legs), where the readouts hold PLACEHOLDER
+  let priced = false; // false at rest (0-1 legs or an unfitted leg): readouts hold PLACEHOLDER
   let crowns = {}; // the last priced payload's, so a sweep home to rest keeps its scale
   let cur = null; // the numbers on screen; null until the first render
   let from = null;
@@ -79,7 +79,7 @@
   function render(args) {
     setFrameHeight(FRAME_HEIGHT);
     const p = args.payload;
-    priced = "crowns" in p; // below two legs the builder sends a bare {legs}
+    priced = "crowns" in p; // below two legs, or with a leg the fit did not price, a bare {legs}
     if (priced) crowns = p.crowns;
     const target = {};
     TWEENED.forEach(function (name) {

@@ -2,8 +2,9 @@
 
 These prove ``score_slip`` reuses the prediction layer's copula scorer over a
 **block-diagonal** correlation matrix, prices Underdog vs Sleeper per the lane
-contract, folds the platform's same-game pair modifiers into the boost, and sizes a
-``Decimal`` fractional-Kelly stake — the one sanctioned live calc. Exact equality is
+contract, folds the platform's same-game pair modifiers into the boost, prices the legs'
+fitted chances as ``ev`` beside the model's claim as ``model_ev``, and sizes a ``Decimal``
+fractional-Kelly stake on ``ev`` — the one sanctioned live calc. Exact equality is
 asserted only at two legs, where ``multivariate_normal.cdf`` is the closed-form
 bivariate normal (≥3 legs is randomized QMC, ~1e-4 jitter, so those assertions stay
 structural).
@@ -43,12 +44,15 @@ from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 
 def _leg(player, market, bet, line, p, boost, game, push=0.0):
+    """A leg whose fitted chance is the model's claim; a test that needs the two apart
+    overrides ``fit_prob``."""
     return {
         "player": player,
         "market": market,
         "bet": bet,
         "line": line,
         "win_prob": p,
+        "fit_prob": p,
         "push_prob": push,
         "boost": boost,
         "game": game,
@@ -76,28 +80,58 @@ def test_block_diagonal_zeroes_cross_game():
     assert np.allclose(np.diag(sig), 1.0)
 
 
-def test_two_leg_same_game_matches_direct_parlay_call():
-    """The reuse pin: ``score_slip`` joint/EV equals a hand-built copula call."""
+def test_two_leg_slip_prices_ev_on_the_fit_and_model_ev_on_the_claim():
+    """The reuse pin: both numbers equal a hand-built copula call, ``ev`` (and the joint)
+    on the legs' ``fit_prob`` and ``model_ev`` on their ``win_prob``. The fit and the claim
+    rank the two legs in opposite orders, so reading one field for the other fails."""
     legs = [
-        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
-        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y") | {"fit_prob": 0.45},
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y") | {"fit_prob": 0.62},
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
     score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
 
-    p = np.array([0.6, 0.55])
-    push = np.zeros(2)
     sig = psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]))
     search, full = payout_curve_for("Underdog", "pooled")
     base = float(search[0])
     payout = float(np.clip(1.0 * base, 1.0, 100.0))
-    expected = float(parlay_payout_prob(p, push, sig, 2, 1.0, payout, full, base))
 
-    assert score.model_ev == pytest.approx(expected, rel=1e-9)
+    def value(p):
+        return float(parlay_payout_prob(np.array(p), np.zeros(2), sig, 2, 1.0, payout, full, base))
+
+    assert score.ev == pytest.approx(value([0.45, 0.62]), rel=1e-9)
+    assert score.model_ev == pytest.approx(value([0.6, 0.55]), rel=1e-9)
+    assert score.indep_p == pytest.approx(0.45 * 0.62)
+    # A two-leg Power slip without pushes pays only when both hit, so its value is the
+    # fitted joint times the payout.
+    assert score.joint_p == pytest.approx(score.ev / payout, rel=1e-9)
     assert score.joint_p > score.indep_p  # positive within-game rho lifts the joint
     assert score.play_type == "Power"
     assert isinstance(score.stake, Decimal)
     assert not score.payout_approximate
+
+
+def test_a_leg_the_fit_did_not_price_leaves_the_slip_unpriced():
+    """No ``ev``, no fitted joint and no stake; the claim is priced as on its priced twin."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y") | {"fit_prob": None},
+    ]
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
+    twin = score_slip(
+        [legs[0], legs[1] | {"fit_prob": 0.55}],
+        corr,
+        _mods([]),
+        platform="Underdog",
+        bankroll=Decimal("1000"),
+    )
+
+    assert (score.ev, score.joint_p, score.indep_p) == (None, None, None)
+    assert score.model_ev == pytest.approx(twin.model_ev, rel=1e-9)
+    assert score.payout == twin.payout
+    assert twin.stake > Decimal("0")
+    assert score.stake == Decimal("0")
 
 
 def test_cross_game_pair_scores_as_independent():
@@ -175,13 +209,27 @@ def test_underdog_play_type_by_size():
     assert four_score.play_type == "Flex"
 
 
-def test_negative_edge_yields_zero_stake():
-    legs = [
-        _leg("A", "PTS", "Over", 20.5, 0.2, 1.0, "X/Y"),
-        _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y"),
+def test_stake_follows_the_fitted_value_not_the_claim():
+    """Kelly sizes on ``ev``: nothing under 1 however high the claim, a stake above 1
+    however low the claim."""
+    claimed = [
+        _leg("A", "PTS", "Over", 20.5, 0.9, 1.0, "X/Y") | {"fit_prob": 0.3},
+        _leg("B", "REB", "Over", 8.5, 0.9, 1.0, "X/Y") | {"fit_prob": 0.3},
     ]
-    score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
-    assert score.stake == Decimal("0")
+    fitted = [
+        _leg("A", "PTS", "Over", 20.5, 0.2, 1.0, "X/Y") | {"fit_prob": 0.8},
+        _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y") | {"fit_prob": 0.8},
+    ]
+    bankroll = Decimal("1000")
+    claimed_score = score_slip(
+        claimed, _corr([]), _mods([]), platform="Underdog", bankroll=bankroll
+    )
+    fitted_score = score_slip(fitted, _corr([]), _mods([]), platform="Underdog", bankroll=bankroll)
+
+    assert claimed_score.model_ev > 1 > claimed_score.ev
+    assert claimed_score.stake == Decimal("0")
+    assert fitted_score.ev > 1 > fitted_score.model_ev
+    assert fitted_score.stake > Decimal("0")
 
 
 def test_push_leg_routes_finite_ev():
@@ -192,7 +240,7 @@ def test_push_leg_routes_finite_ev():
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.3)])
     score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
-    assert np.isfinite(score.model_ev)
+    assert np.isfinite(score.ev)
     assert score.bet_size == 3
 
 
@@ -233,7 +281,7 @@ def test_sleeper_two_leg_slip_push_refunds_in_full_via_score_slip():
     )
     assert refunded == pytest.approx(1.0, abs=1e-6)
     assert busted == pytest.approx(0.0, abs=1e-6)
-    assert score.model_ev == pytest.approx(refunded, abs=1e-4)
+    assert score.ev == pytest.approx(refunded, abs=1e-4)
 
 
 def test_refused_pair_prices_at_zero_before_the_payout_clip():
@@ -248,7 +296,7 @@ def test_refused_pair_prices_at_zero_before_the_payout_clip():
     assert score.banned
     assert score.pair_mods == ((0, 1, 0.0),)
     assert score.payout == 0.0
-    assert score.model_ev == 0.0
+    assert score.ev == score.model_ev == 0.0
     assert score.stake == Decimal("0")
 
 
@@ -277,7 +325,7 @@ def test_repriced_pair_matches_direct_parlay_call_with_modifier_in_boost():
     assert not score.banned
     assert score.pair_mods == ((0, 1, 0.85),)
     assert score.payout == pytest.approx(payout)
-    assert score.model_ev == pytest.approx(expected, rel=1e-9)
+    assert score.ev == pytest.approx(expected, rel=1e-9)
 
 
 def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier():
@@ -295,7 +343,7 @@ def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier()
     one_loss_tier = payout_curve_for("Underdog", "pooled")[1][4][1]
     # score_slip clips each probability a hair inside (0, 1), so a stray sample can
     # land in another tier: the tolerance covers that, not a pricing difference.
-    assert score.model_ev == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
+    assert score.ev == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
 
 
 def test_mods_off_the_slips_game_or_platform_are_ignored():
@@ -314,7 +362,7 @@ def test_mods_off_the_slips_game_or_platform_are_ignored():
     clean = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
     assert score.pair_mods == ()
     assert score.payout == clean.payout
-    assert score.model_ev == pytest.approx(clean.model_ev, rel=1e-9)
+    assert score.ev == pytest.approx(clean.ev, rel=1e-9)
 
 
 def test_ev_lift_matches_hand_built_pair_minus_solo():
@@ -412,13 +460,14 @@ def test_banned_partners_marks_both_legs_of_a_refused_slip_pair():
     }
 
 
-def test_astrolabe_payload_shape_and_crowns():
-    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
-    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+def test_astrolabe_payload_draws_the_fitted_numbers():
+    """The win dials, the EV dial and the Kelly dial read the fit, not the claim."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.7, 1.0, "X/Y") | {"fit_prob": 0.6},
+        _leg("B", "REB", "Over", 8.5, 0.65, 1.0, "X/Y") | {"fit_prob": 0.55},
+    ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    score = score_slip(
-        [focus, candidate], corr, _mods([]), platform="Underdog", bankroll=Decimal("1000")
-    )
+    score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
 
     payload = astrolabe_payload(score)
 
@@ -428,11 +477,12 @@ def test_astrolabe_payload_shape_and_crowns():
         "payout": pytest.approx(3.5),
         "payout_approximate": False,
         "win_corr": pytest.approx(score.joint_p),
-        "win_indep": pytest.approx(score.indep_p),
-        "ev": pytest.approx(score.model_ev - 1),
-        "kelly": pytest.approx((score.model_ev - 1) / (score.payout - 1)),
+        "win_indep": pytest.approx(0.6 * 0.55),
+        "ev": pytest.approx(score.ev - 1),
+        "kelly": pytest.approx((score.ev - 1) / (score.payout - 1)),
         "crowns": {"win": 0.30, "ev": 0.12, "kelly": 0.03},
     }
+    assert score.ev != pytest.approx(score.model_ev)
 
 
 def test_astrolabe_payload_clamps_negative_kelly():
@@ -441,11 +491,21 @@ def test_astrolabe_payload_clamps_negative_kelly():
         _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y"),
     ]
     score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
-    raw_kelly = (score.model_ev - 1) / (score.payout - 1)
+    raw_kelly = (score.ev - 1) / (score.payout - 1)
     assert raw_kelly < 0.0
 
     payload = astrolabe_payload(score)
     assert payload["kelly"] == 0.0
+
+
+def test_astrolabe_payload_rests_on_an_unpriced_slip():
+    """No fitted dials: the bare rest payload the builder sends below two legs."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y") | {"fit_prob": None},
+    ]
+    score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
+    assert astrolabe_payload(score) == {"legs": 2}
 
 
 def test_astrolabe_payload_sleeper_play_type_and_payout_passes_through():

@@ -40,6 +40,9 @@ def _leg(player: str, market: str, team: str) -> dict:
         "boost": 1.0,
         "push_prob": 0.0,
         "kelly": 0.05,
+        "fit_prob": 0.55,
+        "ev": 0.95,
+        "pick": False,
     }
 
 
