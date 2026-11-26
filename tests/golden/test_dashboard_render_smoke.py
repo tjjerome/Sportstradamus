@@ -212,7 +212,7 @@ def test_tonight_card_counts_the_picks_when_no_story_binds_them(monkeypatch, tmp
         ],
     )
     assert cards, "no Tonight game card rendered"
-    assert "No prophecy yet — 2 favored legs, no story binds them" in cards[0]
+    assert "No prophecy yet — 2 picks, no story binds them" in cards[0]
     assert "<b>2</b> picks" in cards[0]
 
 
@@ -328,6 +328,31 @@ def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
     assert "“Tatum takes over”" in cards[0]
     assert bet_arrow("Over") not in cards[0]
     assert bet_arrow("Under") not in cards[0]
+
+
+def test_tonight_headlines_from_a_parlays_snapshot_from_before_the_fit(monkeypatch, tmp_path):
+    """A parlays snapshot with no ``EV`` column still heads a storyless game: its thesis
+    with the highest Model EV."""
+    parlays_fixture = tmp_path / "current_parlays.parquet"
+    pd.DataFrame(
+        [
+            {"Game": "NYK/SAS", "Date": "2026-07-04", "Model EV": 1.2, "Thesis": "Knicks grind"},
+            {"Game": "NYK/SAS", "Date": "2026-07-04", "Model EV": 1.6, "Thesis": "Spurs run"},
+        ]
+    ).to_parquet(parlays_fixture)
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame([{**_OFFER_ROWS[0], "Pick": True}]).to_parquet(offers_fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", tmp_path / "no_stories.parquet")
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", parlays_fixture)
+    st.cache_data.clear()
+
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.run()
+    assert not at.exception
+    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    assert "“Spurs run”" in cards[0]
 
 
 def test_board_renders_condensed_grid(monkeypatch, tmp_path):
@@ -708,6 +733,77 @@ def test_games_lists_the_games_with_a_pick_whatever_their_kelly(monkeypatch, tmp
     at.run()
     assert not at.exception
     assert at.selectbox(key="game_select").options == ["NYK vs SAS · 2026-07-04"]
+
+
+def _games_story_captions(monkeypatch, tmp_path, story: dict) -> list[str]:
+    """The Games page's captions with NYK/SAS's two picks and one stored story preset.
+
+    The preset's legs are the two picks themselves, so its game is the slip's.
+    """
+    picks = [
+        {**_OFFER_ROWS[0], "Fit Prob": 0.52, "EV": 0.96, "Pick": True},
+        {
+            **_OFFER_ROWS[0],
+            "Player": "K. Towns",
+            "Market": "REB",
+            "Fit Prob": 0.5,
+            "EV": 0.93,
+            "Pick": True,
+        },
+    ]
+    row = {
+        "platform": "Underdog",
+        "League": "NBA",
+        "Game": "NYK/SAS",
+        "Date": "2026-07-04",
+        "story_id": "NYK/SAS#0",
+        "objective": "builder",
+        "headline": "Brunson carries it",
+        "legs": [build_leg(pick) for pick in picks],
+        "bet_size": 2,
+        "joint_p": 0.26,
+        "model_ev": 1.3,
+        "kelly_stake": 0.0,
+        "lead": True,
+        "lead_side": "Over",
+        **story,
+    }
+    offers_fixture = tmp_path / "current_offers.parquet"
+    stories_fixture = tmp_path / "current_game_stories.parquet"
+    pd.DataFrame(picks).to_parquet(offers_fixture)
+    pd.DataFrame([row]).to_parquet(stories_fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", stories_fixture)
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", tmp_path / "no_parlays.parquet")
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/games.py")
+    at.run()
+    assert not at.exception
+    return [c.value for c in at.caption]
+
+
+def test_games_story_preloader_leads_with_ev_and_the_payout_to_check(monkeypatch, tmp_path):
+    """The preset's fitted ev reads as EV beside its claim, and its fitted joint (ev over a
+    3.50x payout) gives the payout it needs."""
+    captions = _games_story_captions(monkeypatch, tmp_path, {"ev": 0.91})
+    start = captions.index("2 legs · EV 0.91 · Model EV 1.30")
+    assert captions[start + 1 : start + 3] == [
+        "Worth a bet if the app pays at least 3.85x (we assume 3.50x).",
+        "Legs here share a game, so this value is unproven until you check the app's payout "
+        "against that number.",
+    ]
+
+
+def test_games_story_preloader_on_a_snapshot_from_before_the_fit_shows_model_ev_only(
+    monkeypatch, tmp_path
+):
+    captions = _games_story_captions(monkeypatch, tmp_path, {})
+    assert "2 legs · Model EV 1.30" in captions
+    assert not any(c.startswith("Worth a bet") for c in captions)
 
 
 def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):

@@ -16,6 +16,7 @@ from sportstradamus.dashboard.components.constellation_slate import GameShape
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
+from sportstradamus.dashboard.components.slip_readout import ev_text
 from sportstradamus.dashboard.components.slip_state import (
     _BUILDER,
     _LEGS,
@@ -41,6 +42,7 @@ from sportstradamus.dashboard.narrative import (
     game_headline,
     home_away,
 )
+from sportstradamus.dashboard.slip_engine import payout_check, play_type_for
 from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS, team_name
 
 # Hero shape glyph — matches the mockup's 74px .glyphwrap.
@@ -221,7 +223,13 @@ def _render_story_preloader(
     if orow.empty:
         return
     o = orow.iloc[0]
-    st.caption(f"{int(o['bet_size'])} legs · EV {o['model_ev'] - 1:+.1%}")
+    st.caption(f"{int(o['bet_size'])} legs · {ev_text(o['ev'], o['model_ev'])}")
+    # A preset the fit did not price (or one from before it priced presets) has no fitted
+    # joint; a priced one's payout is its ev over that joint.
+    if pd.notna(o["ev"]):
+        kind = play_type_for(platform, int(o["bet_size"]))
+        for line in payout_check(o["legs"], kind, o["joint_p"], o["ev"] / o["joint_p"]):
+            st.caption(line)
     if st.button("Seed constellation", key="cascade_seed", type="primary"):
         seed_from_story(o["legs"], platform, offers)
         st.rerun()

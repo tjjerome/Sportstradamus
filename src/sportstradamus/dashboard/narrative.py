@@ -38,9 +38,9 @@ SHAPE_CAPTION = {
     "grind": "low total",
 }
 
-# A story binds legs to each other, so it takes two: below that a missing prophecy is a
+# A story binds picks to each other, so it takes two: below that a missing prophecy is a
 # genuinely thin game rather than a gap in the story engine.
-_STORY_FAVORED_MIN = 2
+_STORY_PICKS_MIN = 2
 
 # Colorblind-safe side cues (spec §3.2): shape (up/down triangle) plus color both
 # carry Over/Under, so the aggrid JsCode cell renderer in Phase B can key off shape
@@ -69,19 +69,28 @@ def _game_date_mask(df: pd.DataFrame, game: str, date) -> pd.Series:
     return (df["Game"] == game) & (df["Date"].astype(str) == str(date))
 
 
+def _top_row(df: pd.DataFrame, fitted: str, claim: str) -> pd.Series | None:
+    """The row with the highest ``fitted`` value; the highest ``claim`` when no row has a
+    fitted value (an entry snapshot from before the fit priced entries). ``None`` on no row.
+    """
+    key = fitted if df[fitted].notna().any() else claim
+    df = df.dropna(subset=[key])
+    return None if df.empty else df.loc[df[key].idxmax()]
+
+
 def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     """The headline of the highest-EV parlay for one game (``""`` when none).
 
-    ``parlays`` is ``current_parlays``; the top per-leg-set thesis is the
-    ``Thesis`` of the max-``Model EV`` row in ``(Game, Date)``.
+    ``parlays`` is ``current_parlays``; the top per-leg-set thesis is the ``Thesis`` of the
+    max-``EV`` row in ``(Game, Date)``, or of the max-``Model EV`` row when none has an
+    ``EV``.
     """
     if parlays.empty or "Thesis" not in parlays.columns or "Model EV" not in parlays.columns:
         return ""
-    sub = parlays.loc[_game_date_mask(parlays, game, date)].dropna(subset=["Model EV"])
-    if sub.empty:
+    top = _top_row(parlays.loc[_game_date_mask(parlays, game, date)], "EV", "Model EV")
+    if top is None:
         return ""
-    thesis = sub.loc[sub["Model EV"].idxmax(), "Thesis"]
-    return str(thesis) if pd.notna(thesis) else ""
+    return str(top["Thesis"]) if pd.notna(top["Thesis"]) else ""
 
 
 def _story_rows(stories: pd.DataFrame, game: str, date, platform: str | None) -> pd.DataFrame:
@@ -104,32 +113,28 @@ def game_headline(
     """Story-engine headline for one ``(Game, Date)``, optionally scoped to ``platform``.
 
     Prefers the slate's ``lead`` story for that key, falling back to every matching row
-    when none is marked lead, and returns that subset's highest-``model_ev`` ``headline``.
-    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row, and ``""``
-    when both are empty.
+    when none is marked lead, and returns that subset's highest-``ev`` ``headline`` (the
+    highest ``model_ev`` when none has an ``ev``). Falls back to ``top_thesis(parlays)``
+    when ``stories`` has no usable row, and ``""`` when both are empty.
     """
     rows = _story_rows(stories, game, date, platform)
     if not rows.empty and {"headline", "model_ev"} <= set(rows.columns):
-        sub = rows.dropna(subset=["model_ev"])
-        lead_sub = sub.loc[sub["lead"]]
-        if not lead_sub.empty:
-            sub = lead_sub
-        if not sub.empty:
-            headline = sub.loc[sub["model_ev"].idxmax(), "headline"]
-            if pd.notna(headline) and str(headline):
-                return str(headline)
+        lead = rows.loc[rows["lead"]]
+        top = _top_row(lead if not lead.empty else rows, "ev", "model_ev")
+        if top is not None and pd.notna(top["headline"]) and str(top["headline"]):
+            return str(top["headline"])
     return top_thesis(parlays, game=game, date=date)
 
 
-def storyless_prophecy(favored: int) -> str:
+def storyless_prophecy(picks: int) -> str:
     """Tonight's placeholder line for a game :func:`game_headline` left empty.
 
-    A game carrying favored legs with no story to bind them is a correlation gap, not a
-    quiet slate, so the copy says which of the two it is.
+    A game carrying the board's picks with no story to bind them is a correlation gap,
+    not a quiet slate, so the copy says which of the two it is.
     """
-    if favored >= _STORY_FAVORED_MIN:
-        return f"No prophecy yet — {favored} favored legs, no story binds them"
-    return "No prophecy tonight — thin edges"
+    if picks >= _STORY_PICKS_MIN:
+        return f"No prophecy yet — {picks} picks, no story binds them"
+    return "No prophecy tonight — too few picks"
 
 
 def home_away(group: pd.DataFrame) -> tuple[str, str]:

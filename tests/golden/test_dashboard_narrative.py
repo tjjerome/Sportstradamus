@@ -44,22 +44,57 @@ def test_home_away_falls_back_to_canonical_without_home_column():
     assert home_away(group) == ("TOR", "WAS")  # canonical (alphabetical) order
 
 
-def test_top_thesis_picks_highest_ev():
+def test_top_thesis_picks_the_highest_fitted_ev():
+    """The fit and the claim rank the game's two entries in opposite orders."""
+    parlays = pd.DataFrame(
+        [
+            {"Game": "NYK/SAS", "Date": "2026-06-13", "EV": 0.91, "Model EV": 1.9, "Thesis": "low"},
+            {
+                "Game": "NYK/SAS",
+                "Date": "2026-06-13",
+                "EV": 0.97,
+                "Model EV": 1.2,
+                "Thesis": "high",
+            },
+            {
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "EV": 1.5,
+                "Model EV": 5.0,
+                "Thesis": "other",
+            },
+        ]
+    )
+    assert top_thesis(parlays, game="NYK/SAS", date="2026-06-13") == "high"
+
+
+def test_top_thesis_reads_model_ev_on_a_snapshot_from_before_the_fit():
     parlays = pd.DataFrame(
         [
             {"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "low"},
             {"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.9, "Thesis": "high"},
-            {"Game": "BOS/PHI", "Date": "2026-06-13", "Model EV": 5.0, "Thesis": "other game"},
         ]
-    )
+    ).assign(EV=float("nan"))
     assert top_thesis(parlays, game="NYK/SAS", date="2026-06-13") == "high"
 
 
 def test_top_thesis_doubleheader_splits_on_date():
     parlays = pd.DataFrame(
         [
-            {"Game": "NYL/WAS", "Date": "2026-06-13", "Model EV": 1.5, "Thesis": "game one"},
-            {"Game": "NYL/WAS", "Date": "2026-06-14", "Model EV": 9.0, "Thesis": "game two"},
+            {
+                "Game": "NYL/WAS",
+                "Date": "2026-06-13",
+                "EV": 0.9,
+                "Model EV": 1.5,
+                "Thesis": "game one",
+            },
+            {
+                "Game": "NYL/WAS",
+                "Date": "2026-06-14",
+                "EV": 1.1,
+                "Model EV": 9.0,
+                "Thesis": "game two",
+            },
         ]
     )
     assert top_thesis(parlays, game="NYL/WAS", date="2026-06-13") == "game one"
@@ -67,13 +102,14 @@ def test_top_thesis_doubleheader_splits_on_date():
 
 def test_top_thesis_empty_when_no_match():
     parlays = pd.DataFrame(
-        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "x"}]
+        [{"Game": "NYK/SAS", "Date": "2026-06-13", "EV": 0.9, "Model EV": 1.2, "Thesis": "x"}]
     )
     assert top_thesis(parlays, game="ZZZ/YYY", date="2026-06-13") == ""
     assert top_thesis(pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == ""
 
 
 def test_game_headline_story_wins_over_parlay():
+    """The story with the highest fitted ev heads the game, though the other claims more."""
     stories = pd.DataFrame(
         [
             {
@@ -81,7 +117,8 @@ def test_game_headline_story_wins_over_parlay():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "low",
-                "model_ev": 1.2,
+                "ev": 0.91,
+                "model_ev": 1.9,
                 "lead": False,
                 "lead_side": "",
             },
@@ -90,14 +127,23 @@ def test_game_headline_story_wins_over_parlay():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "The Knicks pull away",
-                "model_ev": 1.9,
+                "ev": 0.98,
+                "model_ev": 1.2,
                 "lead": False,
                 "lead_side": "",
             },
         ]
     )
     parlays = pd.DataFrame(
-        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 5.0, "Thesis": "parlay says"}]
+        [
+            {
+                "Game": "NYK/SAS",
+                "Date": "2026-06-13",
+                "EV": 1.4,
+                "Model EV": 5.0,
+                "Thesis": "parlay says",
+            }
+        ]
     )
     assert (
         game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "The Knicks pull away"
@@ -112,6 +158,7 @@ def test_game_headline_falls_back_to_parlay_when_no_story_row():
                 "Game": "BOS/PHI",
                 "Date": "2026-06-13",
                 "headline": "other game",
+                "ev": 1.2,
                 "model_ev": 2.0,
                 "lead": False,
                 "lead_side": "",
@@ -119,7 +166,15 @@ def test_game_headline_falls_back_to_parlay_when_no_story_row():
         ]
     )
     parlays = pd.DataFrame(
-        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "parlay thesis"}]
+        [
+            {
+                "Game": "NYK/SAS",
+                "Date": "2026-06-13",
+                "EV": 0.9,
+                "Model EV": 1.2,
+                "Thesis": "parlay thesis",
+            }
+        ]
     )
     assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "parlay thesis"
 
@@ -132,6 +187,7 @@ def test_game_headline_blank_story_headline_falls_back():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "",
+                "ev": 1.3,
                 "model_ev": 3.0,
                 "lead": False,
                 "lead_side": "",
@@ -139,7 +195,15 @@ def test_game_headline_blank_story_headline_falls_back():
         ]
     )
     parlays = pd.DataFrame(
-        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "parlay backup"}]
+        [
+            {
+                "Game": "NYK/SAS",
+                "Date": "2026-06-13",
+                "EV": 0.9,
+                "Model EV": 1.2,
+                "Thesis": "parlay backup",
+            }
+        ]
     )
     assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "parlay backup"
 
@@ -156,6 +220,7 @@ def test_game_headline_prefers_the_lead_story_over_higher_ev():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "The Knicks pull away",
+                "ev": 1.05,
                 "model_ev": 1.9,
                 "lead": False,
                 "lead_side": "",
@@ -165,6 +230,7 @@ def test_game_headline_prefers_the_lead_story_over_higher_ev():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "SAS steals it late",
+                "ev": 0.92,
                 "model_ev": 1.2,
                 "lead": True,
                 "lead_side": "Under",
@@ -185,6 +251,7 @@ def test_game_headline_splits_doubleheader_on_date():
                 "Game": "NYL/WAS",
                 "Date": "2026-06-13",
                 "headline": "game one",
+                "ev": 1.2,
                 "model_ev": 9.0,
                 "lead": True,
                 "lead_side": "Over",
@@ -194,6 +261,7 @@ def test_game_headline_splits_doubleheader_on_date():
                 "Game": "NYL/WAS",
                 "Date": "2026-06-14",
                 "headline": "game two",
+                "ev": 0.9,
                 "model_ev": 1.0,
                 "lead": True,
                 "lead_side": "Over",
@@ -211,6 +279,7 @@ def test_game_headline_scopes_platform_when_given():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "underdog's take",
+                "ev": 1.1,
                 "model_ev": 5.0,
                 "lead": True,
                 "lead_side": "Over",
@@ -220,6 +289,7 @@ def test_game_headline_scopes_platform_when_given():
                 "Game": "NYK/SAS",
                 "Date": "2026-06-13",
                 "headline": "sleeper's take",
+                "ev": 0.9,
                 "model_ev": 1.0,
                 "lead": True,
                 "lead_side": "Under",
@@ -235,23 +305,52 @@ def test_game_headline_scopes_platform_when_given():
 
 
 def test_game_headline_takes_the_higher_ev_lead_when_the_platforms_split():
-    """Tonight reads across platforms: a game they lead on different sides shows the
-    higher-EV lead, and never a higher-EV story that is not a lead."""
+    """Tonight reads across platforms: a game they lead on different sides shows the lead
+    with the higher fitted ev, though the other claims more, and never a higher-ev story
+    that is not a lead."""
     row = {"Game": "NYK/SAS", "Date": "2026-06-13", "lead": True}
     stories = pd.DataFrame(
         [
-            {**row, "platform": "underdog", "headline": "a", "model_ev": 1.0, "lead_side": "Over"},
-            {**row, "platform": "sleeper", "headline": "b", "model_ev": 2.5, "lead_side": "Under"},
+            {
+                **row,
+                "platform": "underdog",
+                "headline": "a",
+                "ev": 0.9,
+                "model_ev": 2.5,
+                "lead_side": "Over",
+            },
+            {
+                **row,
+                "platform": "sleeper",
+                "headline": "b",
+                "ev": 0.96,
+                "model_ev": 1.0,
+                "lead_side": "Under",
+            },
             {
                 **row,
                 "platform": "sleeper",
                 "headline": "c",
+                "ev": 1.4,
                 "model_ev": 9.0,
                 "lead": False,
                 "lead_side": "",
             },
         ]
     )
+    assert game_headline(stories, pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == "b"
+
+
+def test_game_headline_on_a_snapshot_from_before_the_fit_takes_the_lead_by_model_ev():
+    """No story has an ev: the lead stories still win, the highest Model EV among them."""
+    row = {"Game": "NYK/SAS", "Date": "2026-06-13", "platform": "underdog", "lead_side": ""}
+    stories = pd.DataFrame(
+        [
+            {**row, "headline": "a", "model_ev": 1.2, "lead": True},
+            {**row, "headline": "b", "model_ev": 1.6, "lead": True},
+            {**row, "headline": "c", "model_ev": 9.0, "lead": False},
+        ]
+    ).assign(ev=float("nan"))
     assert game_headline(stories, pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == "b"
 
 
@@ -365,11 +464,11 @@ def test_shape_help_glosses_the_clouded_shape():
     assert "clouded (no moneyline quoted yet)" in SHAPE_HELP
 
 
-def test_storyless_prophecy_names_the_favored_legs():
-    assert storyless_prophecy(20) == "No prophecy yet — 20 favored legs, no story binds them"
-    assert storyless_prophecy(2).startswith("No prophecy yet — 2 favored legs")
+def test_storyless_prophecy_counts_the_picks():
+    assert storyless_prophecy(20) == "No prophecy yet — 20 picks, no story binds them"
+    assert storyless_prophecy(2).startswith("No prophecy yet — 2 picks")
 
 
-def test_storyless_prophecy_stays_thin_edges_below_two_legs():
-    assert storyless_prophecy(1) == "No prophecy tonight — thin edges"
-    assert storyless_prophecy(0) == "No prophecy tonight — thin edges"
+def test_storyless_prophecy_says_too_few_picks_below_two():
+    assert storyless_prophecy(1) == "No prophecy tonight — too few picks"
+    assert storyless_prophecy(0) == "No prophecy tonight — too few picks"
