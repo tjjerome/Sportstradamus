@@ -2,7 +2,7 @@
 
 Pins the owner's 2026-10-03 decisions: ``Star`` comes from existing offer
 columns only (rank-1 depth, median-line percentile, market breadth; no MLB depth
-term), each side's lead seed is its most prominent strong leg, and the slate
+term), each side's lead seed is its most prominent story leg, and the slate
 pass flags exactly one story per menu. Over leads fill toward half of each
 date's games, rounded up, the games with the brightest Over-led story first.
 The 2026-10-17 shape rule: an Over seeds a lead only in a shootout or a blowout.
@@ -143,36 +143,36 @@ def test_empty_offers_gain_the_column():
 
 
 def _legs(*legs):
-    """``(player, bet, model_ev, star)`` per strong leg -> lead_seeds' (edge, bet_df, star_of)."""
-    edge = {i: ev for i, (_, _, ev, _) in enumerate(legs)}
+    """``(player, bet, ev, star)`` per story leg -> lead_seeds' (ev, bet_df, star_of)."""
+    ev = {i: leg_ev for i, (_, _, leg_ev, _) in enumerate(legs)}
     bet_df = {
-        i: {"Player": player, "Bet": bet, "Model EV": ev}
-        for i, (player, bet, ev, _) in enumerate(legs)
+        i: {"Player": player, "Bet": bet, "EV": leg_ev}
+        for i, (player, bet, leg_ev, _) in enumerate(legs)
     }
     star_of = {i: star for i, (*_, star) in enumerate(legs)}
-    return edge, bet_df, star_of
+    return ev, bet_df, star_of
 
 
 @pytest.mark.parametrize(
     ("legs", "seeds"),
     [
         pytest.param(
-            [("Role", "Over", 1.40, 1.5), ("Star", "Over", 1.10, 2.5)],
+            [("Role", "Over", 0.95, 1.5), ("Star", "Over", 0.80, 2.5)],
             {"Over": 1},
-            id="star-beats-edge",
+            id="star-beats-ev",
         ),
         pytest.param(
-            [("Low", "Under", 1.10, 2.0), ("High", "Under", 1.20, 2.0)],
+            [("Low", "Under", 0.80, 2.0), ("High", "Under", 0.90, 2.0)],
             {"Under": 1},
-            id="edge-breaks-star-tie",
+            id="ev-breaks-star-tie",
         ),
         pytest.param(
-            [("Zed", "Over", 1.10, 2.0), ("Abe", "Over", 1.10, 2.0)],
+            [("Zed", "Over", 0.80, 2.0), ("Abe", "Over", 0.80, 2.0)],
             {"Over": 1},
             id="name-breaks-full-tie",
         ),
         pytest.param(
-            [("Up", "Over", 1.10, 1.0), ("Down", "Under", 1.30, 2.0)],
+            [("Up", "Over", 0.80, 1.0), ("Down", "Under", 0.95, 2.0)],
             {"Over": 0, "Under": 1},
             id="one-per-side",
         ),
@@ -182,10 +182,9 @@ def test_lead_seeds_tie_breaks(legs, seeds):
     assert lead_seeds(*_legs(*legs), "shootout") == seeds
 
 
-def test_lead_seeds_omits_a_side_with_no_strong_leg():
-    edge, bet_df, star_of = _legs(("Up", "Over", 1.20, 1.0), ("Weak", "Under", 1.02, 2.9))
-    del edge[1]  # under the menu's edge floor, so the caller never marks it strong
-    assert lead_seeds(edge, bet_df, star_of, "blowout") == {"Over": 0}
+def test_lead_seeds_omits_a_side_with_no_leg():
+    # The game's story legs hold no Under, so no Under story is led.
+    assert lead_seeds(*_legs(("Up", "Over", 0.90, 1.0)), "blowout") == {"Over": 0}
 
 
 @pytest.mark.parametrize(
@@ -199,8 +198,9 @@ def test_lead_seeds_omits_a_side_with_no_strong_leg():
     ],
 )
 def test_an_over_seed_needs_a_shootout_or_a_blowout(shape, seeds):
-    edge, bet_df, star_of = _legs(("Up", "Over", 1.40, 3.0), ("Down", "Under", 1.10, 0.0))
-    assert lead_seeds(edge, bet_df, star_of, shape) == seeds
+    assert (
+        lead_seeds(*_legs(("Up", "Over", 0.95, 3.0), ("Down", "Under", 0.80, 0.0)), shape) == seeds
+    )
 
 
 def _stories(*stories):

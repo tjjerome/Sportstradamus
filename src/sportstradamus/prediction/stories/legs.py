@@ -234,8 +234,8 @@ def validate_parlay_legs(
     without a team can't satisfy the both-sides rule on its own.
 
     ``require_both_teams=False`` relaxes only the both-sides rule (never the
-    distinct-player rule): the menu sets it for a game whose model edge is entirely
-    one-sided, so it can still offer that team's preset — the user adds the second
+    distinct-player rule): the menu sets it for a game whose story legs all sit on
+    one team, so it can still offer that team's preset — the user adds the second
     team from another game (a satellite leg) in the editor.
     """
     players = [leg_field(leg, "player") for leg in legs]

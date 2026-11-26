@@ -1,8 +1,8 @@
 """Star prominence and the lead story each game's menu headlines.
 
-Ranked on edge alone, a game's menu anchors on its highest-probability leg,
-which on DFS x.5 lines is usually a role player's Under. These pure pieces
-re-anchor it on the game's stars from snapshot columns alone, no new data:
+Ranked on EV alone, a game's menu anchors on whichever leg values highest, star
+or not. These pure pieces re-anchor it on the game's stars from snapshot columns
+alone, no new data:
 ``attach_prominence`` scores every offer's player, ``lead_seeds`` picks the leg
 an Over-led and an Under-led story grow from, and ``assign_leads`` flags the one
 story per ``(platform, Game, Date)`` the Games and Tonight tabs headline, with
@@ -26,7 +26,7 @@ STAR_RANK_ONE: dict[str, frozenset[str]] = {
     "NHL": frozenset({"C1", "W1", "D1", "G1"}),
 }
 
-# Over first: menu._cluster_strong_legs grows the led clusters in this order, so the
+# Over first: menu._cluster_legs grows the led clusters in this order, so the
 # Over-led one claims its legs before the Under-led one.
 LEAD_SIDES: tuple[str, str] = ("Over", "Under")
 # Owner rule (2026-10-17): an Over leads a game only when its script (``GameCtx.shape``)
@@ -68,25 +68,25 @@ def attach_prominence(offers: pd.DataFrame) -> pd.DataFrame:
 
 
 def lead_seeds(
-    edge: Mapping[int, float],
+    ev: Mapping[int, float],
     bet_df: Mapping[int, Mapping],
     star_of: Mapping[int, float],
     shape: str,
 ) -> dict[str, int]:
-    """Per side, the strong leg id its lead story grows from.
+    """Per side, the story leg id its lead story grows from.
 
-    ``edge`` maps the game's strong legs to their ``Model EV`` and ``star_of``
-    maps them to ``Star``. The most prominent leg wins, then the bigger edge,
-    then the alphabetically earlier player; a side with no strong leg is left
-    out, and so is Over unless the game's ``shape`` is in ``OVER_LEAD_SHAPES``.
+    ``ev`` maps the game's story legs to their ``EV`` and ``star_of`` maps them
+    to ``Star``. The most prominent leg wins, then the higher EV, then the
+    alphabetically earlier player; a side with no story leg is left out, and so
+    is Over unless the game's ``shape`` is in ``OVER_LEAD_SHAPES``.
     """
     seeds = {}
     for side in LEAD_SIDES:
         if side == "Over" and shape not in OVER_LEAD_SHAPES:
             continue
-        legs = [i for i in edge if bet_df[i]["Bet"] == side]
+        legs = [i for i in ev if bet_df[i]["Bet"] == side]
         if legs:
-            seeds[side] = min(legs, key=lambda i: (-star_of[i], -edge[i], bet_df[i]["Player"]))
+            seeds[side] = min(legs, key=lambda i: (-star_of[i], -ev[i], bet_df[i]["Player"]))
     return seeds
 
 

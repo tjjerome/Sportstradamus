@@ -7,12 +7,13 @@ generator). Pins the owner-locked acceptance criteria: ≤5 correlation-cluster
 stories per game, no-signal games yield nothing, the two objectives are the true
 argmaxes, the play-type cap holds, platforms are independent, the EV is the
 real copula scorer (not a reimplementation), and each side's most prominent
-strong leg leads a story that ranks ahead of the unled ones. An Over leads only
-in a shootout or a blowout.
+leg leads a story that ranks ahead of the unled ones. An Over leads only in a
+shootout or a blowout. A game's story legs are its pool legs, ordered by ``EV``.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import re
 from itertools import combinations
@@ -27,11 +28,7 @@ from sportstradamus.prediction.payouts import payout_curve_for
 from sportstradamus.prediction.stories import menu as menu_mod
 from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
-from sportstradamus.prediction.stories.menu import (
-    _MENU_EDGE_FLOOR,
-    _story_prose,
-    build_game_stories,
-)
+from sportstradamus.prediction.stories.menu import _story_prose, build_game_stories
 from sportstradamus.prediction.stories.pricing import _log_growth, score_subset
 
 
@@ -43,31 +40,34 @@ def _ctx(
     probs,
     corr,
     *,
+    fits=None,
+    evs=None,
     platform="Underdog",
-    edges=None,
     teams=None,
     game="AAA/BBB",
     max_size=None,
     players=None,
     bets=None,
-    kellys=None,
     stars=None,
     date="2026-06-12",
     commence="",
 ):
     """Build one synthetic GameScoringContext + its matching offers frame.
 
-    Every leg is Kelly-positive unless ``kellys`` says otherwise; ``stars`` is
-    the offers frame's ``Star`` column (all 0.0 by default, so a seed falls to
-    the earlier player name).
+    ``probs`` is each leg's claimed chance (``p_model``, ``Win Prob``) and ``fits``
+    its fitted one (``p_fit``, ``Fit Prob``), the claimed chance unless given.
+    ``evs`` is each leg's ``EV``: 0.90 unless given, under 1 like every leg on the
+    live board, and tied, so an order by it falls to the earlier leg. ``stars`` is
+    the offers frame's ``Star`` column (all 0.0 by default, so a seed falls to the
+    earlier player name).
     """
     n = len(probs)
     probs = np.asarray(probs, dtype=float)
-    edges = [1.30] * n if edges is None else edges
+    fits = probs.copy() if fits is None else np.asarray(fits, dtype=float)
+    evs = [0.90] * n if evs is None else evs
     teams = teams or (["AAA"] * (n // 2) + ["BBB"] * (n - n // 2))
     players = players or [f"Player{i}" for i in range(n)]
     bets = bets or ["Over"] * n
-    kellys = [0.25] * n if kellys is None else kellys
     stars = [0.0] * n if stars is None else stars
     names = ["Points", "Rebounds", "Assists", "Steals", "Blocks", "Turnovers", "FG3M", "FTM"]
     markets = [names[i % len(names)] for i in range(n)]
@@ -78,7 +78,7 @@ def _ctx(
         EVb=np.zeros((n, n)),
         V=np.zeros((n, n)),
         p_model=probs,
-        p_fit=probs.copy(),
+        p_fit=fits,
         p_books=probs.copy(),
         p_push=np.zeros(n),
         boosts=np.ones(n),
@@ -87,14 +87,15 @@ def _ctx(
     )
     bet_df = {
         i: {
-            "Model EV": edges[i],
+            "EV": evs[i],
+            "Fit Prob": fits[i],
+            "Pick": False,
             "Bet": bets[i],
             "Team": teams[i],
             "Player": players[i],
             "Market": markets[i],
             "Line": 5.5 + i,
             "Win Prob": probs[i],
-            "Kelly": kellys[i],
             "Commence": commence,
         }
         for i in range(n)
@@ -164,33 +165,23 @@ def test_caps_at_five_stories():
 
 
 def test_no_signal_games_yield_zero():
-    # All legs below the edge floor → no strong legs → no stories.
-    weak = _ctx([0.62, 0.61, 0.60], np.eye(3), edges=[1.0, 1.0, 1.0])
-    assert build_game_stories([weak[0]], weak[1], pd.DataFrame(), None).empty
-    # Strong legs but no correlated pair (identity ρ) → only singletons → nothing.
-    # The lead's orphan fallback needs another player, and these are one player's
-    # markets, so even the lead stays alone.
+    # Every leg is a story leg, but no pair correlates (identity ρ) → only singletons →
+    # nothing. The lead's orphan fallback needs another player, and these are one
+    # player's markets, so even the lead stays alone.
     uncorrelated = _ctx([0.66, 0.65, 0.64], np.eye(3), teams=["AAA"] * 3, players=["A"] * 3)
     assert build_game_stories([uncorrelated[0]], uncorrelated[1], pd.DataFrame(), None).empty
 
 
-def test_edge_floor_excludes_weak_leg():
-    # Legs 0,1 strong and correlated; leg 2 strong+correlated; leg 3 BELOW floor.
-    corr = np.eye(4)
-    corr[0, 1] = corr[1, 0] = 0.4
-    corr[0, 2] = corr[2, 0] = 0.3
-    corr[0, 3] = corr[3, 0] = 0.4
-    sctx, offers = _ctx([0.66, 0.65, 0.64, 0.66], corr, edges=[1.30, 1.30, 1.30, 1.00])
-    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
-    legs = [leg for row in out["legs"] for leg in row]
-    assert not any(leg["player"] == "Player3" for leg in legs)  # sub-floor leg never appears
+def test_every_pool_leg_is_a_story_leg_at_its_ev():
+    """A game's story legs are its pool legs, valued at their ``EV`` with no floor.
 
-
-def test_kelly_zero_leg_is_never_strong():
-    # A sub-1x or deep-alt payout zeroes Kelly, so the leg can't seed or join a story
-    # even well above the edge floor.
-    sctx, _offers = _ctx([0.70, 0.66], np.eye(2), edges=[1.10, 1.30], kellys=[0.0, 0.25])
-    assert menu_mod._strong_legs(sctx) == {1: 1.30}
+    Leg 0's EV is far under 1 and a zero Kelly would have barred it from the old
+    menu; leg 1 sits outside the pool, so it stays out whatever its value.
+    """
+    sctx, _offers = _ctx([0.66, 0.70, 0.62], np.eye(3), evs=[0.78, 0.99, 0.93])
+    sctx.bet_df[0]["Kelly"] = 0.0
+    pool = dataclasses.replace(sctx, leg_indices=(2, 0))
+    assert menu_mod._leg_evs(pool) == {2: 0.93, 0: 0.78}
 
 
 def test_correlation_cluster_forms_over_exact_legs():
@@ -208,17 +199,19 @@ def test_cluster_holds_one_leg_per_player():
 
     Same-player legs correlate near 1, so without the rule the cap fills with
     one name and ``validate_parlay_legs`` (distinct players) has no valid
-    subset left to pick.
+    subset left to pick. Star's highest-EV leg is the third of his four, and the
+    claimed chances rank his first one highest.
     """
     sctx, _offers = _ctx(
-        [0.66] * 7,
+        [0.70, 0.68, 0.62, 0.64, 0.66, 0.66, 0.66],
         _block_diag_corr([7], 0.4),
+        evs=[0.80, 0.84, 0.95, 0.90, 0.86, 0.86, 0.86],
         players=["Star"] * 4 + ["Player4", "Player5", "Player6"],
     )
-    edge = menu_mod._strong_legs(sctx)
-    order = sorted(edge, key=lambda i: -edge[i])
-    clusters = menu_mod._cluster_strong_legs(order, sctx, {})
-    assert clusters == [([0, 4, 5, 6], "", "")]  # Star's strongest leg, then three teammates
+    ev = menu_mod._leg_evs(sctx)
+    order = sorted(ev, key=lambda i: -ev[i])
+    clusters = menu_mod._cluster_legs(order, sctx, {})
+    assert clusters == [([2, 4, 5, 6], "", "")]  # Star's top-EV leg, then three teammates
     assert len({sctx.bet_df[i]["Player"] for i in clusters[0][0]}) == 4
 
 
@@ -273,21 +266,19 @@ def test_led_story_headline_is_routed_to_its_lead(monkeypatch):
     assert leads == ["Player2", "Player0"]  # rank order: the richer Under-led story first
 
 
-def test_orphan_lead_pairs_with_the_top_edge_leg_from_the_other_team():
+def test_orphan_lead_pairs_with_the_top_ev_leg_from_the_other_team():
     # The star Over (Player0, AAA) correlates with nothing, so its led cluster is a
-    # singleton that prices nothing and borrows a leg. Player3 (AAA) has the top
-    # edge but shares the lead's team; Player2 is the top-edge BBB leg.
-    probs, edges, stars = [0.66, 0.62, 0.64, 0.65], [1.30, 1.20, 1.40, 1.50], [3.0, 0, 0, 0]
-    sctx, offers = _ctx(
-        probs, np.eye(4), teams=["AAA", "BBB", "BBB", "AAA"], edges=edges, stars=stars
-    )
+    # singleton that prices nothing and borrows a leg. Player3 (AAA) has the top EV
+    # but shares the lead's team; Player2 is the top-EV BBB leg.
+    probs, evs, stars = [0.66, 0.62, 0.64, 0.65], [0.80, 0.70, 0.90, 0.95], [3.0, 0, 0, 0]
+    sctx, offers = _ctx(probs, np.eye(4), teams=["AAA", "BBB", "BBB", "AAA"], evs=evs, stars=stars)
     out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["story_id"].nunique() == 1
     assert out["lead_player"].unique().tolist() == ["Player0"]
     for legs in out["legs"]:
         assert {leg["player"] for leg in legs} == {"Player0", "Player2"}
-    # One-sided game: any other player qualifies, so the top edge wins outright.
-    sctx, offers = _ctx(probs, np.eye(4), teams=["AAA"] * 4, edges=edges, stars=stars)
+    # One-sided game: any other player qualifies, so the top EV wins outright.
+    sctx, offers = _ctx(probs, np.eye(4), teams=["AAA"] * 4, evs=evs, stars=stars)
     out = build_game_stories([sctx], offers, _context_frame("AAA/BBB"), None)
     assert out["story_id"].nunique() == 1
     for legs in out["legs"]:
@@ -297,20 +288,20 @@ def test_orphan_lead_pairs_with_the_top_edge_leg_from_the_other_team():
 def test_under_lead_survives_a_fully_correlated_pool():
     # Every pair correlates, so the Over-led cluster (the star Player0) absorbs the
     # whole pool and the Under lead (Player5, BBB) is left alone. It still gets its
-    # story: it borrows the top-edge AAA leg — Player2 at 1.35, since Player1 and
-    # Player3 out-edge it but share Player5's team — although the Over cluster
+    # story: it borrows the top-EV AAA leg — Player2 at 0.85, since Player1 and
+    # Player3 out-value it but share Player5's team — although the Over cluster
     # already claimed that leg.
     sctx, offers = _ctx(
         [0.66] * 6,
         _block_diag_corr([6], 0.3),
         teams=["AAA", "BBB"] * 3,
         bets=["Over"] * 5 + ["Under"],
-        edges=[1.30, 1.45, 1.35, 1.40, 1.30, 1.30],
+        evs=[0.80, 0.95, 0.85, 0.90, 0.80, 0.80],
         stars=[2.0, 0, 0, 0, 0, 0],
     )
-    edge = menu_mod._strong_legs(sctx)
-    order = sorted(edge, key=lambda i: -edge[i])
-    assert menu_mod._cluster_strong_legs(order, sctx, {"Over": 0, "Under": 5}) == [
+    ev = menu_mod._leg_evs(sctx)
+    order = sorted(ev, key=lambda i: -ev[i])
+    assert menu_mod._cluster_legs(order, sctx, {"Over": 0, "Under": 5}) == [
         ([0, 1, 2, 3, 4], "Over", "Player0"),
         ([5], "Under", "Player5"),
     ]
@@ -329,7 +320,7 @@ def test_under_lead_survives_a_fully_correlated_pool():
 def test_same_team_led_cluster_borrows_an_other_team_leg():
     # Two-team game: the Under lead (Player2, BBB) correlates only with its own
     # team's Unders, so its cluster prices nothing under the both-teams rule. It
-    # borrows the top-edge AAA leg (Player0) and the story spans both teams.
+    # borrows the top-EV AAA leg (Player0) and the story spans both teams.
     sctx, offers = _ctx(
         [0.66] * 5,
         _block_diag_corr([2, 3], 0.4),
@@ -515,16 +506,6 @@ def test_flex_loss_tier_prices_the_largest_multipliers_times_the_pair_modifier()
     assert scored["model_ev"] == pytest.approx(one_loss_tier * 1.2 * 1.1 * 0.9 * 0.85, rel=1e-3)
 
 
-def test_edge_floor_value_is_owner_locked():
-    assert _MENU_EDGE_FLOOR == 0.03
-
-
-def test_strong_legs_admit_an_edge_from_the_floor():
-    """The owner's 0.03 floor in behavior: a 0.04 edge seeds a story, a 0.02 edge never does."""
-    sctx, _offers = _ctx([0.66, 0.66], np.eye(2), edges=[1.04, 1.02])
-    assert menu_mod._strong_legs(sctx) == {0: 1.04}
-
-
 @pytest.mark.parametrize(
     ("shape", "led"),
     [
@@ -573,7 +554,7 @@ def test_presets_are_valid_parlays():
 
 
 def test_single_team_game_emits_single_team_story():
-    # When the model's edge legs are ALL on one team, a single-team preset IS allowed —
+    # When the game's story legs are ALL on one team, a single-team preset IS allowed —
     # the user completes it with a cross-game satellite leg in the editor. (Whole-game gate.)
     corr = _block_diag_corr([3], 0.3)
     sctx, offers = _ctx([0.66, 0.65, 0.64], corr, teams=["AAA", "AAA", "AAA"])
@@ -589,8 +570,8 @@ def test_single_team_game_emits_single_team_story():
 
 
 def test_unled_single_team_cluster_in_two_team_game_emits_no_story():
-    # The game's edge spans both teams but each correlation cluster is one-sided and
-    # none bridges them. The Over-led AAA cluster borrows the top-edge BBB leg
+    # The game's story legs span both teams but each correlation cluster is one-sided
+    # and none bridges them. The Over-led AAA cluster borrows the top-EV BBB leg
     # (Player2); the unled BBB cluster has no such recourse and emits nothing.
     corr = _block_diag_corr([2, 2], 0.4)
     sctx, offers = _ctx([0.66, 0.65, 0.64, 0.63], corr, teams=["AAA", "AAA", "BBB", "BBB"])

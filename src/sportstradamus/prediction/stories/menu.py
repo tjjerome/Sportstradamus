@@ -2,8 +2,9 @@
 
 ``build_game_stories`` turns each game's scoring bundle (``GameScoringContext``,
 captured by ``find_correlation``'s ``story_sink``) into up to five data-driven
-*stories* — correlation clusters of the game's strong legs. Each story emits two
-starting parlays over its cluster's legs (legs may be shared):
+*stories* — correlation clusters of the game's story legs, which are its pool legs
+(``leg_indices``) ordered by ``EV``, with no floor. Each story emits two starting
+parlays over its cluster's legs (legs may be shared):
 
 * **Bankroll Builder** — the leg-subset with the highest single-bet full-Kelly
   *log-growth* ``G`` (the bet that compounds bankroll fastest, not the biggest
@@ -11,12 +12,11 @@ starting parlays over its cluster's legs (legs may be shared):
 * **Shoot the Moon** — the leg-subset with the highest *model EV* inside the
   play-type cap (the widest high-edge set; usually a flex extension of Builder).
 
-Ranked on edge alone the menu opens every game on a role player's Under (the
-highest-probability leg on DFS x.5 lines), so two stories per game are *led*:
-one grows from the most prominent strong Over (only in a shootout or a blowout,
-``lead.OVER_LEAD_SHAPES``) and one from the most prominent strong Under
-(``lead.lead_seeds``), the lead sits in both presets, led stories rank first,
-and ``lead.assign_leads`` flags the one each menu headlines.
+Ranked on EV alone a menu opens on whichever leg values highest, star or not, so
+two stories per game are *led*: one grows from the most prominent Over (only in a
+shootout or a blowout, ``lead.OVER_LEAD_SHAPES``) and one from the most prominent
+Under (``lead.lead_seeds``), the lead sits in both presets, led stories rank
+first, and ``lead.assign_leads`` flags the one each menu headlines.
 
 Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Subsets
 are enumerated but scored in two phases (``pricing``) — a cheap independent-joint
@@ -49,13 +49,8 @@ from sportstradamus.prediction.stories.pricing import independent, score_subset,
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
-# A leg qualifies as a story seed when its per-$1 model EV clears this edge. 0.05 until
-# 2026-10-17, when the owner lowered it to admit more Over-led stories (the story-balance
-# lane's option B, honest-receipts.md §7); the Receipts cohort floor
-# (realized.RECOMMENDED_EDGE_MIN) stayed at 0.05.
-_MENU_EDGE_FLOOR: float = 0.03
-# Two strong legs join a cluster when |rho| over their pair clears this; matches
-# the display-correlation floor in correlation.py.
+# Two legs join a cluster when |rho| over their pair clears this; matches the
+# display-correlation floor in correlation.py.
 _CLUSTER_RHO_FLOOR: float = 0.05
 # Brute-force bound: 2**8 = 256 subsets keeps a cluster's enumeration instant.
 _MAX_CLUSTER_LEGS: int = 8
@@ -121,24 +116,24 @@ def _stories_for_game(
     ctxs: Mapping[str, GameCtx],
     seen: set[str],
 ) -> list[dict]:
-    edge = _strong_legs(sctx)
-    if len(edge) < 2:
+    ev = _leg_evs(sctx)
+    if len(ev) < 2:
         return []
-    # Whole-game gate: only when the model's edge is entirely one-sided may a story
+    # Whole-game gate: only when the game's story legs all sit on one team may a story
     # be a single-team preset (the user completes it with a satellite leg). A game
-    # with edge on both teams still requires both-teams presets.
-    require_both = len({team for i in edge if (team := sctx.bet_df[i].get("Team"))}) >= 2
+    # with legs on both teams still requires both-teams presets.
+    require_both = len({team for i in ev if (team := sctx.bet_df[i].get("Team"))}) >= 2
     stat_by_label = leg_market_map(sctx.league, sctx.platform)
     index = offer_index(offers)
     stars = {}
-    for i in edge:
+    for i in ev:
         rec = sctx.bet_df[i]
         stars[i] = index.get((rec["Player"], rec["Bet"], rec["Line"]), {}).get("Star", 0.0)
     ctx = ctxs.get(sctx.game)
-    seeds = lead_seeds(edge, sctx.bet_df, stars, ctx.shape if ctx else "even")
-    order = sorted(edge, key=lambda i: -edge[i])
+    seeds = lead_seeds(ev, sctx.bet_df, stars, ctx.shape if ctx else "even")
+    order = sorted(ev, key=lambda i: -ev[i])
     scored = []
-    for cluster, side, lead in _cluster_strong_legs(order, sctx, seeds):
+    for cluster, side, lead in _cluster_legs(order, sctx, seeds):
         priced = _price_cluster(
             cluster, seeds.get(side), order, sctx, stat_by_label, require_both=require_both
         )
@@ -146,7 +141,7 @@ def _stories_for_game(
             scored.append((*priced, side, lead))
     # Led stories first, between themselves by Moon EV; then the rest by EV.
     scored.sort(
-        key=lambda s: (s[3] == "", -s[2]["model_ev"], -max(edge[i] for i in s[0]), s[2]["bet_id"])
+        key=lambda s: (s[3] == "", -s[2]["model_ev"], -max(ev[i] for i in s[0]), s[2]["bet_id"])
     )
     rows: list[dict] = []
     for rank, (_cluster, builder, moon, side, lead) in enumerate(scored[:_MAX_STORIES]):
@@ -166,33 +161,28 @@ def _stories_for_game(
     return rows
 
 
-def _strong_legs(sctx: GameScoringContext) -> dict[int, float]:
-    """Bet-eligible, model-favored legs mapped to their per-$1 edge.
+def _leg_evs(sctx: GameScoringContext) -> dict[int, float]:
+    """The game's story legs mapped to their ``EV``: every pool leg, with no floor.
 
-    Every leg in ``leg_indices`` is already a player prop (game lines are
-    L3-gated, not yet in the candidate set), so eligibility is the strong-edge
-    floor plus ``Kelly > 0``, which excludes payouts at or below 1x and above
-    the favored cap so no -EV or deep-alt leg can seed or join a story.
+    The pool (``leg_indices``) holds the game's priced legs, so each carries an
+    ``EV`` (the fitted win chance times the side's payout). On the live board no
+    leg reaches 1, so a floor on it would leave every menu empty.
     """
-    return {
-        i: sctx.bet_df[i]["Model EV"]
-        for i in sctx.leg_indices
-        if sctx.bet_df[i]["Model EV"] - 1.0 >= _MENU_EDGE_FLOOR and sctx.bet_df[i]["Kelly"] > 0
-    }
+    return {i: sctx.bet_df[i]["EV"] for i in sctx.leg_indices}
 
 
-def _cluster_strong_legs(
+def _cluster_legs(
     order: Sequence[int], sctx: GameScoringContext, seeds: Mapping[str, int]
 ) -> list[tuple[list[int], str, str]]:
     """``(cluster, lead_side, lead_player)`` per ρ-graph cluster over ``order``.
 
-    ``order`` is the game's strong legs, strongest edge first. The Over-led and
+    ``order`` is the game's story legs, highest ``EV`` first. The Over-led and
     Under-led clusters grow first from their ``seeds`` (each side's seed is kept
     out of the other's pool so both stories can exist) and are returned even as
     singletons: the caller lends a lead that prices nothing a partner leg. The
-    greedy pass then seeds the rest on the strongest remaining leg, tagged
-    ``("", "")``, where an isolated strong leg forms no story. A cluster attaches
-    any leg correlated with a member.
+    greedy pass then seeds the rest on the highest-EV remaining leg, tagged
+    ``("", "")``, where an isolated leg forms no story. A cluster attaches any
+    leg correlated with a member.
     """
     players = {i: sctx.bet_df[i]["Player"] for i in order}
     remaining = set(order)
@@ -218,11 +208,11 @@ def _lead_partner(
     sctx: GameScoringContext,
     require_both: bool,
 ) -> int | None:
-    """The top-edge strong leg a lead borrows when its cluster prices nothing around it.
+    """The top-EV leg a lead borrows when its cluster prices nothing around it.
 
-    From the other team when the game has strong legs on both (the preset must
+    From the other team when the game has story legs on both (the preset must
     span both sides anyway), else from any other player. ``order`` is every
-    strong leg by edge, so a leg another story already uses may serve twice.
+    story leg by ``EV``, so a leg another story already uses may serve twice.
     The pair may be uncorrelated: the dek's cluster clause stays quiet below
     its ρ floor, so the card never claims a bundle that isn't there.
     """
@@ -238,9 +228,9 @@ def _grow_cluster(
     corr: np.ndarray,
     players: Mapping[int, str],
 ) -> list[int]:
-    """Attach legs correlated (|ρ| ≥ floor) with any member, strongest first, up to the cap.
+    """Attach legs correlated (|ρ| ≥ floor) with any member, highest EV first, up to the cap.
 
-    One leg per player: a player's strongest leg claims their slot and their
+    One leg per player: a player's highest-EV leg claims their slot and their
     remaining legs stay in the pool for a later cluster. Same-player legs
     correlate near 1, so without the rule one hot player's five markets fill the
     cap and ``validate_parlay_legs`` (distinct players) finds no valid subset.
