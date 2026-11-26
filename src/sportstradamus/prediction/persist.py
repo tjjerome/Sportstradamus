@@ -217,9 +217,10 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
     parlay (one row per ``objective``). ``legs`` is a list of canonical
     structured legs (``sportstradamus.leg_schema.build_leg`` output, stored as a
     ``list<struct>`` parquet column) that the dashboard's ``seed_from_story``
-    re-resolves against current offers; ``kelly_stake`` is a standalone
-    full-Kelly bankroll *fraction* — the dashboard rail re-sizes it into
-    Decimal dollars against the live bankroll. ``lead_side`` / ``lead_player``
+    re-resolves against current offers; ``ev`` is the parlay's fitted value of
+    a unit staked, ``joint_p`` that value over the payout, ``model_ev`` the
+    model's claim for the same parlay, and ``kelly_stake`` 0.0 (no entry is
+    staked, ``stories.menu._row``). ``lead_side`` / ``lead_player``
     name the side and player a led story is seeded on (``""`` when unled),
     ``star`` is the story's max player prominence, and ``lead`` flags the one
     story per platform/game/date the Games and Tonight tabs headline.
@@ -261,10 +262,8 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
         df["Model Skew"] = np.nan
 
     keep = [c for c in _OFFER_KEEP_COLS if c in df.columns]
-    df = df[keep]
-    if "Model EV" in df.columns:
-        df = df.sort_values("Model EV", ascending=False, ignore_index=True)
-    return df
+    # EV orders the board; a leg the fit did not price follows, by the model's own EV.
+    return df[keep].sort_values(["EV", "Model EV"], ascending=False, ignore_index=True)
 
 
 def _split_dist_params(df: pd.DataFrame) -> pd.DataFrame:

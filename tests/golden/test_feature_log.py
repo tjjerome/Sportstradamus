@@ -543,7 +543,8 @@ def test_a_skewnormal_win_prob_reprices_from_its_record(log_dir, monkeypatch, tm
     assert not np.isclose(unshifted, served["Win Prob"]).any()
 
     # The dashboard snapshot keeps its NaN Model Skew and none of the history-only columns.
-    snapshot = persist._normalize_offers(served)
+    # It orders by the stamp's EV, which a scoring run lays on after this test's records.
+    snapshot = persist._normalize_offers(served.assign(EV=np.nan))
     assert snapshot["Model Skew"].isna().all()
     assert snapshot.columns.intersection(_RECORD_DECISION_COLS).empty
 

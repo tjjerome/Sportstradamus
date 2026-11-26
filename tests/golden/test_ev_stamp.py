@@ -270,6 +270,22 @@ def test_the_board_snapshot_keeps_the_stamp():
     pd.testing.assert_frame_equal(snapshot[EV_STAMP_COLS], scored[EV_STAMP_COLS])
 
 
+def test_the_board_snapshot_lists_priced_legs_by_ev_then_the_rest_by_model_ev():
+    """The fitted number orders the snapshot; the model's claim orders only the legs the
+    fit did not price, after them."""
+    scored = pd.DataFrame(
+        {
+            "Player": ["Ann", "Bob", "Cy", "Dee"],
+            "EV": [0.90, np.nan, 0.95, np.nan],
+            "Model EV": [1.40, 1.10, 0.80, 1.30],
+        }
+    )
+
+    snapshot = persist._normalize_offers(scored)
+
+    assert snapshot["Player"].tolist() == ["Cy", "Ann", "Dee", "Bob"]
+
+
 @_NHL_LABELS
 def test_process_offers_stamps_the_records_before_find_correlation_sees_them(
     monkeypatch, platform, label, archive_name
