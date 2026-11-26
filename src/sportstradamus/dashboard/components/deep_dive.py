@@ -1,9 +1,9 @@
 """Offer-detail dialog and navigation for the dashboard.
 
 The evidence-chain view a user opens on any offer: a themed header (Cinzel kicker,
-player + market, side line, edge badge, gold rule), the model's "case" (the per-offer
-``Why``), a one-line game-context strip, and six tabs (History, Model, Comps, Other
-stats, Correlated, Movement). The Comps / Other-stats tabs read the
+player + market, side line, EV badge, gold rule), a pick's record line, the model's "case"
+(the per-offer ``Why``), a one-line game-context strip, and six tabs (History, Model, Comps,
+Other stats, Correlated, Movement). The Comps / Other-stats tabs read the
 ``current_offer_details`` sidecar prerendered at ``prophecize`` time so the server never
 recomputes them live; the Movement tab reads the ``current_line_movement`` snapshot,
 matched on Platform too, because each app moves its own line.
@@ -28,9 +28,12 @@ from sportstradamus.dashboard.data import (
     load_current_game_context,
     load_current_line_movement,
     load_current_offer_details,
+    load_play_record,
 )
+from sportstradamus.dashboard.legs import ev_marked, record_line
 from sportstradamus.dashboard.narrative import SHAPE_HELP, bet_arrow, context_strip
 from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.helpers import leg_kind
 from sportstradamus.helpers.io import LINE_MOVEMENT_KEYS
 
 _DETAIL_KEY = ("League", "Date", "Player", "Market", "Opponent")
@@ -64,11 +67,15 @@ def drop_detail_on_page_change(state, page_id: str) -> None:
         state["_active_page"] = page_id
 
 
-def _edge_badge(model_ev: float) -> str:
-    """Board-style Model Edge (``Model EV − 1``) as a semantic colored chip."""
-    edge = model_ev - 1.0
-    color = "green" if edge >= 0 else "red"
-    return f":{color}[**{edge:+.0%} edge**]"
+def _ev_badge(row: pd.Series) -> str:
+    """The fitted EV and win chance, led by the "+EV" mark when the leg wears it, over the
+    model's own claim; a leg the fit did not price shows no EV of its own.
+    """
+    model = f":gray[Model EV {row['Model EV']:.2f} · Model win {row['Win Prob']:.0%}]"
+    if pd.isna(row["EV"]):
+        return f"**No EV**  \n{model}"
+    mark = ":green[**+EV**] " if ev_marked(row.to_frame().T).iloc[0] else ""
+    return f"{mark}**EV {row['EV']:.2f}** · Win {row['Fit Prob']:.0%}  \n{model}"
 
 
 def _esc_field(row: pd.Series, key: str) -> str:
@@ -93,9 +100,7 @@ def _render_header(row: pd.Series) -> None:
         f"{_esc_field(row, 'Opponent')}</div>",
         unsafe_allow_html=True,
     )
-    model_ev = row.get("Model EV")
-    if pd.notna(model_ev):
-        badge.markdown(_edge_badge(float(model_ev)))
+    badge.markdown(_ev_badge(row))
     st.markdown(
         f'<hr style="height:1px;border:0;margin:10px 0 4px;'
         f'background:linear-gradient(90deg,{GOLD},transparent)">',
@@ -184,6 +189,10 @@ def _render_nav() -> None:
 def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     _render_nav()
     _render_header(row)
+    if row["Pick"]:
+        kind = leg_kind([row["Boost"]], [row["Platform"]])[0]
+        line, hover = record_line(load_play_record(), row["League"], kind)
+        st.caption(line, help=hover)
     _render_case(row)
     _render_context_strip(row, load_current_game_context())
 

@@ -122,3 +122,14 @@ def test_board_shows_the_picks_record_for_their_league_and_kind(monkeypatch, tmp
     record = next(c for c in at.caption if c.value.startswith("NBA even picks"))
     assert record.value == "NBA even picks: 269 legs, +2.7%"
     assert "-4.1% to +9.6%" in record.proto.help
+
+
+def test_a_picks_detail_leads_with_its_ev_and_carries_its_record(monkeypatch, tmp_path):
+    at = _board(monkeypatch, tmp_path)
+    # The Board keeps an open dialog's stack across a rerun only on a correlation hop.
+    at.session_state["detail_stack"] = [0]
+    at.session_state["corr_nav"] = True
+    at.run()
+    assert not at.exception
+    assert any(m.value.startswith("**EV 0.95** · Win 52%") for m in at.markdown)
+    assert [c.value for c in at.caption].count("NBA even picks: 269 legs, +2.7%") == 2

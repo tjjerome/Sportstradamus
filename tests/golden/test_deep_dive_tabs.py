@@ -170,7 +170,7 @@ def test_lift_survivors_resolves_idx_and_returns_multiplier():
     assert item["player"] == "J. Young"
     assert idx == 11  # resolved against the non-0-based grid index
     # ev_lift returns a raw EV multiplier (near/above 1.0), not a zero-centered delta —
-    # the display is `lift - 1.0`, mirroring _edge_badge.
+    # the display is `lift - 1.0`.
     assert lift > 1.0
 
 

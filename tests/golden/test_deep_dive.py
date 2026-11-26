@@ -1,4 +1,4 @@
-"""Pure helpers behind the deep-dive dialog shell (detail-row lookup, edge badge, the
+"""Pure helpers behind the deep-dive dialog shell (detail-row lookup, EV badge, the
 context-strip text helpers) and the page-change dialog reset.
 
 Render paths (``show_detail`` and the tab renderers in ``deep_dive_tabs``) call ``st.*``
@@ -19,7 +19,7 @@ import pandas as pd
 from sportstradamus import data as data_pkg
 from sportstradamus.dashboard.components.deep_dive import (
     _detail_row,
-    _edge_badge,
+    _ev_badge,
     _team_total_text,
     _win_prob_text,
     drop_detail_on_page_change,
@@ -123,9 +123,28 @@ def test_detail_row_movement_keys_split_platforms():
         assert hit is not None and hit["changes"] == changes
 
 
-def test_edge_badge_sign_color():
-    assert ":green[" in _edge_badge(1.12) and "+12%" in _edge_badge(1.12)
-    assert ":red[" in _edge_badge(0.95) and "-5%" in _edge_badge(0.95)
+def _offer(**fit) -> pd.Series:
+    """An Underdog even pick (its 1.0 multiplier pays 1.83) as the dialog receives it: one row
+    of the offers frame, so its numbers ride in an object Series."""
+    row = {"Boost": 1.0, "Platform": "Underdog", "Win Prob": 0.60, "Model EV": 1.10, **fit}
+    return pd.DataFrame([row]).iloc[0]
+
+
+def test_badge_leads_with_the_fitted_ev_and_shows_the_models_claim():
+    badge = _ev_badge(_offer(**{"Fit Prob": 0.52, "Fit Prob Low": 0.47, "EV": 0.95}))
+    assert badge == "**EV 0.95** · Win 52%  \n:gray[Model EV 1.10 · Model win 60%]"
+
+
+def test_badge_marks_a_leg_whose_lower_bound_clears_its_payout_not_its_ev():
+    marked = _ev_badge(_offer(**{"Fit Prob": 0.60, "Fit Prob Low": 0.56, "EV": 1.098}))
+    assert marked.startswith(":green[**+EV**] **EV 1.10**")
+    unmarked = _ev_badge(_offer(**{"Fit Prob": 0.574, "Fit Prob Low": 0.5355, "EV": 1.05}))
+    assert unmarked.startswith("**EV 1.05**")
+
+
+def test_badge_on_a_leg_the_fit_did_not_price_shows_only_the_models_claim():
+    badge = _ev_badge(_offer(**{"Fit Prob": None, "Fit Prob Low": None, "EV": None}))
+    assert badge == "**No EV**  \n:gray[Model EV 1.10 · Model win 60%]"
 
 
 def test_team_total_text_with_delta():
