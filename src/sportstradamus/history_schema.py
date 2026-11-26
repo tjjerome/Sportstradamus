@@ -60,8 +60,8 @@ OFFER_LEVEL_COLS = [
 
 # Decision-time context: what the scorer saw when it chose the side. Research reads it
 # back from history; reporting reads only the columns whose comment names the reader.
-# Offer-level, NaN on rows written before the column existed, and never backfilled, the
-# EV stamp's four Book columns excepted.
+# Offer-level, NaN on rows written before the column existed, and never backfilled except
+# the EV stamp's four Book columns, which book_stamp.fill_history fills on rows no run stamped.
 DECISION_COLS = [
     # One UTC stamp per prophecize run, so a row joins the archive state that run saw. A
     # row is the last scoring whose board went out before its game
@@ -106,8 +106,8 @@ DECISION_COLS = [
     "Market Prob Implied",
     # Scored At of the run that first wrote the key; a key older than this column stays NaN.
     "First Scored At",
-    # The EV stamp (prediction/ev_stamp.py). book_stamp.fill_history fills the four Book
-    # columns on rows no run stamped; live_fit.fit reads Book Prob and Book Class.
+    # The EV stamp (prediction/ev_stamp.py); live_fit.fit reads Book Prob and Book Class.
+    #
     # The sportsbooks' mean chance of the Bet side at this exact line; NaN when none prices it.
     "Book Prob",
     # How many sportsbooks price this exact line.
