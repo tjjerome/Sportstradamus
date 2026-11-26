@@ -158,6 +158,8 @@ def fit(offers: pd.DataFrame, prior_legs: float = PRIOR_LEGS) -> pd.DataFrame:
         # Each term's mean square over the legs that carry it. Over every leg, a term few legs
         # carry (a league with few withheld cells) is held too loosely and overfits them.
         mean_square = (design**2).sum(axis=0) / (design != 0).sum(axis=0)
+        # A leg at chance one half adds a quarter of its regressor's square to the Hessian: this
+        # precision is what ``prior_legs`` such legs, each at the mean square, would add.
         precision = prior_legs * 0.25 * np.maximum(mean_square, _MIN_MEAN_SQUARE)
         hit = legs["hit"].to_numpy()
         beta, cov, chance = _newton(design, hit, legs["x0"].to_numpy(), precision)
@@ -202,18 +204,18 @@ def score(offers: pd.DataFrame, table: pd.DataFrame) -> pd.DataFrame:
     eta = terms["x0"].to_numpy(copy=True)
     variance = np.zeros(len(terms))
     for fitted in table.itertuples(index=False):
-        legs = (
+        in_stratum = (
             terms["League"].eq(fitted.league)
             & terms["Kind"].eq(fitted.kind)
             & terms["Book Class"].eq(fitted.book_class)
         ).to_numpy()
-        if not legs.any():
+        if not in_stratum.any():
             continue
         names = [term for term in TERMS if not np.isnan(getattr(fitted, term))]
-        design = terms.loc[legs, names].to_numpy(float)
-        eta[legs] += design @ np.array([getattr(fitted, term) for term in names])
+        design = terms.loc[in_stratum, names].to_numpy(float)
+        eta[in_stratum] += design @ np.array([getattr(fitted, term) for term in names])
         cov = np.reshape(fitted.cov, (len(names), len(names)))
-        variance[legs] = np.einsum("ij,jk,ik->i", design, cov, design)
+        variance[in_stratum] = np.einsum("ij,jk,ik->i", design, cov, design)
     over = offers["Bet"].eq("Over").to_numpy()
     side_eta = np.where(over, eta, -eta)
     prob = expit(side_eta)
@@ -262,7 +264,7 @@ def fit_gain(offers: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     over_hit = offers["Result"].eq("Over").to_numpy()
     fit_over = np.where(offers["Bet"].eq("Over"), offers["Fit Prob"], 1 - offers["Fit Prob"])
     app_over = expit(terms["x0"].to_numpy())
-    # The app's log loss less the fit's: the log of the fit's chance of what happened over the app's.
+    # The app's log loss less the fit's: log of the fit's chance of what happened over the app's.
     gain = np.log(np.where(over_hit, fit_over / app_over, (1 - fit_over) / (1 - app_over)))
     legs = terms.assign(Date=offers["Date"].to_numpy(), gain=gain).dropna(subset="gain")
     pooled = pd.concat([legs, legs.assign(League="all", Kind="all")])
