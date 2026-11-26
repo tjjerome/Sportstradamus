@@ -98,9 +98,8 @@ def stamp(
         slates.append(inputs.set_axis(slate.index))
     books = pd.concat(slates).reindex(offers.index)
     over = offers["Bet"].eq("Over")
-    return books.assign(**{"Book Prob": books["Book Over"].where(over, 1 - books["Book Over"])})[
-        COLS
-    ]
+    books["Book Prob"] = books["Book Over"].where(over, 1 - books["Book Over"])
+    return books[COLS]
 
 
 def fill_history(history: pd.DataFrame, archive) -> pd.DataFrame:
@@ -119,7 +118,7 @@ def fill_history(history: pd.DataFrame, archive) -> pd.DataFrame:
     fills = []
     # A row with no ``Scored At`` falls out here: groupby drops the missing key.
     for scored_at, run in tqdm(pending.groupby("Scored At"), desc="Book stamps", unit="run"):
-        saw_batch = scored_at - newest_quote.get(scored_at, pd.NaT) < _SAME_BATCH
+        saw_batch = scored_at - newest_quote[scored_at] < _SAME_BATCH
         offers = run.assign(Market=list(map(archive_market, run["League"], run["Market"])))
         cut = scored_at if saw_batch else scored_at - _SAME_BATCH
         fills.append(stamp(offers, archive, scored_at, at=cut))
