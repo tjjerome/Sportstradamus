@@ -219,10 +219,11 @@ def known_commence_times(history: pd.DataFrame) -> pd.Series:
 def commence_times(history: pd.DataFrame) -> pd.Series:
     """Each row's kickoff: the instant its close is gated on and read as of.
 
-    :func:`known_commence_times`, so a ``PREDICTION_KEY`` group is read from the archive
-    once, at one instant, however its rows differ. A group with no kickoff at all, and
-    every row of a frame without a ``Commence`` column, gets
-    :data:`_COMMENCE_DEFAULT_OFFSET` past its game date: NaT where that date does not parse.
+    The :func:`known_commence_times` kickoff where the frame holds one, else a stand-in: a
+    group with no kickoff at all, and every row of a frame without a ``Commence`` column,
+    gets :data:`_COMMENCE_DEFAULT_OFFSET` past its game date (NaT where that date does not
+    parse). The rows of a ``PREDICTION_KEY`` group share one instant, so the archive is read
+    once per group however its rows differ.
     """
     stand_in = (
         pd.to_datetime(history["Date"], format="%Y-%m-%d", errors="coerce")
