@@ -170,6 +170,12 @@ These conventions pair with the hooks in `.claude/hooks/`.
   representing the line accurately. Never discard a candidate because it moves the
   model toward the book ("hygiene", "it learns what the line knows"), and never keep
   one because it moves away; only its error on the priced population decides.
+* **Error is the floor; the scoreboard decides above it.** Lower error at the posted
+  line has not moved the money. A change that passes on error is kept only if its
+  information weight on the rows it targets rises and its play's return does not
+  fall, both read against the control on the same later dates
+  ([docs/handoffs/profit-engine.md](docs/handoffs/profit-engine.md): §5.2 states the
+  rule, §7 the scoreboard and how much of it is built).
 * **Older verdicts predate this rule.** Many keep/kill calls made before it were
   judged on all held-out rows, on the offline gates, on what a candidate adds beyond
   the book, or on the recommended legs alone. Treat such a verdict as unverified:
@@ -352,7 +358,7 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   (`shipped: "withheld"` → `shipped: "devel"`) the human commits directly;
   `sportstradamus ship config --branch devel` only validates + summarizes.
 
-  `prophecize` and `close-lines` both fire at `:50` during peak hours.
+  `prophecize` and `close-lines` both fire at `:20` during peak hours.
   close-lines does not queue behind prophecize: it fetches on time, and while
   the archive is held its captures wait in `close_line_captures.json` for a
   later tick (docs/OPERATIONS.md, couplings).
@@ -371,6 +377,8 @@ The old single-file modules no longer exist. Use these paths:
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
 | `posted_sides`, `play_record`, `entry_record` (the money tables) | `sportstradamus.plays` |
+| `fit`, `score`, `walk_forward` (EV's fitted win chance) | `sportstradamus.live_fit` |
+| `stamp`, `fill_history` (the sportsbooks' same-line price) | `sportstradamus.book_stamp` |
 
 Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 

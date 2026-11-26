@@ -1,8 +1,9 @@
 # Lane brief — profit engine: one EV fitted where we bet, plays scored in money
 
-> Status: ACTIVE. Built: the Modifiers page fix (step 0) and the money table, offline (phase 0)
-> and nightly. Next: the rest of phase 1, the EV fit and its weights table (§5.1, §6). The model
-> lane (§7) opens the day phase 1's first nightly weights table exists.
+> Status: ACTIVE. Built: the Modifiers page fix (step 0), the money table (phase 0, offline and
+> nightly) and EV with its scoreboard (phase 1: the stamp on every scored record, the nightly
+> weights table, the fit's two plays, the replay's fit check). Next: the engine reads EV (phase 2,
+> §5.3); until then ranking and stakes read the model's claim. The model lane (§7) is open.
 
 ## 1. Mission & money logic
 
@@ -72,6 +73,18 @@ build prints:
   offers with one side posted.
 - The engine's entries: Underdog 2-pick 200 and 3-pick 7,599 (7,799 together, 135 of them NBA).
 
+Add `--walk-forward` and point `--history` at `history_stamped.parquet` (the same history with
+its book stamps rebuilt): the replay prices each of the last 33 game dates from fits on earlier
+dates only and prints the fit check. A correct build prints:
+
+- The fit's log-loss gain over the app's price, × 10,000, every leg pooled: +5.7 [+2.0, +9.3] on
+  122,627 legs. NBA modified-payout picks: +10.2 on 36,866.
+- What the model's side paid, by band of EV: says .871 and paid .887 on 78,213 legs; .915 and
+  .916 on 42,030; .948 and .935 on 2,166; .980 and .982 on 173; at 1 or more, says 1.027 and
+  paid .803 on 45.
+- "+EV" marks: 0 of 139,279 legs. `ev_rank` minus `model_edge`: +0.028 a leg [−0.003, +0.060],
+  on 7,115 legs each.
+
 ### Volatile product assumptions
 
 - History carries both sides' payouts (`Payout Over`, `Payout Under`) only from 2026-10-05, so
@@ -111,20 +124,33 @@ that the Over hits:
 
 - **App's fair price**: the posted pair of payouts with the cut removed; one half on an even pick.
 - **Book price**: the plain mean of each sportsbook's own latest price at the app's exact line,
-  at most 90 minutes old, as the scoring run saw it. Present only in class A; a translated price
-  joins class B when the model lane earns it weight (§7, M2).
+  at most 90 minutes old, as the scoring run saw it, read off the archive's `ladder` table
+  (which holds every same-line quote the `odds` table holds). Present only in class A; a
+  translated price joins class B when the model lane earns it weight (§7, M2).
 - **Model's P**: the served `Win Prob`. A withheld cell serves the book consensus under that
   name, so its rows carry their own weight `w_fb` and `w_model` reads served models only.
 - One fit per league, pick kind (Underdog even, Underdog modified payout, Sleeper) and class,
   refit nightly on the trailing 90 days. A prior worth 4,000 legs pulls every coefficient toward
-  the no-evidence point (c = 0, a = 1, every w = 0), which is the app's fair price. Below 400
-  settled legs a fit is not used and the leg takes that no-evidence value: zero edge, on
-  purpose. An offer with one side posted has no fair price and gets no EV.
+  the no-evidence point (c = 0, a = 1, every w = 0), which is the app's fair price. Each
+  coefficient's prior is scaled by the legs that carry its term: scaled by every leg, a term
+  few legs carry (`w_fb` in a league with few withheld cells) is held too loosely and overfits
+  them. Below 400 settled legs a fit is not used and the leg takes that no-evidence value:
+  zero edge, on purpose. An offer with one side posted has no fair price and gets no EV: a third
+  of history's rows, nearly all alternate rungs, and on one in five of them (7 % of all rows,
+  mostly Sleeper's) the posted side is the model's.
 - The side a leg takes stays the model's. The fit values that side; it does not choose it.
 - `EV` is the fitted win chance times the posted payout, and it ranks legs. The "+EV" mark and
   the stake read the fit's one-sided 95 % lower bound instead: a leg is marked when the bound
   times the payout reaches 1, and it is staked at half Kelly on the bound. `Win Prob` and
   `Model EV` keep their meaning.
+
+A scoring run stamps seven columns on each record (`prediction/ev_stamp.stamp_records`):
+`Book Prob`, `Book Count`, `Book Class` and `Book Observed At`, the books' price as that run
+read the archive (`book_stamp.stamp`), then `Fit Prob`, `Fit Prob Low` and `EV`
+(`live_fit.score` against the nightly table). They ride to the board snapshot and to history.
+`reflect` refits the table every night (`data/runtime/live_fit.parquet`), and for history rows
+scored before the stamp existed it fills the four Book columns from the archive as their run
+could read it (`book_stamp.fill_history`), so the fit's window is full from its first night.
 
 The prior, the lower bound and the side rule come from the research brief
 ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)), walk-forward over the last 33
@@ -146,10 +172,10 @@ the distribution. `book_pull` retires in M1.
 
 A **play** is a named rule that picks sides from a day's board (`plays.PLAYS`). Registered:
 `model_edge` (the board's rule, `realized.recommended`, so Receipts, the live gap and the replay
-keep their cohort) and two controls that need no model, `under` (every Under on an even pick)
-and `all` (every posted side). Two more register with phase 1: `ev_edge` (the "+EV" mark of
-§5.1 in the same payout band) and `ev_rank` (per date, league and kind, as many legs as
-`model_edge` took, the top ones by EV).
+keep their cohort), two controls that need no model, `under` (every Under on an even pick) and
+`all` (every posted side), and the fit's two: `ev_edge` (the "+EV" mark of §5.1 in the same
+payout band) and `ev_rank` (per date, league and kind, as many legs as `model_edge` took, the
+highest by EV). A new play registers last, so the plays before it keep their bounds.
 
 `plays.play_record` scores each play per league and pick kind:
 
@@ -170,8 +196,12 @@ over the trailing 90 days (`plays.trailing_record`; games before props counted o
 stay out): the window main's money test reads (§5.5). On the dev box, `sportstradamus admin
 play-replay` scores any window of a history, this box's or a frozen copy.
 
-Phase 1 adds the **information weights** of §1 (the fit's coefficients with their standard
-errors, by league, kind and class): the model lane's scoreboard.
+The **information weights** of §1 are the fit's own table, `data/runtime/live_fit.parquet`: one
+row per league, kind and class with its coefficients, their standard errors and its legs. They
+are the model lane's scoreboard. `play-replay --walk-forward` prices each game date of a stamped
+history from fits on earlier dates and prints the fit's checks: its log-loss gain over the app's
+price, what each band of EV paid, the count of "+EV" marks and `ev_rank` against `model_edge`
+(`live_fit.fit_gain`, `live_fit.ev_bands`; §3 holds the known answers).
 
 **Keep rule.** The priced-population rule stays as the floor: a change may not make error at the
 posted line worse. Above that floor, a change of any kind (rule, model, feature, data source) is
@@ -194,6 +224,8 @@ can (0.31 against 0.56 on NBA's class B today).
   persona per registered play is appended.
 - The dashboard shows "EV", "Model EV", the mark and the play's own record beside each leg and
   entry. [DESIGN.md](../../DESIGN.md) governs the UI work.
+- A rung with one side posted carries no EV (§5.1), so a rank on EV alone would never list the
+  7 % of rows whose only posted side is the model's. What ranks them is decided here.
 
 ### 5.4 Stacks: "bet if the app pays at least X"
 
@@ -226,37 +258,59 @@ Gate 2 stays. `devel` is never gated by it.
 |---|---|---|
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
-| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, apply, walk-forward, the weights table); `Book Prob`, `Fit Prob` and `EV` stamped on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; M1 ships inside it. The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and must pass its acceptance tests on the frozen history | In progress: the nightly `play_record.parquet` is built and the brief is in |
+| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, score, walk-forward, the fit's checks); the EV stamp on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; the plays `ev_edge` and `ev_rank`; `play-replay --walk-forward`; history records only a board a bettor could act on (§7, M1). The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and passes its acceptance tests on the frozen history (§3) | Built. `EV` is stamped and recorded; ranking, the mark and stakes wait for phase 2 |
 | Phase 2 | The engine reads EV (§5.3), one subagent per module | Queued |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |
 
 Where the code lives: `plays.py` holds the play registry, the posted sides, both money tables
 and the anytime-valid bound (`sequence_bounds`, which `scripts/books_lean.py` also reads);
-`helpers.leg_kind` names a side's pick kind beside `platform_payout`; the structure census gets
-its own module with phase 3.
+`helpers.leg_kind` names a side's pick kind beside `platform_payout`; `live_fit.py` holds the
+fit, the pricing and the fit's checks; `book_stamp.py` reads the books' same-line price for a
+run's offers and for stored rows; `prediction/ev_stamp.py` lays both on a run's records. The
+structure census gets its own module with phase 3.
 
 ## 7. The model lane
 
-**The scoreboard.** The information weights of §1 by league, market, pick kind and class, with
-the play's return beside them: live every night once phase 1 lands, and offline for a candidate
-version through `play-replay` on the realized replay's posted legs. A candidate is judged on the
+**The scoreboard.** The information weights of §1 by league, pick kind and class, with the
+play's return beside them: `reflect` writes both every night (`live_fit.parquet`,
+`play_record.parquet`), and `play-replay --walk-forward` reads a stamped history the same way
+offline. Two parts are not built: the weights by market, and the replay of a candidate model
+version (the realized replay's posted legs carry no book stamp). A candidate is judged on the
 scoreboard, by the keep rule of §5.2, before it ships. Brier and the six gates remain the test
 for serving a price; they no longer decide whether model work is paying.
 
-**When.** M1 ships inside phase 1. M2 and M3 open the day phase 1's first nightly table exists,
-beside phases 2 to 4. The weekly retrain and defect fixes never stop.
+**When.** M1 ships inside phase 1. M2 and M3 run beside phases 2 to 4. The weekly retrain and
+defect fixes never stop.
 
 - **M1. Use the books raw** (class A; no retraining). The fit's book input is the plain mean of
-  same-line book prices, widened by any rung a book posts at the app's exact line. The served
-  quote is a median 79 minutes old because of the schedule, not the 1-hour training quote: a run
-  reads the newest quote in the archive, usually the last broad poll at :30 of an earlier hour,
-  and the closing capture stamped in the run's own minute lands after the run has taken the
-  archive (397 of 426 runs never saw it). Weights are earned on fresh quotes (M2's slope price
-  reads 0.52 at 20 minutes or less against 0.12 at 45 to 90), so the open question is which
-  schedule puts a fresh quote in front of a run that finishes before the game starts.
-  Then fit per-book weights on outcomes at posted lines, and retire `book_pull` and re-read its
-  cells on the money table. Target: `w_book` near 1 in every league.
+  same-line book prices, widened by any rung a book posts at the app's exact line.
+  `book_pull` stays for now: the fit is estimated after it, so nothing is counted twice, and its
+  cells have carried it only since 2026-11-23; its retirement is read on the money table with the
+  kill lines' first reading. Target: `w_book` near 1 in every league.
+- **M1, open: a fitted average of the books.** A weighted consensus should beat the plain mean
+  of books. The first read did not settle it. On offers two or more books price, the engine's
+  `book_weights.json` mean adds nothing to the plain mean (the weight on their difference is
+  −0.05 (.36) over the three leagues), and no single book's gap to the plain mean points at the
+  outcome by more than 1.4 standard errors. That tests one fit (weights on each book's implied
+  mean against the stat result, unshrunk, near one-hot) on 46 dates at the app's line, not the
+  class. The study fits the average on outcomes at posted lines, over every line two or more
+  books share in four seasons of archive quotes, walk-forward, and is read on class-A offers by
+  the EV fit's own gain (lane `research/m1/`).
+- **M1. The board a bettor can act on.** A run takes about 25 minutes and publishes once, at its
+  end; games start on the hour or the half hour. History records a row only when its game was at
+  least five minutes ahead as the board went out (`prediction.cli._recordable`): a later scoring
+  leaves the stored row alone and an offer first seen that late is never stored, so the money
+  record, the closing-line value and the fit read boards a bettor could act on. Rows of games
+  through 2026-11-25 hold each offer's last scoring instead, which landed too late for about
+  three quarters of offers, and the fit's 90-day window carries them until they age out. The run
+  fires at :20 and the broad poll at :05: over the 46 days measured, 77 % of last passes then
+  land in time, on a board 16 to 21 minutes old at the start, scored on sportsbook quotes at
+  most 30 minutes old for 59 % of offers (24 %, 46 to 51 minutes and 37 % with the run at :50
+  and the poll at :30). Weights are earned on fresh quotes (M2's slope price reads 0.52 at 20
+  minutes or less against 0.12 at 45 to 90). Open: a capture before every run lifts the
+  fresh-quote share to 99 % for about 4,300 credits a month, and the feature log and the entries
+  record (`parlay_hist`) still keep scorings that landed too late.
 - **M2. Translate a book's price to another line** (class B, and every modified-payout rung): the
   largest pool of unused information. Step 1 interpolates between the same book's two nearest
   rungs where they bracket the app's line (4 % of class B). Step 2 shifts the nearest quote by

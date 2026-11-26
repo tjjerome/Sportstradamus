@@ -26,7 +26,7 @@ ground truth:
 the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-11-20._
+_Last updated: 2026-11-25._
 
 ---
 
@@ -40,8 +40,11 @@ with an **offline** check at research→devel and a **live** check at devel→ma
 | **Set first baseline** | The **6 gates** below | **Live Gate 2:** ≥ 200 settled offers in 30 days, live book BSS ≥ 0, neither side's live precision below 0.50 |
 | **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | No separate live rule |
 
-Realized money is never a live threshold: no model is promoted, demoted or withheld on
-realized ROI (owner rule, 2026-10-04). A served cell that fails a gate on a later retrain
+Realized money is not a live threshold today: no model is promoted, demoted or withheld on
+realized ROI (owner rule, 2026-10-04). The owner has since decided a money test for `main`
+alone (2026-11-25); the rule here stands until the profit-engine lane builds that test
+([handoffs/profit-engine.md](handoffs/profit-engine.md) §5.5), and `devel` is never gated on
+money. A served cell that fails a gate on a later retrain
 is flagged, not withheld: `meditate`'s post-run table and `sportstradamus ship config --branch
 devel` list it (`training.graduation.served_cells_failing_ship`), and the cull is the
 owner's. For `main`, the monthly `gate-status` job regenerates `stat_meta.json` from live
@@ -400,6 +403,18 @@ Pre-registered in `docs/archive/researcher_model_class_and_edge.md` (X2): accept
 sits below 0 or 400 legs hit .53 or less. Never a serving rule. Closed by the owner on 2026-11-11
 after look 1, which killed by construction (the apps' shade covers the books' lean); the command
 stays for a hand read: [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5.
+
+### The money table and the EV fit (`admin play-replay`, report only)
+
+`reflect` writes two tables every night. `data/runtime/play_record.parquet` scores each named
+pick rule ("play") per league and pick kind in money over the trailing 90 days;
+`data/runtime/live_fit.parquet` holds the weights the settled posted picks put on the app's fair
+price, the sportsbooks' same-line price and the model's probability, which price each offer's
+`EV`. `sportstradamus admin play-replay` scores the plays over any window of a history; with
+`--walk-forward` it prices each game date's `EV` from fits on earlier dates and prints the fit's
+own checks. Neither table gates a cell: the weights are the model lane's scoreboard, and the
+money table becomes the input of `main`'s money test when that is built. Design, evidence and
+the keep rule that reads them: [handoffs/profit-engine.md](handoffs/profit-engine.md) §5.
 
 ---
 

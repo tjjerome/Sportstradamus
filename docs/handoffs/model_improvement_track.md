@@ -40,6 +40,14 @@ number of +EV opportunities per slate and the D3/D5 gate input — but it is an 
 goal. Work is ordered by payoff-to-effort per the §6 workstream table; individual levers are
 expected to fail, and every workstream carries pre-written escalation branches.
 
+**What model work is aimed at.** Lower error at posted lines has not moved the money, so above
+the priced-population floor a change is judged by the information weight its rows carry beyond
+the app's own price, and by its play's return. The profit-engine lane's brief holds that
+scoreboard, the keep rule and the four steps that order the work (use the books raw, translate
+a book's price to another line, price what no book quotes, model the app's price):
+[`profit-engine.md`](profit-engine.md) §5.2 and §7. The six gates and Brier stay the test for
+serving a price.
+
 Breadth targets (D3/D5 inputs; MLB and NHL have none — see below):
 
 | League | Ship-75 target | Ship-90 target |

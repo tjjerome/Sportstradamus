@@ -55,10 +55,10 @@ Replace `<repo-dir>` with the checkout's absolute path: cron's shell reads a
 leftover `<repo-dir>` as an input redirect, and the line never runs.
 
 ```cron
-50 8-20 * * *          <repo-dir>/scripts/run_job.sh prophecize
-30 8,11,14,17,20 * * * <repo-dir>/scripts/run_job.sh confer
-5 9 * * *              ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
-5 15 * * *             ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
+20 8-20 * * *          <repo-dir>/scripts/run_job.sh prophecize
+5 8,11,14,17,20 * * *  <repo-dir>/scripts/run_job.sh confer
+45 8 * * *             ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
+45 14 * * *            ARCHIVE_LOCK_TIMEOUT=2400 <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
 # 0 1 * * 5            <repo-dir>/scripts/run_job.sh meditate   # off: models train dev-side (below)
 0 2 * * *              <repo-dir>/scripts/run_job.sh reflect
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
@@ -75,7 +75,7 @@ leftover `<repo-dir>` as an input redirect, and the line never runs.
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy: [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10) |
 | `meditate` | off on prod | retrain models — runs dev-side weekly; `scripts/sync_to_prod.sh` sends the results (below) |
-| `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
+| `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger, the money table and the EV fit's table |
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due or spooled |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
@@ -110,8 +110,17 @@ Couplings to keep in sync:
 - Every job but `close-lines` holds the shared archive lock for its whole run,
   including ones like `gate-status` that never read the archive, which is why
   `gate-status` sits at 4am rather than inside `reflect`'s ~1.5 h hold from 2am.
-  `ledger-commit` queues behind the 8:50 and 14:50 `prophecize` runs (17-35 min),
-  so its lines raise `ARCHIVE_LOCK_TIMEOUT` from 15 to 40 min.
+  `ledger-commit` fires at :45, as the 8:20 and 14:20 `prophecize` runs end (17-35 min),
+  and queues behind a long one, so its lines raise `ARCHIVE_LOCK_TIMEOUT` from 15 to
+  40 min. It holds the lock about 25 minutes itself, so the 9:20 and 15:20 runs start
+  late when it runs long.
+- The minutes follow the games: starts fall on the hour or the half hour and a run
+  publishes its board once, at its end. `prophecize` at :20 lands it about a quarter of
+  an hour before the :00 starts, and `confer` at :05 puts a fresh sportsbook poll in
+  front of that run. History records a row only when its board went out at least five
+  minutes before the game, so a run that lands later than that records nothing for the
+  game. Move either minute only with the reads in
+  [handoffs/profit-engine.md](handoffs/profit-engine.md) §7 (M1) in hand.
 - `close-lines` runs a few seconds but must not queue behind those holds, or the
   games starting inside them lose their closing line. It takes the archive lock
   itself, only to archive what it fetched and for at most
@@ -159,10 +168,10 @@ snapshot between `prophecize` runs: it re-derives the movement from the archive
 against the offers already on disk, so it costs one archive read and no scrape.
 
 ```cron
-20 8-20 * * *          <repo-dir>/scripts/run_job.sh export-line-movement
+50 8-20 * * *          <repo-dir>/scripts/run_job.sh export-line-movement
 ```
 
-Keep it off `prophecize`'s `:50` minute — it takes the same archive lock.
+Keep it off `prophecize`'s `:20` minute — it takes the same archive lock.
 
 The dev-side collector `savant-fetch` (MLB) is **not** in the prod crontab — it
 runs on the dev box beside the manual weekly `meditate`, then
