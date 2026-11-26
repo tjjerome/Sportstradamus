@@ -213,12 +213,21 @@ _OFFER_DEFAULTS = {
     "EV": np.nan,
     "Pick": False,
 }
+# The same for the entry snapshots: one written before the fit priced entries has no
+# fitted EV, so its readers take their not-priced path, and a story from before the lead
+# flag leads nothing.
+_PARLAY_DEFAULTS = {"EV": np.nan}
+_STORY_DEFAULTS = {"lead": False, "lead_side": "", "ev": np.nan}
+
+
+def _with_defaults(df: pd.DataFrame, defaults: dict) -> pd.DataFrame:
+    """``df`` with each column of ``defaults`` it predates added at its default value."""
+    return df.assign(**{col: v for col, v in defaults.items() if col not in df.columns})
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
 def _load_current_offers_cached(path: Path, mtime: float) -> pd.DataFrame:
-    df = read_parquet_safe(path)
-    return df.assign(**{col: v for col, v in _OFFER_DEFAULTS.items() if col not in df.columns})
+    return _with_defaults(read_parquet_safe(path), _OFFER_DEFAULTS)
 
 
 def load_current_offers() -> pd.DataFrame:
@@ -234,11 +243,15 @@ def load_current_offers() -> pd.DataFrame:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current parlays...")
 def _load_current_parlays_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    return _with_defaults(read_parquet_safe(path), _PARLAY_DEFAULTS)
 
 
 def load_current_parlays() -> pd.DataFrame:
-    """Today's parlay candidates from the latest ``prophecize`` snapshot."""
+    """Today's parlay candidates from the latest ``prophecize`` snapshot.
+
+    ``EV`` (the fitted value of a unit staked, the rank key) sits beside ``Model EV`` (the
+    model's claim); a snapshot written before the fit priced entries reads ``EV`` blank.
+    """
     return _load_current_parlays_cached(CURRENT_PARLAYS_PATH, _mtime(CURRENT_PARLAYS_PATH))
 
 
@@ -279,21 +292,19 @@ def load_pair_modifiers() -> dict:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")
 def _load_current_game_stories_cached(path: Path, mtime: float) -> pd.DataFrame:
-    df = read_parquet_safe(path)
-    for col, default in (("lead", False), ("lead_side", "")):
-        if col not in df.columns:
-            df = df.reindex(columns=[*df.columns, col], fill_value=default)
-    return df
+    return _with_defaults(read_parquet_safe(path), _STORY_DEFAULTS)
 
 
 def load_current_game_stories() -> pd.DataFrame:
     """Per-(platform, game) story menu from the latest ``prophecize`` snapshot.
 
-    Keys ``platform, League, Game, story_id, objective`` with ``legs`` a JSON
-    leg-desc list; ``headline``/``joint_p``/``model_ev``/``kelly_stake``/
-    ``bet_size``/``lead``/``lead_side`` per row (``lead``/``lead_side`` default to
-    ``False``/``""`` for a snapshot written before those columns existed). Seeds
-    the Slips constellation builder (Bankroll Builder / Shoot the Moon).
+    Keys ``platform, League, Game, Date, story_id, objective`` with ``legs`` the preset's
+    canonical legs. Per row: ``headline``, ``ev`` (the fitted value of a unit staked),
+    ``joint_p`` (the fitted joint chance, ``ev`` over the payout), ``model_ev`` (the
+    model's claim), ``kelly_stake`` (0.0), ``bet_size``, ``lead`` and ``lead_side``. A
+    snapshot written before a column existed reads ``ev`` blank (not priced) and
+    ``lead``/``lead_side`` as ``False``/``""``. Seeds the Games page's constellation
+    builder (Bankroll Builder / Shoot the Moon).
     """
     return _load_current_game_stories_cached(
         CURRENT_GAME_STORIES_PATH, _mtime(CURRENT_GAME_STORIES_PATH)
@@ -637,8 +648,9 @@ def get_filtered_history(
 ) -> pd.DataFrame:
     """Annotate offer outcomes, keep each prop at its last scoring and apply sidebar filters.
 
-    Returns a per-offer DataFrame with columns: all prediction-level cols +
-    Line, Boost, Platform, Bet, Win Prob, Market Prob, Result, Hit, Model EV, Market EV, Kelly.
+    Returns a per-offer DataFrame: every history column (the EV stamp's ``Fit Prob``,
+    ``EV`` and ``Pick`` among them, blank on rows scored before the stamp) plus ``Result``,
+    ``Hit``, and the model's ``Model EV``, ``Market EV`` and ``Kelly`` at the payout.
     """
     df = annotate_offer_outcomes(history)
     if df.empty:

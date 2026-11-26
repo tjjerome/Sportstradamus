@@ -83,6 +83,58 @@ def test_stories_loader_backfills_lead_columns(monkeypatch, tmp_path):
     assert data_module.load_current_offers()["Star"].tolist() == [2.4]
 
 
+def test_stories_loader_reads_a_snapshot_from_before_the_fit_priced_stories_as_not_priced(
+    monkeypatch, tmp_path
+):
+    data_module = _loaders(
+        monkeypatch,
+        tmp_path,
+        offers_rows=[{"Player": "J. Brunson"}],
+        stories_rows=[{"story_id": "NYK/SAS#0", "model_ev": 1.3, "lead": True}],
+    )
+    stories = data_module.load_current_game_stories()
+    assert stories["ev"].isna().all()
+    assert stories["model_ev"].tolist() == [1.3]
+    assert stories["lead"].tolist() == [True]
+
+
+def test_stories_loader_keeps_the_ev_a_snapshot_already_has(monkeypatch, tmp_path):
+    data_module = _loaders(
+        monkeypatch,
+        tmp_path,
+        offers_rows=[{"Player": "J. Brunson"}],
+        stories_rows=[{"story_id": "NYK/SAS#0", "ev": 0.97, "model_ev": 1.3}],
+    )
+    assert data_module.load_current_game_stories()["ev"].tolist() == [0.97]
+
+
+def test_parlays_loader_reads_a_snapshot_from_before_the_fit_priced_entries_as_not_priced(
+    monkeypatch, tmp_path
+):
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    parlays = tmp_path / "current_parlays.parquet"
+    pd.DataFrame(
+        [
+            {"Game": "NYK/SAS", "Model EV": 1.4, "Thesis": "old"},
+            {"Game": "NYK/SAS", "Model EV": 1.1, "Thesis": "older"},
+        ]
+    ).to_parquet(parlays)
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", parlays)
+    st.cache_data.clear()
+    loaded = data_module.load_current_parlays()
+    assert loaded["EV"].isna().all()
+    assert loaded["Model EV"].tolist() == [1.4, 1.1]
+
+
+def test_parlays_loader_keeps_the_ev_a_snapshot_already_has(monkeypatch, tmp_path):
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    parlays = tmp_path / "current_parlays.parquet"
+    pd.DataFrame([{"Game": "NYK/SAS", "EV": 0.93, "Model EV": 1.4}]).to_parquet(parlays)
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", parlays)
+    st.cache_data.clear()
+    assert data_module.load_current_parlays()["EV"].tolist() == [0.93]
+
+
 def test_before_the_nightly_job_runs_every_league_and_kind_reads_no_picks_settled(
     monkeypatch, tmp_path
 ):
