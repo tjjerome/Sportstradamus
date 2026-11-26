@@ -377,7 +377,7 @@ The old single-file modules no longer exist. Use these paths:
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
 | `posted_sides`, `play_record`, `entry_record` (the money tables) | `sportstradamus.plays` |
-| `fit`, `score`, `walk_forward` (EV's fitted win chance) | `sportstradamus.live_fit` |
+| `fit`, `score`, `picks`, `walk_forward` (EV's fitted win chance, and the board's picks by it) | `sportstradamus.live_fit` |
 | `stamp`, `fill_history` (the sportsbooks' same-line price) | `sportstradamus.book_stamp` |
 
 Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.

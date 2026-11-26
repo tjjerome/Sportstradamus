@@ -154,16 +154,35 @@ def test_ev_rank_takes_as_many_legs_as_model_edge_on_each_date_league_and_kind()
     assert ranked["Side"].eq("Over").all()
 
 
+def test_ev_pick_takes_the_sides_the_board_stamped_as_picks():
+    offers = pd.DataFrame(
+        [
+            _offer(Player="A", Pick=True, **_FIT),
+            _offer(Player="B", Pick=False, **_FIT),
+            # Scored before the board flagged picks.
+            _offer(Player="C", Pick=np.nan, **_FIT),
+        ]
+    )
+    sides = plays.posted_sides(offers)
+    picked = sides[plays.PLAYS["ev_pick"](sides)]
+
+    assert list(picked["Player"]) == ["A"]
+    # The flag is the model's side's: the other side of a pick is not one.
+    assert picked["Side"].eq("Over").all()
+
+
 def test_a_history_from_before_the_fit_scores_and_the_ev_plays_pick_nothing():
     sides = plays.posted_sides(_four_recommended_offers())
     record = plays.play_record(sides, np.random.default_rng(0))
 
     assert not plays.PLAYS["ev_edge"](sides).any()
     assert not plays.PLAYS["ev_rank"](sides).any()
+    assert not plays.PLAYS["ev_pick"](sides).any()
     assert set(record["play"]) == {"model_edge", "under", "all"}
 
 
-def test_the_ev_plays_draw_after_the_plays_registered_before_them(monkeypatch):
+@pytest.mark.parametrize("earlier_count", [3, 5])
+def test_a_play_draws_after_the_plays_registered_before_it(monkeypatch, earlier_count):
     rng = np.random.default_rng(5)
     # Sleeper legs at payouts all their own, so a bound moves with the draws behind it.
     offers = pd.DataFrame(
@@ -179,6 +198,7 @@ def test_the_ev_plays_draw_after_the_plays_registered_before_them(monkeypatch):
                 Recommended=pick == 0,
                 **{"Payout Over": payout, "Payout Under": rng.uniform(1.5, 2.4)},
                 **_FIT | {"Fit Prob Low": 0.7 if pick == 1 else 0.3, "EV": 0.9 + pick / 100},
+                Pick=pick == 2,
             )
             for day in range(1, 13)
             for pick, payout in enumerate(rng.uniform(1.5, 2.4, 3))
@@ -186,11 +206,13 @@ def test_the_ev_plays_draw_after_the_plays_registered_before_them(monkeypatch):
     )
     sides = plays.posted_sides(offers)
     record = plays.play_record(sides, np.random.default_rng(0))
-    earlier = ["model_edge", "under", "all"]
+    registered = list(plays.PLAYS)
+    assert registered == ["model_edge", "under", "all", "ev_edge", "ev_rank", "ev_pick"]
+    earlier = registered[:earlier_count]
     monkeypatch.setattr(plays, "PLAYS", {name: plays.PLAYS[name] for name in earlier})
     before = plays.play_record(sides, np.random.default_rng(0))
 
-    assert {"ev_edge", "ev_rank"} <= set(record["play"])
+    assert set(registered[earlier_count:]) <= set(record["play"])
     pd.testing.assert_frame_equal(record[record["play"].isin(earlier)], before)
 
 

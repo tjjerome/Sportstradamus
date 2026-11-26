@@ -39,21 +39,23 @@ _WINDOW_COLS = ["first_date", "last_date"]
 _GAIN_SCALE = 10_000
 
 
-def _rank_gap(sides: pd.DataFrame, rng: np.random.Generator) -> tuple[float, float, float]:
-    """``ev_rank`` less ``model_edge`` in return a leg, with 95 % bounds.
+def _gap_to_rule(
+    sides: pd.DataFrame, play: str, rng: np.random.Generator
+) -> tuple[float, float, float]:
+    """``play`` less ``model_edge`` in return a leg, with 95 % bounds.
 
     Each resample draws whole game dates once and scores both plays on them, so what the two
     share on a date cancels in the bound (the brief's AT5 and K4).
     """
     picked = pd.DataFrame(
-        {play: sides["Unit"].where(plays.PLAYS[play](sides)) for play in ("ev_rank", "model_edge")}
+        {name: sides["Unit"].where(plays.PLAYS[name](sides)) for name in (play, "model_edge")}
     )
-    # Per game date: the rank play's summed return and legs, then the rule's.
+    # Per game date: the play's summed return and legs, then the rule's.
     by_date = picked.groupby(sides["Date"]).agg(["sum", "count"]).to_numpy()
 
     def gap(totals: np.ndarray) -> np.ndarray:
-        rank_units, rank_legs, rule_units, rule_legs = totals.T
-        return rank_units / rank_legs - rule_units / rule_legs
+        play_units, play_legs, rule_units, rule_legs = totals.T
+        return play_units / play_legs - rule_units / rule_legs
 
     draws = rng.integers(0, len(by_date), (_GATE1_N_BOOT, len(by_date)))
     lo, hi = np.percentile(gap(by_date[draws].sum(axis=1)), [_CI_LOW_PCT, _CI_HIGH_PCT])
@@ -63,13 +65,13 @@ def _rank_gap(sides: pd.DataFrame, rng: np.random.Generator) -> tuple[float, flo
 def _fit_check(
     walked: pd.DataFrame, sides: pd.DataFrame, rng: np.random.Generator, out: Path
 ) -> None:
-    """The fit check: the walked fit's gain and band tables, its marks and the rank play's gap."""
+    """The fit check: the walked fit's gain and band tables, its marks and its rank plays' gaps."""
     gain = live_fit.fit_gain(walked, rng)
     bands = live_fit.ev_bands(walked, rng)
     _atomic_write_parquet(gain, out / "fit_gain.parquet")
     _atomic_write_parquet(bands, out / "ev_bands.parquet")
     marks = (walked["Fit Prob Low"] * walked["Payout"] >= 1).sum()
-    gap, gap_lo, gap_hi = _rank_gap(sides, rng)
+    gaps = {play: _gap_to_rule(sides, play, rng) for play in ("ev_rank", "ev_pick")}
     dates = walked["Date"]
     click.echo(
         f"\nFit check: {dates.nunique()} game dates, {dates.min()} to {dates.max()}, each "
@@ -84,7 +86,10 @@ def _fit_check(
     click.echo(
         f'\n"+EV" marks (Fit Prob Low x payout at least 1): {marks:,} of {len(walked):,} legs'
     )
-    click.echo(f"ev_rank minus model_edge, return a leg: {gap:+.3f} [{gap_lo:+.3f}, {gap_hi:+.3f}]")
+    for play, (gap, gap_lo, gap_hi) in gaps.items():
+        click.echo(
+            f"{play} minus model_edge, return a leg: {gap:+.3f} [{gap_lo:+.3f}, {gap_hi:+.3f}]"
+        )
     click.echo(f"\nwrote fit_gain.parquet and ev_bands.parquet to {out}")
 
 
@@ -143,7 +148,6 @@ def main(
 ) -> None:
     """Score each play's legs, and the engine's own entries, in money over a window of game dates."""
     last = until or pd.Timestamp.max
-    rng = np.random.default_rng(plays.RECORD_SEED)
     # Asked of the file's schema: the history itself takes a minute and gigabytes to load.
     if walk_forward and "Book Class" not in pq.read_schema(history_path).names:
         raise click.UsageError(
@@ -153,15 +157,19 @@ def main(
     offers = realized.settled_offers(pd.read_parquet(history_path))
     offers = offers[pd.to_datetime(offers["Date"]).between(since, last)]
     if walk_forward:
-        # A scoring run's prices go first: the walk joins its own under the same names.
+        # A scoring run's prices go first: the walk joins its own under the same names, and
+        # its picks replace the run's.
         offers = live_fit.walk_forward(offers.drop(columns=live_fit.SCORE_COLS, errors="ignore"))
+        offers["Pick"] = live_fit.picks(offers)
     sides = plays.posted_sides(offers)
-    play_table = plays.play_record(sides, rng)
+    # Each table draws from its own generator, so a play added to the registry moves no bound
+    # of the entry table or the fit check.
+    play_table = plays.play_record(sides, np.random.default_rng(plays.RECORD_SEED))
     entries = pd.concat(
         [pd.read_parquet(day, columns=_ENTRY_COLS) for day in sorted(entries_dir.glob("*.parquet"))]
     )
     entries = entries[pd.to_datetime(entries["Date"]).between(since, last)]
-    entry_table = plays.entry_record(entries, rng)
+    entry_table = plays.entry_record(entries, np.random.default_rng(plays.RECORD_SEED))
 
     out.mkdir(parents=True, exist_ok=True)
     _atomic_write_parquet(play_table, out / "play_record.parquet")
@@ -179,4 +187,4 @@ def main(
         click.echo(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     click.echo(f"\nwrote play_record.parquet and entry_record.parquet to {out}")
     if walk_forward:
-        _fit_check(offers, sides, rng, out)
+        _fit_check(offers, sides, np.random.default_rng(plays.RECORD_SEED), out)

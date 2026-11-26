@@ -117,8 +117,9 @@ def _ev_rank(sides: pd.DataFrame) -> pd.Series:
 # cut costs a bettor who takes every Under on an even pick, or every side it posts.
 # ``ev_edge`` is the "+EV" mark inside the board's payout band: the fit's lower bound on the
 # win chance, times the payout, reaches 1. ``ev_rank`` spends the board's leg count on the
-# highest ``EV`` instead. A new play goes last: ``play_record`` draws its bounds in this
-# order, so the plays before it keep their numbers.
+# highest ``EV`` instead, and ``ev_pick`` is the board's own picks as each run flagged them
+# (``live_fit.picks``). A new play goes last: ``play_record`` draws its bounds in this order,
+# so the plays before it keep their numbers.
 PLAYS: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     "model_edge": lambda sides: sides["Recommended"],
     "under": lambda sides: sides["Side"].eq("Under") & sides["Kind"].eq("underdog_even"),
@@ -128,6 +129,8 @@ PLAYS: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
         & realized.in_recommended_band(sides["Payout"])
     ),
     "ev_rank": _ev_rank,
+    # NaN on a row scored before the flag existed.
+    "ev_pick": lambda sides: sides["Pick"].eq(True),
 }
 
 
@@ -143,9 +146,9 @@ def posted_sides(offers: pd.DataFrame) -> pd.DataFrame:
         own: Underdog's raw multiplier, Sleeper's decimal payout), ``Kind``
         (``helpers.leg_kind``), ``Game`` (the league and its two teams, the same from either
         team) and, priced per side, ``Payout``, ``Breakeven``, ``Hit``, ``Unit`` and
-        ``Win Prob`` (the model's probability of that side). ``Recommended`` is False on a
-        side the model did not choose. The EV fit prices the model's side alone, so
-        ``live_fit.SCORE_COLS`` are NaN on the other side, and on every side of offers
+        ``Win Prob`` (the model's probability of that side). ``Recommended`` and ``Pick`` are
+        False on a side the model did not choose. The EV fit prices the model's side alone,
+        so ``live_fit.SCORE_COLS`` are NaN on the other side, and on every side of offers
         scored before the fit.
     """
     over = offers["Bet"].eq("Over")
@@ -157,6 +160,7 @@ def posted_sides(offers: pd.DataFrame) -> pd.DataFrame:
         Side=np.where(over, "Under", "Over"),
         Multiplier=payout_other * offers["Boost"] / payout_chosen,
         Recommended=False,
+        Pick=False,
         **{"Win Prob": 1 - offers["Win Prob"]},
         **dict.fromkeys(live_fit.SCORE_COLS, np.nan),
     )

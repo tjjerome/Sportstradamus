@@ -1,9 +1,11 @@
 # Lane brief — profit engine: one EV fitted where we bet, plays scored in money
 
 > Status: ACTIVE. Built: the Modifiers page fix (step 0), the money table (phase 0, offline and
-> nightly) and EV with its scoreboard (phase 1: the stamp on every scored record, the nightly
-> weights table, the fit's two plays, the replay's fit check). Next: the engine reads EV (phase 2,
-> §5.3); until then ranking and stakes read the model's claim. The model lane (§7) is open.
+> nightly), EV with its scoreboard (phase 1: the stamp on every scored record, the nightly
+> weights table, the fit's plays, the replay's fit check) and the first piece of phase 2, the
+> slate's picks by EV (the `Pick` stamp and its play). Next: the entry search, the stories and
+> the dashboard read EV (§5.3); until then the board's ranking and stakes read the model's
+> claim. The model lane (§7) is open.
 
 ## 1. Mission & money logic
 
@@ -77,13 +79,16 @@ Add `--walk-forward` and point `--history` at `history_stamped.parquet` (the sam
 its book stamps rebuilt): the replay prices each of the last 33 game dates from fits on earlier
 dates only and prints the fit check. A correct build prints:
 
-- The fit's log-loss gain over the app's price, × 10,000, every leg pooled: +5.7 [+2.0, +9.3] on
+- The fit's log-loss gain over the app's price, × 10,000, every leg pooled: +5.7 [+2.1, +9.2] on
   122,627 legs. NBA modified-payout picks: +10.2 on 36,866.
 - What the model's side paid, by band of EV: says .871 and paid .887 on 78,213 legs; .915 and
   .916 on 42,030; .948 and .935 on 2,166; .980 and .982 on 173; at 1 or more, says 1.027 and
   paid .803 on 45.
 - "+EV" marks: 0 of 139,279 legs. `ev_rank` minus `model_edge`: +0.028 a leg [−0.003, +0.060],
   on 7,115 legs each.
+- Play `ev_pick`, the walked dates' picks: 1,956 legs, hit .574 against a break-even of .594,
+  return −3.6 % [−8.3, +0.8]; NHL 804 legs at +1.8 %, NBA 894 at −5.5 %, NFL 204 at −12.2 %.
+  `ev_pick` minus `model_edge`: +0.047 a leg [+0.004, +0.096].
 
 ### Volatile product assumptions
 
@@ -144,10 +149,11 @@ that the Over hits:
   times the payout reaches 1, and it is staked at half Kelly on the bound. `Win Prob` and
   `Model EV` keep their meaning.
 
-A scoring run stamps seven columns on each record (`prediction/ev_stamp.stamp_records`):
+A scoring run stamps eight columns on each record (`prediction/ev_stamp.stamp_records`):
 `Book Prob`, `Book Count`, `Book Class` and `Book Observed At`, the books' price as that run
 read the archive (`book_stamp.stamp`), then `Fit Prob`, `Fit Prob Low` and `EV`
-(`live_fit.score` against the nightly table). They ride to the board snapshot and to history.
+(`live_fit.score` against the nightly table), then `Pick`, the slate's picks by that `EV`
+(`live_fit.picks`, §5.3). They ride to the board snapshot and to history.
 `reflect` refits the table every night (`data/runtime/live_fit.parquet`), and for history rows
 scored before the stamp existed it fills the four Book columns from the archive as their run
 could read it (`book_stamp.fill_history`), so the fit's window is full from its first night.
@@ -173,9 +179,10 @@ the distribution. `book_pull` retires in M1.
 A **play** is a named rule that picks sides from a day's board (`plays.PLAYS`). Registered:
 `model_edge` (the board's rule, `realized.recommended`, so Receipts, the live gap and the replay
 keep their cohort), two controls that need no model, `under` (every Under on an even pick) and
-`all` (every posted side), and the fit's two: `ev_edge` (the "+EV" mark of §5.1 in the same
-payout band) and `ev_rank` (per date, league and kind, as many legs as `model_edge` took, the
-highest by EV). A new play registers last, so the plays before it keep their bounds.
+`all` (every posted side), and the fit's three: `ev_edge` (the "+EV" mark of §5.1 in the same
+payout band), `ev_rank` (per date, league and kind, as many legs as `model_edge` took, the
+highest by EV) and `ev_pick` (the board's picks of §5.3, as the scoring run flagged them). A new
+play registers last, so the plays before it keep their bounds.
 
 `plays.play_record` scores each play per league and pick kind:
 
@@ -199,9 +206,10 @@ play-replay` scores any window of a history, this box's or a frozen copy.
 The **information weights** of §1 are the fit's own table, `data/runtime/live_fit.parquet`: one
 row per league, kind and class with its coefficients, their standard errors and its legs. They
 are the model lane's scoreboard. `play-replay --walk-forward` prices each game date of a stamped
-history from fits on earlier dates and prints the fit's checks: its log-loss gain over the app's
-price, what each band of EV paid, the count of "+EV" marks and `ev_rank` against `model_edge`
-(`live_fit.fit_gain`, `live_fit.ev_bands`; §3 holds the known answers).
+history from fits on earlier dates, flags that date's picks by the walked EV and prints the
+fit's checks: its log-loss gain over the app's price, what each band of EV paid, the count of
+"+EV" marks, and `ev_rank` and `ev_pick` against `model_edge` (`live_fit.fit_gain`,
+`live_fit.ev_bands`; §3 holds the known answers).
 
 **Keep rule.** The priced-population rule stays as the floor: a change may not make error at the
 posted line worse. Above that floor, a change of any kind (rule, model, feature, data source) is
@@ -215,7 +223,7 @@ can (0.31 against 0.56 on NBA's class B today).
 - The leg filters that read the claimed number are redirected or deleted: the story menu's edge
   floor, the entry search's claimed-value floors, the leg-pool floors and the pick'em filter's
   thresholds.
-- Selection becomes rank-based, so no league or kind goes empty: per game the top legs by EV,
+- Selection becomes rank-based, so no league or kind goes empty: the slate's picks by EV (below),
   entries ranked by entry EV, the best few kept per game and per slate whether or not they clear
   1. At or above 1 an entry gets the "+EV" mark; the rest read as "best available".
 - Cross-game entries reach the board through a `current_entries` snapshot, built only at the
@@ -224,8 +232,26 @@ can (0.31 against 0.56 on NBA's class B today).
   persona per registered play is appended.
 - The dashboard shows "EV", "Model EV", the mark and the play's own record beside each leg and
   entry. [DESIGN.md](../../DESIGN.md) governs the UI work.
-- A rung with one side posted carries no EV (§5.1), so a rank on EV alone would never list the
-  7 % of rows whose only posted side is the model's. What ranks them is decided here.
+- A rung with one side posted carries no EV (§5.1), so it is never a pick, though on 7 % of rows
+  the model's side is the only one posted. The board lists such a leg after the legs EV ranks,
+  by `Model EV`, with no mark and no stake.
+
+**Picks (built).** `live_fit.picks` names a slate's picks and the scoring run stamps them as
+`Pick` (§5.1). A slate is one league's game date on one platform. It has a place for each of its
+teams, ten at most (`live_fit.PICKS_PER_SLATE`), per pick kind; each player's highest-EV offer
+competes for the places, wherever on the slate it sits. The paper play `ev_pick` scores them
+every night (§5.2).
+
+The rank runs over the slate, not within each game. Walk-forward over the last 33 game dates
+(§3), the picks returned −3.6 % a leg on 1,956 legs where `model_edge` returned −8.4 % on 7,115:
++4.7 points [+0.4, +9.6]. By league the picks returned +1.8 % in NHL (804 legs, [−4.6, +8.6]),
+−5.5 % in NBA (894, [−11.9, +0.7]) and −12.2 % in NFL (204, [−25.0, −1.0]), where `model_edge`
+returned −3.8 %, −10.0 % and −5.2 %. NFL is fourteen game dates, and its fit does not yet beat
+the app's price there (§3), so its rank separates little; its picks are read again on the
+nightly record before anything is built on them. Three places a game returned −7.5 % on
+4,887 legs: a game the fit has no view of still fills its places. A flat ten a slate returned
+−4.2 %, and on slates of one or two games −4.9 % against −1.2 % for a place a team (the lane's
+`research/phase2/`, read 2026-11-26).
 
 ### 5.4 Stacks: "bet if the app pays at least X"
 
@@ -259,14 +285,14 @@ Gate 2 stays. `devel` is never gated by it.
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
 | Phase 1 | EV and the scoreboard: `live_fit.py` (fit, score, walk-forward, the fit's checks); the EV stamp on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; the plays `ev_edge` and `ev_rank`; `play-replay --walk-forward`; history records only a board a bettor could act on (§7, M1). The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and passes its acceptance tests on the frozen history (§3) | Built. `EV` is stamped and recorded; ranking, the mark and stakes wait for phase 2 |
-| Phase 2 | The engine reads EV (§5.3), one subagent per module | Queued |
+| Phase 2 | The engine reads EV (§5.3), one subagent per module | In progress. Built: the slate's picks (`live_fit.picks`, the `Pick` stamp, the play `ev_pick`). Queued: the entry search, the stories and the dashboard read EV; cross-game entries; `policy_v5` |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |
 
 Where the code lives: `plays.py` holds the play registry, the posted sides, both money tables
 and the anytime-valid bound (`sequence_bounds`, which `scripts/books_lean.py` also reads);
 `helpers.leg_kind` names a side's pick kind beside `platform_payout`; `live_fit.py` holds the
-fit, the pricing and the fit's checks; `book_stamp.py` reads the books' same-line price for a
+fit, the pricing, the pick rule and the fit's checks; `book_stamp.py` reads the books' same-line price for a
 run's offers and for stored rows; `prediction/ev_stamp.py` lays both on a run's records. The
 structure census gets its own module with phase 3.
 

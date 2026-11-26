@@ -37,6 +37,10 @@ LOWER_BOUND_Z = 1.645
 MIN_TRAIN_DATES = 14
 # The EV bands of the research brief's honesty test (docs/archive/researcher_ev_fit.md, AT3).
 EV_BAND_EDGES: tuple[float, ...] = (0.0, 0.9, 0.94, 0.97, 1.0, np.inf)
+# The most players a slate's board calls picks, per pick kind; a slate of fewer teams has one
+# place a team. Walk-forward, those picks returned -3.6 % a leg where the board's 5 %-edge rule
+# returned -8.4 %, and three places a game -7.5 % (docs/handoffs/profit-engine.md 5.3).
+PICKS_PER_SLATE = 10
 
 FIT_COLS: list[str] = [
     "league",
@@ -57,6 +61,7 @@ GAIN_COLS: list[str] = ["league", "kind", "n_legs", "n_dates", "gain", "gain_lo"
 BAND_COLS: list[str] = ["band", "n_legs", "says", "paid", "paid_lo", "paid_hi"]
 
 _STRATUM = ["League", "Kind", "Book Class"]
+_SLATE = ["League", "Date", "Platform"]
 # Probabilities are clipped this far inside (0, 1) before the logit.
 _PROB_EPS = 1e-3
 # Floor on a regressor's mean square, so a near-constant column keeps a finite prior.
@@ -67,6 +72,21 @@ _NEWTON_TOL = 1e-8
 
 def _logit(prob) -> np.ndarray:
     return logit(np.clip(np.asarray(prob, dtype=float), _PROB_EPS, 1 - _PROB_EPS))
+
+
+def pick_kind(offers: pd.DataFrame) -> np.ndarray:
+    """Each offer's pick kind, the fit's stratum of payout structure.
+
+    Off Underdog it is the platform's name in lower case; on Underdog ``underdog_even`` when
+    both sides pay the same and ``underdog_modified`` when they do not.
+    """
+    platform = offers["Platform"].to_numpy(str)
+    # Even when both sides pay the same: the fair price is one half on every such offer.
+    return np.select(
+        [platform != "Underdog", np.isclose(offers["Payout Over"], offers["Payout Under"])],
+        [np.char.lower(platform), "underdog_even"],
+        "underdog_modified",
+    )
 
 
 def _terms(offers: pd.DataFrame) -> pd.DataFrame:
@@ -88,16 +108,10 @@ def _terms(offers: pd.DataFrame) -> pd.DataFrame:
     d_model = _logit(np.where(over, win_prob, 1 - win_prob)) - x0
     d_book = _logit(np.where(over, book_prob, 1 - book_prob)) - x0
     served = offers["Model Version"].ne(BOOK_FALLBACK_VERSION).to_numpy()
-    platform = offers["Platform"].to_numpy(str)
     return pd.DataFrame(
         {
             "League": offers["League"].to_numpy(),
-            # Even when both sides pay the same: the fair price is one half on every such offer.
-            "Kind": np.select(
-                [platform != "Underdog", np.isclose(payout_over, payout_under)],
-                [np.char.lower(platform), "underdog_even"],
-                "underdog_modified",
-            ),
+            "Kind": pick_kind(offers),
             "Book Class": offers["Book Class"].to_numpy(),
             "x0": x0,
             "c": 1.0,
@@ -227,6 +241,35 @@ def score(offers: pd.DataFrame, table: pd.DataFrame) -> pd.DataFrame:
         },
         index=offers.index,
     )
+
+
+def picks(offers: pd.DataFrame) -> np.ndarray:
+    """Which offers a board calls its picks, by the ``EV`` it priced them at.
+
+    A slate is one league's game date on one platform, with a place for each of its teams up
+    to ``PICKS_PER_SLATE``. Per pick kind (:func:`pick_kind`) each player's highest-``EV``
+    offer competes for the places, wherever on the slate it sits. An offer with no ``EV`` is
+    never a pick.
+
+    Args:
+        offers: Offers as the module reads them, with ``Date``, ``Team``, ``Player`` and
+            ``EV``.
+
+    Returns:
+        One flag per offer, in ``offers``' order.
+    """
+    # A combo's Team joins its players' teams with a slash.
+    teams = offers.assign(Team=offers["Team"].str.split("/")).explode("Team")
+    places = teams.groupby(_SLATE)["Team"].nunique().clip(upper=PICKS_PER_SLATE)
+    best_of_player = (
+        offers.assign(Kind=pick_kind(offers), Row=np.arange(len(offers)))
+        .dropna(subset="EV")
+        .sort_values("EV", ascending=False, kind="stable")
+        .drop_duplicates([*_SLATE, "Kind", "Player"])
+    )
+    rank = best_of_player.groupby([*_SLATE, "Kind"]).cumcount()
+    placed = rank < best_of_player.join(places.rename("Places"), on=_SLATE)["Places"]
+    return np.isin(np.arange(len(offers)), best_of_player.loc[placed, "Row"])
 
 
 def walk_forward(offers: pd.DataFrame) -> pd.DataFrame:

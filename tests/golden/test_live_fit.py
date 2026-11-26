@@ -420,3 +420,53 @@ def test_ev_bands_bounds_resample_whole_game_dates():
     band = "[0.94, 0.97)"
     assert alone.at[band, "paid_lo"] == alone.at[band, "paid_hi"] == alone.at[band, "paid"]
     assert across.at[band, "paid_lo"] < across.at[band, "paid"] < across.at[band, "paid_hi"]
+
+
+def test_pick_kind_names_each_offers_stratum_of_the_fit():
+    offers = pd.DataFrame(
+        {
+            "Platform": ["Underdog", "Underdog", "Sleeper"],
+            "Payout Over": [1.83, 1.5, 1.8],
+            "Payout Under": [1.83, 2.4, 1.8],
+        }
+    )
+
+    assert live_fit.pick_kind(offers).tolist() == ["underdog_even", "underdog_modified", "sleeper"]
+
+
+def test_picks_give_each_platforms_slate_its_own_places():
+    # One league's game date. Underdog posts three teams, so its lowest EV still holds a place;
+    # Sleeper posts one, so its second-highest does not.
+    offers = pd.DataFrame(
+        {
+            "League": "NHL",
+            "Date": "2026-11-20",
+            "Platform": ["Underdog"] * 3 + ["Sleeper"] * 2,
+            "Team": ["BOS", "NYR", "TOR", "BOS", "BOS"],
+            "Player": list("ABCDE"),
+            "Payout Over": 1.83,
+            "Payout Under": 1.83,
+            "EV": [0.90, 0.91, 0.92, 0.95, 0.94],
+        }
+    )
+
+    assert live_fit.picks(offers).tolist() == [True, True, True, True, False]
+
+
+def test_a_player_may_hold_a_pick_in_each_pick_kind():
+    # A two-team Underdog slate. Player A is posted as an even pick and at a modified payout:
+    # the two compete in their own kinds, so the lower of them is a pick as well.
+    offers = pd.DataFrame(
+        {
+            "League": "NHL",
+            "Date": "2026-11-20",
+            "Platform": "Underdog",
+            "Team": ["BOS", "BOS", "NYR"],
+            "Player": ["A", "A", "B"],
+            "Payout Over": [1.83, 1.5, 1.83],
+            "Payout Under": [1.83, 2.4, 1.83],
+            "EV": [0.92, 0.90, 0.91],
+        }
+    )
+
+    assert live_fit.picks(offers).tolist() == [True, True, True]

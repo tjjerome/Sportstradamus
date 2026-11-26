@@ -257,6 +257,7 @@ def test_history_rows_keep_the_ev_stamp_a_scored_leg_carries(monkeypatch, tmp_pa
         "Fit Prob": 0.53,
         "Fit Prob Low": 0.5,
         "EV": 0.97,
+        "Pick": True,
     }
     slate = _nhl_assists_slate().assign(**stamp)
 

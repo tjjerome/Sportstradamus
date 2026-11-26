@@ -48,7 +48,7 @@ def test_scored_record_supplies_every_decision_col_the_writer_does_not_stamp():
 
 
 def test_history_keeps_every_column_of_the_ev_stamp():
-    # history_schema spells the seven out: importing them would close an import cycle.
+    # history_schema spells the eight out: importing them would close an import cycle.
     assert set(EV_STAMP_COLS) <= set(DECISION_COLS)
 
 
@@ -98,11 +98,12 @@ _STAMP = {
     "Fit Prob": 0.53,
     "Fit Prob Low": 0.5,
     "EV": 0.97,
+    "Pick": True,
 }
 
 
 def test_a_history_stored_before_the_ev_stamp_takes_stamped_rows(tmp_path, monkeypatch):
-    """The first run after the stamp ships: stored rows hold every column but its seven."""
+    """The first run after the stamp ships: stored rows hold every column but its eight."""
     monkeypatch.setattr(io, "HISTORY_PATH", tmp_path / "history.parquet")
     stored = pd.DataFrame([_row(24.5, "Underdog"), _row(25.5, "Underdog")]).drop(
         columns=EV_STAMP_COLS

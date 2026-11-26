@@ -346,3 +346,93 @@ def test_find_correlation_carries_the_stamp_and_reads_none_of_it(monkeypatch):
     # scipy integrates the joint chance of three or more legs by sampling, so such a parlay's
     # price repeats to about four digits from one search to the next.
     pd.testing.assert_frame_equal(parlays, bare_parlays, rtol=1e-3)
+
+
+def _model_led_fit(fit_path) -> None:
+    """A fit table whose one stratum prices an NHL even pick no book quotes at the model's chance."""
+    fitted = dict.fromkeys(live_fit.FIT_COLS, np.nan) | {
+        "league": "NHL",
+        "kind": "underdog_even",
+        "book_class": "C",
+        "c": 0.0,
+        "w_model": 1.0,
+        "cov": np.zeros(4).tolist(),
+    }
+    pd.DataFrame([fitted]).to_parquet(fit_path)
+
+
+def _ranked(count: int, teams: int = 12) -> list[dict]:
+    """``count`` even picks on one slate of ``teams`` teams, each its own player, highest EV first."""
+    return [
+        _record(f"P{rank}", "Over", win_prob=0.61 - rank / 100) | {"Team": f"T{rank % teams}"}
+        for rank in range(count)
+    ]
+
+
+def _picks(records: list[dict]) -> list[bool]:
+    stamp_records(records, "Underdog", SCORED_AT, _Ladder({}))
+    return [record["Pick"] for record in records]
+
+
+def test_a_slates_picks_are_its_players_with_the_highest_ev_ten_at_most(fit_path):
+    _model_led_fit(fit_path)
+    # Lowest first: a rule that took the first ten records would keep the wrong players.
+    records = _ranked(12)[::-1]
+
+    assert live_fit.PICKS_PER_SLATE == 10
+    assert _picks(records) == [False, False] + [True] * 10
+    # Plain flags, so the frame history is cut from types the column as a flag.
+    assert pd.DataFrame(records)["Pick"].dtype == bool
+
+
+def test_a_slate_of_fewer_than_ten_teams_has_one_place_a_team(fit_path):
+    _model_led_fit(fit_path)
+    # One game: two places, taken by the highest EV wherever it sits, here both on one team.
+    one_game = _ranked(6, teams=2)
+    one_game[1]["Team"] = "T0"
+
+    assert _picks(one_game) == [True, True, False, False, False, False]
+
+
+def test_a_combo_adds_its_players_teams_to_the_slate_and_no_team_of_its_own(fit_path):
+    _model_led_fit(fit_path)
+    records = [*_ranked(4, teams=2), _record("P0 + P1", "Over", win_prob=0.4) | {"Team": "T0/T1"}]
+
+    assert _picks(records) == [True, True, False, False, False]
+
+
+def test_a_player_holds_one_pick_at_the_offer_with_the_highest_ev(fit_path):
+    _model_led_fit(fit_path)
+    ann = {"Team": "T0"}
+    records = [
+        _record("Ann", "Over", line=2.5, win_prob=0.70) | ann,
+        _record("Ann", "Over", line=3.5, win_prob=0.72) | ann,
+        *_ranked(10),
+    ]
+
+    picks = _picks(records)
+
+    assert picks[:2] == [False, True]
+    # Ann holds one of the ten places, not two: nine of the others follow her.
+    assert picks[2:] == [True] * 9 + [False]
+
+
+def test_each_game_date_league_and_pick_kind_ranks_its_own_picks(fit_path):
+    _model_led_fit(fit_path)
+    # Each stands alone on its slate at a lower EV than the eleventh even pick, which is cut.
+    alone = [
+        _record("modified", "Under", boost_over=1.4, boost_under=2.2) | {"Team": "T0"},
+        _record("next day", "Over", win_prob=0.45) | {"Team": "T0", "Date": "2026-11-21"},
+        _record("other league", "Over") | {"Team": "T0", "League": "NBA"},
+    ]
+    records = [*_ranked(11), *alone]
+
+    assert _picks(records) == [True] * 10 + [False] + [True] * 3
+    assert max(record["EV"] for record in records[11:]) < records[10]["EV"]
+
+
+def test_an_offer_the_fit_does_not_price_is_no_pick_on_a_slate_with_places_to_spare(fit_path):
+    _model_led_fit(fit_path)
+    unpriced = _record("one side posted", "Over", win_prob=0.9, boost_under=0.0) | {"Team": "T0"}
+
+    assert _picks([unpriced, *_ranked(3)]) == [False, True, True, True]

@@ -108,6 +108,7 @@ def test_the_ev_stamp_columns_keep_their_types(tmp_path, monkeypatch):
             "Fit Prob": [0.53, 0.5],
             "Fit Prob Low": [0.5, 0.5],
             "EV": [0.97, 0.89],
+            "Pick": [True, False],
         }
     )
     io.write_history(_flat_history().join(stamp))

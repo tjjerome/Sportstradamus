@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from sportstradamus import live_fit
+from sportstradamus import live_fit, plays
 from sportstradamus.history_schema import HISTORY_COLS
 from sportstradamus.scripts import play_replay
 
@@ -116,8 +116,9 @@ def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path)
         for date, actual in (("2026-10-24", 4.0), ("2026-10-25", 1.0))
         for pick in (_RULE_PICK, _RANK_PICK)
     ]
-    # A scoring run's own fit columns, which the walk replaces: kept, they mark every leg "+EV".
-    stale = {"Fit Prob": 0.99, "Fit Prob Low": 0.99, "EV": 9.9}
+    # A scoring run's own fit columns and pick flags, which the walk replaces: kept, they mark
+    # every leg "+EV" and call every leg a pick.
+    stale = {"Fit Prob": 0.99, "Fit Prob Low": 0.99, "EV": 9.9, "Pick": True}
     history = pd.DataFrame(train + walked, columns=HISTORY_COLS).assign(
         **{"Book Prob": np.nan, "Book Class": "C"}, **stale
     )
@@ -130,6 +131,8 @@ def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path)
     assert (every["n"], every["first_date"], every["last_date"]) == (8, "2026-10-24", "2026-10-25")
     assert legs.at[("model_edge", "all", "all"), "roi"] == pytest.approx((0.7 - 1) / 2)
     assert legs.at[("ev_rank", "all", "all"), "roi"] == pytest.approx((0.6 - 1) / 2)
+    # One team on each slate, so one place: the pick the app's prices value higher.
+    assert legs.at[("ev_pick", "all", "all"), "roi"] == pytest.approx((0.6 - 1) / 2)
     assert "ev_edge" not in legs.index.get_level_values("play")
 
     # Too few legs for a fit, so each leg is priced at the app's own fair price: no gain.
@@ -153,6 +156,7 @@ def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path)
     # The plays win and lose on the same dates, so a date drawn for both leaves a narrow gap:
     # -.1 on two 24ths, 0 on two 25ths. Drawn apart, the gap would run from -1.7 to +1.6.
     assert "ev_rank minus model_edge, return a leg: -0.050 [-0.100, +0.000]" in result.output
+    assert "ev_pick minus model_edge, return a leg: -0.050 [-0.100, +0.000]" in result.output
 
 
 def test_the_fit_check_marks_by_the_lower_bound_and_prints_the_gain_scaled(tmp_path, monkeypatch):
@@ -172,6 +176,31 @@ def test_the_fit_check_marks_by_the_lower_bound_and_prints_the_gain_scaled(tmp_p
     gain = pd.read_parquet(out / "fit_gain.parquet").set_index(["league", "kind"])
     assert gain.at[("all", "all"), "gain"] == pytest.approx(np.log(0.6 / 0.5))
     assert "+1823.2" in result.output
+
+
+def test_a_play_added_to_the_registry_moves_no_other_tables_bounds(tmp_path, monkeypatch):
+    # Entries on eight dates, each at its own payout and missed on the odd ones, so a bound
+    # depends on the dates drawn.
+    days = [f"2026-11-{day:02d}" for day in range(1, 9)]
+    history = pd.DataFrame([_OFFER | {"Date": day} for day in days], columns=HISTORY_COLS)
+    history.to_parquet(tmp_path / "history.parquet")
+    entries = tmp_path / "parlay_hist"
+    entries.mkdir()
+    for number, day in enumerate(days):
+        graded = [_ENTRY | {"Date": day, "Misses": float(number % 2), "Boost": 3 + 0.37 * number}]
+        pd.DataFrame(graded).to_parquet(entries / f"{day}.parquet")
+    args = ["--history", str(tmp_path / "history.parquet"), "--entries", str(entries)]
+
+    def entry_table(out: str) -> pd.DataFrame:
+        result = CliRunner().invoke(play_replay.main, [*args, "--out", str(tmp_path / out)])
+        assert result.exit_code == 0, result.output
+        return pd.read_parquet(tmp_path / out / "entry_record.parquet")
+
+    before = entry_table("before")
+    monkeypatch.setitem(plays.PLAYS, "overs", lambda sides: sides["Bet"].eq("Over"))
+
+    pd.testing.assert_frame_equal(entry_table("after"), before)
+    assert before["roi_lo"].iloc[0] < before["roi_hi"].iloc[0]
 
 
 def test_walk_forward_refuses_a_history_without_the_book_stamp(tmp_path):
