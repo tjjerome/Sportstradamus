@@ -288,15 +288,28 @@ defect fixes never stop.
   `book_pull` stays for now: the fit is estimated after it, so nothing is counted twice, and its
   cells have carried it only since 2026-11-23; its retirement is read on the money table with the
   kill lines' first reading. Target: `w_book` near 1 in every league.
-- **M1, open: a fitted average of the books.** A weighted consensus should beat the plain mean
-  of books. The first read did not settle it. On offers two or more books price, the engine's
-  `book_weights.json` mean adds nothing to the plain mean (the weight on their difference is
-  −0.05 (.36) over the three leagues), and no single book's gap to the plain mean points at the
-  outcome by more than 1.4 standard errors. That tests one fit (weights on each book's implied
-  mean against the stat result, unshrunk, near one-hot) on 46 dates at the app's line, not the
-  class. The study fits the average on outcomes at posted lines, over every line two or more
-  books share in four seasons of archive quotes, walk-forward, and is read on class-A offers by
-  the EV fit's own gain (lane `research/m1/`).
+- **M1, read: a fitted average of the books.** Against outcomes, a fitted average beats the
+  plain mean. Fitted on each book's last pre-game price at every line it posted (the archive's
+  `ladder` table, two to four seasons) and priced walk-forward, each month by earlier months, it
+  lowers log loss per 10,000 by 25 in NFL, 32 in NBA and 28 in NHL (NBA and NHL with intervals
+  clear of zero, NFL's reaching it). Most of that is level: a book's devigged over-price runs
+  about two points high, and a quote devigged from one posted side runs higher, by an amount
+  that differs by book. A two-number level fit alone takes 17, 27 and 23 of it; terms by book
+  and by market add 4 to 8; weights by book add under 1, in NBA only (Caesars and FanDuel weigh
+  two to three times the average book). As the EV fit's book input it changes nothing
+  measurable: on class-A offers the fit's walk-forward log loss moves by −0.25 [−1.40, +1.02]
+  per 10,000 over 45,085 legs, under the kill line written before the read, so the plain mean
+  stays the input. The fit carries its own level per league, kind and class, and class-A legs
+  rest 86 % on two-sided quotes, where every book runs high alike. One stratum gains with an
+  interval clear of zero, NFL modified-payout picks (−8.75 [−13.98, −5.97] on 785 legs), where
+  few legs leave the fit's own level near its prior. Not tried: the same frozen fit on later
+  dates (the lane's scripts read it out of sample), a fit on quotes as of scoring time, a
+  trailing window, weights by market, MLB and WNBA, and the level wherever a book price enters
+  with no level fit of its own, as in training's book quotes. Traps the study met: book prices
+  in the `odds` table from before 2026-07-11 are re-decoded, not native; a one-sided quote is
+  recognised by the two-decimal price left after the flat 6.52 % devig; NHL goals rungs above
+  0.5 written from 2025-03-28 to 2026-06-14 do not hold the rung's price. Method and reads: lane
+  `research/m1/`.
 - **M1. The board a bettor can act on.** A run takes about 25 minutes and publishes once, at its
   end; games start on the hour or the half hour. History records a row only when its game was at
   least five minutes ahead as the board went out (`prediction.cli._recordable`): a later scoring
