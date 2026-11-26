@@ -169,19 +169,12 @@ def test_app_sport_switch_rerenders_without_exception(monkeypatch, tmp_path):
     assert at.session_state["sport"] == "NBA"
 
 
-def test_tonight_card_names_favored_legs_when_no_story_binds_them(monkeypatch, tmp_path):
-    """A storyless game with model-liked legs says so instead of claiming thin edges.
+def _tonight_cards(monkeypatch, tmp_path, rows: list[dict]) -> list[str]:
+    """Tonight's game cards over ``rows``, with no story or parlay to headline them.
 
-    Three offers in one game, two of them favored (``Kelly > 0``, distinct
-    Player/Market/Bet), with the story and parlay snapshots pointed at absent files so
-    ``narrative.game_headline`` returns "". The counts differ on purpose: the card must
-    print its ``favored`` 2, never the ``offer_count`` 3 computed a line away.
+    The injected APP_CSS is markdown too and carries every .tc-* selector; each card is the
+    block that opens on the .tonight-card div.
     """
-    rows = [
-        {**_OFFER_ROWS[0], "Kelly": 0.03},
-        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02},
-        {**_OFFER_ROWS[0], "Player": "M. Bridges", "Market": "AST", "Kelly": 0.0},
-    ]
     fixture = tmp_path / "current_offers.parquet"
     pd.DataFrame(rows).to_parquet(fixture)
     data_module = importlib.import_module("sportstradamus.dashboard.data")
@@ -193,24 +186,104 @@ def test_tonight_card_names_favored_legs_when_no_story_binds_them(monkeypatch, t
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     assert not at.exception
-    # The injected APP_CSS is markdown too and carries every .tc-* selector; the card
-    # itself is the block that opens on the .tonight-card div.
-    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    return [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+
+
+def test_tonight_card_counts_the_picks_when_no_story_binds_them(monkeypatch, tmp_path):
+    """A storyless game with picks says so instead of claiming thin edges.
+
+    Three offers in one game, two of them picks (distinct Player/Market/Bet). The one leg
+    that is no pick carries the only positive Kelly, so a card counting the model's liked
+    legs reads one, and the card must print its 2 picks, never the ``offer_count`` 3.
+    """
+    cards = _tonight_cards(
+        monkeypatch,
+        tmp_path,
+        [
+            {**_OFFER_ROWS[0], "Kelly": 0.0, "EV": 0.93, "Pick": True},
+            {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.0, "Pick": True},
+            {
+                **_OFFER_ROWS[0],
+                "Player": "M. Bridges",
+                "Market": "AST",
+                "Kelly": 0.03,
+                "Pick": False,
+            },
+        ],
+    )
     assert cards, "no Tonight game card rendered"
     assert "No prophecy yet — 2 favored legs, no story binds them" in cards[0]
+    assert "<b>2</b> picks" in cards[0]
+
+
+def test_tonight_badge_leads_with_the_mark_then_the_best_ev(monkeypatch, tmp_path):
+    """The badge reads the fit, never the model's claim, and a pick lights the card.
+
+    Underdog's 1.0 multiplier pays 1.83. NYK/SAS holds a marked pick (bound 0.56 x 1.83
+    clears 1); BOS/LAL's pick has EV 1.05 but a bound that reaches only 0.98 of its payout,
+    so it shows its EV unmarked; DEN/PHX was not priced, so its Model EV 1.20 and Kelly buy
+    it no badge and no light.
+    """
+    leg = {**_OFFER_ROWS[0], "Boost": 1.0}
+    cards = _tonight_cards(
+        monkeypatch,
+        tmp_path,
+        [
+            {**leg, "Fit Prob": 0.60, "Fit Prob Low": 0.56, "EV": 1.098, "Pick": True},
+            {
+                **leg,
+                "Team": "BOS",
+                "Opponent": "LAL",
+                "Home": True,
+                "Game": "BOS/LAL",
+                "Player": "J. Tatum",
+                "Fit Prob": 0.574,
+                "Fit Prob Low": 0.5355,
+                "EV": 1.05,
+                "Pick": True,
+            },
+            {
+                **leg,
+                "Team": "DEN",
+                "Opponent": "PHX",
+                "Home": True,
+                "Game": "DEN/PHX",
+                "Player": "N. Jokic",
+                "Model EV": 1.20,
+                "Kelly": 0.05,
+                "Pick": False,
+            },
+        ],
+    )
+    by_team = {team: next(c for c in cards if f">{team} " in c) for team in ("NYK", "BOS", "DEN")}
+    assert 'tc-badge tc-g">+EV<' in by_team["NYK"]
+    assert 'tc-badge tc-gray">top EV 1.05<' in by_team["BOS"]
+    assert 'tc-badge tc-gray">no EV<' in by_team["DEN"]
+    assert not by_team["BOS"].startswith('<div class="tonight-card muted"')
+    assert by_team["DEN"].startswith('<div class="tonight-card muted"')
+
+
+def test_tonight_reads_a_snapshot_from_before_the_ev_stamp_as_no_picks(monkeypatch, tmp_path):
+    """A snapshot with no ``Pick`` / ``EV`` columns renders every game unpriced and unlit,
+    whatever Kelly the model claimed."""
+    cards = _tonight_cards(monkeypatch, tmp_path, [{**row, "Kelly": 0.03} for row in _OFFER_ROWS])
+    assert len(cards) == 2
+    for card in cards:
+        assert card.startswith('<div class="tonight-card muted"')
+        assert 'tc-gray">no EV<' in card and "<b>0</b> picks" in card
 
 
 def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
-    """The brightest star leads the slate, ahead of a game with more favored legs.
+    """The brightest star leads the slate, ahead of a game with more picks.
 
-    Two NBA games on one date, neither urgent (no ``Commence``): A carries two
-    model-liked legs at Star 1.0, B one at Star 2.8, so B's card renders first. B's
-    lead story (``lead``, ``lead_side == "Over"``) reads as its quoted headline alone:
-    the card carries no side arrow.
+    Two NBA games on one date, neither urgent (no ``Commence``): A carries two picks at
+    Star 1.0, B one at Star 2.8, so B's card renders first. B's lead story (``lead``,
+    ``lead_side == "Over"``) reads as its quoted headline alone: the card carries no side
+    arrow.
     """
     rows = [
-        {**_OFFER_ROWS[0], "Kelly": 0.03, "Star": 1.0},
-        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02, "Star": 1.0},
+        {**_OFFER_ROWS[0], "Pick": True, "Star": 1.0},
+        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Pick": True, "Star": 1.0},
         {
             **_OFFER_ROWS[0],
             "Team": "BOS",
@@ -218,7 +291,7 @@ def test_tonight_sorts_star_games_first(monkeypatch, tmp_path):
             "Home": True,
             "Game": "BOS/LAL",
             "Player": "J. Tatum",
-            "Kelly": 0.02,
+            "Pick": True,
             "Star": 2.8,
         },
     ]
@@ -605,6 +678,36 @@ def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):
     assert not at.exception
     chips = [pl for pl in at.get("page_link") if pl.page == "lab-modifiers"]
     assert chips and chips[0].label == "Payout incorrect? Report it"
+
+
+def test_games_lists_the_games_with_a_pick_whatever_their_kelly(monkeypatch, tmp_path):
+    """A game is a candidate when it has a pick on the platform: NYK/SAS's pick claims no
+    Kelly, and BOS/LAL's Kelly buys it no place without one."""
+    rows = [
+        {**_OFFER_ROWS[0], "Kelly": 0.0, "EV": 0.93, "Pick": True},
+        {
+            **_OFFER_ROWS[0],
+            "Team": "BOS",
+            "Opponent": "LAL",
+            "Home": True,
+            "Game": "BOS/LAL",
+            "Player": "J. Tatum",
+            "Kelly": 0.04,
+            "EV": 0.88,
+            "Pick": False,
+        },
+    ]
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(rows).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/games.py")
+    at.run()
+    assert not at.exception
+    assert at.selectbox(key="game_select").options == ["NYK vs SAS · 2026-07-04"]
 
 
 def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):

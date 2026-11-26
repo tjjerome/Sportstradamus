@@ -18,6 +18,7 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
+from sportstradamus.dashboard.legs import ev_marked
 from sportstradamus.dashboard.narrative import (
     SHAPE_CAPTION,
     SHAPE_DISPLAY,
@@ -114,15 +115,12 @@ if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
-# The model-liked picks (Kelly > 0) are the legs the constellation draws as stars. Their
-# Star prominence is read against the league's own slate max, so a league with no depth
-# term (MLB tops out at 2.0) competes on equal footing with one that has it.
-liked = (
-    pd.to_numeric(offers["Kelly"], errors="coerce") > 0
-    if "Kelly" in offers.columns
-    else pd.Series(False, index=offers.index)
-)
-league_star_max = offers.loc[liked].groupby("League")["Star"].max()
+# The board's picks are the legs the constellation draws as stars. Their Star prominence is
+# read against the league's own slate max, so a league with no depth term (MLB tops out at
+# 2.0) competes on equal footing with one that has it.
+picked = offers["Pick"]
+marked = ev_marked(offers)
+league_star_max = offers.loc[picked].groupby("League")["Star"].max()
 
 now = pd.Timestamp.now(tz="UTC")
 cards = []
@@ -135,13 +133,10 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     date_raw = key_dict.get("Date", "")
     home, away = home_away(group)
 
-    # Favored legs dedupe to distinct Player/Market/Bet across books and alt-lines.
-    picks = group.loc[liked[group.index]]
-    favored = picks.drop_duplicates(["Player", "Market", "Bet"]).shape[0]
+    # Picks dedupe to distinct Player/Market/Bet across books and alt-lines.
+    picks = group.loc[picked[group.index]]
+    n_picks = picks.drop_duplicates(["Player", "Market", "Bet"]).shape[0]
     star = picks["Star"].max() / league_star_max[league] if not picks.empty else 0.0
-    # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
-    edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
-    top_edge = edges.max() if edges is not None and edges.notna().any() else None
     strip = context_strip(game_context, game=game, date=date_raw)
     # Commence is the full tip-off timestamp threaded from the scrapers; absent it (older
     # snapshots, Sleeper offers) minutes-to-tip is inf, so the game reads as non-urgent.
@@ -157,10 +152,11 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             "home": home,
             "away": away,
             "date": date_raw,
-            "favored": favored,
+            "picks": n_picks,
             "star": star,
             "offer_count": len(group),
-            "top_edge": top_edge,
+            "top_ev": group["EV"].max(),
+            "marked": marked[group.index].any(),
             "headline": game_headline(stories, parlays, game=game, date=date_raw),
             "shape": strip["shape"] if strip else "",
             "minutes": minutes,
@@ -169,35 +165,37 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     )
 
 # Games tipping off within the hour rise to the top; within a tier the brightest star
-# leads, then the most favored legs, soonest tip-off as the tiebreak.
-cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["star"], -c["favored"], c["minutes"]))
+# leads, then the most picks, soonest tip-off as the tiebreak.
+cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["star"], -c["picks"], c["minutes"]))
 
 for c in cards:
     league, home, away = c["league"], c["home"], c["away"]
-    top_edge, favored, offer_count = c["top_edge"], c["favored"], c["offer_count"]
+    n_picks, offer_count, top_ev = c["picks"], c["offer_count"], c["top_ev"]
     shape, minutes = c["shape"], c["minutes"]
     # A game with no context row has no shape at all, which is the clouded reading too.
     shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
 
-    # A positive top edge lights the card; without one it drops to the muted "no edge"
-    # state. The prophecy is the oracle voice — the story headline, or a dim placeholder.
-    has_edge = top_edge is not None and pd.notna(top_edge) and top_edge > 0
-    card_class = "tonight-card" if has_edge else "tonight-card muted"
-    edge_badge = (
-        f'<span class="tc-badge tc-g">+{top_edge:.0%} top edge</span>'
-        if has_edge
-        else '<span class="tc-badge tc-gray">no edge</span>'
-    )
+    # A pick lights the card; a game without one drops to the muted state. The badge leads
+    # with the "+EV" mark, else the game's best EV. The prophecy is the oracle voice — the
+    # story headline, or a dim placeholder.
+    card_class = "tonight-card" if n_picks else "tonight-card muted"
+    if c["marked"]:
+        ev_badge = '<span class="tc-badge tc-g">+EV</span>'
+    elif pd.notna(top_ev):
+        ev_badge = f'<span class="tc-badge tc-gray">top EV {top_ev:.2f}</span>'
+    else:
+        ev_badge = '<span class="tc-badge tc-gray">no EV</span>'
     prophecy = (
         f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]
-        else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(favored)}</div>'
+        else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(n_picks)}</div>'
     )
     countdown = _format_countdown(minutes) if minutes != float("inf") else ""
     league_esc = html.escape(league)
     kicker = f"{league_esc} &nbsp;·&nbsp; {countdown}" if countdown else league_esc
     kicker_cls = "tc-kicker tc-urgent" if c["urgent"] else "tc-kicker"
     plural = "s" if offer_count != 1 else ""
+    picks_plural = "s" if n_picks != 1 else ""
     # The whole card is the View-game link; Date keeps doubleheaders distinct and the
     # label must match the Games page's game-picker (its ?game= deep link).
     game_param = f"{home} vs {away} · {c['date']}" if c["date"] else f"{home} vs {away}"
@@ -209,8 +207,8 @@ for c in cards:
         f'<div class="tc-main"><div class="{kicker_cls}">{kicker}</div>'
         f'<div class="tc-matchup">{home_esc} <span class="tc-vs">vs</span> {away_esc}</div>'
         f"{prophecy}"
-        f'<div class="tc-foot">{edge_badge}<span class="tc-meta">'
-        f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
+        f'<div class="tc-foot">{ev_badge}<span class="tc-meta">'
+        f"<b>{offer_count}</b> offer{plural} &middot; <b>{n_picks}</b> pick{picks_plural}</span>"
         f'<span class="tc-viewcue">View game →</span></div></div>'
         f'<div class="tc-side">{game_shape_glyph(shape, size=_CARD_GLYPH_SIZE)}'
         f'<span class="tc-shapename">{shape_name}</span></div></div>',
