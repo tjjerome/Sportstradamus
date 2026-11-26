@@ -1,11 +1,12 @@
 """Pins for the dashboard constellation — the DESIGN §4a static, shape-dealt star map.
 
 ``constellation_figure`` is pure (networkx force layout + plotly draw, no Streamlit).
-The node set is the game's strongest **model-liked** legs (Kelly ``K`` > 0), capped and
-fixed per game — selecting a leg never moves a star, it only lights it up, and a slip
+The node set is the game's strongest **picks** (``Pick``, never the model's Kelly), capped
+and fixed per game — selecting a leg never moves a star, it only lights it up, and a slip
 leg beyond the cut is promoted into the spot the *deeper* lens would have given it. A
 slip leg renders active (full team color, opacity 1, labelled); a candidate renders
-desaturated + dim, labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side — on the
+desaturated + dim, labelled like the rest. Star size runs from the lowest EV drawn to the
+highest. Each team's hub anchors to its side — on the
 template the game was dealt when it has one, on the spring solve when it doesn't. Every tie is a
 gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) drawn as a faint base web that
 brightens when both its stars are in the slip. These assert that grammar, the static layout,
@@ -64,7 +65,9 @@ from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED, team_colors
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
 
 
-def _row(i: int, key: str, k: float) -> dict:
+def _row(i: int, key: str, ev: float | None, pick: bool = True) -> dict:
+    """An offer at ``ev`` (``None``: the fit did not price it); ``Kelly`` 0, so the map
+    cannot be drawn off the model's Kelly."""
     player, market, bet = key.split("|")
     return {
         "Player": player,
@@ -74,9 +77,12 @@ def _row(i: int, key: str, k: float) -> dict:
         "Game": "NYK/SAS",
         "League": "NBA",
         "Team": _TEAMS[i % 2],
-        "Kelly": k,
+        "Kelly": 0.0,
         "Win Prob": 0.6,
         "Boost": 1.5,
+        "Fit Prob": None if ev is None else ev / 1.5,
+        "EV": ev,
+        "Pick": pick,
     }
 
 
@@ -85,10 +91,8 @@ def _slip(*keys: str) -> list[dict]:
 
 
 def _pool(*specs) -> pd.DataFrame:
-    rows = [
-        _row(i, s[0], s[1]) if isinstance(s, tuple) else _row(i, s, 0.2)
-        for i, s in enumerate(specs)
-    ]
+    """Rows from ``(key, ev[, pick])`` specs, or a bare key for a pick at EV 0.2."""
+    rows = [_row(i, *s) if isinstance(s, tuple) else _row(i, s, 0.2) for i, s in enumerate(specs)]
     return pd.DataFrame(rows)
 
 
@@ -134,13 +138,20 @@ def _sizes(fig) -> dict:
     return out
 
 
-def test_universe_is_only_k_positive_legs():
+def test_universe_is_only_the_picks():
+    # The model's Kelly no longer decides: C and D carry a positive Kelly but are no
+    # picks (D has no EV at all), and B is a pick at a Kelly of 0.
     legs = _slip("A|PTS|Over")
-    pool = _pool(
-        ("A|PTS|Over", 0.4), ("B|REB|Under", 0.1), ("C|AST|Over", -0.2), ("D|PTS|Under", 0.0)
+    pool = pd.DataFrame(
+        [
+            _row(0, "A|PTS|Over", 0.95),
+            _row(1, "B|REB|Under", 0.90),
+            {**_row(2, "C|AST|Over", 0.97, False), "Kelly": 0.2},
+            {**_row(3, "D|PTS|Under", None, False), "Kelly": 0.3},
+        ]
     )
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
-    assert _shown_keys(fig) == {"A|PTS|Over", "B|REB|Under"}  # C (<0) and D (==0) dropped
+    assert _shown_keys(fig) == {"A|PTS|Over", "B|REB|Under"}
 
 
 def test_active_full_color_candidate_desaturated_and_dim():
@@ -220,16 +231,23 @@ def test_star_labels_name_markets_the_way_the_board_does():
     assert star_label(leagueless) == "B PTS o10.5"
 
 
-def test_star_size_scales_with_edge():
-    legs = _slip("A|PTS|Over")
-    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.1))
-    sizes = _sizes(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool))
-    assert sizes["A|PTS|Over"] > sizes["B|REB|Under"]  # higher K → bigger star
-    assert sizes["A|PTS|Over"] == SIZE_MAX  # the game's strongest leg maxes out
+def test_star_size_runs_from_the_lowest_to_the_highest_ev_drawn():
+    # EV spans a narrow band, so a scale from zero would draw every star near full size.
+    pool = pd.DataFrame(
+        [
+            {**_row(0, "A|PTS|Over", 0.95), "Kelly": 0.01},
+            {**_row(1, "B|REB|Under", 0.85), "Kelly": 0.30},
+            _row(2, "C|AST|Over", 0.90),
+        ]
+    )
+    sizes = _sizes(constellation_figure(_slip("A|PTS|Over"), _corr(), pool))
+    assert sizes["A|PTS|Over"] == SIZE_MAX  # the game's highest EV maxes out
+    assert sizes["B|REB|Under"] == SIZE_MIN  # its lowest sits at the floor
+    assert sizes["C|AST|Over"] == pytest.approx((SIZE_MIN + SIZE_MAX) / 2)
 
 
 def _ladder(n: int) -> pd.DataFrame:
-    """``n`` one-leg players, teams alternating, Kelly strictly descending."""
+    """``n`` one-leg picks, teams alternating, EV strictly descending."""
     return _pool(*[(f"P{i:02d}|PTS|Over", 0.9 - i * 0.03) for i in range(n)])
 
 
@@ -256,15 +274,26 @@ def test_nodes_carry_leg_key_customdata():
 
 
 def test_node_customdata_carries_card_fields():
-    # customdata = [key, player, market, bet, line, win, boost, kelly] — the JS card
-    # reads the fields after the key; the click path still reads customdata[0].
-    fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
+    # customdata = [key, player, market, bet, line, win, boost, ev, model win, model ev,
+    # in slip] — the JS card reads the fields after the key; the click path reads [0].
+    fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.93)))
     cd = _trace(fig, "active").customdata[0]
     assert cd[0] == "A|PTS|Over"
     assert [cd[1], cd[2], cd[3]] == ["A", "Points", "Over"]  # the card names the market too
     assert float(cd[4]) == 10.5  # line
-    assert 0.0 <= float(cd[5]) <= 1.0  # win prob
-    assert float(cd[6]) > 0  # boost
+    assert float(cd[5]) == pytest.approx(0.62)  # the fitted win chance, EV / payout
+    assert float(cd[6]) == 1.5  # boost
+    assert float(cd[7]) == pytest.approx(0.93)  # EV
+    assert float(cd[8]) == pytest.approx(0.6)  # the model's win chance
+    assert float(cd[9]) == pytest.approx(0.9)  # Model EV, 0.6 x 1.5
+    assert cd[10] == 1  # in the slip
+
+
+def test_an_unpriced_legs_card_carries_no_win_chance_or_ev():
+    leg = _row(0, "A|PTS|Over", None, False)
+    cd = _trace(constellation_figure([leg], _corr(), pd.DataFrame([leg])), "active").customdata[0]
+    assert cd[5] is None and cd[7] is None
+    assert float(cd[9]) == pytest.approx(0.9)
 
 
 def test_team_hubs_anchor_to_opposite_sides():
@@ -367,7 +396,7 @@ def test_edges_ride_in_layout_meta_as_plain_json_never_as_traces():
     decode plotly 6's base64 arrays, so the records must survive a JSON round trip."""
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
     corr = _corr(("A|PTS|Over", "B|REB|Under", -0.5), ("A|PTS|Over", "D|PTS|Under", 0.5))
-    deep_pool = _pool(("D|PTS|Under", -0.1))
+    deep_pool = _pool(("D|PTS|Under", None, False))
     fig = constellation_figure(_slip("A|PTS|Over"), corr, pool, deep_pool=deep_pool)
     assert not {"edge", "deep_edge"} & {trace.name for trace in fig.data}
     assert [edge["lens"] for edge in _edges(fig)] == [True, False]
@@ -383,15 +412,23 @@ def test_layout_is_deterministic():
     )
 
 
-def test_hover_shows_win_prob_boost_and_kelly():
-    fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
+def test_hover_leads_with_the_fitted_ev_and_shows_the_models_claim():
+    fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.93)))
     hover = _trace(fig, "active").hovertext[0]
-    assert "Points" in hover and "Win" in hover and "Kelly" in hover
+    assert hover.split("<br>")[1:] == ["Win 62% · 1.50x · EV 0.93", "Model win 60% · Model EV 0.90"]
+    assert "Kelly" not in hover
 
 
-def test_active_leg_below_k_floor_still_shows():
-    # An active leg whose offer slipped to K ≤ 0 keeps its star — a slip never loses a leg.
-    fig = constellation_figure([_row(0, "A|PTS|Over", -0.1)], None, _pool(("A|PTS|Over", -0.1)))
+def test_hover_on_an_unpriced_leg_shows_only_the_models_claim():
+    leg = _row(0, "A|PTS|Over", None, False)
+    hover = _trace(constellation_figure([leg], _corr(), pd.DataFrame([leg])), "active").hovertext[0]
+    assert hover.split("<br>")[1:] == ["1.50x · no EV", "Model win 60% · Model EV 0.90"]
+
+
+def test_an_active_leg_that_is_no_pick_still_shows():
+    # An active leg the board does not pick keeps its star — a slip never loses a leg.
+    leg = _row(0, "A|PTS|Over", 0.8, False)
+    fig = constellation_figure([leg], None, pd.DataFrame([leg]))
     assert "A|PTS|Over" in _shown_keys(fig)
 
 
@@ -411,8 +448,8 @@ def test_deep_pool_none_is_byte_stable_with_no_deep_trace():
 def test_deep_stars_take_their_ties_to_main_stars():
     """A deep star arrives with its correlations, marked as the lens ties the JS fades."""
     legs = _slip("A|PTS|Over")
-    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # model-liked candidate pool
-    deep_pool = _pool(("D|PTS|Under", -0.1))  # model-passed
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # the picks
+    deep_pool = _pool(("D|PTS|Under", None, False))  # no pick
     fig = constellation_figure(
         legs, _corr(("A|PTS|Over", "D|PTS|Under", 0.5)), pool, deep_pool=deep_pool
     )
@@ -421,30 +458,29 @@ def test_deep_stars_take_their_ties_to_main_stars():
     assert tie["opacity"] == EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
 
 
-def test_deep_tier_colors_split_liked_from_passed():
-    """Two readings: a liked leg the cut left behind is a candidate, just smaller and
-    dimmer; only the model-passed tier wears the lens's own gray, at the floor alpha
-    that keeps it present without competing with the lit map."""
+def test_deep_tier_colors_split_picks_from_the_rest():
+    """Two readings: a pick the cut left behind is a candidate, just smaller and dimmer;
+    every other leg wears the lens's own gray however high its EV — EV sets only how big
+    and how bright each is, so here the gray star outshines the pick."""
     fig = constellation_figure(
-        [], None, _ladder(DEFAULT_STARS + 1), deep_pool=_pool(("D|PTS|Under", -0.1))
+        [], None, _ladder(DEFAULT_STARS + 1), deep_pool=_pool(("D|PTS|Under", 0.95, False))
     )
     deep = _trace(fig, "deep")
-    assert [cd[0] for cd in deep.customdata] == [f"P{DEFAULT_STARS}|PTS|Over", "D|PTS|Under"]
-    liked, passed = deep.marker.opacity
-    assert liked > passed
-    assert passed == DEEP_ALPHA_MIN
-    assert all(alpha <= INACTIVE_ALPHA for alpha in deep.marker.opacity)
-    assert deep.marker.color[1] == _DEEP_COLOR
+    assert [cd[0] for cd in deep.customdata] == ["D|PTS|Under", f"P{DEFAULT_STARS}|PTS|Over"]
+    rest, pick = deep.marker.opacity
+    assert (rest, pick) == (INACTIVE_ALPHA, DEEP_ALPHA_MIN)
+    assert deep.marker.color[0] == _DEEP_COLOR
+    assert deep.marker.color[1] == desaturate(team_colors("NBA", "NYK")[0], INACTIVE_DESAT)
     assert all(color not in (GRAY, GOLD) for color in deep.marker.color)
-    assert list(deep.marker.line.color) == [GREEN, RED]  # liked=Over, passed=Under
+    assert list(deep.marker.line.color) == [RED, GREEN]  # D is an Under, the pick an Over
 
 
 def test_an_in_slip_deep_leg_burns_as_a_promoted_star():
-    """A slip never loses a leg to the cut: picking a model-passed star promotes it
-    out of the tier and lights it at main size, lens or no lens."""
-    legs = [_row(0, "D|PTS|Under", -0.1)]
+    """A slip never loses a leg to the cut: picking a star the board did not pick
+    promotes it out of the tier and lights it at main size, lens or no lens."""
+    legs = [_row(0, "D|PTS|Under", None, False)]
     pool = _pool(("A|PTS|Over", 0.4))
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3))
+    deep_pool = _pool(("D|PTS|Under", None, False), ("E|AST|Over", None, False))
     fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool)
     assert {cd[0] for cd in _trace(fig, "deep").customdata} == {"E|AST|Over"}
     active = _trace(fig, "active")
@@ -456,30 +492,33 @@ def test_deep_pool_does_not_move_existing_stars():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
     corr = _corr(("A|PTS|Over", "B|REB|Under", 0.5))
-    deep_pool = _pool(("D|PTS|Under", -0.1))
+    deep_pool = _pool(("D|PTS|Under", None, False))
     without = _node_pos(constellation_figure(legs, corr, pool))
     with_deep = _node_pos(constellation_figure(legs, corr, pool, deep_pool=deep_pool))
     for key, xy in without.items():
         assert with_deep[key] == xy
 
 
-def test_deep_pool_star_sizes_scale_with_edge_under_the_main_floor():
-    """The tier ranks itself the way the map does — edge sets a lens star's size — in
+def test_deep_pool_star_sizes_scale_with_ev_under_the_main_floor():
+    """The tier ranks itself the way the map does — EV sets a lens star's size — in
     a band that starts over the engraving's fillers and ends under the main floor, so
     the strongest thing behind the cut still never outranks the weakest star on it."""
     pool = _ladder(DEFAULT_STARS + 1)
-    deep_pool = pd.concat([pool, _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -5.0))])
+    deep_pool = pd.concat([pool, _pool(("D|PTS|Under", 0.25, False), ("E|AST|Over", None, False))])
     deep = _trace(constellation_figure([], None, pool, deep_pool=deep_pool), "deep")
     size = dict(zip((cd[0] for cd in deep.customdata), deep.marker.size, strict=True))
     assert size[f"P{DEFAULT_STARS}|PTS|Over"] > size["D|PTS|Under"]
-    assert size["D|PTS|Under"] == size["E|AST|Over"] == DEEP_SIZE_MIN  # both passes, both floored
+    # The tier's lowest EV and the leg the fit did not price share the floor.
+    assert size["D|PTS|Under"] == size["E|AST|Over"] == DEEP_SIZE_MIN
     assert all(FILLER_SIZE < px < SIZE_MIN for px in size.values())
     phone = _trace(constellation_figure([], None, pool, deep_pool=deep_pool, mobile=True), "deep")
     assert all(DEEP_SIZE_MIN_MOBILE <= px < SIZE_MIN_MOBILE for px in phone.marker.size)
 
 
 def test_deep_pool_positions_are_deterministic_across_calls():
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3), ("F|STL|Under", -0.2))
+    deep_pool = _pool(
+        ("D|PTS|Under", 0.3, False), ("E|AST|Over", None, False), ("F|STL|Under", 0.2, False)
+    )
     pool = _pool(("A|PTS|Over", 0.4))
     one = _trace(constellation_figure([], _corr(), pool, deep_pool=deep_pool), "deep")
     two = _trace(constellation_figure([], _corr(), pool, deep_pool=deep_pool), "deep")
@@ -493,7 +532,7 @@ def test_wider_groups_none_is_byte_stable_with_no_wider_trace():
     assert _trace(fig, "wider") is None
 
 
-def _wider_row(player, market, bet, game, team, league, kelly):
+def _wider_row(player, market, bet, game, team, league, ev):
     return {
         "Player": player,
         "Market": market,
@@ -502,9 +541,12 @@ def _wider_row(player, market, bet, game, team, league, kelly):
         "Game": game,
         "League": league,
         "Team": team,
-        "Kelly": kelly,
+        "Kelly": 0.0,
         "Win Prob": 0.55,
         "Boost": 1.4,
+        "Fit Prob": ev / 1.4,
+        "EV": ev,
+        "Pick": True,
     }
 
 
@@ -630,7 +672,7 @@ def test_wider_stars_never_enter_the_constellations_footprint():
     included, and keeps a glyph's clear air from every one of them."""
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -0.3))
+    deep_pool = _pool(("D|PTS|Under", None, False), ("E|AST|Over", None, False))
     fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool, wider_groups=_sky(2))
     sky = {cd[0] for cd in _trace(fig, "wider").customdata}
     pos, sizes = _node_pos(fig), _sizes(fig)
@@ -692,12 +734,12 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
         assert min(t.marker.size) >= SIZE_MIN_MOBILE
         assert t.textfont.size == LABEL_FONT_SIZE_MOBILE
         for cd in t.customdata:
-            assert len(cd) == 9
-            assert cd[8] in (0, 1)
+            assert len(cd) == 11
+            assert cd[10] in (0, 1)
     active = _trace(fig, "active")
-    assert all(cd[8] == 1 for cd in active.customdata)
+    assert all(cd[10] == 1 for cd in active.customdata)
     candidate = _trace(fig, "candidate")
-    assert all(cd[8] == 0 for cd in candidate.customdata)
+    assert all(cd[10] == 0 for cd in candidate.customdata)
 
 
 # --- Phase D: the constellation-shape layer -------------------------------------

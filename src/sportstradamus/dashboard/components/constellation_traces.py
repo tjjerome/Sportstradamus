@@ -3,26 +3,27 @@
 ``constellation.py`` orchestrates the figure; this module owns the pieces it and
 the lenses draw with: the caption, hover text and card fields a node carries
 (:func:`star_label`, :func:`node_info`), the node traces and edge records, the two team
-tags, the blank locked frame, and the one edge-proportional scale the main map and
-the deeper lens's tier both rank themselves by (:func:`edge_scale`). Nothing here
-decides where a star sits — positions arrive from ``constellation_spring``,
-``constellation_slate`` and the lens modules.
+tags, the blank locked frame, and the one EV scale the main map and the deeper lens's
+tier both rank themselves by (:func:`ev_scale`). Nothing here decides where a star
+sits — positions arrive from ``constellation_spring``, ``constellation_slate`` and the
+lens modules.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+import pandas as pd
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_spacing import X_RANGE, Y_RANGE
 from sportstradamus.dashboard.theme import GRAY, GREEN, RED, team_name
-from sportstradamus.helpers import market_display_name
-from sportstradamus.leg_schema import leg_field, leg_field_float
+from sportstradamus.helpers import market_display_name, platform_payout
+from sportstradamus.leg_schema import is_pick, leg_field, leg_field_float
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
-# Star size scales with the leg's Kelly edge, relative to the game's strongest leg.
+# Star size scales with the leg's EV, from the lowest to the highest EV drawn with it.
 SIZE_MIN = 14
 SIZE_MAX = 38
 # A candidate (not-in-slip) star keeps most of its team hue — only a light blend toward
@@ -44,8 +45,8 @@ EDGE_BASE_ALPHA = 0.03
 FIG_HEIGHT = 380
 LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
 
-# Phase M touch floors: a fingertip needs ~22px; the label lifts with it. The Kelly
-# ordering (size = edge) survives — the floor compresses the range, never reorders it.
+# Phase M touch floors: a fingertip needs ~22px; the label lifts with it. The EV
+# ordering (size = EV) survives — the floor compresses the range, never reorders it.
 SIZE_MIN_MOBILE = 22
 LABEL_FONT_SIZE_MOBILE = 13
 _ACTIVE_LABEL_COLOR = "#C7CEDA"  # in-slip captions read brighter than gray candidate labels
@@ -101,56 +102,78 @@ def star_label(leg: Mapping) -> str:
     return f"{_last_name(str(leg_field(leg, 'player')))} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
 
 
-def _hover_text(leg: Mapping) -> str:
-    p = leg_field_float(leg, "win_prob")
-    boost = leg_field_float(leg, "boost", 1.0)
-    k = leg_field_float(leg, "kelly")
-    head = (
-        f"{leg_field(leg, 'player')} — {_market_name(leg)} "
-        f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
-    )
-    return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
-
-
-def _card_fields(leg: Mapping) -> list:
-    """Structured fields the hover card reads from a node's ``customdata`` (after the key)."""
-    return [
-        str(leg_field(leg, "player")),
-        _market_name(leg),
-        _bet_word(leg_field(leg, "bet")),
-        float(leg_field(leg, "line")),
-        leg_field_float(leg, "win_prob"),
-        leg_field_float(leg, "boost", 1.0),
-        leg_field_float(leg, "kelly"),
-    ]
-
-
 def node_info(leg: Mapping) -> dict:
-    """Everything a node carries: its caption, team, edge, hover text and card fields."""
+    """Everything a node carries: its caption, team, numbers, pick flag, hover text and card.
+
+    ``ev`` is the fitted EV, None on a leg the fit did not price (one side posted);
+    ``model_ev`` is the model's own claim, its win chance times the payout. The hover
+    leads with the fitted win chance and EV and gives the model's beside them, and
+    ``card`` is what the component's hover card reads from ``customdata`` after the
+    key: player, market, side, line, fitted win, boost, EV, model win, Model EV.
+    """
+    ev = leg_field(leg, "ev")
+    ev = None if pd.isna(ev) else float(ev)
+    fit = None if ev is None else float(leg_field(leg, "fit_prob"))
+    win = leg_field_float(leg, "win_prob")
+    boost = leg_field_float(leg, "boost", 1.0)
+    model_ev = win * float(platform_payout(boost, leg_field(leg, "platform")))
+    bet = _bet_word(leg_field(leg, "bet"))
+    line = float(leg_field(leg, "line"))
+    fitted = (
+        f"{boost:.2f}x · no EV" if ev is None else f"Win {fit:.0%} · {boost:.2f}x · EV {ev:.2f}"
+    )
     return {
         "label": star_label(leg),
         "team": leg_field(leg, "team"),
-        "edge": leg_field_float(leg, "kelly"),
-        "hover": _hover_text(leg),
-        "card": _card_fields(leg),
+        "ev": ev,
+        "model_ev": model_ev,
+        "pick": is_pick(leg),
+        "hover": (
+            f"{leg_field(leg, 'player')} — {_market_name(leg)} {bet} {line:.10g}"
+            f"<br>{fitted}<br>Model win {win:.0%} · Model EV {model_ev:.2f}"
+        ),
+        "card": [
+            str(leg_field(leg, "player")),
+            _market_name(leg),
+            bet,
+            line,
+            fit,
+            boost,
+            ev,
+            win,
+            model_ev,
+        ],
     }
 
 
-def edge_scale(
-    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = SIZE_MAX
+def ev_scale(
+    keys: Sequence[str],
+    info: Mapping[str, dict],
+    *,
+    floor: float,
+    ceiling: float = SIZE_MAX,
+    among: Sequence[str] | None = None,
 ) -> dict[str, float]:
-    """Per-node value in ``[floor, ceiling]`` ∝ Kelly edge, over the strongest of ``keys``.
+    """Per-node value in ``[floor, ceiling]`` by EV, lowest to highest EV of ``among``.
 
     Star size on the main map, size *and* opacity on the deeper lens's own tier —
     one scale so the two tiers rank themselves the same way at different volumes.
-    A model-passed leg (edge ≤ 0) sits at the floor rather than below it, and a
-    set with nothing positive in it is flat there.
+    EV spans a narrow band, so the scale runs from the lowest EV drawn (``among``,
+    ``keys`` by default) to the highest, not from zero. A leg the fit did not price
+    sits at the floor, a set of one EV sits at the ceiling, and a leg outside the
+    ``among`` range clamps to its end, so sizing a newcomer against the drawn stars
+    never resizes them.
     """
-    top = max((info[k]["edge"] for k in keys), default=0.0)
-    if top <= 0:
-        return dict.fromkeys(keys, float(floor))
-    span = ceiling - floor
-    return {k: floor + max(info[k]["edge"], 0.0) / top * span for k in keys}
+    evs = [info[k]["ev"] for k in (keys if among is None else among) if info[k]["ev"] is not None]
+    lo, hi = min(evs, default=0.0), max(evs, default=0.0)
+
+    def at(ev: float | None) -> float:
+        if ev is None:
+            return float(floor)
+        share = (ev - lo) / (hi - lo) if hi > lo else float(ev >= hi)
+        return floor + min(max(share, 0.0), 1.0) * (ceiling - floor)
+
+    return {k: at(info[k]["ev"]) for k in keys}
 
 
 def blank_figure() -> go.Figure:

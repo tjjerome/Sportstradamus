@@ -17,8 +17,8 @@ lattice — placing every star on the lattice drew a ring of identical dots arou
 each main, which is a grid, not a sky. Everything already on screen goes to
 ``settle`` as ``fixed``, which is what makes "revealing a lens never moves a
 star" a property of the geometry rather than a convention. Size and opacity both
-carry the star's Kelly edge, so the tier ranks itself in a band that starts over
-the engraving and stops under the main map's floor.
+carry the star's EV, so the tier ranks itself in a band that starts over the
+engraving and stops under the main map's floor.
 
 Every draw — the scatter and the main star an untied deep star borrows — is an
 md5 of the key it belongs to (the seeding ``constellation_shapes.assign_templates``
@@ -46,16 +46,16 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.components.constellation_traces import bet_marker_line
 
-# The model-passed tier: a flat cool gray, distinct from both a team color and
-# GRAY (the unknown-team fallback and the label color), so it reads as "the model
-# passes on this" rather than as one more desaturated candidate.
+# The legs the board did not pick: a flat cool gray, distinct from both a team color
+# and GRAY (the unknown-team fallback and the label color), so it reads as "not a
+# pick" rather than as one more desaturated candidate.
 _DEEP_COLOR = "#5f6b80"
 # Over the engraving's FILLER_SIZE (6) so a lens star never reads as decoration,
 # under the main map's floor (SIZE_MIN 14) so it never outranks a real star.
 DEEP_SIZE_MIN, DEEP_SIZE_MAX = 7, 13
 # A thumb needs ~12 px; 20 stays under the 22 px mobile main floor.
 DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE = 12, 20
-DEEP_ALPHA_MIN = 0.25  # the model-passed floor: present, never a distraction
+DEEP_ALPHA_MIN = 0.25  # the tier's floor: present, never a distraction
 _SIDE_FALLBACK_X = 0.6  # where an untied deep star heads when its half holds no main star
 # How far past clear air a deep star may drift from its main: its neighbourhood,
 # never halfway to the next one.
@@ -70,17 +70,17 @@ DEEP_EDGES_PER_STAR = 2
 
 
 def deep_tier(node_info: Mapping[str, dict], keys: Sequence[str]) -> list[str]:
-    """Every known leg that is not a main star, strongest first.
+    """Every known leg that is not a main star, highest ``EV`` first.
 
-    One sort key gives both readings the deeper lens holds — the model-liked legs
-    the default cut left behind, then the model-passed ones — with no tier
-    bookkeeping: edge orders them and the sign says which is which.
+    The legs the fit did not price follow the rest, highest Model EV first.
     """
     main = set(keys)
-    return sorted(
-        (key for key in node_info if key not in main),
-        key=lambda key: (-node_info[key]["edge"], key),
-    )
+
+    def rank(key: str) -> tuple:
+        ev = node_info[key]["ev"]
+        return (ev is None, -(ev or 0.0), -node_info[key]["model_ev"], key)
+
+    return sorted((key for key in node_info if key not in main), key=rank)
 
 
 def deep_positions(
@@ -228,9 +228,9 @@ def add_deep_trace(
     """The deeper lens's own stars, as the one fade-able trace named ``deep``.
 
     Everything arrives per point because the tier carries two readings and a
-    ranking inside each: a model-liked leg the cut left behind wears the candidate
-    look, a model-passed one the cool gray of the lens itself, and edge sets how
-    big and how bright either is. ``flip_colors`` is the full team color each star
+    ranking inside each: a pick the cut left behind wears the candidate look, any
+    other leg the cool gray of the lens itself, and EV sets how big and how bright
+    either is. ``flip_colors`` is the full team color each star
     burns once a click puts it in the slip; it rides as ``meta`` so the component
     can paint it before the rerun promotes the star.
     """

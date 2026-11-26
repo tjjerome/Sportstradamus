@@ -1,10 +1,9 @@
 """Pins for the constellation's readability pass: the capped star set, the
 minimum-distance spacing lattice, and sparse captions.
 
-A busy game offers far more model-liked legs than a 980x360 box can hold, so the
-map draws a bounded default set — the strongest by Kelly edge, both teams
-represented, no player owning it — and everything else waits behind *look
-deeper*. What is drawn then goes through ``settle``: the biggest stars keep their
+A busy game can offer more picks than a 980x360 box can hold, so the map draws a
+bounded default set — the highest EV, both teams represented, no player owning
+it — and everything else waits behind *look deeper*. What is drawn then goes through ``settle``: the biggest stars keep their
 template vertices to the float and only a star that would collide moves, to the
 nearest free lattice cell on its own team's half. Captions stop being universal:
 the slip's stars plus the biggest few candidates carry one, and only where its
@@ -57,7 +56,7 @@ _TEAMS = ("NYK", "SAS")
 _HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
 
 
-def _row(player: str, team: str, kelly: float, market: str = "PTS") -> dict:
+def _row(player: str, team: str, ev: float, market: str = "PTS", *, pick: bool = True) -> dict:
     return {
         "Player": player,
         "Market": market,
@@ -66,14 +65,18 @@ def _row(player: str, team: str, kelly: float, market: str = "PTS") -> dict:
         "Game": "NYK/SAS",
         "League": "NBA",
         "Team": team,
-        "Kelly": kelly,
+        # Kelly runs against EV, so a map ranked on the model's Kelly draws the wrong stars.
+        "Kelly": 1.0 - ev,
         "Win Prob": 0.6,
         "Boost": 1.5,
+        "Fit Prob": ev / 1.5,
+        "EV": ev,
+        "Pick": pick,
     }
 
 
 def _ladder(n: int, *, top: float = 0.9, step: float = 0.03) -> pd.DataFrame:
-    """``n`` one-leg players, teams alternating, Kelly strictly descending."""
+    """``n`` one-leg picks, teams alternating, EV strictly descending."""
     return pd.DataFrame([_row(f"P{i:02d}", _TEAMS[i % 2], top - i * step) for i in range(n)])
 
 
@@ -220,7 +223,7 @@ def test_the_lattice_stays_inside_the_inset_frame():
     assert abs(y) <= Y_RANGE * _FRAME_INSET
 
 
-def test_default_set_is_top_n_by_kelly():
+def test_default_set_is_top_n_by_ev():
     universe = {_key(i): row for i, row in enumerate(_ladder(DEFAULT_STARS + 3).to_dict("records"))}
     chosen = default_stars(universe, list(_TEAMS))
     assert len(chosen) == DEFAULT_STARS
@@ -234,7 +237,7 @@ def test_default_set_guarantees_both_teams():
     chosen = default_stars(universe, list(_TEAMS))
     by_team = [universe[key]["Team"] for key in chosen]
     assert len(chosen) == DEFAULT_STARS
-    assert by_team.count("SAS") == MIN_PER_TEAM  # the floor, over a lopsided Kelly ranking
+    assert by_team.count("SAS") == MIN_PER_TEAM  # the floor, over a lopsided EV ranking
     assert by_team.count("NYK") == DEFAULT_STARS - MIN_PER_TEAM
 
 
@@ -259,12 +262,12 @@ def test_in_slip_leg_beyond_the_cut_is_still_a_star():
     assert [card[0] for card in active.customdata] == [_key(DEFAULT_STARS + 2)]
 
 
-def test_a_slip_with_only_a_passed_leg_still_renders():
-    """Nothing in the pool is model-liked, so the default cut is empty and the
-    promoted slip leg is the whole map — the one case that hands the spring solve
-    an empty node set, which it cannot warm-start.
+def test_a_slip_with_only_a_leg_that_is_no_pick_still_renders():
+    """Nothing in the pool is a pick, so the default cut is empty and the promoted
+    slip leg is the whole map — the one case that hands the spring solve an empty
+    node set, which it cannot warm-start.
     """
-    leg = _row("A", "NYK", -0.1)
+    leg = _row("A", "NYK", 0.8, pick=False)
     stars = _stars(constellation_figure([leg], None, pd.DataFrame([leg])))
     assert set(stars) == {"A|PTS|Over"}
 

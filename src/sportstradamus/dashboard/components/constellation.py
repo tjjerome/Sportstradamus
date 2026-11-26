@@ -1,12 +1,13 @@
-"""The constellation — an interactive star map of a game's model-liked legs.
+"""The constellation — an interactive star map of a game's picks.
 
 The dashboard's signature element (DESIGN.md §4a) and the slip editor's primary
-control. The game's strongest model-liked legs are stars — the top
-``DEFAULT_STARS`` by edge with both teams represented and at most two per player;
-the rest wait behind *look deeper* — each sized by its edge so the strongest read
-biggest. The layout is **fixed per game** (the sports-object template the game was
-dealt, or a team-anchored force-directed solve when it is too thin for one) and
-never moves when you pick legs; ``constellation_spacing.settle`` then nudges only
+control. The game's picks (``Pick``, the legs the board ranks highest by the fitted
+``EV``) are stars — the top ``DEFAULT_STARS`` by EV with both teams represented and
+at most two per player; the rest wait behind *look deeper* — each sized by its EV
+between the lowest and the highest drawn, so the strongest read biggest. The layout
+is **fixed per game** (the sports-object template the game was dealt, or a
+team-anchored force-directed solve when it is too thin for one) and never moves
+when you pick legs; ``constellation_spacing.settle`` then nudges only
 the stars that would collide, so the biggest keep their vertices exactly. Captions
 are sparse for the same reason — the slip's stars plus the biggest few candidates
 carry one, everything else reads from its hover card. A star you've added to the
@@ -27,9 +28,9 @@ Two optional lenses layer onto the same figure (P8 Task C6) instead of living as
 separate expanders below the map; ``constellation_deep`` and ``constellation_wider``
 draw one each:
 
-* ``deep_pool`` — "look deeper": the game's remaining legs — the ones the default
-  cut left behind, then the model-passed ones — as small stars *inside* the map,
-  sized and lit by edge and scattered by seeded draw into the neighbourhood of the
+* ``deep_pool`` — "look deeper": the game's remaining legs — picks the default cut
+  left behind and every leg the board did not pick — as small stars *inside* the map,
+  sized and lit by EV and scattered by seeded draw into the neighbourhood of the
   main star each correlates with, carrying its ties. The main stars are held fixed,
   so revealing the tier can never reshuffle the lit map.
 * ``wider_groups`` — "look wider": the map recedes a little and other games' best
@@ -103,7 +104,7 @@ from sportstradamus.dashboard.components.constellation_traces import (
     add_team_tags,
     blank_figure,
     edge_record,
-    edge_scale,
+    ev_scale,
     node_info,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
@@ -158,10 +159,10 @@ def constellation_figure(
     shape: dict | None = None,
     banned: Collection[str] = (),
 ) -> go.Figure:
-    """Static star map of the game's model-liked legs, the slip's legs lit up.
+    """Static star map of the game's picks, the slip's legs lit up.
 
-    ``pool`` is the game's candidate offers — the static universe is its ``K`` > 0
-    legs; ``slip_legs`` are the ones currently in the slip (drawn active). ``rho`` is
+    ``pool`` is the game's candidate offers — the static universe is its picks;
+    ``slip_legs`` are the ones currently in the slip (drawn active). ``rho`` is
     the game's pair map (``GameCtx.rho``). Each node carries its ``Player|Market|Bet`` key
     as customdata for click handling; the layout never depends on the selection.
 
@@ -224,9 +225,9 @@ def constellation_figure(
         shape,
         shape_scale,
     )
-    sizes = edge_scale(keys, info, floor=floor)
+    sizes = ev_scale(keys, info, floor=floor)
     focus_scale = WIDER_SCALE if wider_groups is not None else 1.0
-    # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
+    # Biggest first: a top-EV star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
     # Spaced against the px the viewer actually gets: "look wider" shrinks positions
     # but not marker sizes, so the solve has to see the shrunk scale, not the base one.

@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 GAME = "NYK/SAS"
+BOOST = 1.5
 
 
 def offer_row(
     player: str,
     team: str,
-    kelly: float,
+    ev: float | None,
     *,
+    pick: bool = True,
     market: str = "PTS",
     game: str = GAME,
     bet: str = "Over",
 ) -> dict:
+    """An offer at ``ev``; ``None`` is a leg the fit did not price, which is never a pick.
+
+    ``Kelly`` is 0 on every row: the map reads the board's pick and its EV, never the
+    model's Kelly, so a map drawn off Kelly comes out empty.
+    """
     return {
         "Player": player,
         "Market": market,
@@ -22,9 +29,12 @@ def offer_row(
         "Game": game,
         "League": "NBA",
         "Team": team,
-        "Kelly": kelly,
+        "Kelly": 0.0,
         "Win Prob": 0.6,
-        "Boost": 1.5,
+        "Boost": BOOST,
+        "Fit Prob": None if ev is None else ev / BOOST,
+        "EV": ev,
+        "Pick": pick,
     }
 
 

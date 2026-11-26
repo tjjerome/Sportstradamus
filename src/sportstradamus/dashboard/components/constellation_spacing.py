@@ -1,6 +1,6 @@
 """What the constellation shows and how close its stars may sit.
 
-A busy game offers far more model-liked legs than the map can hold — a hundred
+A busy game can offer more picks than the map can hold — a hundred
 stars on a template's dozen vertices is a blob, not a reading. So the map draws a
 bounded default set (:func:`default_stars`), the rest waits behind *look deeper*,
 and whatever ends up drawn goes through one placement primitive
@@ -26,7 +26,7 @@ from collections.abc import Container, Mapping, Sequence
 
 import numpy as np
 
-from sportstradamus.leg_schema import is_model_liked, leg_field
+from sportstradamus.leg_schema import is_pick, leg_field, leg_field_float
 
 X_RANGE, Y_RANGE = 1.6, 1.4  # the figure's locked axis ranges (constellation_traces.blank_figure)
 
@@ -165,9 +165,9 @@ def default_stars(
     per_team: int = MIN_PER_TEAM,
     per_player: int = MAX_PER_PLAYER,
 ) -> list[str]:
-    """The game's strongest model-liked legs — the stars drawn before *look deeper*.
+    """The game's strongest picks — the stars drawn before *look deeper*.
 
-    Ranked by Kelly edge, but two floors bend the ranking so the map still reads
+    Ranked by EV, but two floors bend the ranking so the map still reads
     as a matchup: each team fills ``per_team`` slots before the open ranking
     spends the rest, and no player carries more than ``per_player`` legs. Takes
     the defining rows (canonical legs or raw offer rows alike, via ``leg_field``)
@@ -178,8 +178,8 @@ def default_stars(
     overshoots ``cap`` when it is set above it (the shipped 6 + 6 sits under 20).
     """
     ranked = sorted(
-        (key for key, leg in universe.items() if is_model_liked(leg)),
-        key=lambda key: (-float(leg_field(universe[key], "kelly")), key),
+        (key for key, leg in universe.items() if is_pick(leg)),
+        key=lambda key: (-leg_field_float(universe[key], "ev"), key),
     )
     chosen: list[str] = []
     legs_of_player: Counter[str] = Counter()

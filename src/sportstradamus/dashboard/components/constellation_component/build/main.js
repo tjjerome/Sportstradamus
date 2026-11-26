@@ -253,7 +253,7 @@
       const points = trace.customdata;
       if (!points) return;
       points.forEach(function (cd) {
-        inSlip[cd[0]] = !!cd[8];
+        inSlip[cd[0]] = !!cd[10];
       });
       const opacity = trace.marker.opacity === undefined ? 1 : trace.marker.opacity;
       const star = {
@@ -814,8 +814,14 @@
     const bet = cd[3];
     const line = cd[4];
     const win = cd[5];
-    const boost = cd[6];
-    const kelly = cd[7];
+    const boost = (Number(cd[6]) || 1).toFixed(2) + "x";
+    const ev = cd[7];
+    // A leg the fit did not price (one side posted) has no win chance or EV of its own.
+    const fitted =
+      ev === null
+        ? boost + " · no EV"
+        : "Win " + pct(win) + " · " + boost + ' · <span class="cst-ev">EV ' +
+          Number(ev).toFixed(2) + "</span>";
     return [
       '<div class="cst-head">',
       shotHtml(player),
@@ -824,12 +830,12 @@
       '</div><div class="cst-leg">',
       esc(market) + " · " + esc(bet) + " " + esc(line),
       "</div></div></div>",
-      '<div class="cst-stats">Win ',
-      pct(win),
-      " · ",
-      (Number(boost) || 1).toFixed(2),
-      'x · <span class="cst-kelly">Kelly ',
-      pct(kelly),
+      '<div class="cst-stats">',
+      fitted,
+      '<br><span class="cst-model">Model win ',
+      pct(cd[8]),
+      " · Model EV ",
+      Number(cd[9]).toFixed(2),
       "</span></div>",
       banHtml(cd[0]),
       sparkHtml(cd[0]),

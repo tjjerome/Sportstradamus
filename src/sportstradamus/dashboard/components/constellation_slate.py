@@ -43,7 +43,7 @@ from sportstradamus.dashboard.components.constellation_shapes import (
 )
 from sportstradamus.dashboard.components.constellation_spacing import default_stars
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.leg_schema import is_model_liked, leg_field
+from sportstradamus.leg_schema import is_pick, leg_field
 
 # |ρ| floor to draw an edge or weight the layout — the story-menu edge floor.
 _MIN_EDGE_RHO = 0.05
@@ -75,11 +75,11 @@ SHAPE_SCALE_MOBILE = (1.30, 0.98)
 
 
 def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> dict[str, Mapping]:
-    """``leg key -> the row that defines it``: model-liked legs plus any active slip leg.
+    """``leg key -> the row that defines it``: the board's picks plus any active slip leg.
 
     The static node set — it depends on the game's offers, not on which legs are in
     the slip (the slip only decides which stars light up) — so the map never
-    reshuffles on a pick. An active leg whose offer has slipped below K > 0 is kept
+    reshuffles on a pick. An active leg that is not, or is no longer, a pick is kept
     so a slip never loses one of its own stars. Returns the defining row rather than
     anything derived from it because the two callers want different things out of it:
     the figure reads a star's whole hover card, the classifier only its team.
@@ -87,7 +87,7 @@ def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> di
     universe: dict[str, Mapping] = {}
     if pool is not None and not pool.empty:
         for row in pool.to_dict("records"):
-            if is_model_liked(row):
+            if is_pick(row):
                 universe.setdefault(corr_key(row), row)
     for leg in slip_legs:
         universe.setdefault(corr_key(leg), leg)
@@ -191,7 +191,7 @@ def slate_shapes(
     game keeps its shape when the user switches Underdog ↔ Sleeper or narrows the
     sport filter, and no two games showing at the same time wear the same shape.
     The graph classified is the one actually drawn — the capped default star set,
-    not the whole model-liked pool — so the tuning cockpit's readings and
+    not every pick of the game — so the tuning cockpit's readings and
     ``n_supernodes`` describe what a viewer sees.
     """
     cfg = tuning()

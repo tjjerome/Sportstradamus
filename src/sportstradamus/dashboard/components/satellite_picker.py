@@ -1,10 +1,10 @@
 """Supplemental leg data — non-star legs that ride along in a same-game slip.
 
 The constellation builder is same-game (DESIGN §4a), so a leg from another game can
-never be one of its stars. A game whose ``K`` > 0 legs sit on only one of its two teams
-can't form a valid parlay alone (``validate_parlay_legs`` needs two distinct teams), so
-:func:`satellite_groups` offers ``K`` > 0 legs from *other* games on the platform,
-grouped by game — the "look wider" lens (``constellation_wider``) scatters its output
+never be one of its stars. A game whose picks sit on only one of its two teams can't
+form a valid parlay alone (``validate_parlay_legs`` needs two distinct teams), so
+:func:`satellite_groups` offers the picks of *other* games on the platform, grouped
+by game — the "look wider" lens (``constellation_wider``) scatters its output
 through the open sky around the map, clustered by game; tapping one adds it as a
 satellite.
 
@@ -36,28 +36,28 @@ def satellite_groups(
     platform: str,
     exclude_keys: set[str],
 ) -> list[tuple[str, list[dict]]]:
-    """Other-game edge legs to offer, grouped by game, games ranked by best edge.
+    """Other games' picks to offer, grouped by game, games ranked by their best EV.
 
-    Filters ``offers`` to model-liked legs (``K`` > 0) on ``platform`` in games other
-    than ``focus_game``, drops anything already in the slip (``exclude_keys`` of
-    ``corr_key``), keeps each game's top ``_PER_GAME_CAP`` by ``K``, and orders the
-    games by their single strongest leg so the best options lead.
+    Filters ``offers`` to the picks on ``platform`` in games other than
+    ``focus_game``, drops anything already in the slip (``exclude_keys`` of
+    ``corr_key``), keeps each game's top ``_PER_GAME_CAP`` by ``EV``, and orders the
+    games by their single highest-EV pick so the best options lead.
     """
     if offers.empty:
         return []
     pool = offers[
-        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & (offers["Kelly"] > 0)
+        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & offers["Pick"]
     ]
     groups: list[tuple[str, list[dict]]] = []
     for game, block in pool.groupby("Game", sort=False):
         rows = [
             row
-            for row in block.sort_values("Kelly", ascending=False).to_dict("records")
+            for row in block.sort_values("EV", ascending=False).to_dict("records")
             if corr_key(row) not in exclude_keys
         ]
         if rows:
             groups.append((str(game), rows[:_PER_GAME_CAP]))
-    groups.sort(key=lambda g: float(g[1][0]["Kelly"]), reverse=True)
+    groups.sort(key=lambda g: float(g[1][0]["EV"]), reverse=True)
     return groups
 
 

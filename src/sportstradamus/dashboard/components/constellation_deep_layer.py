@@ -29,7 +29,7 @@ from sportstradamus.dashboard.components.constellation_traces import (
     INACTIVE_DESAT,
     desaturate,
     edge_record,
-    edge_scale,
+    ev_scale,
     node_info,
 )
 from sportstradamus.dashboard.legs import corr_key
@@ -64,11 +64,10 @@ def add_deep_layer(
     their ties are gated on the lens itself, so a lens-off figure with nothing
     beyond the cut stays byte-identical to today's.
 
-    Recomputing ``edge_scale`` over the promoted legs cannot move a main star's
-    size: the top-Kelly leg is always inside the default cut, so the scale's
-    denominator is the one ``settle`` already spaced against. ``deep_span`` is the
-    lens tier's own size band, scaled over the tier's own strongest leg, so the
-    two scales never share a denominator.
+    A promoted leg is sized against the main stars' own EV range, clamped to its
+    ends, so it can never move a main star's size: those are the sizes ``settle``
+    already spaced against. ``deep_span`` is the lens tier's own size band, scaled
+    over the tier's own EV range, so the two scales never share one.
     """
     if deep_pool is not None:
         info |= {
@@ -83,8 +82,8 @@ def add_deep_layer(
     deep = [key for key in tier if key not in active] if deep_pool is not None else []
     drawn = promoted + deep
     lo, hi = deep_span
-    sizes |= edge_scale(deep, info, floor=lo, ceiling=hi) | edge_scale(
-        keys + promoted, info, floor=floor
+    sizes |= ev_scale(deep, info, floor=lo, ceiling=hi) | ev_scale(
+        promoted, info, floor=floor, among=keys
     )
     ties = game_edges(keys + drawn, rho)
     pos |= deep_positions(
@@ -96,7 +95,7 @@ def add_deep_layer(
         teams,
         px,
     )
-    alphas = edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=INACTIVE_ALPHA)
+    alphas = ev_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=INACTIVE_ALPHA)
     team_fills = [team_color.get(info[k]["team"], GRAY) for k in deep]
     add_deep_trace(
         fig,
@@ -104,10 +103,10 @@ def add_deep_layer(
         pos,
         info,
         sizes=sizes,
-        # A liked leg the cut left behind is a candidate, just smaller; only the
-        # model-passed tier wears the lens's own gray.
+        # A pick the cut left behind is a candidate, just smaller; every other leg
+        # wears the lens's own gray.
         colors=[
-            desaturate(fill, INACTIVE_DESAT) if info[k]["edge"] > 0 else _DEEP_COLOR
+            desaturate(fill, INACTIVE_DESAT) if info[k]["pick"] else _DEEP_COLOR
             for k, fill in zip(deep, team_fills, strict=True)
         ],
         flip_colors=team_fills,

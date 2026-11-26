@@ -28,10 +28,11 @@ def _banned(*keys: str) -> dict[str, str]:
 def _figure(**kwargs):
     """Slip leg ``A``, candidates ``B``/``C``, both lenses on — a star in every star trace.
 
-    The deep tier holds one liked and one passed leg so its per-point opacities differ.
+    The deep tier holds a pick and a leg the fit did not price, so its per-point
+    opacities differ.
     """
     pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("B", "SAS", 0.3), _row("C", "NYK", 0.2)])
-    deep_pool = pd.DataFrame([_row("L", "NYK", 0.1), _row("D", "SAS", -0.1)])
+    deep_pool = pd.DataFrame([_row("L", "NYK", 0.9), _row("D", "SAS", None, pick=False)])
     sky = [
         _row("W0", "MIA", 0.3, market="3PM", game=_WIDER_GAME),
         _row("W1", "MIA", 0.25, market="3PM", game=_WIDER_GAME, bet="Under"),
@@ -87,7 +88,7 @@ def test_a_banned_slip_leg_is_crossed_on_the_lit_map():
 
 def test_a_deep_mark_keeps_its_stars_own_dim():
     """DESIGN §4a holds every lens star under the main-star floor, so the × over one takes
-    that star's own per-point opacity. The passed star sits at the lens's size floor, where
+    that star's own per-point opacity. The unpriced star sits at the lens's size floor, where
     a scaled × would be a speck, so the mark's floor is what sizes it."""
     fig = _figure(banned=_banned(_key("D")))
     host, mark = _trace(fig, "deep"), _trace(fig, "deep_banned")

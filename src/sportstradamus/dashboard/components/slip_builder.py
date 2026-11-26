@@ -91,7 +91,7 @@ def _active_lenses(
 
     "Look deeper" hands back the same unfiltered ``pool`` frame the map already
     has — the figure keeps whatever rows it doesn't already know, and its tier is
-    those plus the model-liked legs its own star cut left behind — so no separate
+    those plus the picks its own star cut left behind — so no separate
     query. "Look wider" reruns the existing ``satellite_groups`` query. Either
     lens off resolves ``None``.
     """

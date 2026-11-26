@@ -29,7 +29,9 @@ declares the component against `build/` and exposes
 
 - Python passes the plotly figure as `figure_json` (`fig.to_json()`). The star traces —
   `candidate`, `active`, `deep` and `wider` — carry `customdata`
-  `[key, player, market, bet, line, win, boost, kelly, in_slip]`. All but `wider` also carry a
+  `[key, player, market, bet, line, win, boost, ev, model_win, model_ev, in_slip]`: `win` and
+  `ev` are the fitted win chance and EV (`null` on a leg the fit did not price), `model_win` and
+  `model_ev` the model's own. All but `wider` also carry a
   per-point `meta` list: the colour each star wears while a click flips it (the team colour for
   `candidate` and `deep`, the desaturated one for `active`). A star the platform won't pair with
   the slip wears an × from an overlay trace named `<host>_banned`, which has no `customdata`.

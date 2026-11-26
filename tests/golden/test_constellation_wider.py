@@ -50,7 +50,7 @@ def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
 
 def _deep_pool(n: int) -> pd.DataFrame:
     return pd.DataFrame(
-        [_row(f"Q{i:03d}", ("NYK", "SAS")[i % 2], -0.05 - i / 2000) for i in range(n)]
+        [_row(f"Q{i:03d}", ("NYK", "SAS")[i % 2], None, pick=False) for i in range(n)]
     )
 
 
@@ -206,7 +206,7 @@ def test_sky_labels_never_land_on_another_games_group():
     wider than the band it hangs under."""
     for names, deep, bands in (
         (["CIN/CLE", "LAA/LAD", "PHI/PIT", "ARI/ATH", "TOR/WSH", "MIN/NYM"], None, 2),
-        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(190), 2),
+        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(170), 2),
     ):
         groups = [
             (

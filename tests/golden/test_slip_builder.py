@@ -31,7 +31,7 @@ from sportstradamus.leg_schema import build_leg
 from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 
 
-def _offer(player, market, bet, line, game, team, platform, kelly):
+def _offer(player, market, bet, line, game, team, platform, ev, pick=True):
     return {
         "Player": player,
         "Market": market,
@@ -40,11 +40,14 @@ def _offer(player, market, bet, line, game, team, platform, kelly):
         "Game": game,
         "Team": team,
         "Platform": platform,
-        "Kelly": kelly,
+        "Kelly": 0.0,
         "League": "NBA",
         "Date": "2026-06-14",
         "Win Prob": 0.6,
         "Boost": 2.0,
+        "Fit Prob": ev / 2.0,
+        "EV": ev,
+        "Pick": pick,
     }
 
 
@@ -117,10 +120,10 @@ def test_apply_adds_then_removes_a_pool_star():
 
 
 def test_apply_resolves_a_deep_star_the_same_way_as_an_ordinary_one():
-    # A model-passed row (Kelly <= 0) drawn only because "look deeper" put the same
+    # A row the board did not pick, drawn only because "look deeper" put the same
     # unfiltered pool frame in as deep_pool — the apply doesn't know or care which lens
     # revealed it, it just matches the key against `pool`.
-    pool = _pool_df(_offer("D", "PTS", "Under", 10.5, "NYK/SAS", "NYK", "Underdog", -0.2))
+    pool = _pool_df(_offer("D", "PTS", "Under", 10.5, "NYK/SAS", "NYK", "Underdog", 0.7, False))
     _apply_constellation_action(_emit(1, {"D|PTS|Under": True}), pd.DataFrame(), pool, None)
     assert [leg["player"] for leg in st.session_state[_LEGS]] == ["D"]
 

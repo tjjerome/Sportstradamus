@@ -46,10 +46,11 @@ _OFFER_KEYS = {
 # Only the fields the dual-shape helpers below actually read off a raw offer
 # row — league among them, because the constellation resolves a board's display
 # name for its labels, hovers and cards off raw candidate rows as readily as off
-# slip legs. The rest of LEG_FIELDS (stat/game/date/platform/push_prob) is
-# canonical-only: every call site that needs one of those only ever holds a
-# canonical leg, never a raw offer row, so it indexes directly (leg["game"])
-# instead of going through leg_field.
+# slip legs, and the fit's three with the platform, because a star's size, card and
+# pick flag read them off either shape. The rest of LEG_FIELDS
+# (stat/game/date/push_prob) is canonical-only: every call site that needs one of
+# those only ever holds a canonical leg, never a raw offer row, so it indexes
+# directly (leg["game"]) instead of going through leg_field.
 _FIELD_TO_OFFER_COL = {
     "player": "Player",
     "team": "Team",
@@ -57,9 +58,13 @@ _FIELD_TO_OFFER_COL = {
     "bet": "Bet",
     "line": "Line",
     "league": "League",
+    "platform": "Platform",
     "win_prob": "Win Prob",
     "boost": "Boost",
     "kelly": "Kelly",
+    "fit_prob": "Fit Prob",
+    "ev": "EV",
+    "pick": "Pick",
 }
 
 
@@ -85,12 +90,13 @@ def leg_field_float(leg: Mapping, field: str, default: float = 0.0) -> float:
     return float(leg_field(leg, field, default) or default)
 
 
-def is_model_liked(leg: Mapping) -> bool:
-    """Whether a leg's Kelly edge is positive — the star-vs-satellite split
-    the constellation, satellite picker, and slip builder all filter on.
-    Runs on either a canonical leg or a raw current_offers row via leg_field.
+def is_pick(leg: Mapping) -> bool:
+    """Whether the board called the leg one of its picks (``live_fit.picks``) — the
+    star-vs-the-rest split the constellation draws on. Runs on either a canonical
+    leg or a raw current_offers row via leg_field; a leg stored before the flag
+    existed reads as no pick.
     """
-    return leg_field_float(leg, "kelly") > 0
+    return bool(leg_field(leg, "pick", False))
 
 
 def _numeric_or_default(row: Mapping, col: str, default: float | None) -> float | None:

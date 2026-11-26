@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from sportstradamus.leg_schema import LEG_FIELDS, build_leg, leg_field, leg_label
+from sportstradamus.leg_schema import LEG_FIELDS, build_leg, is_pick, leg_field, leg_label
 
 OFFER_ROW = {
     "Player": "Luka Doncic",
@@ -105,3 +105,27 @@ def test_leg_field_reads_raw_offer_row():
 def test_leg_field_defaults_when_missing():
     assert leg_field({"Player": "Luka Doncic"}, "team") is None
     assert leg_field({"Player": "Luka Doncic"}, "team", "N/A") == "N/A"
+
+
+def test_leg_field_reads_the_fit_off_a_raw_offer_row():
+    row = {**OFFER_ROW, "Fit Prob": 0.52, "EV": 0.95, "Pick": True}
+    assert leg_field(row, "fit_prob") == 0.52
+    assert leg_field(row, "ev") == 0.95
+    assert leg_field(row, "pick") is True
+    assert leg_field(row, "platform") == "Underdog"
+
+
+def test_a_pick_is_the_boards_pick_flag_not_a_positive_kelly():
+    # The model's Kelly no longer decides what the board likes: the fitted EV's pick does.
+    liked_by_the_model = {**OFFER_ROW, "Kelly": 0.12, "Pick": False}
+    picked_at_zero_kelly = {**OFFER_ROW, "Kelly": 0.0, "Pick": True}
+    for leg in (liked_by_the_model, build_leg(liked_by_the_model)):
+        assert is_pick(leg) is False
+    for leg in (picked_at_zero_kelly, build_leg(picked_at_zero_kelly)):
+        assert is_pick(leg) is True
+
+
+def test_a_leg_stored_before_the_pick_flag_is_no_pick():
+    stored = {k: v for k, v in build_leg(OFFER_ROW).items() if k not in ("fit_prob", "ev", "pick")}
+    assert is_pick(stored) is False
+    assert is_pick({**stored, "pick": None}) is False
