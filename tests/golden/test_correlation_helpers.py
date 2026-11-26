@@ -49,13 +49,11 @@ from sportstradamus.prediction.correlation import (
     _build_game_corr_map,
     _collect_game_corr,
     _leg_pair_corr_boost,
-    _leg_shrinkage,
     _resolve_player_positions,
     _select_bet_offers,
     find_correlation,
 )
 from sportstradamus.prediction.parlay import GameArrays
-from tests.golden.test_underdog_pickem import stub_cell_trust
 
 
 def _has_corr_parquets(league: str) -> bool:
@@ -1217,8 +1215,6 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
             "Player": ["A", "B", "C"],
             "Bet": ["Over", "Over", "Over"],
             "cMarket": [["G1.PTS"], ["G2.AST"], ["C1.REB"]],
-            # Deliberately not real stat_map["Underdog"] keys — keeps
-            # _leg_shrinkage on its no-I/O 1.0 fallback path in these tests.
             "Market": ["Test1", "Test2", "Test3"],
         }
     )
@@ -1231,8 +1227,8 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     game_df, game_dict = _matrix_game()
     c_map = {("G1.PTS", "G2.AST"): 0.4, ("G2.AST", "C1.REB"): 0.2}
 
-    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
-    C, M, EV, EVb, p_push = g.C, g.M, g.EV, g.EVb, g.p_push
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, "Underdog")
+    C, M, EV, p_push = g.C, g.M, g.EV, g.p_push
 
     assert C.shape == (3, 3)
     assert np.allclose(np.diag(C), 1.0)  # np.eye base
@@ -1251,7 +1247,6 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     assert g.V[0, 1] == pytest.approx(v01)
     assert EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.52 * 0.49)
     assert np.allclose(EV, EV.T)
-    assert EVb.shape == (3, 3)
 
 
 def test_the_pair_grid_reads_the_models_chance_for_a_leg_the_fit_did_not_price() -> None:
@@ -1260,7 +1255,7 @@ def test_the_pair_grid_reads_the_models_chance_for_a_leg_the_fit_did_not_price()
     game_df["Fit Prob"] = [0.52, np.nan, 0.55]
     c_map = {("G1.PTS", "G2.AST"): 0.4}
 
-    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, "Underdog")
 
     v01 = np.sqrt(0.52 * 0.48 * 0.5 * 0.5)
     assert g.V[0, 1] == pytest.approx(v01)
@@ -1268,27 +1263,12 @@ def test_the_pair_grid_reads_the_models_chance_for_a_leg_the_fit_did_not_price()
     assert not np.isnan(g.EV).any()
 
 
-def test_the_pair_grid_ranks_alike_whatever_the_smallest_entry_pays() -> None:
-    """The grid only ranks leg sets, so no payout scales it. A Flex-only list pays nothing
-    at 2 picks: scaled by that payout the grid was all zeros and ranked no set above
-    another."""
-    game_df, game_dict = _matrix_game()
-
-    def grid(search_payouts: list[float]) -> np.ndarray:
-        return _build_correlation_matrices(
-            game_df, game_dict, {}, {}, {}, search_payouts, "Underdog", "NBA", {}
-        ).EV
-
-    np.testing.assert_array_equal(grid([0.0, 3.25]), grid([3.5, 6.5]))
-    assert grid([0.0, 3.25])[0, 1] == pytest.approx(0.52 * 0.49)
-
-
 def test_build_correlation_matrices_carry_each_legs_fitted_chance() -> None:
     """``p_fit`` is the stamp's ``Fit Prob``, NaN kept on a leg the fit did not price."""
     game_df, game_dict = _matrix_game()
     game_df["Fit Prob"] = [0.52, np.nan, 0.47]
 
-    g = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {})
+    g = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, "Underdog")
 
     np.testing.assert_array_equal(g.p_fit, [0.52, np.nan, 0.47])
 
@@ -1298,9 +1278,7 @@ def test_build_correlation_matrices_honors_push_column() -> None:
     game_df, game_dict = _matrix_game()
     game_df["Push Prob"] = [0.1, np.nan, 0.2]
 
-    p_push = _build_correlation_matrices(
-        game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {}
-    ).p_push
+    p_push = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, "Underdog").p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]
 
 
@@ -1311,7 +1289,7 @@ def _annotated_game() -> tuple[pd.DataFrame, GameArrays]:
         League="NBA", Team=["NYK", "SAS", "NYK"], Line=[24.5, 6.5, 9.5], Date="2026-06-03"
     )
     c_map = {("G1.PTS", "C1.REB"): 0.4, ("G2.AST", "C1.REB"): 0.2}
-    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, "Underdog")
     return game_df, g
 
 
@@ -1384,9 +1362,7 @@ def test_a_legs_partners_are_the_pools_legs_it_correlates_with() -> None:
     )
     game_df.loc[4, "Fit Prob"] = np.nan
     c_map = {("K0.M", f"K{i}.M"): rho for i, (_, _, rho) in enumerate(legs) if rho}
-    g = _build_correlation_matrices(
-        game_df, game_df.to_dict("index"), c_map, {}, {}, [3.0], "Underdog", "NBA", {}
-    )
+    g = _build_correlation_matrices(game_df, game_df.to_dict("index"), c_map, {}, {}, "Underdog")
     df = game_df.assign(**{"Corr Same": None, "Corr Opp": None})
 
     _annotate_correlation_columns(df, game_df, game_df.drop(index=4), g, {})
@@ -1399,37 +1375,6 @@ def test_a_legs_partners_are_the_pools_legs_it_correlates_with() -> None:
     assert df.at[0, "Corr Same"][0]["mult"] == round(float(np.exp(0.40 * 0.25)), 2)
     assert partners(4, "Corr Same") == []
     assert partners(4, "Corr Opp") == [("Ann", "Test0")]
-
-
-@pytest.mark.parametrize(
-    ("league", "markets", "expected"),
-    [
-        ("NBA", ["Fantasy Points", "Rebounds", "H2H Points"], [0.163, 0.40, 1.0]),
-        ("NHL", ["Assists", "Goals"], [0.30, 0.45]),
-    ],
-)
-def test_leg_shrinkage_asks_a_cells_trust_under_the_leagues_own_market_name(
-    monkeypatch, league, markets, expected
-) -> None:
-    """``stat_map`` names a market the same for every league and a cell goes by its
-    league's own name: Underdog's NBA Fantasy Points is the ``fantasy points
-    prizepicks`` cell, its NHL Assists the ``assists`` cell. Asked for under the
-    mapped name no cell answers, and the no-evidence rung sizes every parlay holding
-    the leg to nothing. REB and goals are already their league's own names; a market
-    the platform map lacks is never asked for."""
-    stub_cell_trust(
-        monkeypatch,
-        {
-            ("NBA", "fantasy points prizepicks"): 0.163,
-            ("NBA", "REB"): 0.40,
-            ("NHL", "assists"): 0.30,
-            ("NHL", "goals"): 0.45,
-        },
-    )
-
-    shrinkage = _leg_shrinkage(pd.DataFrame({"Market": markets}), "Underdog", league, {})
-
-    assert shrinkage.tolist() == expected
 
 
 @_needs_nba_corr

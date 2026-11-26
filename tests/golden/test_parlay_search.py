@@ -285,14 +285,12 @@ def _beam_inputs(p_fit=(0.82,) * 4, p_model=None, payouts=(3.0, 6.0, 10.0)) -> d
         C=C,
         M=M,
         EV=EV,
-        EVb=np.zeros((n, n)),
         V=V,
         p_model=p_model,
         p_fit=p_fit,
         p_books=p_model - 0.2,
         p_push=np.zeros(n),
         boosts=boosts,
-        shrinkage=np.ones(n),
         opp_boost=np.full(n, np.nan),
     )
     return {
@@ -939,14 +937,12 @@ def _sleeper_flex_beam_inputs(*, m_pair: float = 1.0, p_push_leg0: float = 0.0) 
         C=C,
         M=M,
         EV=EV,
-        EVb=np.zeros((n, n)),
         V=V,
         p_model=p_model,
         p_fit=p_model,
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,
-        shrinkage=np.ones(n),
         opp_boost=opp_boost,
     )
     return {

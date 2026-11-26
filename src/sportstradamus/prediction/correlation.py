@@ -23,7 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, cell_market, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.ev_stamp import EV_STAMP_COLS
 from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
@@ -207,50 +207,14 @@ def _leg_opp_boost(game_df, platform):
     )
 
 
-def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
-    """Per-leg Kelly shrinkage weight, cached by ``(league, cell market)``.
-
-    ``shrinkage_cache`` is caller-owned and shared across every game in one
-    league's processing loop — ``resolve_market_shrinkage`` hits training/CLV
-    I/O per call, and markets repeat heavily across a slate's legs, so this
-    avoids re-resolving the same cell hundreds of times per league. Legs
-    whose ``Market`` has no ``stat_map`` entry for this platform keep ``1.0``:
-    those are game legs (moneylines, totals) with no per-market calibration
-    concept, not no-evidence player cells — ``resolve_shrinkage``'s own
-    no-evidence default is the smaller :data:`NO_EVIDENCE_SHRINKAGE`.
-    """
-    from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
-
-    out = np.ones(len(game_df), dtype=float)
-    for i, label in enumerate(game_df["Market"]):
-        cell = cell_market(league, platform, label)
-        if cell is None:
-            continue
-        key = (league, cell)
-        if key not in shrinkage_cache:
-            shrinkage_cache[key] = resolve_market_shrinkage(*key)[0]
-        out[i] = shrinkage_cache[key]
-    return out
-
-
-def _build_correlation_matrices(
-    game_df,
-    game_dict,
-    c_map,
-    team_mod_map,
-    opp_mod_map,
-    search_payouts,
-    platform,
-    league,
-    shrinkage_cache,
-):
-    """Per-game leg×leg correlation (C) / boost (M) matrices and pair-value grids.
+def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod_map, platform):
+    """Per-game leg×leg correlation (C) / boost (M) matrices and the pair-value grid.
 
     Returns a :class:`GameArrays` bundling the symmetric leg matrices ``C``/``M``,
     the pair grid ``EV`` beam search ranks leg sets by and its std-dev outer
-    product ``V``, the book grid ``EVb``, and the per-leg probability / boost
-    vectors beam search consumes. ``EV`` and ``V`` are built on each leg's lead
-    chance: the fitted one, and the model's for a leg the fit did not price.
+    product ``V``, and the per-leg probability / boost vectors beam search
+    consumes. ``EV`` and ``V`` are built on each leg's lead chance: the fitted
+    one, and the model's for a leg the fit did not price.
     """
     C = np.eye(len(game_dict))
     M = np.zeros([len(game_dict), len(game_dict)])
@@ -266,15 +230,10 @@ def _build_correlation_matrices(
         p_push = np.zeros(len(game_df), dtype=float)
     boosts = game_df["Boost"].to_numpy()
     opp_boost = _leg_opp_boost(game_df, platform)
-    shrinkage = _leg_shrinkage(game_df, platform, league, shrinkage_cache)
     V = p_lead * (1 - p_lead)
     V = V.reshape(len(game_dict), 1) * V
     V = np.sqrt(V)
     P = p_lead.reshape(len(p_lead), 1) * p_lead
-    Vb = p_books * (1 - p_books)
-    Vb = Vb.reshape(len(game_dict), 1) * Vb
-    Vb = np.sqrt(Vb)
-    Pb = p_books.reshape(len(p_books), 1) * p_books
     for i, j in combinations(range(len(game_dict)), 2):
         rho, boost = _leg_pair_corr_boost(
             game_dict[i], game_dict[j], c_map, team_mod_map, opp_mod_map
@@ -287,25 +246,16 @@ def _build_correlation_matrices(
         np.multiply(np.exp(np.multiply(C, V)), P),
         boosts.reshape(len(boosts), 1) * M * boosts,
     )
-    EVb = (
-        np.multiply(
-            np.multiply(np.exp(np.multiply(C, Vb)), Pb),
-            boosts.reshape(len(boosts), 1) * M * boosts,
-        )
-        * search_payouts[0]
-    )
     return GameArrays(
         C=C,
         M=M,
         EV=EV,
-        EVb=EVb,
         V=V,
         p_model=p_model,
         p_fit=p_fit,
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,
-        shrinkage=shrinkage,
         opp_boost=opp_boost,
     )
 
@@ -614,10 +564,6 @@ def _process_league_games(
     parlay-ineligible — capture the game's scoring bundle into ``story_sink``
     (when not None) and beam-search parlays onto ``parlay_df`` (returned).
     """
-    # Shared across every game this league processes below — resolve_market_shrinkage
-    # hits training/CLV I/O per (league, market), and markets repeat heavily
-    # across a slate, so caching here (not per-game) keeps it out of the hot path.
-    shrinkage_cache: dict[tuple[str, str], float] = {}
     # Listed up front so the bar has a total.
     for game_df, team, opp, date in tqdm(
         list(_game_frames(league_df)), desc=f"Checking {league} games", unit="game"
@@ -629,15 +575,7 @@ def _process_league_games(
         bet_df = idx.to_dict("index")
 
         g = _build_correlation_matrices(
-            game_df,
-            game_dict,
-            c_map,
-            team_mod_map,
-            opp_mod_map,
-            search_payouts,
-            platform,
-            league,
-            shrinkage_cache,
+            game_df, game_dict, c_map, team_mod_map, opp_mod_map, platform
         )
         _annotate_correlation_columns(df, game_df, idx, g, market_map)
 

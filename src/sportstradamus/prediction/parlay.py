@@ -30,14 +30,12 @@ class GameArrays:
     C: np.ndarray  # leg×leg correlation
     M: np.ndarray  # leg×leg boost modifier
     EV: np.ndarray  # leg×leg pair value at the lead chance (fitted, else the model's)
-    EVb: np.ndarray  # leg×leg book pairwise EV
     V: np.ndarray  # lead-chance std-dev outer product
     p_model: np.ndarray
     p_fit: np.ndarray  # the EV stamp's Fit Prob; nan on a leg the fit did not price
     p_books: np.ndarray
     p_push: np.ndarray
     boosts: np.ndarray
-    shrinkage: np.ndarray  # per-leg Kelly shrinkage weight, resolve_shrinkage output
     opp_boost: np.ndarray  # opposite-side payout multiplier; nan unless Sleeper
 
 

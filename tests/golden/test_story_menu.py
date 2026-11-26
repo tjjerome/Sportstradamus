@@ -96,14 +96,12 @@ def _ctx(
         C=np.asarray(corr, dtype=float),
         M=np.ones((n, n)) - np.eye(n),
         EV=np.zeros((n, n)),
-        EVb=np.zeros((n, n)),
         V=np.zeros((n, n)),
         p_model=probs,
         p_fit=fits,
         p_books=probs.copy(),
         p_push=np.zeros(n),
         boosts=np.ones(n),
-        shrinkage=np.ones(n),
         opp_boost=np.full(n, np.nan),
     )
     bet_df = {
