@@ -27,12 +27,11 @@ from sportstradamus.history_schema import BOOK_FALLBACK_VERSION
 REALIZED_WINDOWS: tuple[int, ...] = (30, 90)
 # From this game date an early closing stamp is released pre-game, so Scored At is the last scoring.
 COUNT_ONCE_FROM = pd.Timestamp("2026-10-09")
-# The Receipts and paper-ledger "recommended" edge floor. It equalled the story menu's floor
-# until 2026-10-17, when the menu dropped to 0.03 (menu._MENU_EDGE_FLOOR) and this one stayed, so
-# the realized cohort and the even-pick bettor read the same rule across that change.
+# The claimed edge from which Receipts, the paper ledger's even-pick bettor and the play
+# ``model_edge`` count a side recommended: the board's rule before EV led it.
 RECOMMENDED_EDGE_MIN: float = 0.05
-# The menu's Kelly cap: the menu never shows a leg paying more (Kelly is 0 there), so the
-# recommended cohort stops where the menu does.
+# The payout past which a leg's Kelly is zeroed (``MAX_FAVORED_PAYOUT``): the recommended
+# cohort and the "+EV" mark both stop there.
 RECOMMENDED_PAYOUT_MAX: float = MAX_FAVORED_PAYOUT
 # 2.5 is RECOMMENDED_PAYOUT_MAX; the bands show whether that cap should move.
 PAYOUT_BAND_EDGES: tuple[float, ...] = (1.0, 1.5, 2.0, 2.5, 3.0)
