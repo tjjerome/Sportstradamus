@@ -49,7 +49,8 @@ _MAX_BOOST_UNDERDOG: float = 2.5
 _MAX_BOOST_OTHER: float = 60.0
 
 
-# Caps on a game's pool, the legs its beam search and story menu draw from.
+# Caps on a game's pool, the legs its beam search and story menu draw from. A ranked pool
+# always fills to its cap, and the search's cost grows with it: 24 legs cost about 1.4 s a game.
 _MAX_OFFERS_PER_PLAYER: int = 2
 _MAX_OFFERS_PER_TEAM: int = 12
 _MAX_OFFERS_PER_GAME: int = 24
@@ -563,7 +564,7 @@ def _append_story_context(
     """Capture one game's scoring bundle for the story-menu generator.
 
     No-op unless ``story_sink`` is provided (the pickem variant-sweep caller and
-    beam-search-only runs leave it None) and the game has bet-eligible legs. The
+    beam-search-only runs leave it None) and the game's pool holds a leg. The
     bundle lets the generator price story subsets beam search never enumerates.
     """
     if story_sink is None or idx.empty:

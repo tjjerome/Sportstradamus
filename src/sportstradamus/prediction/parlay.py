@@ -49,7 +49,7 @@ class GameScoringContext:
     payout tables for the beam search; the story-menu generator reuses the same
     objects to score story subsets that beam search never enumerates (it only
     keeps both-team parlays). ``leg_indices`` are positions into ``g``'s matrices
-    (the bet-eligible legs); ``bet_df`` maps the same positions to their offer
+    (the legs of the game's pool); ``bet_df`` maps the same positions to their offer
     records (``Desc``/``Model``/``Bet``/``Team``/…). Collected per game into the
     opt-in ``story_sink``; one context per ``(platform, game)``.
     """
@@ -68,18 +68,20 @@ class GameScoringContext:
 
 # --- Beam-search constants --------------------------------------------------
 
-# Beam width: max parlay candidates carried between sizes. Empirically large
-# enough that the survivors at sizes 5/6 don't get pruned by ranking jitter.
+# Leg sets carried from one entry size to the next. A size's admissible sets can sit hundreds
+# deep behind one-team and over-boosted ones (a 250-wide beam priced no six-leg entry on a
+# synthetic pool of boosted legs); at this width a game at the pool cap costs about 1.4 s.
 _BEAM_WIDTH: int = 1000
 
 # Boost-product gates: drop entries whose modifier product implies hard-banned
 # pairs (low) or runaway promo stacking (high).
 _MIN_PRODUCT_BOOST: float = 0.7
 
-# Admissible candidates exact-priced per entry size, from the head of the beam.
+# Admissible sets exact-priced per entry size, from the head of the beam. Each costs a copula
+# call of up to 20 ms, so with no value floor left this is what bounds a game's run time.
 _EXACT_PRICED_PER_SIZE: int = 12
 
-# Entries a game keeps per size: the exact-priced candidates worth most at the fitted chances.
+# Entries a game keeps per size: the exact-priced sets worth most at the fitted chances.
 _KEPT_PER_SIZE: int = 3
 
 

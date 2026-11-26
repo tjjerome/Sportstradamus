@@ -343,7 +343,7 @@ def sleeper_flex_payout_curve(
         # raw_payout cancels out algebraically (1 - p_exact*(k_val/p_exact)
         # == 1-k_val always) and can never actually bound a thin-tier blowup.
         # PAYOUT_CLIP_HI is the same runaway-payout guard used everywhere
-        # else in this pipeline (expected_payout_with_pushes, _evaluate_parlay).
+        # else in this pipeline (expected_payout_with_pushes, parlay._price_parlay).
         raw_payout = min(float(k_val) / float(p_exact), PAYOUT_CLIP_HI)
         row.append(max(raw_payout, SLEEPER_FLEX_MIN_MULTIPLIER))
     row += [0.0] * (n + 1 - len(row))

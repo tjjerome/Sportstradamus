@@ -19,16 +19,21 @@ closed live in git history, not in this body.
 **Pairwise EV matrix** (`_build_correlation_matrices`, `prediction/correlation.py`):
 
 ```
-EV[i, j] = exp(C[i,j] * V[i,j]) * P[i,j] * boosts[i] * M[i,j] * boosts[j] * payouts[0]
+EV[i, j] = exp(C[i,j] * V[i,j]) * P[i,j] * boosts[i] * M[i,j] * boosts[j]
 ```
 
-with `V[i,j] = sqrt(p_i(1-p_i) p_j(1-p_j))`, `P[i,j] = p_i p_j`. This is a log-linear
+with `V[i,j] = sqrt(p_i(1-p_i) p_j(1-p_j))`, `P[i,j] = p_i p_j`, where `p` is each
+leg's lead chance: the EV stamp's `Fit Prob`, and the model's `Win Prob` for a leg the
+fit did not price (such a leg is outside the pool, §2.3, so the model's chance only
+scales the `Corr Mult` of its display partners). The grid carries no payout factor: a
+Flex-only payout list pays 0 at two picks, which would zero it. This is a log-linear
 boost on the independent product — **not a probability, unbounded above 1** for high
 `C` and intermediate `p`. It only ranks candidates inside the beam (final pricing is
-the copula, §2.2), so it is a ranking-only defect — but an EV leak: overconfident
-pseudo-EV can promote weak candidates into the `_BEAM_WIDTH=1000` beam and crowd out
-better ones. Disposition: bound or replace with the true pairwise copula CDF — parked,
-scoped into parlay-dependence stage 3 (gated on D3).
+the copula, §2.2), so it is a ranking-only defect — but an EV leak: the grid decides
+which sets reach the copula, and overconfident pseudo-EV can promote weak candidates
+into the `_BEAM_WIDTH=1000` beam and crowd out better ones. Disposition: bound or
+replace with the true pairwise copula CDF — parked, scoped into parlay-dependence
+stage 3 (gated on D3).
 
 **Final pricing** (`parlay_payout_prob`, `prediction/joint.py`) is a Gaussian copula:
 `Φ_n(Φ⁻¹(p); Σ)` via `scipy.stats.multivariate_normal.cdf` — called with **default
@@ -95,10 +100,20 @@ values and bans still waiting on an owner quote are listed under I5a-3 in
 CLI/kwarg surface; tuning requires a source edit. `max_bet_size` is implicit in the
 payout-curve length.
 
+The beam carries inadmissible sets like any other (one team only, boost product
+outside the band): admissibility is checked on the finished size, not while a set
+grows. A size therefore builds no entry when its beam holds no admissible set. On a
+synthetic game whose pool was mostly legs paying above 1.0, six-leg sets ran over
+`_MAX_BOOST_UNDERDOG` and filled 958 of the beam's 1,000 places; a 250-wide beam held
+no admissible six-leg set at all. Disposition: open — how often a real slate's size
+comes up short has not been measured.
+
 ### 2.2 Per-step scoring and PSD handling
 
-Per-step ranking is the geometric mean of pairwise EV (§1.1 defect) with floor
-`_PARLAY_GEO_MEAN_FLOOR = 1.05`; survivors are re-priced by the copula.
+Per-step ranking is the geometric mean of the pair grid (§1.1 defect), with no floor.
+At each size the first `_EXACT_PRICED_PER_SIZE` admissible sets of the beam are priced
+by the copula at the fitted chances, and the `_KEPT_PER_SIZE` worth most become rows;
+each kept row is priced once more at the model's own chances for `Model EV`.
 
 Non-PSD Σ submatrices are always repaired, never dropped: `psd_or_none`
 (`prediction/joint.py`) projects any submatrix whose smallest eigenvalue is below
@@ -118,14 +133,23 @@ lands for ladders, the same upgrade applies here.
 
 ### 2.3 Constraints enforced
 
-Strictly-increasing leg index; same-player dedup (exact + substring); per-step
-geo-mean floor; beam width; both-teams rule; boost band; independent books-EV and
-model-EV floors; PSD repair; final EV/units floors. The thresholds are named
-module-level constants: `_BEAM_WIDTH`, `_PARLAY_GEO_MEAN_FLOOR`, `_MIN_PRODUCT_BOOST`,
-`_BOOKS_EV_FLOOR`, `_MODEL_EV_PRECHECK_FLOOR`, `_MODEL_EV_FINAL_FLOOR` and
-`_KELLY_UNITS_FLOOR` in `prediction/parlay.py`; `_PSD_EIG_TOLERANCE` and
-`_PUSH_PROB_FLOOR` in `prediction/joint.py`; `_PUSH_MC_SAMPLES` in
-`prediction/payouts.py`.
+Strictly-increasing leg index; same-player dedup (exact + substring); beam width;
+both-teams rule; boost band; PSD repair. No value floor applies anywhere: the pool, the
+beam and the kept rows are all chosen by rank, so a game whose every leg sits under
+break-even still builds entries.
+
+The pool is the game's legs the fit priced, highest `EV` first, one side of a line,
+under the per-player, per-team and per-game caps (`_select_bet_offers`,
+`prediction/correlation.py`). A ranked pool always fills to its cap, and the search's
+cost grows with it: at the caps a game costs about 1.4 s (synthetic 24-leg game,
+Underdog pooled curve; 1.7 s when every leg can push).
+
+The thresholds are named module-level constants: `_BEAM_WIDTH`, `_MIN_PRODUCT_BOOST`,
+`_EXACT_PRICED_PER_SIZE` and `_KEPT_PER_SIZE` in `prediction/parlay.py`;
+`_MAX_OFFERS_PER_PLAYER`, `_MAX_OFFERS_PER_TEAM`, `_MAX_OFFERS_PER_GAME`,
+`_MAX_BOOST_UNDERDOG` and `_MAX_BOOST_OTHER` in `prediction/correlation.py`;
+`_PSD_EIG_TOLERANCE` and `_PUSH_PROB_FLOOR` in `prediction/joint.py`;
+`_PUSH_MC_SAMPLES` in `prediction/payouts.py`.
 
 ### 2.4 Payout source
 
@@ -149,27 +173,26 @@ sleeper-parity. Pointers only — no new item here.
 
 ### 2.5 Output ranking and dedup
 
-`_append_parlay_rows` (`prediction/correlation.py`) keeps the top
-`_PARLAY_TOP_N_PER_SORT` candidates by each of Model EV, Rec Bet and Fun and dedups the
-union on exact `Bet ID`; there is no family clustering. Overlap-aware selection
-remains a consumer concern.
+A game's rows are the search's kept set: at most `_KEPT_PER_SIZE` entries a size,
+ranked by `EV`, the value of a unit staked at the fitted chances. `Model EV` beside it
+is the same pricing at the model's own chances. `find_correlation` hands on every row
+the search returns, the board run orders the slate's entries by `EV`, and there is no
+family clustering. Overlap-aware selection remains a consumer concern.
+
+At the Flex sizes, and for any set with a push leg, the value is a Monte-Carlo estimate
+from unseeded draws (§2.2). One estimate carries 1 to 1.5 % sampling noise; on a
+synthetic game the priced sets of a size spread 4–12 % in value, and the noise changed
+up to one of the three entries kept.
 
 ### 2.6 Parlay-path Kelly sizing
 
-`Rec Bet` is a shrinkage-aware Kelly score. `_parlay_kelly_units`
-(`prediction/parlay.py`) recovers the win probability as `Model EV / payout` (exact on
-the analytical path, an approximation on the push-aware Monte-Carlo path) and passes it
-to `strategies/kelly.py::kelly_edge` with the slip's smallest per-leg shrinkage weight;
-`kelly_edge` blends the probability with the payout's implied `1 / payout`, trusting the
-model by that weight. Each leg's weight is `resolve_market_shrinkage` for its cell
-(`resolve_shrinkage` over the cell's training and live Brier skill); a game leg with no
-cell keeps 1.0. The edge is multiplied by `DEFAULT_KELLY_FRACTION` and divided by
-`MAX_FRACTION_OF_BANKROLL`, so `Rec Bet` is the quarter-Kelly fraction in multiples of
-the 0.5% hard cap, not clipped to it. It is a ranking and filter score, not a stake: a
-candidate below `_KELLY_UNITS_FLOOR` is dropped, and `Rec Bet` is one of the three sort
-keys in §2.5. Pick'em entries are staked by `strategies/kelly.py::fractional_kelly_stake`
-(called from `underdog_pickem._row_to_entry`). Sleeper-parity stage 1 (`b9f8a95e`) put
-this in place of the old unshrunk inline formula.
+`Rec Bet` is 0.0 on every row: an entry gets no stake and no "+EV" mark until the
+entries' money record supports one
+([profit-engine.md §5.3](handoffs/profit-engine.md)). Nothing sizes or filters a parlay
+by Kelly; the units score that did is archived in
+`src/deprecated/parlay_search_orphans.py`. Pick'em entries are staked by
+`strategies/kelly.py::fractional_kelly_stake` (called from
+`underdog_pickem._row_to_entry`).
 
 ---
 
@@ -211,6 +234,7 @@ justifies unparking it early.
 |---|---|---|---|
 | MVN cdf default tolerances at d=5–6 (§1.1) | real, cheap | parked behind D3 | here + parlay-dependence §6 stage-3 scope |
 | Beam heuristic unbounded (§1.1) | ranking-only EV leak | parked | here + same stage-3 scope |
+| Beam can hold no admissible set at a size (§2.1) | seen on a synthetic pool of boosted legs | open — measure on a real slate | here |
 | Cross-game ρ=0 (§1.1) | accepted for player-only slips | mixed-slip case → dfs-products | here + dfs-products brief |
 | PSD-repair distortion (§2.2) | drop-bias fixed; distortion unmeasured | YES — read-only rider on production re-run | hygiene-closeout stage 2 + here |
 | Payout staleness (§2.4) | Underdog table at the owner-confirmed live terms (October 2026); still static config | recurring per-season re-verify | hygiene stage 3 + sleeper-parity stage 0 |
