@@ -24,13 +24,15 @@ the pair, and a slip holding one scores zero. Both pair lookups are dicts built 
 per snapshot, so a price costs the copula, not a scan of the slate. Money is
 ``Decimal``.
 
-``slip_headline`` reuses the P2 thesis engine so the constellation builder's live
-headline is a deterministic, path-independent function of the leg-set.
+``payout_check`` is the "pays at least" rule: the payout an all-or-nothing entry needs to
+break even on its fitted joint, which the rail and the story preloader print beside the
+payout we assume. ``slip_headline`` reuses the P2 thesis engine so the constellation
+builder's live headline is a deterministic, path-independent function of the leg-set.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -117,16 +119,13 @@ def score_slip(
     """
     n = len(legs)
     claim = np.clip([float(leg["win_prob"]) for leg in legs], _PROB_EPS, 1 - _PROB_EPS)
-    fitted = all(leg["fit_prob"] is not None for leg in legs)
-    fit = (
-        np.clip([float(leg["fit_prob"]) for leg in legs], _PROB_EPS, 1 - _PROB_EPS)
-        if fitted
-        else None
-    )
-    indep_p = float(np.prod(fit)) if fitted else None
+    fit = None
+    if all(leg["fit_prob"] is not None for leg in legs):
+        fit = np.clip([float(leg["fit_prob"]) for leg in legs], _PROB_EPS, 1 - _PROB_EPS)
+    indep_p = None if fit is None else float(np.prod(fit))
     play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
     zero = SlipScore(
-        ev=0.0 if fitted else None,
+        ev=None if fit is None else 0.0,
         indep_p=indep_p,
         joint_p=indep_p,
         payout=0.0,
@@ -167,7 +166,7 @@ def score_slip(
         )
 
     model_ev = value(claim)
-    if not fitted:
+    if fit is None:
         return replace(zero, payout=payout, model_ev=model_ev)
     ev = value(fit)
     stake = fractional_kelly_stake(
@@ -277,6 +276,36 @@ def astrolabe_payload(score: SlipScore) -> dict:
     }
 
 
+def play_type_for(platform: str, n: int) -> str:
+    """Power (Underdog) or Max (Sleeper) up to the platform's all-or-nothing cap, else Flex."""
+    if platform == "Sleeper":
+        return "Max" if n <= SLEEPER_MAX_SIZE else "Flex"
+    return "Power" if n <= POWER_MAX_SIZE else "Flex"
+
+
+def payout_check(
+    legs: Sequence[Mapping], play_type: str, joint_p: float | None, payout: float
+) -> list[str]:
+    """The lines that tell the bettor what payout makes an entry worth a bet.
+
+    An all-or-nothing entry (Power or Max) the fit priced breaks even at ``1 / joint_p``,
+    printed beside the ``payout`` we assume so the bettor can hold the app's against it. A
+    Flex entry has no single payout and an unpriced one no fitted joint, so neither gets a
+    number. The app cuts a same-game entry by its own read of how often the picks hit
+    together, known only for the pairs on record, so legs sharing a game add that the value
+    is unproven until that check.
+    """
+    if play_type == "Flex" or joint_p is None:
+        return []
+    lines = [f"Worth a bet if the app pays at least {1 / joint_p:.2f}x (we assume {payout:.2f}x)."]
+    if max(Counter(leg["game"] for leg in legs).values()) > 1:
+        lines.append(
+            "Legs here share a game, so this value is unproven until you check the app's "
+            "payout against that number."
+        )
+    return lines
+
+
 def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     """(play_type, full payout curve, base multiplier, payout_approximate) for a platform/size.
 
@@ -288,15 +317,11 @@ def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     ``score_slip``'s early-return guard turns into a zero-payout/zero-EV score
     rather than an error — pre-existing, symmetric across both platforms.
     """
-    if platform == "Sleeper":
-        search, full_curve = payout_curve_for("Sleeper", "pooled")
-        base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
-        play_type = "Max" if n <= SLEEPER_MAX_SIZE else "Flex"
-        return play_type, full_curve, float(base), False
-    search, full_curve = payout_curve_for("Underdog", "pooled")
+    search, full_curve = payout_curve_for(
+        "Sleeper" if platform == "Sleeper" else "Underdog", "pooled"
+    )
     base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
-    play_type = "Power" if n <= POWER_MAX_SIZE else "Flex"
-    return play_type, full_curve, float(base), False
+    return play_type_for(platform, n), full_curve, float(base), False
 
 
 def _block_diagonal_sig(legs: Sequence[Mapping], ctxs: Mapping[str, GameCtx]) -> np.ndarray:

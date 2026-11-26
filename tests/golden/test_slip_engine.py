@@ -11,7 +11,8 @@ structural).
 
 ``ev_lift`` and ``astrolabe_payload`` are thin reads on top of the same
 ``score_slip`` path (spec §4.1, §4.4c); ``banned_partners`` reads the same
-pair-modifier slice for the star map. All pinned below.
+pair-modifier slice for the star map; ``payout_check`` is the "pays at least" rule the
+rail and the story preloader print. All pinned below.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from sportstradamus.dashboard.slip_engine import (
     banned_partners,
     ev_lift,
     modifier_map,
+    payout_check,
+    play_type_for,
     score_slip,
 )
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
@@ -207,6 +210,47 @@ def test_underdog_play_type_by_size():
     )
     assert two_score.play_type == "Power"
     assert four_score.play_type == "Flex"
+
+
+def test_play_type_for_by_platform_and_size():
+    assert [play_type_for("Underdog", n) for n in (2, 3, 4)] == ["Power", "Power", "Flex"]
+    assert [play_type_for("Sleeper", n) for n in (2, 3, 4)] == ["Max", "Max", "Flex"]
+
+
+def test_pays_at_least_is_one_over_the_fitted_joint_on_an_all_or_nothing_slip():
+    cross_game = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "Z/W"),
+    ]
+    assert payout_check(cross_game, "Power", 0.25, 3.5) == [
+        "Worth a bet if the app pays at least 4.00x (we assume 3.50x)."
+    ]
+    assert payout_check(cross_game, "Max", 0.4, 3.0) == [
+        "Worth a bet if the app pays at least 2.50x (we assume 3.00x)."
+    ]
+
+
+def test_a_flex_or_unpriced_slip_has_no_pays_at_least():
+    """A Flex entry has no single payout to check; an unpriced one has no fitted joint."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+    ]
+    assert payout_check(legs, "Flex", 0.25, 3.5) == []
+    assert payout_check(legs, "Power", None, 3.5) == []
+
+
+def test_legs_sharing_a_game_add_that_the_value_is_unproven():
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "Z/W"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+    ]
+    assert payout_check(legs, "Power", 0.2, 6.0) == [
+        "Worth a bet if the app pays at least 5.00x (we assume 6.00x).",
+        "Legs here share a game, so this value is unproven until you check the app's payout "
+        "against that number.",
+    ]
 
 
 def test_stake_follows_the_fitted_value_not_the_claim():
