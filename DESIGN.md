@@ -196,7 +196,7 @@ name or it doesn't earn one; the licence credit under the map names artists, nev
 gold stays the correlation-edge color alone, so no engraved stroke can be misread as a ρ tie — it
 carries no `customdata` and is inert to click and hover, and a game with no template draws none of it. Everything else here *is* data: use the map on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
-is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
+is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = EV**,
 **brightness = in the slip**, **border = over/under**, **× = won't pair**, edge = correlation — as FIXED. Team fills come from
 `team_assets.json` via `theme.team_colors(league, code)`; an unmapped code gets the neutral
 gray fallback. Team fills are never gold — gold is the correlation-edge color.

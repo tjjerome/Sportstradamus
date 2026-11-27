@@ -1,6 +1,6 @@
 """The "won't pair" mark — an orange × over a star the platform won't pair with the slip.
 
-Every channel a star already carries is spoken for (fill = team, size = edge, brightness =
+Every channel a star already carries is spoken for (fill = team, size = EV, brightness =
 in the slip, border = the Over/Under call, gold = correlation), so the mark rides on top as
 an overlay trace of its own: orange is the warning intent, and an × says "no" without color.
 """
