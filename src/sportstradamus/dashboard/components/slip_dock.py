@@ -105,8 +105,8 @@ def _summary(legs: Sequence[dict], score: SlipScore | None) -> str:
         return f"{len(legs)} leg · add another to price"
     if score.banned:
         return f"{len(legs)} legs · won't pair · $0"
-    priced = "" if score.ev is not None else "not priced · "
-    return f"{len(legs)} legs · {priced}{ev_text(score.ev, score.model_ev)} · ${score.stake}"
+    prefix = "" if score.ev is not None else "not priced · "
+    return f"{len(legs)} legs · {prefix}{ev_text(score.ev, score.model_ev)} · ${score.stake}"
 
 
 def _render_sheet(legs: Sequence[dict], score: SlipScore | None) -> None:
