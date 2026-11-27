@@ -80,15 +80,18 @@ def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> di
     The static node set — it depends on the game's offers, not on which legs are in
     the slip (the slip only decides which stars light up) — so the map never
     reshuffles when a leg is added. The board's slate picks do not gate it: a slate
-    holds ten a pick kind, which leaves most games with few or none. An active leg the
-    fit did not price is kept so a slip never loses one of its own stars. Returns the defining row
-    rather than anything derived from it because the two callers want different things
-    out of it: the figure reads a star's whole hover card, the classifier only its team.
+    flags at most ``live_fit.PICKS_PER_SLATE`` picks per pick kind, which leaves most
+    games with few or none. An active leg the fit did not price is kept so a slip
+    never loses one of its own stars. Returns the defining row rather than anything
+    derived from it because the two callers want different things out of it: the
+    figure reads a star's whole hover card, the classifier only its team.
     """
     universe: dict[str, Mapping] = {}
     if pool is not None and not pool.empty:
         for row in pool.to_dict("records"):
             if is_priced(row):
+                # The snapshot is written EV-descending (persist._normalize_offers), so the
+                # first priced row a key meets is its best-EV one, across alt lines and platforms.
                 universe.setdefault(corr_key(row), row)
     for leg in slip_legs:
         universe.setdefault(corr_key(leg), leg)

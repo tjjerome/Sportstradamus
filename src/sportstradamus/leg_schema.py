@@ -28,6 +28,7 @@ LEG_FIELDS = (
     "kelly",
     # The EV stamp's read of the leg (prediction/ev_stamp.py): the fitted win chance and
     # its EV, None on a leg the fit did not price, and whether the board called it a pick.
+    # Nothing reads a leg's `pick` back; it stays so the stored list<struct> keeps one shape.
     "fit_prob",
     "ev",
     "pick",
@@ -46,11 +47,11 @@ _OFFER_KEYS = {
 # Only the fields the dual-shape helpers below actually read off a raw offer
 # row — league among them, because the constellation resolves a board's display
 # name for its labels, hovers and cards off raw candidate rows as readily as off
-# slip legs; the platform and the fit's two too, because a star's size and card
+# slip legs; the platform, fit_prob and ev too, because a star's size and card
 # read them off either shape. The rest of LEG_FIELDS
-# (stat/game/date/push_prob/kelly/pick) is canonical-only: every call site that needs one of
-# those only ever holds a canonical leg, never a raw offer row, so it indexes
-# directly (leg["game"]) instead of going through leg_field.
+# (stat/game/date/push_prob/kelly/pick) is canonical-only: every call site that
+# needs one of those only ever holds a canonical leg, never a raw offer row, so it
+# indexes directly (leg["game"]) instead of going through leg_field.
 _FIELD_TO_OFFER_COL = {
     "player": "Player",
     "team": "Team",

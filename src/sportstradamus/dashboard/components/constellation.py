@@ -2,9 +2,9 @@
 
 The dashboard's signature element (DESIGN.md §4a) and the slip editor's primary
 control. The legs the fit priced (the ones carrying an ``EV``) are stars — the top
-``DEFAULT_STARS`` by EV with both teams represented and
-at most two per player; the rest wait behind *look deeper* — each sized by its EV
-between the lowest and the highest drawn, so the strongest read biggest. The layout
+``DEFAULT_STARS`` by EV with both teams represented and at most two per
+player; the rest wait behind *look deeper* — each sized by its EV between
+the lowest and the highest drawn, so the strongest read biggest. The layout
 is **fixed per game** (the sports-object template the game was dealt, or a
 team-anchored force-directed solve when it is too thin for one) and never moves
 when you add legs to the slip; ``constellation_spacing.settle`` then nudges only the
@@ -161,7 +161,7 @@ def constellation_figure(
 ) -> go.Figure:
     """Static star map of the game's priced legs, the slip's legs lit up.
 
-    ``pool`` is the game's candidate offers — the static universe is the ones the fit priced;
+    ``pool`` is the game's candidate offers — the static universe is its priced legs;
     ``slip_legs`` are the ones currently in the slip (drawn active). ``rho`` is
     the game's pair map (``GameCtx.rho``). Each node carries its ``Player|Market|Bet`` key
     as customdata for click handling; the layout never depends on the selection.

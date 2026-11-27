@@ -275,7 +275,7 @@ def _game_select(games: dict[str, dict], legs: list[dict]) -> tuple[str, str]:
 
 # Constellation lenses (P8 Task C6): a multi-select segmented control — tight, and gold
 # when active via theme's shared `segmented_controlActive` rule. Each option maps to a
-# session-state bool (`deep_pool` / `wider_groups`) that render_constellation_builder reads.
+# session-state bool (`lens_deep` / `lens_wider`) that render_constellation_builder reads.
 _LENS_LABELS = {"lens_deep": "Look deeper", "lens_wider": "Look wider"}
 
 

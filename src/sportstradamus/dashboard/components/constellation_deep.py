@@ -228,11 +228,11 @@ def add_deep_trace(
     """The deeper lens's own stars, as the one fade-able trace named ``deep``.
 
     Everything arrives per point because the tier carries two readings and a
-    ranking inside each: a priced leg the cut left behind wears the candidate look,
-    sized and lit by its EV, and a leg the fit did not price the cool gray of the lens
-    itself at the tier's floor. ``flip_colors`` is the full team color each star burns once a click
-    puts it in the slip; it rides as ``meta`` so the component can paint it before
-    the rerun promotes the star.
+    ranking inside each: a priced leg the cut left behind wears the candidate
+    look, sized and lit by its EV, and a leg the fit did not price the cool gray
+    of the lens itself at the tier's floor. ``flip_colors`` is the full team color
+    each star burns once a click puts it in the slip; it rides as ``meta`` so the
+    component can paint it before the rerun promotes the star.
     """
     if not keys:
         return
