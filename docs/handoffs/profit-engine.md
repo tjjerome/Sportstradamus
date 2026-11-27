@@ -26,7 +26,7 @@ reproduces the first five rows.
 | By pick kind | Underdog even picks −5.2 % (2,734 legs); raised payout −6.9 % (2,342); cut payout −10.4 % (604); Sleeper −12.3 % (3,706) |
 | Even picks by league | NBA .497 on 1,433; NFL .527 on 526; NHL .551 on 741 (+0.8 %). Break-even is .546 a pick, about .536 inside a 2- to 4-pick Power entry |
 | Every side the apps posted, taken blind | Underdog even picks −8.5 % a leg; cut payout −11.8 %; raised payout −19.1 %; Sleeper −12.0 % |
-| The engine's own same-game entries | 7,799 Underdog 2- and 3-pick entries, 7,664 of them NFL; claimed value 2.22 for 1 staked; all picks hit 9.0 % where 12.0 % was needed (the mean of each entry's own break-even). The search keeps only entries claiming 2.0 or more, which selects the largest compounded errors |
+| The engine's own same-game entries | 7,799 Underdog 2- and 3-pick entries, 7,664 of them NFL; claimed value 2.22 for 1 staked; all picks hit 9.0 % where 12.0 % was needed (the mean of each entry's own break-even). The search kept only entries claiming 2.0 or more, which selected the largest compounded errors |
 | Rules that need no model | Following Underdog's own line moves .493 on 4,829; each market's prior-month winning side .51 to .52; every Under on an even pick .515 on 17,258 |
 
 **Where information beyond the app's price comes from.** On settled posted picks, how much weight
@@ -220,21 +220,41 @@ can (0.31 against 0.56 on NBA's class B today).
 
 ### 5.3 The engine reads EV
 
-- The leg filters that read the claimed number are redirected or deleted: the story menu's edge
-  floor, the entry search's claimed-value floors, the leg-pool floors and the pick'em filter's
-  thresholds.
-- Selection becomes rank-based, so no league or kind goes empty: the slate's picks by EV (below),
-  entries ranked by entry EV, the best few kept per game and per slate whether or not they clear
-  1. At or above 1 an entry gets the "+EV" mark; the rest read as "best available".
-- Cross-game entries reach the board through a `current_entries` snapshot, built only at the
-  sizes with the lowest break-even (2-, 3- and 4-pick Power, 4-pick Flex).
-- The paper ledger moves to `policy_v5`: personas price with the fitted win chance, and one
-  persona per registered play is appended.
-- The dashboard shows "EV", "Model EV", the mark and the play's own record beside each leg and
-  entry. [DESIGN.md](../../DESIGN.md) governs the UI work.
-- A rung with one side posted carries no EV (§5.1), so it is never a pick, though on 7 % of rows
-  the model's side is the only one posted. The board lists such a leg after the legs EV ranks,
-  by `Model EV`, with no mark and no stake.
+Selection is by rank on the fitted number, so no league or kind goes empty, and nothing is
+filtered on the model's claim: the story menu's edge floor, the entry search's claimed-value
+floors, the leg-pool floors and the pick'em filter's thresholds are gone.
+
+- **Legs.** The board lists legs by `EV`, and the slate's picks (below) are the legs it
+  recommends. A rung with one side posted carries no EV (§5.1), so it is never a pick, though on
+  7 % of rows the model's side is the only one posted: it lists after the legs EV ranks, by
+  `Model EV`, with no mark and no stake.
+- **Same-game entries** (`prediction.correlation.find_correlation`,
+  `prediction.parlay.beam_search_parlays`). A game's pool is its priced legs by `EV`, at most 2 a
+  player, 12 a team and 24 a game. Per entry size the search exact-prices the first twelve
+  admissible leg sets of its beam on the fitted chances and keeps the three worth most, whether
+  or not they clear 1. A row carries `EV`, the fitted value of a unit staked and the rank key,
+  beside `Model EV`, the claim. A game can lack an entry at sizes 4 to 6 when the sets the beam
+  carries are ones the app refuses ([PARLAY_AUDIT.md](../PARLAY_AUDIT.md) §2.1).
+- **Stories** (`prediction/stories/menu.py`). A story's presets are its best entry of two or
+  three legs (Builder) and its best larger one (Moon), both by fitted value; a game's lead story
+  is the one whose Builder is worth most.
+- **An entry carries no "+EV" mark and no stake**: `Rec Bet`, a story's `kelly_stake` and the
+  pick'em stake are 0. An entry's fitted value rests on how often its picks hit together, which
+  the app prices with a cut of its own (§5.4), and the engine's graded entries paid under 1
+  where they claimed 2.2 (§1). A stake waits for the entries' own money record (§5.2).
+- **Pick'em** (`sportstradamus bet pickem`) emits the search's entries, ranked by `EV`.
+- **The paper ledger** runs `policy_v5`
+  ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10): every persona prices its legs at the
+  fitted chance, and the persona `ev_picks` deals the board's picks into cross-game entries.
+- **The dashboard** leads with "EV" and shows "Model EV" beside it, on legs, entries, stories
+  and the slip; a leg wears the "+EV" mark of §5.1 and the board's picks show their play's
+  record (§5.2). The slip rail prices a slip on the fitted chances, stakes it by Kelly on that
+  value (zero at or under 1) and, for an all-or-nothing slip, shows the payout at which it
+  breaks even, for the owner to hold against the app's. [DESIGN.md](../../DESIGN.md) governs
+  the UI work.
+- **Queued.** Cross-game entries on the board, through a `current_entries` snapshot built only
+  at the sizes with the lowest break-even (2-, 3- and 4-pick Power, 4-pick Flex). Entries
+  graded in money (`Profit` on every graded row), so the entry record counts a pushed leg.
 
 **Picks (built).** `live_fit.picks` names a slate's picks and the scoring run stamps them as
 `Pick` (§5.1). A slate is one league's game date on one platform. It has a place for each of its
@@ -285,7 +305,7 @@ Gate 2 stays. `devel` is never gated by it.
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
 | Phase 1 | EV and the scoreboard: `live_fit.py` (fit, score, walk-forward, the fit's checks); the EV stamp on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; the plays `ev_edge` and `ev_rank`; `play-replay --walk-forward`; history records only a board a bettor could act on (§7, M1). The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and passes its acceptance tests on the frozen history (§3) | Built. `EV` is stamped and recorded; ranking, the mark and stakes wait for phase 2 |
-| Phase 2 | The engine reads EV (§5.3), one subagent per module | In progress. Built: the slate's picks (`live_fit.picks`, the `Pick` stamp, the play `ev_pick`). Queued: the entry search, the stories and the dashboard read EV; cross-game entries; `policy_v5` |
+| Phase 2 | The engine reads EV (§5.3), one subagent per module | In progress. Built: the slate's picks (`live_fit.picks`, the `Pick` stamp, the play `ev_pick`); the entry search, the stories, pick'em, the paper ledger (`policy_v5`) and the dashboard read EV. Queued: cross-game entries on the board; entries graded in money |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |
 
