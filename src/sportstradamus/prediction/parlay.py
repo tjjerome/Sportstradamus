@@ -48,7 +48,7 @@ class GameScoringContext:
     objects to score story subsets that beam search never enumerates (it only
     keeps both-team parlays). ``leg_indices`` are positions into ``g``'s matrices
     (the legs of the game's pool); ``bet_df`` maps the same positions to their offer
-    records (``Desc``/``Model``/``Bet``/``Team``/…). Collected per game into the
+    records (``Player``/``Team``/``Market``/``Bet``/``EV``/…). Collected per game into the
     opt-in ``story_sink``; one context per ``(platform, game)``.
     """
 
@@ -128,11 +128,7 @@ def resolve_leg_stat(market: str, stat_by_label: dict) -> str:
     return stat_by_label.get(stripped, stripped)
 
 
-def _is_sleeper_flex_candidate(info, bet_size):
-    return info["Platform"] == "Sleeper" and bet_size >= SLEEPER_FLEX_MIN_SIZE
-
-
-def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG):
+def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, sig):
     """Price a Sleeper Flex candidate: devig each leg, then K(n,k)/P_devigged.
 
     boost/M's running-product mechanism does not apply here -- devig already
@@ -149,10 +145,10 @@ def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG):
     )
     flex_curve = sleeper_flex_payout_curve(devigged_p, sleeper_payouts["flex_k"])
     payout = flex_curve[bet_size][0]
-    p = parlay_payout_prob(
-        p, np.zeros(bet_size), SIG, bet_size, 1.0, payout, flex_curve, payout_base
+    value = parlay_payout_prob(
+        p, np.zeros(bet_size), sig, bet_size, 1.0, payout, flex_curve, payout_base
     )
-    return payout, p
+    return payout, value
 
 
 def _leg_boost_payout(
@@ -162,7 +158,7 @@ def _leg_boost_payout(
     boost,
     payout,
     p,
-    SIG,
+    sig,
     full_payouts,
     payout_base,
     full_refund_below_size,
@@ -172,7 +168,7 @@ def _leg_boost_payout(
     return parlay_payout_prob(
         p,
         g.p_push[np.ix_(bet_id)],
-        SIG,
+        sig,
         bet_size,
         boosts_leg,
         payout,
@@ -190,10 +186,13 @@ def _leg_boost_payout(
 def _price_parlay(
     g, p, bet_id, boost, sig, payout_base, info, full_payouts, full_refund_below_size
 ):
-    """``(payout, value of a unit staked)`` for one admissible candidate at leg chances ``p``."""
+    """``(payout, value of a unit staked)`` for one admissible candidate.
+
+    ``p`` is a game-wide chance array (``g.p_fit`` or ``g.p_model``), read at ``bet_id``.
+    """
     bet_size = len(bet_id)
     p_legs = p[np.ix_(bet_id)]
-    if _is_sleeper_flex_candidate(info, bet_size):
+    if info["Platform"] == "Sleeper" and bet_size >= SLEEPER_FLEX_MIN_SIZE:
         return _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p_legs, sig)
     payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
     value = _leg_boost_payout(
@@ -232,6 +231,8 @@ def _parlay_row(
     return info | {
         "EV": ev,
         "Model EV": model_ev,
+        # The books' price of the entry, approximated: the model's exact value scaled by the
+        # ratio of the independent prices at the books' and at the model's chances.
         "Market EV": model_ev / prev_p * prev_pb,
         # Display Boost: the payout-inclusive value, so the column matches the
         # EV that drove ranking.
