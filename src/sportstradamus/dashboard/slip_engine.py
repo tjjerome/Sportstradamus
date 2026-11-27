@@ -148,7 +148,7 @@ def score_slip(
     push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
     full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
 
-    def value(p: np.ndarray) -> float:
+    def expected_payout(p: np.ndarray) -> float:
         """Expected payout per $1 staked when the legs win with chances ``p``."""
         return float(
             parlay_payout_prob(
@@ -165,10 +165,10 @@ def score_slip(
             )
         )
 
-    model_ev = value(claim)
+    model_ev = expected_payout(claim)
     if fit is None:
         return replace(zero, payout=payout, model_ev=model_ev)
-    ev = value(fit)
+    ev = expected_payout(fit)
     stake = fractional_kelly_stake(
         bankroll=bankroll,
         win_prob=ev / payout,
