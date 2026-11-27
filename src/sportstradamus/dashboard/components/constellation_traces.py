@@ -27,7 +27,7 @@ _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 SIZE_MIN = 14
 SIZE_MAX = 38
 # A candidate (not-in-slip) star keeps most of its team hue — only a light blend toward
-# gray plus reduced opacity marks it not-yet-picked. The old 0.55/0.45 crushed dark
+# gray plus reduced opacity marks it not yet added. The old 0.55/0.45 crushed dark
 # franchise colors to near-gray, so candidates read as a colorless field.
 INACTIVE_DESAT = 0.35
 INACTIVE_ALPHA = 0.60
@@ -39,8 +39,8 @@ _EDGE_WIDTH_MIN = 1.0
 _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
 _EDGE_ALPHA_MIN = 0.25
 # The whole correlation web is drawn barely-there at this alpha so the structure reads
-# before any pick without drowning the field; a tie whose both endpoints are in the slip
-# brightens to full gold (edge_record), well above this base.
+# before any leg is added without drowning the field; a tie whose both endpoints are in
+# the slip brightens to full gold (edge_record), well above this base.
 EDGE_BASE_ALPHA = 0.03
 FIG_HEIGHT = 380
 LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
