@@ -99,7 +99,8 @@ def star_label(leg: Mapping) -> str:
     game's candidate pool and the slip's own legs on one map).
     """
     ou = "o" if _bet_word(leg_field(leg, "bet")) == "Over" else "u"
-    return f"{_last_name(str(leg_field(leg, 'player')))} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
+    last_name = _last_name(str(leg_field(leg, "player")))
+    return f"{last_name} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
 
 
 def node_info(leg: Mapping) -> dict:
