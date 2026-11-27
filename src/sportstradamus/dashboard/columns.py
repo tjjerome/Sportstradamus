@@ -4,8 +4,9 @@ You play against DFS (Underdog payout table / Sleeper boost), not against the bo
 EV here is the average return per $1 staked on the app at the leg's payout, break-even at
 1.00. ``EV`` prices the win chance fitted to how past posted picks settled (``Fit Prob``,
 shown as **Win %**); ``Model EV`` prices the model's own chance (``Win Prob``). The Board's
-grid and phone cards show neither: their model column is ``Projection``, the mean the model
-predicts for the stat, in the line's units. ``Market EV`` is the same payout scored with the
+grid and phone cards show neither: their model column is ``Projection``, the served mean for
+the stat in the line's units (the model's, pooled with the book consensus where one is quoted;
+the consensus alone on a book-fallback leg). ``Market EV`` is the same payout scored with the
 consensus book's probability, so ``Market EV − 1`` (**Consensus Edge**) is how soft the book
 thinks the DFS line is — above 0 it agrees, below 0 you're contrarian. This module relabels
 the columns, attaches header tooltips, and derives Consensus Edge plus the Board's matchup,
@@ -41,9 +42,10 @@ HELP = {
     "Win %": "The chance this side wins, fitted to how past posted picks settled.",
     "EV": "What $1 on this leg returns on average at its payout and the fitted Win %; 1.00 "
     "breaks even.",
-    "Projection": "What the model projects for this stat: the mean of its predicted outcomes, "
-    "in the line's units. On a low-count stat the mean sits above the typical game, so it can "
-    "top the line while the Under is still the likelier side.",
+    "Projection": "The projected stat, in the line's units: the mean of the model's predicted "
+    "outcomes, pooled with the sportsbooks' consensus where one is quoted (the consensus alone "
+    "on a market with no served model). On a low-count stat the mean sits above the typical "
+    "game, so it can top the line while the Under is still the likelier side.",
     "Cons Edge": "The consensus book's edge at the same DFS payout: Market EV − 1. Above 0% "
     "the book agrees the line is soft; below 0% the book disagrees (you're contrarian).",
     MOVE: "How far the fair line has moved since the offer opened, in the stat's own units, on "

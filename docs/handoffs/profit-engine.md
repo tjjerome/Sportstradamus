@@ -105,9 +105,9 @@ dates only and prints the fit check. A correct build prints:
    remove it; modified-payout picks are growing and cannot be ignored.
 2. `devel` is the lab: nothing is turned off there. `main` may be gated on a live money test.
 3. The fitted number leads: ranking, the "+EV" mark and stake size follow it, and the dashboard
-   calls it "EV". The model's claim stays visible as "Model EV", except on the Board, whose
-   model column is the model's projected stat (owner, 11-27). Today's 5 %-edge rule keeps
-   running as a tracked paper play (`model_edge`).
+   calls it "EV". The model's claim stays visible as "Model EV", except in the Board's grid
+   and phone cards, whose model column is the projected stat (owner, 11-27). Today's 5 %-edge
+   rule keeps running as a tracked paper play (`model_edge`).
 4. Main's money test: a league's recommended even picks over the trailing 90 days, at least 300
    legs and a return at or above zero; it drops off `main` again below −3 %.
 5. The owner reads real payouts in the app. No scripted quotes on the owner's account.
@@ -251,9 +251,11 @@ floors, the leg-pool floors and the pick'em filter's thresholds are gone.
   picks into cross-game entries. Every persona stakes flat but `kelly_growth`, which commits
   only an entry whose fitted value clears 1: the paper test of an entry stake.
 - **The dashboard** leads with "EV" and shows "Model EV" beside it, on a leg's detail,
-  entries, stories and the slip; the Board lists a leg's `Projection` (the model's mean for the
-  stat) in its place. A leg wears the "+EV" mark of §5.1 and the board's picks show their play's
-  record (§5.2). The slip rail prices a slip on the fitted chances, stakes it by Kelly on that
+  entries, stories and the slip; the Board lists a leg's `Projection` in its place (the served
+  mean for the stat: the model's, pooled with the book consensus where one is quoted, and the
+  consensus alone on a book-fallback leg). A leg wears the "+EV" mark of §5.1 and the board's
+  picks show their play's record (§5.2). The slip rail prices a slip on the fitted chances,
+  stakes it by Kelly on that
   value (zero at or under 1) and, for an all-or-nothing slip, shows the payout at which it
   breaks even, for the owner to hold against the app's. [DESIGN.md](../../DESIGN.md) governs
   the UI work.
