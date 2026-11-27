@@ -243,10 +243,9 @@ def write_current_offer_details(details: pd.DataFrame) -> None:
 
 
 def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
-    if offers is None or offers.empty:
+    if offers.empty:
         return pd.DataFrame(columns=_OFFER_KEEP_COLS)
-    df = offers.copy()
-    df = df.replace([np.inf, -np.inf], np.nan)
+    df = offers.replace([np.inf, -np.inf], np.nan)
 
     signal_cols = [c for c in _OFFER_SIGNAL_COLS if c in df.columns]
     if signal_cols:
@@ -282,8 +281,8 @@ def _split_dist_params(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_parlays(parlays: pd.DataFrame) -> pd.DataFrame:
-    if parlays is None or parlays.empty:
+    if parlays.empty:
         return pd.DataFrame()
-    df = parlays.drop(columns=[c for c in _PARLAY_DROP_COLS if c in parlays.columns])
+    df = parlays.drop(columns=_PARLAY_DROP_COLS, errors="ignore")
     df = df.replace([np.inf, -np.inf], np.nan)
     return df.sort_values("EV", ascending=False, ignore_index=True)
