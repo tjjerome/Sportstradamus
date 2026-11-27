@@ -23,6 +23,8 @@ from sportstradamus.strategies import _ledger_store
 from sportstradamus.strategies.kelly import MAX_FRACTION_OF_BANKROLL
 from sportstradamus.strategies.underdog_pickem import RecommendedEntry, leg_player
 
+# Ensemble size at the knee of the ensemble-mean convergence curve, which goes as 1 + 1/M
+# (docs/handoffs/sim-bettor-ledger.md §10, Ensemble sizing).
 LEDGER_REPLICATES: int = 40
 # Fixed consumption order on each replicate's one random stream. A new persona goes
 # last: it draws after the others, so their draws for a given seed never move.
@@ -36,10 +38,13 @@ PERSONAS: tuple[str, ...] = (
 RUN_SLOTS: tuple[str, ...] = ("morning", "afternoon")
 
 K: float = 3.0  # Jaccard decay rate -- named v1 default, not fitted
-DRAW_CONTINUE_PROB: float = 0.75  # stop-after-each-draw probability -- named v1 default
+DRAW_CONTINUE_PROB: float = 0.75  # chance of another draw after each one -- named v1 default
 
+# Entries a persona may commit per replicate and day, across both run slots.
 MAX_ENTRIES_PER_DAY: int = 5
+# kelly_growth's Kelly budget for the day; the afternoon run solves for what the morning left.
 KELLY_GROWTH_FRACTION: float = 0.25
+# Every persona and replicate stakes against this fixed paper bankroll, never its settled balance.
 BANKROLL_PER_REPLICATE: Decimal = Decimal("5000")
 # What every persona but kelly_growth stakes on an entry: the cap v4's Kelly stakes were
 # clipped at. Kelly on a fitted value under 1 stakes nothing, so it would record nothing.
@@ -76,9 +81,10 @@ class LedgerCandidate:
 
 
 def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
-    """extras['game'] is always a single game string -- game_span is always 1
-    for this source (confirmed against RecommendedEntry's own construction:
-    it always sets exactly one "TEAM1/TEAM2" key, never multi-game).
+    """A same-game pick'em entry as a ledger candidate, staked ``FLAT_STAKE``.
+
+    Pick'em stakes no entry (``entry.recommended_stake`` is 0), so the stake is the ledger's
+    own. ``game_span`` is 1: the same-game search builds an entry from one game's legs.
     """
     players = frozenset(leg_player(leg) for leg in entry.legs)
     return LedgerCandidate(
@@ -126,9 +132,7 @@ def replicate_rngs(date: datetime.date, run_slot: str) -> list[np.random.Generat
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     if not a or not b:
         return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
+    return len(a & b) / len(a | b)
 
 
 def _percentile_scores(candidates: list[LedgerCandidate], score_fn: Callable) -> np.ndarray:
@@ -160,9 +164,8 @@ def draw_entries(
     """
     if not candidates or budget <= 0:
         return []
-    percentiles = _percentile_scores(candidates, score_fn)
     pool = list(range(len(candidates)))
-    pool_pct = percentiles.copy()
+    pool_pct = _percentile_scores(candidates, score_fn)
     chosen: list[LedgerCandidate] = []
     chosen_players = list(already_chosen_players)
 
@@ -206,9 +209,14 @@ PERSONA_SCORERS: dict[str, Callable[[LedgerCandidate], float]] = {
 def remaining_budget_and_seen_players(
     date: datetime.date, persona: str, replicate_id: int
 ) -> tuple[int, list[frozenset[str]]]:
-    """Called unconditionally at the top of BOTH daily run_slots -- a no-op
-    read for the morning run (nothing committed yet today), the real budget
-    enforcement point for the afternoon run.
+    """The entries ``persona`` may still draw today on this replicate, and its committed players.
+
+    Called unconditionally at the top of BOTH daily run_slots -- a no-op read for the morning
+    run (nothing committed yet today), the real budget enforcement point for the afternoon run.
+
+    Returns:
+        ``(remaining, seen)``: the entries left of ``MAX_ENTRIES_PER_DAY``, and each committed
+        entry's player set, which the draw's overlap decay treats as already chosen.
     """
     committed = _ledger_store.already_committed_entries(date, persona, replicate_id)
     remaining = max(MAX_ENTRIES_PER_DAY - len(committed), 0)
