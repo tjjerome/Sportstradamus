@@ -11,10 +11,11 @@ import pandas as pd
 import pytest
 
 from sportstradamus import clv
-from sportstradamus.strategies._pickem_emit import emit_yaml
+from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
+    RecommendedEntry,
     _filter_parlays,
     construct_entries,
     filter_legs,
@@ -274,6 +275,33 @@ def test_dedupe_max_overlap(fake_market_calibration):
         parlay_dfs=parlay_dfs,
     )
     assert len(out) == 1
+
+
+def _ranked_entry(entry_id: str, *, ev: float, joint_prob: float) -> RecommendedEntry:
+    return RecommendedEntry(
+        id=entry_id,
+        contest_variant="power",
+        entry_size=2,
+        legs=(f"{entry_id} A Over 4.5 Points", f"{entry_id} B Over 4.5 Points"),
+        joint_prob=joint_prob,
+        payout_multiplier=3.0,
+        ev=ev,
+        recommended_stake=Decimal("0"),
+    )
+
+
+def test_entries_rank_by_their_fitted_value_highest_first():
+    """With every entry under 1, EV per dollar times the hit chance ranked the long shot
+    above the likelier entry worth more; the value itself is the rank."""
+    entries = [
+        _ranked_entry("long_shot", ev=-0.20, joint_prob=0.10),
+        _ranked_entry("likely", ev=-0.05, joint_prob=0.50),
+        _ranked_entry("best", ev=-0.02, joint_prob=0.05),
+    ]
+
+    ranked = rank_and_dedupe(entries, PickemConfig(top_k=10))
+
+    assert [e.id for e in ranked] == ["best", "likely", "long_shot"]
 
 
 def test_entry_carries_the_product_of_its_pair_modifiers(fake_market_calibration):

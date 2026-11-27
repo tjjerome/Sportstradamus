@@ -24,14 +24,9 @@ if TYPE_CHECKING:
 def rank_and_dedupe(
     entries: list[RecommendedEntry], config: PickemConfig
 ) -> list[RecommendedEntry]:
-    """Sort by EV-per-dollar, drop near-duplicate entries by leg overlap."""
-    ranked = sorted(
-        entries,
-        key=lambda e: (e.ev * e.joint_prob) / float(max(e.recommended_stake, Decimal("0.01"))),
-        reverse=True,
-    )
+    """Rank by ``ev`` (the fitted value), highest first; drop near-duplicates by leg overlap."""
     kept: list[RecommendedEntry] = []
-    for e in ranked:
+    for e in sorted(entries, key=lambda e: e.ev, reverse=True):
         legs_set = set(e.legs)
         if any(len(legs_set & set(k.legs)) > config.max_overlap for k in kept):
             continue
