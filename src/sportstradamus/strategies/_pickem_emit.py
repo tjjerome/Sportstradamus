@@ -47,9 +47,6 @@ def emit_yaml(
         "generated_at": datetime.datetime.now().isoformat(),
         "date": date.isoformat(),
         "config": {
-            "min_model_edge": config.min_model_edge,
-            "min_sharp_edge": config.min_sharp_edge,
-            "disagreement_threshold": config.disagreement_threshold,
             "entry_sizes": list(config.entry_sizes),
             "contest_variants": list(config.contest_variants),
             "top_k": config.top_k,

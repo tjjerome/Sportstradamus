@@ -15,13 +15,7 @@ from sportstradamus.strategies.underdog_pickem import (
     RecommendedEntry,
     _filter_parlays,
     construct_entries,
-    filter_legs,
 )
-
-
-def _offers(rows):
-    cols = ["Player", "Team", "Market", "Bet", "Win Prob", "Market Prob"]
-    return pd.DataFrame(rows, columns=cols)
 
 
 def _canonical_leg(player, *, market, league, game, platform="Underdog"):
@@ -83,43 +77,12 @@ def _parlay(
     }
 
 
-# --- leg filter ---------------------------------------------------------------
-
-
-def test_filter_legs_drops_below_model_edge():
-    cfg = PickemConfig(min_model_edge=0.05)
-    df = _offers(
-        [
-            ("Caitlin Clark", "IND", "PTS", "Over", 0.56, 0.55),
-            ("A'ja Wilson", "LV", "PTS", "Over", 0.52, 0.51),
-        ]
-    )
-    out = filter_legs(df, cfg)
-    assert list(out["Player"]) == ["Caitlin Clark"]
-
-
-def test_filter_legs_drops_below_sharp_edge():
-    cfg = PickemConfig(min_model_edge=0.0, min_sharp_edge=0.10)
-    df = _offers([("X", "T", "M", "Over", 0.60, 0.55)])
-    assert filter_legs(df, cfg).empty
-
-
-def test_filter_legs_disagreement():
-    cfg = PickemConfig(min_model_edge=0.0, min_sharp_edge=0.0, disagreement_threshold=0.02)
-    df = _offers(
-        [
-            ("Agree", "T", "M", "Over", 0.60, 0.59),
-            ("Diverge", "T", "M", "Over", 0.70, 0.55),
-        ]
-    )
-    out = filter_legs(df, cfg)
-    assert list(out["Player"]) == ["Agree"]
-
-
 # --- parlay candidate pool ----------------------------------------------------
 
 
-def test_parlays_per_variant_routes_filtered_pool(monkeypatch):
+def test_every_scored_record_reaches_each_variants_search(monkeypatch):
+    """No leg gate: a leg the old gate dropped for its read, its book or their gap still
+    seeds entries, as on the board, and the rank chooses among them."""
     from sportstradamus.prediction import correlation
     from sportstradamus.strategies import underdog_pickem as up
 
@@ -132,32 +95,26 @@ def test_parlays_per_variant_routes_filtered_pool(monkeypatch):
     monkeypatch.setattr(correlation, "find_correlation", fake_find_correlation)
     scored = pd.DataFrame(
         {
-            "Player": ["Edge", "NoEdge"],
-            "Win Prob": [0.56, 0.51],
-            "Market Prob": [0.54, 0.505],
+            "Player": ["Edge", "Weak Read", "No Book", "Far From Book"],
+            "Win Prob": [0.56, 0.51, 0.58, 0.70],
+            "Market Prob": [0.54, 0.505, float("nan"), 0.55],
         }
     )
     cfg = PickemConfig(contest_variants=("power", "flex"))
     out = up._parlays_per_variant(scored, {}, cfg, "Underdog")
-    assert seen == {"power": ["Edge"], "flex": ["Edge"]}
+    everyone = ["Edge", "Weak Read", "No Book", "Far From Book"]
+    assert seen == {"power": everyone, "flex": everyone}
     assert set(out) == {"power", "flex"}
-    assert all(df.empty for df in out.values())
 
 
-def test_parlays_per_variant_empty_pool_skips_search(monkeypatch):
-    from sportstradamus.prediction import correlation
+def test_an_empty_board_gets_an_empty_parlay_frame_per_variant():
     from sportstradamus.strategies import underdog_pickem as up
 
-    def boom(*args, **kwargs):
-        raise AssertionError("find_correlation must not run on an empty pool")
-
-    monkeypatch.setattr(correlation, "find_correlation", boom)
     cfg = PickemConfig(contest_variants=("power", "flex"))
-    no_edge = pd.DataFrame({"Player": ["NoEdge"], "Win Prob": [0.50], "Market Prob": [0.50]})
-    for scored in (no_edge, pd.DataFrame()):
-        out = up._parlays_per_variant(scored, {}, cfg, "Underdog")
-        assert set(out) == {"power", "flex"}
-        assert all(df.empty for df in out.values())
+    out = up._parlays_per_variant(pd.DataFrame(), {}, cfg, "Underdog")
+    assert set(out) == {"power", "flex"}
+    assert all(df.empty for df in out.values())
+    assert construct_entries(cfg, parlay_dfs=out) == []
 
 
 # --- parlay-level filter ------------------------------------------------------
@@ -218,9 +175,6 @@ def test_a_board_with_every_entry_under_one_still_yields_entries_and_stakes_none
 
 def test_construct_entries_both_variants():
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(3,),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -241,9 +195,6 @@ def test_construct_entries_both_variants():
 
 def test_construct_entries_yaml_roundtrip(tmp_path: Path):
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(3,),
         contest_variants=("power",),
     )
@@ -274,9 +225,6 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path):
 
 def test_dedupe_max_overlap():
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(3,),
         contest_variants=("power",),
         top_k=10,
@@ -344,9 +292,6 @@ def test_entry_carries_the_product_of_its_pair_modifiers():
 
 def test_construct_entries_sleeper_platform():
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(3,),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -373,9 +318,6 @@ def test_construct_entries_sleeper_push_case_sizes():
     this exercises both explicitly per the stage acceptance criteria.
     """
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(2, 3, 4, 5, 6),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -407,9 +349,6 @@ def test_construct_entries_sleeper_push_case_sizes():
 @pytest.mark.parametrize("platform", ["Underdog", "Sleeper"])
 def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
     cfg = PickemConfig(
-        min_model_edge=0.0,
-        min_sharp_edge=0.0,
-        disagreement_threshold=1.0,
         entry_sizes=(3,),
         contest_variants=("power",),
     )

@@ -31,11 +31,8 @@ _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
 @dataclass(frozen=True)
 class PickemConfig:
-    """Tunable thresholds for :func:`construct_entries` (§6.a)."""
+    """Which entries :func:`construct_entries` searches for, and how many it keeps (§6.a)."""
 
-    min_model_edge: float = 0.020
-    min_sharp_edge: float = 0.015
-    disagreement_threshold: float = 0.04
     entry_sizes: tuple[int, ...] = (3, 5)
     contest_variants: tuple[str, ...] = ("power", "flex")
     top_k: int = 20
@@ -59,24 +56,6 @@ class RecommendedEntry:
     platform: str = "Underdog"
     # Product of the entry's same-game pair modifiers, as the search priced it.
     pair_modifier: float = 1.0
-
-
-def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
-    """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
-    if offers.empty:
-        return offers
-    required = {"Win Prob", "Market Prob"}
-    if not required.issubset(offers.columns):
-        msg = f"filter_legs needs columns {required}; got {set(offers.columns)}"
-        raise ValueError(msg)
-
-    df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
-    keep = (
-        ((df["Win Prob"] - 0.5) >= config.min_model_edge)
-        & ((df["Market Prob"] - 0.5) >= config.min_sharp_edge)
-        & ((df["Win Prob"] - df["Market Prob"]).abs() <= config.disagreement_threshold)
-    )
-    return df.loc[keep].copy()
 
 
 def _filter_parlays(parlay_df: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
@@ -157,17 +136,14 @@ def _parlays_per_variant(
     """Run ``find_correlation`` once per contest variant on already-scored offers.
 
     The expensive scrape + model scoring happened upstream; this only enumerates
-    correlated parlays per payout variant, which touches no archive. Candidates
-    come from the ``filter_legs`` pool — the same edge/disagreement gates as the
-    leg universe — so garbage-probability legs never seed a parlay. An empty
-    pool short-circuits: ``find_correlation`` KeyErrors on a rowless frame.
+    correlated parlays per payout variant, which touches no archive. Every scored
+    record reaches the search, as in the board's own search (``process_offers``),
+    and the rank chooses among the entries. An empty board gets an empty parlay
+    frame back from ``find_correlation``.
     """
     from sportstradamus.prediction.correlation import find_correlation
 
-    pool = filter_legs(scored_offers_df, config)
-    if pool.empty:
-        return {v: pd.DataFrame() for v in config.contest_variants}
-    scored = pool.to_dict("records")
+    scored = scored_offers_df.to_dict("records")
     return {
         v: find_correlation(scored, stats, platform, contest_variant=v)[1]
         for v in config.contest_variants

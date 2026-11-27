@@ -104,3 +104,34 @@ def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
     if has_train and has_live:
         return shrinkage, "blended"
     return shrinkage, "training" if has_train else "clv_segment"
+
+
+# ARCHIVED 2026-11-26 from src/sportstradamus/strategies/underdog_pickem.py
+# Reason: Pick'em hands every scored record to the search, as the board's own search
+#         does, and the ledger's shared cross-game pool takes the board's picks
+#         (policy_v5), so this leg gate lost its last caller. PickemConfig's
+#         min_model_edge, min_sharp_edge and disagreement_threshold went with it, and
+#         its three tests were deleted from tests/golden/test_underdog_pickem.py (git
+#         keeps them).
+# Last live SHA: dde02525
+# Original imports (now unresolved here):
+#   import pandas as pd
+#   from sportstradamus.strategies.underdog_pickem import PickemConfig
+
+
+def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
+    """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
+    if offers.empty:
+        return offers
+    required = {"Win Prob", "Market Prob"}
+    if not required.issubset(offers.columns):
+        msg = f"filter_legs needs columns {required}; got {set(offers.columns)}"
+        raise ValueError(msg)
+
+    df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
+    keep = (
+        ((df["Win Prob"] - 0.5) >= config.min_model_edge)
+        & ((df["Market Prob"] - 0.5) >= config.min_sharp_edge)
+        & ((df["Win Prob"] - df["Market Prob"]).abs() <= config.disagreement_threshold)
+    )
+    return df.loc[keep].copy()
