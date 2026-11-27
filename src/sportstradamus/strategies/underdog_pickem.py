@@ -121,14 +121,6 @@ def construct_entries(
     return rank_and_dedupe(entries, config)
 
 
-def leg_player(leg: str) -> str:
-    """Player name from a leg label ``"{player} Over|Under {line} {market}"``."""
-    for token in (" Over ", " Under "):
-        if token in leg:
-            return leg.split(token, 1)[0].strip()
-    return ""
-
-
 def _parlays_per_variant(
     scored_offers_df: pd.DataFrame,
     stats: dict[str, Stats],

@@ -21,7 +21,7 @@ import numpy as np
 
 from sportstradamus.strategies import _ledger_store
 from sportstradamus.strategies.kelly import MAX_FRACTION_OF_BANKROLL
-from sportstradamus.strategies.underdog_pickem import RecommendedEntry, leg_player
+from sportstradamus.strategies.underdog_pickem import RecommendedEntry
 
 # Ensemble size at the knee of the ensemble-mean convergence curve, which goes as 1 + 1/M
 # (docs/handoffs/sim-bettor-ledger.md §10, Ensemble sizing).
@@ -79,6 +79,14 @@ class LedgerCandidate:
     # Product of the entry's same-game pair modifiers. Each leg's own multiplier is the
     # raw ``boost`` on its ``canonical_legs`` entry; settlement reads both.
     pair_modifier: float = 1.0
+
+
+def leg_player(leg: str) -> str:
+    """Player name from a leg label ``"{player} Over|Under {line} {market}"``."""
+    for token in (" Over ", " Under "):
+        if token in leg:
+            return leg.split(token, 1)[0].strip()
+    return ""
 
 
 def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
