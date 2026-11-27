@@ -483,8 +483,9 @@ inside its group; §8 restates each open one as a plain question.
   Higher, 0.794 (the file banned the pair). All four file values were off, so the other sub-1
   values and bans are unproven; the opposite-direction slot of the lifted ban and the nine other
   banned keys of that family stay as they were. **Struck:** I5b symmetric Σ, I5c
-  `underdog_tax.py`. `_MODEL_EV_FINAL_FLOOR` (2.0) and `_BOOKS_EV_FLOOR` (0.9) unchanged: no tested
-  value returns ≥ 1. I5's own acceptance = priced payout equals the quote on owner-captured slips
+  `underdog_tax.py`. The entry search's floors (2.0 on the claimed value, 0.9 on the books') were
+  left as they stood, since no tested value returned ≥ 1; the profit-engine lane has since replaced
+  them with a rank on the fitted number ([profit-engine.md](profit-engine.md) §5.3). I5's own acceptance = priced payout equals the quote on owner-captured slips
   (one Power, one Flex, one stacked same-game pair) and the ledger settles at it.
 - **I6 model information and train/serve alignment — R3's build order (§5), opened by decision 13.**
   The follow-on investigation (the stale 70 % boosters, the first-to-pass gate selection, the count
@@ -1116,16 +1117,17 @@ eras.
   0.4 %. Each division is guarded now (decision 60). Training and serving read the same
   values, so the fix moves the features only with the WNBA's repair, rebuild and retrain
   (decisions 68 and 72).
-- The parlay search's `Fun` score read no calibration on Underdog until decision 56. A game keeps its top
-  parlays under three sort keys, model EV, recommended stake and `Fun`
-  (`correlation._append_parlay_rows`), and `parlay._parlay_fun` scores an Over leg by its line
-  in units of the market's spread, read from `stat_std` and `stat_cv` under the leg's `Market`.
-  Inside the search that is still the platform's label ("Points"); both tables are keyed by
+- The parlay search's `Fun` score read no calibration on Underdog until decision 56. A game kept its
+  top parlays under three sort keys, model EV, recommended stake and `Fun`, and `Fun` scored an Over
+  leg by its line in units of the market's spread, read from `stat_std` and `stat_cv` under the leg's
+  `Market`. Inside the search that is the platform's label ("Points"); both tables are keyed by
   the league's own name (`PTS`), and the board's rename runs after the search. Of the label
   and league pairs that have a calibration, none of Underdog's 96 is a key and 13 of Sleeper's
-  65 are. The lookup then takes its default of 1 and the score is one plus the raw line: the
-  parlays `Fun` keeps are the ones whose Over legs carry the biggest numbers, a passing-yards
-  Over before any receptions Over, on every board.
+  65 are. The lookup then took its default of 1 and the score was one plus the raw line: the
+  parlays `Fun` kept were the ones whose Over legs carried the biggest numbers, a passing-yards
+  Over before any receptions Over, on every board. The profit-engine lane has since dropped `Fun`
+  and the three sort keys: a game keeps the entries the fitted number values most
+  ([profit-engine.md](profit-engine.md) §5.3).
 - A team with offers on two game dates got one game frame. `correlation._assemble_game_frame`
   takes every leg of a team whatever its date and names the frame by the team's most common
   opponent and date. Both games' legs are then scored with same-game correlations and can
@@ -1185,10 +1187,10 @@ side-rule read, each with a tagged `REPORT.md`, in `~/backups/sportstradamus/202
 (`part1b/` boards, `part3/` side rule, `part4/` shape rule); the star lean it found is fixed by lever T
 ([nfl-ship15-recovery.md §11](nfl-ship15-recovery.md)).
 
-- Decisions the lane took (owner, 2026-10-17; commits `9a0ea6bb`, `ff7fc5e2`): the story floor
-  `menu._MENU_EDGE_FLOOR` is 0.03 (option B) while `realized.RECOMMENDED_EDGE_MIN` stays 0.05, so the
-  Receipts cohort and the paper ledger's even-pick bettor keep one rule (`test_realized_by_side.py` pins
-  the split; coupling them later is one constant plus a restored equality pin); an Over leads only a
+- Decisions the lane took (owner, 2026-10-17; commits `9a0ea6bb`, `ff7fc5e2`): the story floor was
+  set at 0.03 (option B) while `realized.RECOMMENDED_EDGE_MIN` stays 0.05, so the Receipts cohort and
+  the paper ledger's even-pick bettor keep one rule (the story menu has since lost its floor: it ranks
+  by the fitted number, [profit-engine.md](profit-engine.md) §5.3); an Over leads only a
   shootout or a blowout (`lead.OVER_LEAD_SHAPES`). Cost read behind the floor (production history 09-16
   to 10-15, Kelly > 0, day-block CIs): the 0.03–0.05 band returned −8.7 % per pick [−13.0, −3.9] on
   1,545 legs against −9.0 % [−12.8, −5.5] for the ≥ 0.05 band on 4,648; no band makes money, so the
@@ -1265,8 +1267,9 @@ stays as the promotion bar; (b) open, option A, a no-lead Tonight card, whose
 headline is the game's shape and quotes no bet when no story row of the game has `lead_side == "Over"`
 (10 of 29 cards on 10-08, 7 of 31 on 10-15, 3 of 31 on 10-16; cost none in money; recipe: the
 headline branch of `dashboard/surfaces/tonight.py` with its own bank line). The lane's third ask, the
-star-lean lever, closed with lever T on 2026-10-18. Not asked because no change is proposed: the parlay floor
-(`_MODEL_EV_FINAL_FLOOR` = 2.0; no setting tested returns $1 per $1 while the legs are over-read).
+star-lean lever, closed with lever T on 2026-10-18. Not asked because no change was proposed: the parlay floor
+(2.0 on the claimed value; no setting tested returned $1 per $1 while the legs are over-read), which the
+profit-engine lane has since removed ([profit-engine.md](profit-engine.md) §5.3).
 
 The owner's own, no answer needed:
 

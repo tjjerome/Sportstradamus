@@ -195,7 +195,9 @@ inference-path compatibility checklist in
   (`_KELLY_BANKROLL_FRACTION`, inside `_evaluate_parlay`) with
   `strategies/kelly.py::fractional_kelly_stake` conventions (shrinkage
   blend + cap, already used downstream in `underdog_pickem.py`) — highest
-  live-money audit finding. Done in this stage: `_parlay_kelly_units` (`b9f8a95e`).
+  live-money audit finding. Done in this stage (`b9f8a95e`); the profit-engine lane has since
+  retired the entry stake with the claimed number it sized on
+  ([profit-engine.md](profit-engine.md) §5.3).
 - **Entry:** stage 0 complete; the Flex half also waited on the §3.1 protocol.
 - **Scope:** `sportstradamus.prediction.parlay` + `payouts.py` + their golden
   tests.
