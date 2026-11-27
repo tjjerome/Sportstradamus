@@ -154,7 +154,6 @@ def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
 
 
 def construct_entries(
-    bankroll: Decimal,
     config: PickemConfig | None = None,
     *,
     parlay_dfs: dict[str, pd.DataFrame] | None = None,
@@ -259,7 +258,6 @@ def live_load(
 
 @click.command()
 @click.option("--date", default="today", help="Slate date (YYYY-MM-DD or 'today').")
-@click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
 @click.option(
     "--platform",
     type=click.Choice(["Underdog", "Sleeper"], case_sensitive=False),
@@ -274,17 +272,17 @@ def live_load(
     default=None,
     help="Override output YAML path.",
 )
-def pickem_build(date: str, bankroll: str, platform: str, out_path: str | None) -> None:
+def pickem_build(date: str, platform: str, out_path: str | None) -> None:
     """Build today's Pick'em entries for ``platform`` and emit recommendations YAML."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     config = PickemConfig()
-    entries = construct_entries(Decimal(bankroll), config, platform=platform)
+    entries = construct_entries(config, platform=platform)
     target = (
         Path(out_path)
         if out_path
         else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}_{platform.lower()}.yaml"
     )
-    path = emit_yaml(entries, slate_date, Decimal(bankroll), config, target)
+    path = emit_yaml(entries, slate_date, config, target)
     click.echo(f"wrote {len(entries)} entries -> {path}")
 
 

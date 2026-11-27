@@ -8,7 +8,6 @@ the strategies subpackage.
 from __future__ import annotations
 
 import datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,7 +38,6 @@ def rank_and_dedupe(
 def emit_yaml(
     entries: list[RecommendedEntry],
     date: datetime.date,
-    bankroll: Decimal,
     config: PickemConfig,
     out_path: Path,
 ) -> Path:
@@ -48,7 +46,6 @@ def emit_yaml(
     payload = {
         "generated_at": datetime.datetime.now().isoformat(),
         "date": date.isoformat(),
-        "bankroll": str(bankroll),
         "config": {
             "min_model_edge": config.min_model_edge,
             "min_sharp_edge": config.min_sharp_edge,

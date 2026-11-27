@@ -76,12 +76,7 @@ def _platform_candidates(
     ``offers_df``. Do not call construct_entries without parlay_dfs here -- that would
     trigger a second, redundant scrape for whichever platform it's called under.
     """
-    entries = construct_entries(
-        _ledger_selection.BANKROLL_PER_REPLICATE,
-        _SHARED_CONFIG,
-        parlay_dfs=parlay_dfs,
-        platform=platform,
-    )
+    entries = construct_entries(_SHARED_CONFIG, parlay_dfs=parlay_dfs, platform=platform)
     same_game = _partition_by_size_rule(
         [_ledger_selection.from_recommended_entry(e) for e in entries]
     )

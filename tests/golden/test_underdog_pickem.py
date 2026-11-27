@@ -189,7 +189,7 @@ def test_entry_hit_chance_and_value_come_from_the_rows_fitted_ev():
         "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], ev=0.90, model_ev=1.50, payout=6.0)])
     }
 
-    (entry,) = construct_entries(Decimal("500"), cfg, parlay_dfs=parlay_dfs)
+    (entry,) = construct_entries(cfg, parlay_dfs=parlay_dfs)
 
     assert entry.payout_multiplier == 6.0
     assert entry.joint_prob == pytest.approx(0.15)
@@ -210,9 +210,7 @@ def test_a_board_with_every_entry_under_one_still_yields_entries_and_stakes_none
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3", "F4", "F5"], ev=0.79, model_ev=0.79)]),
     }
 
-    out = construct_entries(
-        Decimal("500"), PickemConfig(entry_sizes=(2, 3, 5)), parlay_dfs=parlay_dfs
-    )
+    out = construct_entries(PickemConfig(entry_sizes=(2, 3, 5)), parlay_dfs=parlay_dfs)
 
     assert [round(e.ev, 2) for e in out] == [-0.07, -0.12, -0.21]
     assert all(e.recommended_stake == Decimal("0") for e in out)
@@ -234,7 +232,6 @@ def test_construct_entries_both_variants():
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3)]),
     }
     out = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
     )
@@ -254,7 +251,6 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path):
     )
     parlay_dfs = {"power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5)])}
     entries = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
     )
@@ -262,10 +258,9 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path):
 
     yaml = pytest.importorskip("yaml")
     out_path = tmp_path / "rec.yaml"
-    emit_yaml(entries, datetime.date(2026, 5, 8), Decimal("500"), cfg, out_path)
+    emit_yaml(entries, datetime.date(2026, 5, 8), cfg, out_path)
     payload = yaml.safe_load(out_path.read_text())
     assert payload["date"] == "2026-05-08"
-    assert payload["bankroll"] == "500"
     assert payload["entries"][0]["contest_variant"] == "power"
     assert payload["entries"][0]["entry_size"] == 3
     # Display legs are rendered from the canonical ``legs`` records via
@@ -299,7 +294,6 @@ def test_dedupe_max_overlap():
         )
     }
     out = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
     )
@@ -343,7 +337,7 @@ def test_entry_carries_the_product_of_its_pair_modifiers():
         )
     }
 
-    (entry,) = construct_entries(Decimal("500"), cfg, parlay_dfs=parlay_dfs)
+    (entry,) = construct_entries(cfg, parlay_dfs=parlay_dfs)
 
     assert entry.pair_modifier == pytest.approx(0.72)
 
@@ -367,7 +361,6 @@ def test_construct_entries_sleeper_platform():
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3, platform="Sleeper")]),
     }
     out = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
         platform="Sleeper",
@@ -406,7 +399,6 @@ def test_construct_entries_sleeper_push_case_sizes():
         ),
     }
     out = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
         platform="Sleeper",
@@ -431,7 +423,6 @@ def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
         "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5, platform=platform)])
     }
     entries = construct_entries(
-        Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
         platform=platform,
@@ -441,7 +432,7 @@ def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
 
     yaml = pytest.importorskip("yaml")
     out_path = tmp_path / "rec.yaml"
-    emit_yaml(entries, datetime.date(2026, 5, 8), Decimal("500"), cfg, out_path)
+    emit_yaml(entries, datetime.date(2026, 5, 8), cfg, out_path)
     payload = yaml.safe_load(out_path.read_text())
     assert payload["entries"][0]["platform"] == platform
     assert all(payload["entries"][0]["legs"])
