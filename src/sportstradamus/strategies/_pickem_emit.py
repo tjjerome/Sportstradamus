@@ -55,8 +55,6 @@ def emit_yaml(
             "contest_variants": list(config.contest_variants),
             "top_k": config.top_k,
             "max_overlap": config.max_overlap,
-            "kelly_fraction": config.kelly_fraction,
-            "max_stake_pct_bankroll": config.max_stake_pct_bankroll,
         },
         "entries": [
             {

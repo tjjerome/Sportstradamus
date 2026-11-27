@@ -16,6 +16,7 @@ import pytest
 from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
 from sportstradamus.strategies import _ledger_cross_game as xg
+from sportstradamus.strategies._ledger_selection import FLAT_STAKE
 from sportstradamus.strategies.underdog_pickem import PickemConfig
 
 DATE = datetime.date(2026, 7, 12)
@@ -251,11 +252,12 @@ def test_price_combo_flex_loss_tier_pays_on_the_largest_remaining_multipliers() 
     assert ev_payout == pytest.approx(8.64 / 16 + 2.1 * 4 / 16, abs=0.05)
 
 
-def test_candidate_is_sized_on_its_all_hit_payout_and_its_priced_ev() -> None:
+def test_candidate_is_recorded_on_its_all_hit_payout_and_its_priced_ev() -> None:
     """Four 0.60 picks on Underdog's 4-pick Flex, one of them at 1.25x. All four hit
-    13% of the time, and 13% of the bare 7.2 tier is under a dollar back, so a stake
-    sized on that is nothing. The entry pays 7.2 * 1.25 = 9 when all four hit and is
-    worth holding for its one-miss tier; the stake has to see both."""
+    13% of the time, and 13% of the bare 7.2 tier is under a dollar back, so a Kelly
+    stake sized on that is nothing. The entry pays 7.2 * 1.25 = 9 when all four hit and
+    is worth holding for its one-miss tier; the record kelly_growth sizes on has to see
+    both."""
     offers = _offers_df(
         [
             _offer_row(f"Player {i}", f"G{i}A/G{i}B", market_prob=0.58, boost=boost)
@@ -269,7 +271,7 @@ def test_candidate_is_sized_on_its_all_hit_payout_and_its_priced_ev() -> None:
     assert four_leg.payout_multiplier == pytest.approx(9.0)
     assert four_leg.joint_prob * four_leg.payout_multiplier == pytest.approx(four_leg.ev + 1)
     assert four_leg.joint_prob > 0.6**4
-    assert four_leg.stake > 0
+    assert four_leg.stake == FLAT_STAKE
 
 
 def test_canonical_legs_carry_each_picks_own_multiplier() -> None:
@@ -440,7 +442,7 @@ def test_even_pick_candidate_is_staked_and_pays_its_sizes_table_tier() -> None:
     assert {c.entry_size for c in candidates} == {2, 3, 4}
     for candidate in candidates:
         assert candidate.payout_multiplier == pytest.approx(underdog_curve[candidate.entry_size][0])
-        assert candidate.stake > 0
+        assert candidate.stake == FLAT_STAKE
 
 
 # --- even picks: the slate date's legs, dealt evenly ------------------------------
@@ -603,3 +605,16 @@ def test_leg_without_a_fitted_chance_never_enters_a_candidate(build) -> None:
 
     assert {c.entry_size for c in candidates} == {2, 3}
     assert all("One Side" not in c.players for c in candidates)
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_every_candidate_is_staked_flat_though_worth_less_than_its_stake(build) -> None:
+    """Kelly stakes nothing on an entry worth less than its stake, and every entry on this
+    board is. The flat stake records them all the same."""
+    offers = _offers_df([_offer_row(f"Player {i}", f"G{i}A/G{i}B", fit_prob=0.5) for i in range(3)])
+
+    candidates = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+
+    assert candidates
+    assert all(c.ev < 0 for c in candidates)
+    assert {c.stake for c in candidates} == {FLAT_STAKE}

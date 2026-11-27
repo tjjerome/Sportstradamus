@@ -22,7 +22,6 @@ import pandas as pd
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
-from sportstradamus.strategies.kelly import DEFAULT_KELLY_FRACTION, MAX_FRACTION_OF_BANKROLL
 
 if TYPE_CHECKING:
     from sportstradamus.stats import Stats
@@ -42,8 +41,6 @@ class PickemConfig:
     contest_variants: tuple[str, ...] = ("power", "flex")
     top_k: int = 20
     max_overlap: int = 2
-    kelly_fraction: float = DEFAULT_KELLY_FRACTION
-    max_stake_pct_bankroll: float = MAX_FRACTION_OF_BANKROLL
 
 
 @dataclass(frozen=True)

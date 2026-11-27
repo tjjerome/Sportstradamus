@@ -21,7 +21,6 @@ import datetime
 import hashlib
 import math
 from dataclasses import dataclass
-from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -34,12 +33,7 @@ from sportstradamus.prediction.payouts import (
     payout_curve_for,
 )
 from sportstradamus.realized import recommended
-from sportstradamus.strategies._ledger_selection import (
-    BANKROLL_PER_REPLICATE,
-    LedgerCandidate,
-    _entropy_from,
-)
-from sportstradamus.strategies.kelly import fractional_kelly_stake
+from sportstradamus.strategies._ledger_selection import FLAT_STAKE, LedgerCandidate, _entropy_from
 from sportstradamus.strategies.underdog_pickem import PickemConfig, filter_legs
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
@@ -185,7 +179,7 @@ def _priced_candidates(
     run_slot: str,
     platform: str,
 ) -> list[LedgerCandidate]:
-    """A sized candidate per combo that clears ``config.min_ev`` on ``platform``'s pooled curve."""
+    """A flat-staked candidate per combo at or above ``config.min_ev`` on the pooled curve."""
     rng = _pricing_rng(date, run_slot)
     by_idx = {leg.idx: leg for leg in legs}
 
@@ -198,20 +192,12 @@ def _priced_candidates(
             ev = ev_payout - 1.0
             if ev < config.min_ev:
                 continue
-            # Sized, ranked and recorded as a same-game entry is
+            # Ranked, recorded and sized by kelly_growth as a same-game entry is
             # (underdog_pickem._row_to_entry): on what the entry pays when every pick
             # hits, and the win probability that payout makes worth the priced EV. The
             # all-hit probability on the bare table tier is blind to the pick multipliers
             # and the flex loss tiers, and sizes most flex entries to nothing.
             payout_mult = table_tier * math.prod(leg.boost for leg in combo_legs)
-            joint_prob = ev_payout / payout_mult
-            stake = fractional_kelly_stake(
-                bankroll=BANKROLL_PER_REPLICATE,
-                win_prob=joint_prob,
-                payout_multiplier=Decimal(repr(payout_mult)),
-                fraction=config.kelly_fraction,
-                max_fraction_of_bankroll=config.max_stake_pct_bankroll,
-            )
             games = {leg.game for leg in combo_legs}
             out.append(
                 LedgerCandidate(
@@ -224,10 +210,10 @@ def _priced_candidates(
                     canonical_legs=tuple(leg.canonical_leg for leg in combo_legs),
                     players=frozenset(leg.player for leg in combo_legs),
                     game_span=len(games),
-                    joint_prob=joint_prob,
+                    joint_prob=ev_payout / payout_mult,
                     payout_multiplier=payout_mult,
                     ev=ev,
-                    stake=stake,
+                    stake=FLAT_STAKE,
                     platform=platform,
                     lines=tuple(leg.line for leg in combo_legs),
                     model_probs=tuple(leg.fit_prob for leg in combo_legs),

@@ -345,6 +345,22 @@ def test_committed_record_carries_pair_modifier_and_each_legs_raw_multiplier() -
     assert [leg["boost"] for leg in record["canonical_legs"]] == [0.87, 1.16]
 
 
+def test_a_same_game_entry_is_staked_flat_though_pickem_stakes_it_nothing() -> None:
+    entry = RecommendedEntry(
+        id="entry-4",
+        contest_variant="power",
+        entry_size=2,
+        legs=("Player A Over 4.5 rebounds - 60.0%, 1.6x",),
+        joint_prob=0.25,
+        payout_multiplier=3.5,
+        ev=-0.125,
+        recommended_stake=Decimal("0"),
+        canonical_legs=(_canonical_leg("Player A"),),
+    )
+
+    assert from_recommended_entry(entry).stake == _ledger_selection.FLAT_STAKE == Decimal("25.00")
+
+
 def test_from_recommended_entry_carries_pair_modifier() -> None:
     entry = RecommendedEntry(
         id="entry-3",

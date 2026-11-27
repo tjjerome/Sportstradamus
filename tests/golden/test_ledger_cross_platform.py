@@ -90,12 +90,17 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
     )
 
 
+def _no_offers() -> pd.DataFrame:
+    """A board with no offers, carrying the columns the ledger's builders read."""
+    return pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
+
+
 # --- build_candidate_universe combines both platforms' scrapes -----------------
 
 
 def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
     def _fake_live_load(config, platform, stats):
-        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
+        return {}, _no_offers()
 
     def _fake_construct_entries(config, *, parlay_dfs, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
@@ -142,7 +147,7 @@ def test_build_candidate_universe_loads_the_leagues_once_for_both_platforms(monk
 
     def _fake_live_load(config, platform, stats):
         handed.append(stats)
-        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
+        return {}, _no_offers()
 
     monkeypatch.setattr("sportstradamus.stats.load_live_leagues", _load_live_leagues)
     monkeypatch.setattr(ledger, "live_load", _fake_live_load)
@@ -262,6 +267,55 @@ def test_shared_universe_is_every_candidate_whatever_its_multipliers(monkeypatch
     multipliers = {leg["boost"] for c in pools["safe"] for leg in c.canonical_legs}
     assert {0.87, 0.9, 1.0, 1.1, 1.2} <= multipliers
     assert "Sleeper" in {c.platform for c in pools["safe"]}
+
+
+# --- stakes: flat but for kelly_growth, which waits for a value above one --------
+
+
+def _one_entry_a_platform(monkeypatch, evs: dict[str, float]) -> None:
+    """Fake the league load and ``live_load``: each platform's board is one same-game entry
+    valued at its ``evs`` figure, and no offer."""
+
+    def _live_load(config, platform, stats):
+        parlay = _same_game_parlay((f"{platform} A", f"{platform} B"), (1.0, 1.0), platform)
+        parlays = pd.DataFrame([parlay | {"EV": evs[platform]}])
+        return {"power": parlays, "flex": pd.DataFrame()}, _no_offers()
+
+    monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
+    monkeypatch.setattr(ledger, "live_load", _live_load)
+
+
+def test_personas_commit_the_flat_stake_while_kelly_growth_waits_for_a_value_above_one(
+    monkeypatch, tmp_path
+) -> None:
+    """Every entry on the board is worth less than its stake. Kelly stakes nothing on such
+    an entry, so kelly_growth commits nothing; the other personas commit each entry at the
+    flat stake, and a silent persona or an empty pool is no error."""
+    _redirect_store(monkeypatch, tmp_path)
+    _one_entry_a_platform(monkeypatch, {"Underdog": 0.95, "Sleeper": 0.90})
+
+    assert ledger.run_commit(DATE, "morning") > 0
+
+    records = ledger._ledger_store.read_records(DATE)
+    assert {rec["persona"] for rec in records} == {"safe", "high_ev"}
+    assert {rec["stake"] for rec in records} == {str(_ledger_selection.FLAT_STAKE)}
+
+
+def test_kelly_growth_sizes_an_entry_whose_fitted_value_clears_one(monkeypatch, tmp_path) -> None:
+    """Underdog's entry is worth a cent more than its stake: kelly_growth commits it at the
+    joint Kelly portfolio's stake, under the flat one, and leaves Sleeper's alone."""
+    _redirect_store(monkeypatch, tmp_path)
+    _one_entry_a_platform(monkeypatch, {"Underdog": 1.01, "Sleeper": 0.90})
+
+    ledger.run_commit(DATE, "morning")
+
+    kelly_growth = [
+        rec for rec in ledger._ledger_store.read_records(DATE) if rec["persona"] == "kelly_growth"
+    ]
+    assert kelly_growth
+    assert {rec["platform"] for rec in kelly_growth} == {"Underdog"}
+    for rec in kelly_growth:
+        assert Decimal("0") < Decimal(rec["stake"]) < _ledger_selection.FLAT_STAKE
 
 
 # --- run_commit draws from one shared pool/budget per persona ------------------

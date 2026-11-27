@@ -20,6 +20,7 @@ from decimal import Decimal
 import numpy as np
 
 from sportstradamus.strategies import _ledger_store
+from sportstradamus.strategies.kelly import MAX_FRACTION_OF_BANKROLL
 from sportstradamus.strategies.underdog_pickem import RecommendedEntry, leg_player
 
 LEDGER_REPLICATES: int = 40
@@ -39,6 +40,11 @@ DRAW_CONTINUE_PROB: float = 0.75  # stop-after-each-draw probability -- named v1
 MAX_ENTRIES_PER_DAY: int = 5
 KELLY_GROWTH_FRACTION: float = 0.25
 BANKROLL_PER_REPLICATE: Decimal = Decimal("5000")
+# What every persona but kelly_growth stakes on an entry: the cap v4's Kelly stakes were
+# clipped at. Kelly on a fitted value under 1 stakes nothing, so it would record nothing.
+FLAT_STAKE: Decimal = (BANKROLL_PER_REPLICATE * Decimal(repr(MAX_FRACTION_OF_BANKROLL))).quantize(
+    Decimal("0.01")
+)
 
 
 @dataclass(frozen=True)
@@ -85,7 +91,7 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
         joint_prob=entry.joint_prob,
         payout_multiplier=entry.payout_multiplier,
         ev=entry.ev,
-        stake=entry.recommended_stake,
+        stake=FLAT_STAKE,
         platform=entry.platform,
         pair_modifier=entry.pair_modifier,
     )

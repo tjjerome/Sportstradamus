@@ -38,8 +38,6 @@ _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
     contest_variants=("power", "flex"),
     min_ev=0.05,
-    kelly_fraction=0.25,
-    max_stake_pct_bankroll=0.005,
     top_k=100,
     max_overlap=2,
 )
