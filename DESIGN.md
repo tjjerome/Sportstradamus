@@ -137,13 +137,13 @@ Altair / Vega-Lite inherit these automatically.
 
 ## 4a. Signature element — the constellation
 
-Correlation rendered as a star map, and the slip editor's primary control. The game's
-strongest legs are its stars — the rest wait behind the *deeper* lens — each **filled with its
-team's color** (the two sides of the matchup read at a glance) and **sized by its model edge**
-(the strongest legs read biggest). The map is **static per game** — its stars are the top
-`DEFAULT_STARS` model-liked legs by edge, with both teams represented and at most
-`MAX_PER_PLAYER` per player, fixed in place; a slip leg beyond that cut still burns as a star,
-in the place the deeper lens would give it; selecting a leg never re-deals the map — the mains
+Correlation rendered as a star map, and the slip editor's primary control. The game's picks
+(the legs the board picks by `EV`) are its stars — the rest wait behind the *deeper* lens — each
+**filled with its team's color** (the two sides of the matchup read at a glance) and **sized by
+its `EV`** between the lowest and the highest drawn (the strongest picks read biggest). The map
+is **static per game** — its stars are the top `DEFAULT_STARS` picks by `EV`, with both teams
+represented and at most `MAX_PER_PLAYER` per player, fixed in place; a slip leg beyond that
+cut still burns as a star, in the place the deeper lens would give it; selecting a leg never re-deals the map — the mains
 hold and every other star keeps the main it orbits, and only the picked star's own glyph, grown
 to full size, can nudge whoever it touches. A leg in the slip burns at **full color and
 opacity**; a candidate is the same color
@@ -175,8 +175,8 @@ constellation's own footprint — and tapping one adds it as a satellite. The *d
 in the game's remaining legs as smaller stars inside the constellation, each beside the main star
 it correlates with (or in its team's open space), with its ties drawn; main stars never move for
 the deeper lens, and the wider lens only recedes the whole map a little to make room. Within a
-lens tier, size and opacity both scale with edge (a model-passed leg sits at the floor); every
-lens star stays under the main-star floor, and a slip leg still burns at full opacity above any
+lens tier, size and opacity both scale with `EV` (a leg the fit did not price sits at the
+floor); every lens star stays under the main-star floor, and a slip leg still burns at full opacity above any
 lens star. Both lenses scatter by seeded draw, never a grid and never a ring.
 In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
 read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and

@@ -63,11 +63,11 @@ into **Games** and the Pick'em tab retired, both owner-approved during the build
 
 | Surface | Job | Key content |
 |---|---|---|
-| **Tonight** (home) | "What's on tonight?" | Nebula game cards: matchup, tip-off urgency, the story engine's `game_headline` (the lead story's, quoted, with no side mark), best edge vs the DFS payout, model-liked leg count. Cards sort urgent first, then by the game's star prominence (per-league normalized), then favored-leg count, then tip-off. Click → Games. |
-| **Board** | Cross-game shopping | Every offer in the Obsidian AG Grid (phone: card list): `Move` line-movement spark, Win %, Model Edge, Consensus Edge, Kelly; prophecy lenses (Sharp / Longshots / Contrarian / Consensus); "+ slip" per row; detail dialog. |
+| **Tonight** (home) | "What's on tonight?" | Nebula game cards: matchup, tip-off urgency, the story engine's `game_headline` (the lead story's, quoted, with no side mark), a "+EV" badge when one of the game's legs wears the mark (else the game's top EV), the game's pick count. Cards sort urgent first, then by the star prominence of the game's picks (per-league normalized), then pick count, then tip-off. Click → Games. |
+| **Board** | Cross-game shopping | Every offer in the Obsidian AG Grid (phone: card list), ranked by EV: `Move` line-movement spark, Win % and EV (the fit) beside Model win % and Model EV (the model's claim), Consensus Edge; prophecy lenses (Picks, the default / All / Tonight / Sharp edges / Longshots / Contrarian / Consensus); the picks' record per league and kind; "+ slip" per row; detail dialog. |
 | **Games** | One matchup, fully told — and the slip editor | Platform + game picker → Total / Spread / Shape hero, the story menu (≤ 5 stories × Bankroll Builder / Shoot the Moon; opens on the slate's lead story, each labelled "Over-led · " / "Under-led · "), the constellation (click or tap stars to build; deeper / wider lenses; hover card with last five + movement), satellite and disliked-leg pickers, legs panel, Lock it in. |
 | **Receipts** | Prove it | Every number prices posted sides at the platform payout (`realized.settled_offers`), a prop whose line moved counted once for games from 2026-10-09. Hero: the model's recommended legs (edge ≥ 5% at the payout, payout ≤ 2.5×) — ROI / hit / model read / breakeven / avg payout / record — over an all-posted context row. Skeptic checks: CLV beat rate, Brier vs book, worst month (losers shown, never hidden). Realized-by-side panel (league / platform / cell / quote splits, edge captured), reliability panel by cohort, rolling accuracy against breakeven, precomputed strategy-sim grid + live Customize, **your slips** graded nightly. |
-| **Model Lab** (Diagnostics · Correlations · Training · Modifiers) | How the sausage is made | Per-cell health (model_stats + live metrics + lifecycle), calibration/diagnostics, correlation heatmap from `corr_market_summary`, gate matrix, the modifier reconciler; deep-link target from every "market trust" line. |
+| **Model Lab** (Diagnostics · EV Fit · Correlations · Training · Modifiers) | How the sausage is made | Per-cell health (model_stats + live metrics + lifecycle), calibration/diagnostics, the fit behind EV and every play's record (EV Fit), correlation heatmap from `corr_market_summary`, gate matrix, the modifier reconciler; deep-link target from every "market trust" line. |
 
 Global chrome: sport switch (All · WNBA · MLB · NBA · NFL · NHL) filters every surface; the slip
 rail is mounted on every page.
@@ -81,7 +81,15 @@ Shows, live, per edit: platform toggle (Underdog | Sleeper) · legs with remove 
 auto play-type chip (2–3 → Power, 4+ → Flex) · independent joint
 probability (∏p) **and** correlation-adjusted joint probability (Gaussian copula over the
 per-game correlation slices; cross-game pairs ρ=0) · payout multiplier (platform + play type +
-leg count) · EV · fractional-Kelly stake from a bankroll input. Money is `Decimal`.
+leg count) · EV, with Model EV beside it · fractional-Kelly stake from a bankroll input. Money
+is `Decimal`. EV, both joints and the stake read the legs' fitted chances; Model EV prices the
+model's own chances the same way, and the stake is zero unless EV clears 1. A priced Power or
+Max slip adds the payout it breaks even at ("worth a bet if the app pays at least 4.10x (we
+assume 3.50x)", `1 / joint`), for the owner to hold the app's real payout against; with two
+legs from one game it adds that the value is unproven until that check, since the app cuts a
+same-game entry by its own read of how the picks hit together. A slip holding a leg the fit did
+not price names that leg (only one side of it is posted) and shows its Model EV alone: no
+joint, no dials, stake 0; it can still be locked.
 
 Save slip → `data/runtime/user_slips.parquet`; `reflect` grades pending slips nightly; graded
 slips appear on Receipts ("your record vs the model's"). Both platforms price off a real pooled
@@ -100,7 +108,8 @@ legs, and the constellation puts an orange × on every star the platform won't p
 
 **Deep-dive dialog v2** (row click anywhere; keeps today's three tabs, adds the case):
 
-- Header: headshot, jersey number, team colors, market + line + platform + edge badge.
+- Header: headshot, jersey number, team colors, market + line + platform + EV badge (EV and
+  win chance over the model's own; "No EV" on a leg the fit did not price).
 - **Projected distribution** — the existing density/PMF chart with line marker, over/under
   shading, P(over) annotation. Unchanged math, restyled.
 - **Stat chips** — the inputs that feed the projection (Avg L5, Avg H2H, DVPOA, game total,
@@ -113,7 +122,9 @@ legs, and the constellation puts an orange × on every star the platform won't p
   disagreement).
 - **Market trust** — this market's live 30-day record (`live_metrics_per_market.parquet`
   precision for the bet side) + deep link to its Model Lab cell page.
-- **Pairs well with** — top correlated legs with ρ badges; add-to-slip inline.
+- **Pairs well with** (the Correlated tab) — the offer's correlated same-team and opponent
+  legs, each side's best few by the pair's EV (Model EV beside it); a partner the platform
+  refuses or the fit did not price is left out; view and add-to-slip inline.
 - **Movement** tab — the app's posted line and its price-blended fair line over time
   (`current_line_movement.parquet`).
 
