@@ -97,14 +97,6 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
     )
 
 
-def ev_per_dollar(candidate: LedgerCandidate) -> float:
-    """Mirrors _pickem_emit.rank_and_dedupe's ranking key exactly (that file
-    is untouched -- this is an independent, intentional re-derivation so the
-    personas below share one formula instead of a copy each).
-    """
-    return (candidate.ev * candidate.joint_prob) / float(max(candidate.stake, Decimal("0.01")))
-
-
 def _entropy_from(date: datetime.date, run_slot: str, salt: str = "replicates") -> int:
     """Deterministic entropy int from (date, run_slot[, salt]). sha256 (not
     Python's salted hash()) is what makes this reproducible across separate
@@ -196,15 +188,16 @@ def draw_entries(
     return chosen
 
 
-# kelly_growth's scorer is a draw-order proxy only -- actual sizing for this
-# persona comes from a portfolio solve elsewhere (ledger._resize_kelly_growth),
-# not from this score. even_picks ranks like high_ev; what sets it apart is its
-# pool (ledger.build_candidate_universe), Underdog entries of even picks alone.
+# safe ranks by an entry's hit chance; every other persona by its fitted value, as pick'em
+# ranks its entries (_pickem_emit.rank_and_dedupe). kelly_growth's rank is a draw order
+# only: its stakes come from a portfolio solve (ledger._resize_kelly_growth). even_picks
+# ranks like high_ev; what sets it apart is its pool (ledger.build_candidate_universe),
+# Underdog entries of even picks alone.
 PERSONA_SCORERS: dict[str, Callable[[LedgerCandidate], float]] = {
     "safe": lambda c: c.joint_prob,
-    "high_ev": ev_per_dollar,
-    "kelly_growth": ev_per_dollar,
-    "even_picks": ev_per_dollar,
+    "high_ev": lambda c: c.ev,
+    "kelly_growth": lambda c: c.ev,
+    "even_picks": lambda c: c.ev,
 }
 
 

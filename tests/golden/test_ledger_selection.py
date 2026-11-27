@@ -154,21 +154,23 @@ def test_even_picks_draws_last_on_the_shared_stream() -> None:
     assert set(sel.PERSONA_SCORERS) == set(sel.PERSONAS)
 
 
-def test_even_picks_ranks_candidates_as_high_ev_does() -> None:
-    """EV per dollar staked, not hit probability: its top candidate here is the long
-    shot ``safe`` ranks last."""
+def test_safe_ranks_by_hit_chance_and_every_other_persona_by_fitted_value() -> None:
+    """With no entry worth its stake, EV per dollar times the hit chance ranked the likely
+    entry below the long shot worth less; every persona but safe now ranks by the value
+    itself, as pick'em ranks its entries."""
     candidates = [
-        _candidate("likely", frozenset({"A"}), joint_prob=0.60, ev=0.06, stake=Decimal("20")),
-        _candidate("middle", frozenset({"B"}), joint_prob=0.40, ev=0.20, stake=Decimal("20")),
-        _candidate("long_shot", frozenset({"C"}), joint_prob=0.20, ev=0.90, stake=Decimal("10")),
+        _candidate("likely", frozenset({"A"}), joint_prob=0.50, ev=-0.05),
+        _candidate("best", frozenset({"B"}), joint_prob=0.05, ev=-0.02),
+        _candidate("long_shot", frozenset({"C"}), joint_prob=0.10, ev=-0.20),
     ]
 
-    even_picks = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["even_picks"])
-    high_ev = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["high_ev"])
-    safe = sel._percentile_scores(candidates, sel.PERSONA_SCORERS["safe"])
+    ranks = {
+        persona: sel._percentile_scores(candidates, sel.PERSONA_SCORERS[persona]).tolist()
+        for persona in sel.PERSONAS
+    }
 
-    assert even_picks.tolist() == high_ev.tolist() == [0.0, 0.5, 1.0]
-    assert safe.tolist() == [1.0, 0.5, 0.0]
+    assert ranks.pop("safe") == [1.0, 0.0, 0.5]
+    assert all(rank == [0.5, 1.0, 0.0] for rank in ranks.values())
 
 
 # --- remaining budget / seen players / kelly fraction --------------------------
