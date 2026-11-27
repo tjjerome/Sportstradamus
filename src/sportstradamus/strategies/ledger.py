@@ -1,17 +1,17 @@
 """Twice-daily commit orchestrator for the simulated-bettor ledger.
 
-Implements ``docs/handoffs/sim-bettor-ledger.md`` §10: builds the shared
-same-game + cross-game candidate universe once per run -- one live scrape per
-platform (Underdog and Sleeper), combined into a single pool, plus two
-personas' own pools: ``even_picks``'s, cross-game entries of the Underdog even
-picks the product recommends, and ``ev_picks``'s, cross-game entries dealt
-evenly over each platform's picks -- then draws and sizes entries for each
-persona × 40 Monte-Carlo replicates and appends them to the append-only JSONL
-ledger. Pure orchestration over
-:mod:`sportstradamus.strategies._ledger_selection`,
+Implements ``docs/handoffs/sim-bettor-ledger.md`` §10. Each run builds the candidate pools
+once: one live scrape per platform (Underdog and Sleeper) feeds a shared pool of same-game and
+cross-game entries, and two personas get pools of their own -- ``even_picks``'s, cross-game
+entries of the Underdog even picks the product recommends, and ``ev_picks``'s, cross-game
+entries dealt evenly over each platform's picks. Every persona then draws from its pool on each
+Monte-Carlo replicate, and the entries are appended to the append-only JSONL ledger. Every
+persona but ``kelly_growth`` stakes ``_ledger_selection.FLAT_STAKE``; ``kelly_growth``'s draw is
+re-sized by a portfolio solve.
+
+Pure orchestration over :mod:`sportstradamus.strategies._ledger_selection`,
 :mod:`sportstradamus.strategies._ledger_cross_game`, and
-:mod:`sportstradamus.strategies._ledger_store` — no selection/pricing logic
-lives here.
+:mod:`sportstradamus.strategies._ledger_store`: no selection or pricing logic lives here.
 """
 
 from __future__ import annotations
@@ -25,7 +25,9 @@ import pandas as pd
 
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.helpers.provenance import git_sha
+from sportstradamus.prediction.payouts import POWER_MAX_SIZE, UNDERDOG_FLEX_CAP
 from sportstradamus.strategies import _ledger_cross_game, _ledger_selection, _ledger_store
+from sportstradamus.strategies._ledger_selection import LedgerCandidate
 from sportstradamus.strategies.kelly import KellyCandidate, joint_kelly_portfolio
 from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_entries, live_load
 
@@ -35,27 +37,27 @@ _logger = get_logger("ledger-commit")
 # bankrolls, so two rules are never pooled (docs/handoffs/sim-bettor-ledger.md §10).
 POLICY_VERSION = "policy_v5"
 
+# The variant split prediction.payouts prices: power takes 2 to POWER_MAX_SIZE legs, flex the
+# sizes above it up to UNDERDOG_FLEX_CAP. Sleeper's Max/Flex split mirrors it.
+_POWER_SIZES = tuple(range(2, POWER_MAX_SIZE + 1))
+_FLEX_SIZES = tuple(range(POWER_MAX_SIZE + 1, UNDERDOG_FLEX_CAP + 1))
+# Wider than the PickemConfig defaults ``bet pickem`` runs on: every size either variant pays,
+# and a top_k deep enough that the cut ahead of the size partition keeps the valid entries
+# (docs/handoffs/sim-bettor-ledger.md §10).
 _SHARED_CONFIG = PickemConfig(
-    entry_sizes=(2, 3, 4, 5, 6),
+    entry_sizes=_POWER_SIZES + _FLEX_SIZES,
     contest_variants=("power", "flex"),
     top_k=100,
     max_overlap=2,
 )
-_POWER_SIZES = frozenset({2, 3})
-_FLEX_SIZES = frozenset({4, 5, 6})
 _PLATFORMS: tuple[str, ...] = ("Underdog", "Sleeper")
 
 
-def _partition_by_size_rule(
-    candidates: list[_ledger_selection.LedgerCandidate],
-) -> list[_ledger_selection.LedgerCandidate]:
-    """§10's post-hoc partition on construct_entries's output, which searches
-    BOTH variants across the full entry_sizes tuple and needs this to discard
-    invalid combinations (e.g. a 5-leg "power" search hit). The cross-game
-    builder does NOT need this call -- its pooled payout curve already
-    encodes the same partition internally, so it never generates a combo this
-    would discard in the first place. Only apply this to construct_entries's
-    output, not to build_cross_game_candidates's output.
+def _partition_by_size_rule(candidates: list[LedgerCandidate]) -> list[LedgerCandidate]:
+    """Drop the entries whose size their variant does not pay, like a 5-leg ``power`` hit.
+
+    ``construct_entries`` searches both variants over every size, so its output needs this. The
+    cross-game and dealt builders set an entry's variant from its size, so theirs does not.
     """
     return [
         c
@@ -71,10 +73,10 @@ def _platform_candidates(
     date: datetime.date,
     run_slot: str,
     platform: str,
-) -> list[_ledger_selection.LedgerCandidate]:
-    """One platform's same-game entries off ``parlay_dfs`` plus cross-game combos of its
-    picks off ``offers_df``. Do not call construct_entries without parlay_dfs here -- that would
-    trigger a second, redundant scrape for whichever platform it's called under.
+) -> list[LedgerCandidate]:
+    """One platform's same-game entries off ``parlay_dfs`` plus cross-game combos of its picks.
+
+    ``construct_entries`` gets ``parlay_dfs`` so it does not scrape the platform a second time.
     """
     entries = construct_entries(_SHARED_CONFIG, parlay_dfs=parlay_dfs, platform=platform)
     same_game = _partition_by_size_rule(
@@ -88,19 +90,18 @@ def _platform_candidates(
 
 def build_candidate_universe(
     date: datetime.date, run_slot: str
-) -> dict[str, list[_ledger_selection.LedgerCandidate]]:
-    """One league load for the run and one live scrape per platform (via live_load), reused
-    by every candidate builder.
+) -> dict[str, list[LedgerCandidate]]:
+    """Build each persona's candidate pool from one league load and one scrape per platform.
+
+    ``live_load`` scrapes each platform once and every candidate builder reuses that scrape.
+    Every persona shares one universe except ``even_picks`` and ``ev_picks``, whose pools are
+    built beside it. ``even_picks``'s comes from Underdog's offers alone: cross-game entries of
+    the even picks the product recommends on ``date``'s games, whether or not the board picks
+    them. ``ev_picks``'s holds both platforms' picks on ``date``'s games, dealt into entries of
+    one platform each. No pool has a value floor: the personas' ranks choose among its entries.
 
     Returns:
-        The candidates each persona draws from, keyed by persona. Every persona
-        shares one universe except ``even_picks`` and ``ev_picks``, whose pools are
-        built beside it. ``even_picks``'s comes from Underdog's offers alone:
-        cross-game entries of the even picks the product recommends on ``date``'s
-        games, whether or not the board picks them. ``ev_picks``'s holds both
-        platforms' picks on ``date``'s games, dealt into entries of one platform
-        each. No pool has a value floor: the personas' ranks choose among its
-        entries.
+        The candidates each persona draws from, keyed by persona.
     """
     # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
     from sportstradamus.stats import load_live_leagues
@@ -108,9 +109,9 @@ def build_candidate_universe(
     # A league whose gamelog update failed is logged by the loader and sits this build
     # out; the board run of the same hour is what raises the alarm.
     stats, _ = load_live_leagues()
-    universe: list[_ledger_selection.LedgerCandidate] = []
-    even_picks_pool: list[_ledger_selection.LedgerCandidate] = []
-    ev_picks_pool: list[_ledger_selection.LedgerCandidate] = []
+    universe: list[LedgerCandidate] = []
+    even_picks_pool: list[LedgerCandidate] = []
+    ev_picks_pool: list[LedgerCandidate] = []
     for platform in _PLATFORMS:
         parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform, stats)
         universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
@@ -128,7 +129,7 @@ def build_candidate_universe(
 
 
 def _committed_record(
-    candidate: _ledger_selection.LedgerCandidate,
+    candidate: LedgerCandidate,
     *,
     date: datetime.date,
     run_slot: str,
@@ -168,13 +169,12 @@ def _committed_record(
 
 
 def _resize_kelly_growth(
-    drawn: list[_ledger_selection.LedgerCandidate], date: datetime.date, replicate_id: int
-) -> list[_ledger_selection.LedgerCandidate]:
-    """Re-solve ``joint_kelly_portfolio`` over the already-Jaccard-de-overlapped
-    ``drawn`` candidates, budgeted by the day's remaining Kelly fraction.
+    drawn: list[LedgerCandidate], date: datetime.date, replicate_id: int
+) -> list[LedgerCandidate]:
+    """Size ``drawn`` by one ``joint_kelly_portfolio`` solve on the day's remaining Kelly fraction.
 
-    Drops any candidate the portfolio solve zeroed out or omitted entirely --
-    expected behavior for this persona, not a bug to work around.
+    The draw already de-overlapped the candidates. A candidate the solve zeroes out or omits is
+    dropped -- expected for this persona, not a bug to work around.
     """
     remaining_fraction = _ledger_selection.remaining_kelly_fraction(date, replicate_id)
     if remaining_fraction <= 0.0:
@@ -193,13 +193,17 @@ def _resize_kelly_growth(
 
 
 def run_commit(date: datetime.date, run_slot: str) -> int:
-    """Build candidates, draw + size per persona/replicate, and append.
+    """Build the pools, draw each persona's entries on every replicate, and append them.
 
     A replicate that already holds a record from ``run_slot`` has drawn in it
     and is left alone, so a re-run of the slot adds nothing to it.
 
-    Returns the count of newly-appended records (0 on an empty candidate
-    universe or when a re-run finds nothing new to commit).
+    Returns:
+        The count of newly-appended records (0 on an empty candidate universe or when a
+        re-run finds nothing new to commit).
+
+    Raises:
+        ValueError: If ``run_slot`` is not one of ``_ledger_selection.RUN_SLOTS``.
     """
     if run_slot not in _ledger_selection.RUN_SLOTS:
         msg = f"run_slot must be one of {_ledger_selection.RUN_SLOTS}, got {run_slot!r}"
