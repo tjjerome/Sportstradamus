@@ -142,7 +142,7 @@ def render_constellation_builder(
     platform = st.session_state[_PLATFORM]
     pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
     # Every focus-game leg goes to the map: the figure promotes anything outside its
-    # default star cut — a model-passed leg included — so a slip leg is always lit
+    # default star cut — a leg the board did not pick included — so a slip leg is always lit
     # somewhere on the map rather than vanishing from it on add.
     focus_legs = [leg for leg in legs if leg["game"] == focus_game]
     deep_pool, wider_groups = _active_lenses(
