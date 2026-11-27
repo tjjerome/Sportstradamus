@@ -60,9 +60,9 @@ def add_deep_layer(
     its ties. An in-slip leg beyond the default cut is promoted whether or not the
     lens is on, because it has to burn in the spot the lens would have given it —
     which is why ``drawn`` leads with the promoted keys, whose placement priority
-    must not move when the lens grows the tier behind them. The unpicked stars and
-    their ties are gated on the lens itself, so a lens-off figure with nothing
-    beyond the cut stays byte-identical to today's.
+    must not move when the lens grows the tier behind them. The tier's stars that
+    are not in the slip, and their ties, are gated on the lens itself, so a lens-off
+    figure with nothing beyond the cut stays byte-identical to today's.
 
     A promoted leg is sized against the main stars' own EV range, clamped to its
     ends, so it can never move a main star's size: those are the sizes ``settle``
