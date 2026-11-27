@@ -252,7 +252,7 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
 @click.option("--run-slot", type=click.Choice(_ledger_selection.RUN_SLOTS), required=True)
 @click.option("--date", default="today")
 def ledger_commit(run_slot: str, date: str) -> None:
-    """Twice-daily ledger commit: build candidates, draw, size, append."""
+    """Twice-daily ledger commit: build each persona's pool, draw its entries, stake and append them."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     appended = run_commit(slate_date, run_slot)
     click.echo(f"committed {appended} new entries -> {_ledger_store.entries_path(slate_date)}")

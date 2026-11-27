@@ -202,7 +202,7 @@ def live_load(
     help="Override output YAML path.",
 )
 def pickem_build(date: str, platform: str, out_path: str | None) -> None:
-    """Build today's Pick'em entries for ``platform`` and emit recommendations YAML."""
+    """Build the slate's Pick'em entries, ranked by fitted EV and unstaked, as a recommendations YAML."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     config = PickemConfig()
     entries = construct_entries(config, platform=platform)
