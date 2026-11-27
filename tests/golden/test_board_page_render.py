@@ -32,6 +32,7 @@ _BASE = {
     "Line": 20.5,
     "Boost": 1.0,
     "Win Prob": 0.55,
+    "Projection": 23.456,
     "Market EV": 1.0,
     "Kelly": 0.0,
     "Star": 1.0,
@@ -113,8 +114,18 @@ def test_legs_with_no_ev_list_after_the_ranked_legs_by_model_ev(monkeypatch, tmp
         "C. Unpriced",
         "D. Unpriced",
     ]
-    assert {"Win %", "EV", "Model win %", "Model EV"} <= set(rows.columns)
-    assert "Model Edge" not in rows.columns
+    assert {"Win %", "EV"} <= set(rows.columns)
+    assert not {"Model win %", "Model EV", "Model Edge"} & set(rows.columns)
+
+
+def test_board_shows_the_models_projection_between_the_line_and_the_payout(monkeypatch, tmp_path):
+    """The model's read is its projected stat, in the line's own units, not a second EV."""
+    at = _board(monkeypatch, tmp_path)
+    rows = _grid_rows(at)
+    assert rows["Projection"].tolist() == [23.46, 23.46]
+    order = list(rows.columns)
+    assert order.index("Line") < order.index("Projection") < order.index("Boost")
+    assert "Model EV" not in [slider.label for slider in at.slider]
 
 
 def test_board_shows_the_picks_record_for_their_league_and_kind(monkeypatch, tmp_path):

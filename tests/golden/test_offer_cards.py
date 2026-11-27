@@ -43,6 +43,7 @@ def _rows(n: int) -> list[dict]:
             "Team": "NYK",
             "Date": "2026-07-16",
             "Model EV": 1.05,
+            "Projection": 23.456,
             "Kelly": 0.03,
             "Push Prob": 0.0,
         }
@@ -94,10 +95,11 @@ def test_card_prints_move_text_as_given_with_no_arrow_from_the_fair_move():
     assert "Line `" not in price_only
 
 
-def test_card_leads_with_the_fitted_win_and_ev_and_shows_the_models_ev():
-    """A leg the fit did not price shows no EV of its own, only the model's."""
+def test_card_leads_with_the_fitted_win_and_ev_and_shows_the_models_projection():
+    """A leg the fit did not price shows no EV; every card shows the model's projected stat."""
     rows = _rows(2)
     rows[1] |= {"Fit Prob": None, "EV": None, "Pick": False}
     priced, unpriced = (m.value for m in _card_test(rows).markdown)
-    assert "Win `52%` · EV `0.95` · Model EV `1.05`" in priced
-    assert "No EV · Model EV `1.05`" in unpriced
+    assert "Win `52%` · EV `0.95` · Proj `23.46`" in priced
+    assert "No EV · Proj `23.46`" in unpriced
+    assert "Model EV" not in priced + unpriced

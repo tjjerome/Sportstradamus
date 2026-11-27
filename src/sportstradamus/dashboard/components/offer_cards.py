@@ -2,7 +2,7 @@
 
 The phone replacement for the Board's AG-Grid, which can't fit a 390px
 viewport. Each card carries the row's read (player, market, line/side, Win %,
-EV, Model EV, platform, any line movement) with numerals in the mono code face,
+EV, the model's projection, platform, any line movement) with numerals in the mono code face,
 plus the grid's two actions: Detail (the deep-dive dialog, via the shared
 ``detail_stack``) and Add to slip (the same ``add_to_simple_slip`` path the grid
 selection uses). Pages ``_PAGE_SIZE`` at a time — a slate can run hundreds of
@@ -26,7 +26,8 @@ _SHOWN = "offer_cards_shown"
 def render_offer_cards(offers: pd.DataFrame) -> None:
     """Render the paged card list over a filtered, scored offers frame.
 
-    ``Fit Prob`` arrives as the raw 0–1 probability, ``EV`` and ``Model EV`` as returns per $1.
+    ``Fit Prob`` arrives as the raw 0–1 probability, ``EV`` as the return per $1 and
+    ``Projection`` in the line's units.
     """
     shown = st.session_state.setdefault(_SHOWN, _PAGE_SIZE)
     for idx, row in offers.head(shown).iterrows():
@@ -40,7 +41,6 @@ def render_offer_cards(offers: pd.DataFrame) -> None:
 
 def _render_card(idx, row: pd.Series) -> None:
     arrow = "▲" if str(row.get("Bet", "")).lower().startswith("o") else "▼"
-    # A leg the fit did not price has no win chance or EV of its own: it shows the model's.
     fitted = (
         "No EV" if pd.isna(row["EV"]) else f"Win `{row['Fit Prob']:.0%}` · EV `{row['EV']:.2f}`"
     )
@@ -53,7 +53,7 @@ def _render_card(idx, row: pd.Series) -> None:
     with st.container(border=True):
         st.markdown(
             f"**{row['Player']}** · {market} {arrow} `{row['Line']:.10g}`  \n"
-            f"{fitted} · Model EV `{row['Model EV']:.2f}` · {row.get('Platform', '')} · "
+            f"{fitted} · Proj `{row['Projection']:.2f}` · {row.get('Platform', '')} · "
             f"{row.get('League', '')}{moved}"
         )
         detail_col, add_col = st.columns(2)

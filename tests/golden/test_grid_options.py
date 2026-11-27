@@ -677,11 +677,10 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
         "Market Display",
         "Line",
         MOVE,
+        "Projection",
         "Boost",
         "Fit Prob",
         "EV",
-        "Win Prob",
-        "Model EV",
         "Consensus Edge",
         "Platform",
     ]

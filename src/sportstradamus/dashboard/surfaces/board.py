@@ -46,16 +46,15 @@ MAIN_COLS = [
     "Market Display",
     "Line",
     columns.MOVE,
+    "Projection",
     "Boost",
     "Fit Prob",
     "EV",
-    "Win Prob",
-    "Model EV",
     columns.CONSENSUS_EDGE,
     "Platform",
 ]
 
-RANGE_COLS = ["EV", "Model EV", columns.CONSENSUS_EDGE]
+RANGE_COLS = ["EV", columns.CONSENSUS_EDGE]
 
 signal_cols = [c for c in ["Boost", "Model EV", "Market EV"] if c in offers.columns]
 if signal_cols:
@@ -173,12 +172,12 @@ grid_df = filtered[display_cols].copy()
 if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
 
-# The win chances and Consensus Edge (Market EV − 1) are kept numeric (0–100) so the
+# The win chance and Consensus Edge (Market EV − 1) are kept numeric (0–100) so the
 # columns click-sort; the "%" is a display-only valueFormatter (percent_cols below).
-for col in ("Fit Prob", "Win Prob", columns.CONSENSUS_EDGE):
+for col in ("Fit Prob", columns.CONSENSUS_EDGE):
     if col in grid_df.columns:
         grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
-for col in ("Boost", "EV", "Model EV"):
+for col in ("Projection", "Boost", "EV"):
     if col in grid_df.columns:
         grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
 grid_df = grid_df.rename(columns=columns.LABELS)
@@ -187,11 +186,11 @@ grid_df = grid_df.rename(columns=columns.LABELS)
 # below keys off the post-rename name (Fit Prob -> Win %, Consensus Edge -> Cons Edge).
 numeric_cols = [
     c
-    for c in ("Line", columns.MOVE, "Boost", "Win %", "EV", "Model win %", "Model EV", "Cons Edge")
+    for c in ("Line", columns.MOVE, "Projection", "Boost", "Win %", "EV", "Cons Edge")
     if c in grid_df.columns
 ]
 if mobile:
-    # Cards read the pre-rename filtered frame: raw 0–1 win chances and EVs.
+    # Cards read the pre-rename filtered frame: the raw 0–1 win chance and EV.
     selected_rows = []
     render_offer_cards(filtered)
 else:
@@ -199,7 +198,7 @@ else:
         grid_df,
         numeric_cols=numeric_cols,
         header_help=columns.HELP,
-        percent_cols=["Win %", "Model win %"],
+        percent_cols=["Win %"],
         signed_percent_cols=["Cons Edge"],
         arrow_col="Line",
         spark_col=columns.MOVE,
