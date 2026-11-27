@@ -1,6 +1,7 @@
 Usage: sportstradamus bet pickem [OPTIONS]
 
-  Build today's Pick'em entries for ``platform`` and emit recommendations YAML.
+  Build the slate's Pick'em entries, ranked by fitted EV and unstaked, as a
+  recommendations YAML.
 
 Options:
   --date TEXT                    Slate date (YYYY-MM-DD or 'today').

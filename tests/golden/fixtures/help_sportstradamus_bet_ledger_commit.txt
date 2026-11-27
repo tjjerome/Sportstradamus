@@ -1,6 +1,7 @@
 Usage: sportstradamus bet ledger-commit [OPTIONS]
 
-  Twice-daily ledger commit: build candidates, draw, size, append.
+  Twice-daily ledger commit: build each persona's pool, draw its entries, stake
+  and append them.
 
 Options:
   --run-slot [morning|afternoon]  [required]
