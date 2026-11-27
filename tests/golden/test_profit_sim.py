@@ -97,12 +97,12 @@ def test_payout_non_finite_boost_is_zero():
 
 
 def test_ranking_map_keys_pinned():
-    # Pinned because the page's UI selectbox surfaces these strings;
-    # changing them is a UI-facing change, not a refactor.
-    assert set(RANKING_MAP.keys()) == {"Kelly", "Probability", "EV"}
+    # "EV" alone names the fitted number everywhere else, so the label for the
+    # model's claim says so: a ranking called "EV" that read ``Model EV`` would lie.
+    assert set(RANKING_MAP.keys()) == {"Kelly", "Probability", "Model EV"}
     assert RANKING_MAP["Kelly"] == "Kelly"
     assert RANKING_MAP["Probability"] == "Win Prob"
-    assert RANKING_MAP["EV"] == "Model EV"
+    assert RANKING_MAP["Model EV"] == "Model EV"
 
 
 # --------------------------------------------------------------------------- #

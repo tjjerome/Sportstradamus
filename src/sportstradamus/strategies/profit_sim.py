@@ -51,11 +51,12 @@ _DEFAULT_RNG_SEED: int = 42
 # branch never fires for the gate, so the run is fully deterministic.
 _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 
-# Translates the user-facing ranking label into the exploded-frame column name.
+# Translates a ranking label into the exploded-frame column name. Every ranking here
+# reads the model's claim; the fitted ``EV`` is not a ranking the simulator offers.
 RANKING_MAP: dict[str, str] = {
     "Kelly": "Kelly",
     "Probability": "Win Prob",
-    "EV": "Model EV",
+    "Model EV": "Model EV",
 }
 
 
@@ -177,7 +178,7 @@ def simulate_kelly_all(
     """Deterministic single-run Kelly-all backtest used by the ship gate.
 
     Equivalent to :func:`simulate_strategy` with no thresholds, no
-    Monte-Carlo sampling, Kelly sizing, and ``ranking="EV"``. Two models
+    Monte-Carlo sampling, Kelly sizing, and ``ranking="Model EV"``. Two models
     invoked against the same input frame bet on the same universe of
     events, which is what makes the paired Sharpe (S3) comparison
     well-defined.
@@ -185,7 +186,7 @@ def simulate_kelly_all(
     return simulate_strategy(
         df,
         prob_col=prob_col,
-        ranking="EV",
+        ranking="Model EV",
         min_model_p=0.0,
         min_books_p=0.0,
         max_bets_day=_KELLY_ALL_MAX_BETS_DAY,
