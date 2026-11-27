@@ -4,7 +4,7 @@
 #         blend ramp, its two window constants and the module logger only it used go
 #         with it. Their tests were deleted from tests/golden/test_kelly.py (git keeps
 #         them).
-# Last live SHA: 30dc28fc
+# Last live SHA: d67670cf
 # Original imports (now unresolved here):
 #   import math
 #   from sportstradamus.helpers.logging import get_logger

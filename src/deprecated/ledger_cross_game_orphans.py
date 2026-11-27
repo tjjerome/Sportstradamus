@@ -3,7 +3,7 @@
 #         docs/handoffs/sim-bettor-ledger.md §10), so the trust cut on the served read
 #         lost its only caller. Its test was deleted from
 #         tests/golden/test_ledger_cross_game.py (git keeps it).
-# Last live SHA: 30dc28fc
+# Last live SHA: d67670cf
 # Original imports (now unresolved here):
 #   from dataclasses import replace
 #   import pandas as pd

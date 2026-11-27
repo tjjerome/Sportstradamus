@@ -35,7 +35,7 @@ def _canonical_markets_by_player(filtered_offers, platform="Underdog"):
 #         until the entries' money record supports one (docs/handoffs/profit-engine.md
 #         5.3), so the Kelly call this trust figure sized lost its only caller. Its four
 #         tests were deleted from tests/golden/test_underdog_pickem.py (git keeps them).
-# Last live SHA: 2ac492b7
+# Last live SHA: ada8054a
 # Original imports (now unresolved here):
 #   import pandas as pd
 #   from sportstradamus.helpers import cell_market
@@ -64,7 +64,7 @@ def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float
 #         ledger's trust cut, this lookup's last caller, was archived
 #         (ledger_cross_game_orphans.py). Its test was deleted from
 #         tests/golden/test_kelly.py (git keeps it).
-# Last live SHA: 30dc28fc
+# Last live SHA: d67670cf
 # Original imports (now unresolved here):
 #   import pandas as pd
 #   from sportstradamus.strategies.kelly import resolve_shrinkage
@@ -113,7 +113,7 @@ def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
 #         min_model_edge, min_sharp_edge and disagreement_threshold went with it, and
 #         its three tests were deleted from tests/golden/test_underdog_pickem.py (git
 #         keeps them).
-# Last live SHA: dde02525
+# Last live SHA: 43cc65d4
 # Original imports (now unresolved here):
 #   import pandas as pd
 #   from sportstradamus.strategies.underdog_pickem import PickemConfig

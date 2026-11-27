@@ -3,7 +3,7 @@
 #         Builder's full-Kelly log-growth objective and the stake printed beside it
 #         lost their last callers. Their closed-form test was deleted from
 #         tests/golden/test_story_menu.py (git keeps it).
-# Last live SHA: dfe57da2
+# Last live SHA: 37cfc286
 # Original imports (now unresolved here):
 #   import math
 

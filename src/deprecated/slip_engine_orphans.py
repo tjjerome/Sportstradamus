@@ -2,7 +2,7 @@
 # Reason: The Correlated tab now ranks every partner by its pair's fitted EV and reads the
 #         pair's SlipScore directly (deep_dive_tabs._ranked_partners), removing this
 #         model-EV lift's only call site.
-# Last live SHA: af6988b6
+# Last live SHA: a06113a0
 # Original imports (now unresolved here):
 #   from collections.abc import Mapping
 #   from sportstradamus.dashboard.slip_engine import PairValues, score_slip

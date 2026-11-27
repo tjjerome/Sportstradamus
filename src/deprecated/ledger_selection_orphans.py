@@ -2,7 +2,7 @@
 # Reason: Every ledger persona but safe ranks by an entry's fitted value (policy_v5), as
 #         pick'em's rank_and_dedupe does, so this EV-per-dollar-times-hit-chance key lost
 #         its callers.
-# Last live SHA: 800d732f
+# Last live SHA: 3eacab96
 # Original imports (now unresolved here):
 #   from decimal import Decimal
 #   from sportstradamus.strategies._ledger_selection import LedgerCandidate
