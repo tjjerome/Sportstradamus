@@ -1,11 +1,11 @@
 """Selection/RNG/persona-scoring layer for the simulated-bettor ledger.
 
 Adapts same-game :class:`~sportstradamus.strategies.underdog_pickem.RecommendedEntry`
-candidates (and, later, cross-game candidates from a sibling module) into one
-common :class:`LedgerCandidate` shape, derives reproducible per-replicate RNG
-streams, and runs the Jaccard-similarity-weighted sequential draw described in
-``docs/handoffs/sim-bettor-ledger.md`` §10. No public API beyond what stage 1's
-orchestrator (not built yet) needs; underscore-prefixed helpers are shared
+candidates into the :class:`LedgerCandidate` shape ``_ledger_cross_game``'s
+builders also produce, derives reproducible per-replicate RNG streams, and runs
+the Jaccard-similarity-weighted sequential draw described in
+``docs/handoffs/sim-bettor-ledger.md`` §10. No public API beyond what the
+orchestrator (``ledger``) needs; underscore-prefixed helpers are shared
 within the ``strategies`` subpackage, not the outside world.
 """
 
@@ -101,11 +101,10 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
 def _entropy_from(date: datetime.date, run_slot: str, salt: str = "replicates") -> int:
     """Deterministic entropy int from (date, run_slot[, salt]). sha256 (not
     Python's salted hash()) is what makes this reproducible across separate
-    process invocations. `salt` lets a sibling module (_ledger_cross_game, not
-    built yet) mint an independent, non-colliding sub-stream for its own
-    Monte-Carlo pricing step under a different salt value -- that's why salt
-    is a parameter here rather than hardcoded, even though every call site in
-    THIS file uses the default.
+    process invocations. `salt` lets _ledger_cross_game mint independent,
+    non-colliding sub-streams for its Monte-Carlo pricing and its deals --
+    that's why salt is a parameter here rather than hardcoded, even though
+    every call site in THIS file uses the default.
     """
     key = f"{date.isoformat()}|{run_slot}|{salt}".encode()
     return int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
