@@ -138,7 +138,8 @@ if range_cols:
             vals = pd.to_numeric(filtered[col], errors="coerce")
             filtered = filtered.loc[vals.between(sel[0], sel[1]) | vals.isna()]
 
-# EV ranks the board; a leg the fit did not price follows, by the model's own EV.
+# EV ranks the board; a leg the fit did not price follows, by the model's own EV; Projection
+# is in each stat's own units, so it cannot rank across markets.
 filtered = filtered.sort_values(["EV", "Model EV"], ascending=False, na_position="last")
 
 filtered = filtered.reset_index(drop=True)

@@ -3,8 +3,8 @@
 You play against DFS (Underdog payout table / Sleeper boost), not against the book, so each
 EV here is the average return per $1 staked on the app at the leg's payout, break-even at
 1.00. ``EV`` prices the win chance fitted to how past posted picks settled (``Fit Prob``,
-shown as **Win %**); ``Model EV`` prices the model's own chance (``Win Prob``). The Board
-shows neither of the model's two: its model column is ``Projection``, the mean the model
+shown as **Win %**); ``Model EV`` prices the model's own chance (``Win Prob``). The Board's
+grid and phone cards show neither: their model column is ``Projection``, the mean the model
 predicts for the stat, in the line's units. ``Market EV`` is the same payout scored with the
 consensus book's probability, so ``Market EV − 1`` (**Consensus Edge**) is how soft the book
 thinks the DFS line is — above 0 it agrees, below 0 you're contrarian. This module relabels
