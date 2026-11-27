@@ -124,10 +124,7 @@ PLAYS: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     "model_edge": lambda sides: sides["Recommended"],
     "under": lambda sides: sides["Side"].eq("Under") & sides["Kind"].eq("underdog_even"),
     "all": lambda sides: pd.Series(True, index=sides.index),
-    "ev_edge": lambda sides: (
-        (sides["Fit Prob Low"] * sides["Payout"] >= 1)
-        & realized.in_recommended_band(sides["Payout"])
-    ),
+    "ev_edge": lambda sides: realized.ev_marked(sides["Fit Prob Low"], sides["Payout"]),
     "ev_rank": _ev_rank,
     # NaN on a row scored before the flag existed.
     "ev_pick": lambda sides: sides["Pick"].eq(True),

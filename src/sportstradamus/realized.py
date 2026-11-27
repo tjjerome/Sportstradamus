@@ -97,6 +97,15 @@ def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
     return (win_prob * payout - 1 >= RECOMMENDED_EDGE_MIN) & in_recommended_band(payout)
 
 
+def ev_marked(fit_prob_low: pd.Series, payout: pd.Series) -> pd.Series:
+    """Whether each side wears the "+EV" mark: the one rule the board and ``ev_edge`` share.
+
+    The fit's lower bound on the side's win chance, times its payout, reaches 1, at a payout a
+    side can be recommended at. A side the fit did not price has no bound and is never marked.
+    """
+    return (fit_prob_low * payout >= 1) & in_recommended_band(payout)
+
+
 def last_scored_lines(history: pd.DataFrame) -> pd.Series:
     """Boolean mask over ``history``: the rows at the lines its props still held when last scored.
 

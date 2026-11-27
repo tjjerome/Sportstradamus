@@ -7,9 +7,9 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+from sportstradamus import realized
 from sportstradamus.helpers import archive_market, platform_payout
 from sportstradamus.leg_schema import leg_field
-from sportstradamus.realized import in_recommended_band
 
 __all__ = ["corr_key", "ev_marked", "find_offer_idx", "leg_cell_market", "record_line"]
 
@@ -23,14 +23,13 @@ _KIND_WORDS = {
 
 
 def ev_marked(offers: pd.DataFrame) -> pd.Series:
-    """Which offers wear the "+EV" mark: the fit's lower bound on the win chance (``Fit Prob
-    Low``) times the side's payout reaches 1, at a payout inside the recommended band.
+    """Which offers wear the "+EV" mark: ``realized.ev_marked`` at each offer's own payout.
 
-    The play ``ev_edge`` in ``plays.PLAYS`` is the same rule. ``EV`` never marks a leg on its
-    own, and a leg the fit did not price has no bound, so it is never marked.
+    ``EV`` never marks a leg on its own, and a leg the fit did not price is never marked.
     """
-    payout = platform_payout(offers["Boost"], offers["Platform"])
-    return (offers["Fit Prob Low"] * payout >= 1) & in_recommended_band(payout)
+    return realized.ev_marked(
+        offers["Fit Prob Low"], platform_payout(offers["Boost"], offers["Platform"])
+    )
 
 
 def record_line(record: pd.DataFrame, league: str, kind: str) -> tuple[str, str | None]:
