@@ -74,7 +74,7 @@ def _sleeper_curve(
     real ~1.0797x bonus on top of the raw product; size 2 does not (1.0x).
     `sleeper_payouts["power"]` holds this confirmed, fully-populated
     two-entry table (mirrors underdog_payouts["power"]'s scalar-per-size
-    shape). payout_base is this bonus, not a placeholder -- ranking still
+    shape). payout_base is this bonus, not a placeholder -- pricing still
     multiplies the boost product in, it's just no longer assumed neutral.
 
     Flex (SLEEPER_MAX_SIZE+1..SLEEPER_FLEX_CAP): pulls from
@@ -121,10 +121,11 @@ def payout_curve_for(
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.
 
-    The first return drives beam-search ranking (single multiplier per size,
-    indexed ``[bet_size - 2]``), and its length sets the largest entry the
-    search builds. The second drives push-aware EV, settlement and the display
-    ``Boost`` column (full payout curve indexed by miss count).
+    The first return is the base multiplier each entry size is priced at (single
+    multiplier per size, indexed ``[bet_size - 2]``; 0.0 at a size the variant does
+    not offer, where the search builds no entry), and its length sets the largest
+    entry the search builds. The second drives push-aware EV, settlement and the
+    display ``Boost`` column (full payout curve indexed by miss count).
 
     Underdog pulls from ``data/config/underdog_payouts.json``. The default
     ``"pooled"`` variant builds one combined pool
