@@ -1,4 +1,4 @@
-"""Pick'em orchestrator for Underdog and Sleeper (Phase 3 §3.3).
+"""Pick'em orchestrator for Underdog and Sleeper.
 
 Pure orchestrator over ``prediction.scoring.process_offers`` and
 ``prediction.correlation.find_correlation`` (one search per contest
@@ -32,7 +32,7 @@ _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
 @dataclass(frozen=True)
 class PickemConfig:
-    """Which entries :func:`construct_entries` searches for, and how many it keeps (§6.a)."""
+    """Which entries :func:`construct_entries` searches for, and how many it keeps."""
 
     entry_sizes: tuple[int, ...] = (3, 5)
     contest_variants: tuple[str, ...] = ("power", "flex")

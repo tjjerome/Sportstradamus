@@ -55,9 +55,10 @@ FLAT_STAKE: Decimal = (BANKROLL_PER_REPLICATE * Decimal(repr(MAX_FRACTION_OF_BAN
 
 @dataclass(frozen=True)
 class LedgerCandidate:
-    """Unified shape for same-game (adapted from RecommendedEntry) and
-    cross-game (built by a sibling module, _ledger_cross_game) candidates, so
-    selection code never special-cases the source.
+    """A candidate entry, adapted from a same-game ``RecommendedEntry`` or built cross-game.
+
+    One shape for both (cross-game candidates come from ``_ledger_cross_game``), so selection
+    code never special-cases the source.
     """
 
     id: str
@@ -105,25 +106,25 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
 
 
 def _entropy_from(date: datetime.date, run_slot: str, salt: str = "replicates") -> int:
-    """Deterministic entropy int from (date, run_slot[, salt]). sha256 (not
-    Python's salted hash()) is what makes this reproducible across separate
-    process invocations. `salt` lets _ledger_cross_game mint independent,
-    non-colliding sub-streams for its Monte-Carlo pricing and its deals --
-    that's why salt is a parameter here rather than hardcoded, even though
-    every call site in THIS file uses the default.
+    """Deterministic entropy int from ``(date, run_slot, salt)``.
+
+    sha256 (not Python's salted ``hash()``) is what makes this reproducible across separate
+    process invocations. ``salt`` lets ``_ledger_cross_game`` mint independent, non-colliding
+    sub-streams for its Monte-Carlo pricing and its deals -- that's why salt is a parameter
+    here rather than hardcoded, even though every call site in THIS file uses the default.
     """
     key = f"{date.isoformat()}|{run_slot}|{salt}".encode()
     return int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
 
 
 def replicate_rngs(date: datetime.date, run_slot: str) -> list[np.random.Generator]:
-    """One stream per replicate_id (0-39), spawned fresh every call from a
-    fresh SeedSequence -- this function keeps NO state across calls, so
-    "same (date, run_slot) -> identical 40 children, every time" holds
-    without needing a persistent parent object anywhere. Callers must pass
-    the SAME Generator instance to every persona for one replicate_id, in
-    ``PERSONAS`` order -- this function only hands out streams, consumption
-    order is the caller's responsibility (``ledger.run_commit``).
+    """One random stream per replicate, spawned fresh from the (date, run_slot) entropy.
+
+    The function keeps NO state across calls, so the same ``(date, run_slot)`` gives the same
+    ``LEDGER_REPLICATES`` streams every time, without a persistent parent object anywhere.
+    Callers must pass the SAME Generator to every persona for one replicate, in ``PERSONAS``
+    order: this function only hands out streams, and consumption order is the caller's
+    responsibility (``ledger.run_commit``).
     """
     parent = np.random.SeedSequence(_entropy_from(date, run_slot))
     return [np.random.default_rng(child) for child in parent.spawn(LEDGER_REPLICATES)]
@@ -149,18 +150,18 @@ def draw_entries(
     budget: int,
     rng: np.random.Generator,
 ) -> list[LedgerCandidate]:
-    """Sequential weighted sampling without replacement: normalize remaining
-    pool weights, rng.choice, pop, repeat -- rhymes with this repo's
-    strategies/profit_sim.py:_pick_day_bets (private, do not import it, this
-    is an independent reimplementation of the same *shape*).
+    """Draw up to ``budget`` entries by sequential weighted sampling without replacement.
 
-    Weight formula per candidate: percentile_score * exp(-K * max_jaccard *
-    (1 - percentile_score)), where max_jaccard is against the most-similar
-    entry in already_chosen_players union anything already picked THIS call.
-    Stops at `budget`, when the pool empties, or (after each successful draw,
-    if budget not yet reached and pool not empty) when a DRAW_CONTINUE_PROB
-    coin flip fails -- so a full draw doesn't robotically fill budget every
-    time.
+    Each step normalizes the remaining pool weights, picks one with ``rng.choice``, pops it and
+    repeats. That rhymes with this repo's ``strategies/profit_sim.py:_pick_day_bets`` (private,
+    do not import it; this is an independent reimplementation of the same *shape*).
+
+    Weight formula per candidate: ``percentile_score * exp(-K * max_jaccard * (1 -
+    percentile_score))``, where ``max_jaccard`` is against the most-similar entry in
+    ``already_chosen_players`` union anything already picked THIS call. Stops at ``budget``,
+    when the pool empties, or (after each successful draw, if budget not yet reached and pool
+    not empty) when a ``DRAW_CONTINUE_PROB`` coin flip fails -- so a full draw doesn't
+    robotically fill the budget every time.
     """
     if not candidates or budget <= 0:
         return []

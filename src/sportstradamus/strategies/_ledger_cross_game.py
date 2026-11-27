@@ -143,12 +143,12 @@ def _enumerate_cross_game_combos(legs: list[_ScoredLeg]) -> dict[int, list[tuple
 def _dealt_candidates(
     legs: list[_ScoredLeg], date: datetime.date, run_slot: str, platform: str, salt: str
 ) -> list[LedgerCandidate]:
-    """Up to ``_CROSS_GAME_BEAM_WIDTH`` entries per size dealt evenly over ``legs``, a game
-    per leg, each priced on ``platform``'s pooled curve.
+    """Deal up to ``_CROSS_GAME_BEAM_WIDTH`` entries per size evenly over ``legs``, a game per leg.
 
-    The shared beam keeps the entries with the highest joint chance, which would stake a
-    pool on its few strongest legs. ``salt`` seeds the deal apart from the pricing stream
-    and from every other dealt pool, so they share no draws.
+    Each entry is priced on ``platform``'s pooled curve. The shared beam keeps the entries with
+    the highest joint chance, which would stake a pool on its few strongest legs. ``salt`` seeds
+    the deal apart from the pricing stream and from every other dealt pool, so they share no
+    draws.
     """
     rng = np.random.default_rng(np.random.SeedSequence(_entropy_from(date, run_slot, salt=salt)))
     games = len({leg.game for leg in legs})
@@ -175,9 +175,9 @@ def _pricing_rng(date: datetime.date, run_slot: str) -> np.random.Generator:
 
 
 def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platform: str) -> float:
-    """Expected payout per $1 on the legs' fitted chances, priced through the
-    push-aware pooled curve rather than as the all-hit probability times the top
-    tier, which would miss flex's partial-payout tiers.
+    """Expected payout per $1 on the legs' fitted chances, through the push-aware pooled curve.
+
+    The all-hit probability times the top tier would miss flex's partial-payout tiers.
     """
     n = len(legs)
     return expected_payout_with_pushes(
