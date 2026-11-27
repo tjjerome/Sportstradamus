@@ -35,6 +35,3 @@ def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
     )
     out["scope"] = scope
     return out[columns]
-
-
-\n

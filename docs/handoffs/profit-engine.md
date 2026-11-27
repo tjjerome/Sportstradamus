@@ -301,7 +301,10 @@ slot pairs hold up in the NFL and NHL (the lane's `research/entries/`, read 2026
 `training/correlate.py` therefore writes the league-wide market-pair table into the `same_team`
 and `opposing` scopes of `corr_market_summary.parquet`: one Spearman pass over every team's
 games, and a market pair's value is the mean of its slot pairs' weighted by their shared games,
-the table the replay read. **Queued:** the entry search reads it in place of the two per-team
+the table the replay read. One addition: a pair resting on fewer than 30 shared games is shrunk
+toward zero by that share, as the other scopes shrink theirs. It touches the NFL's two-quarterback
+pairs early in a season (20 games at the replay's first cutoff, 29 at its third) and no pair at
+its last. **Queued:** the entry search reads it in place of the two per-team
 files, which then retire; a league-wide baseline adjusted for a game's offense and defense is
 read against it before anything more is built.
 

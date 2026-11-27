@@ -788,8 +788,7 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     (gamelog freshness, tracked stat schema, and module constants all
     match the prior ``cache_key`` in ``corr_metadata.json``), the function
     logs a "cache valid" line and returns without recomputing. Pass
-    ``force=True`` (CLI: ``--rebuild-correlations`` or ``--force``) to
-    bypass the skip.
+    ``force=True`` (CLI: ``--force``) to bypass the skip.
 
     Process per league when the cache is invalid:
 
@@ -965,7 +964,9 @@ def _league_pair_summary(matrix_for_corr: pd.DataFrame) -> pd.DataFrame:
     ``opposing`` row carries the team's own market as ``market_a``; the matrix holds
     both teams' rows of every game, so a pair reads the same in either order.
     ``n_teams`` counts the slot pairs pooled and ``n_teams_distinct`` the teams in
-    the matrix. A pair pooling at or under ``CORR_MAGNITUDE_FLOOR`` is dropped.
+    the matrix. A pair pooling at or under ``CORR_MAGNITUDE_FLOOR`` is dropped; a kept
+    pair resting on fewer than ``MIN_OVERLAP_FOR_FULL_WEIGHT`` shared games is shrunk
+    toward zero by that share, as ``_same_player_summary`` shrinks its own.
     """
     if "TEAM" not in matrix_for_corr.columns:
         return pd.DataFrame(columns=_SUMMARY_COLUMNS)
@@ -992,9 +993,13 @@ def _league_pair_summary(matrix_for_corr: pd.DataFrame) -> pd.DataFrame:
     pooled = pairs.groupby(["scope", "market_a", "market_b"], as_index=False).agg(
         rho_n=("rho_n", "sum"), n=("n", "sum"), n_teams=("n", "size")
     )
-    pooled["rho_mean"] = pooled["rho_n"] / pooled["n"]
+    rho_pool = pooled["rho_n"] / pooled["n"]
+    # A same-market pair holds every shared game twice: a teammate pair in both slot
+    # orders, an opposing pair from both teams' rows of the game.
+    games = pooled["n"] / np.where(pooled["market_a"] == pooled["market_b"], 2, 1)
+    pooled["rho_mean"] = rho_pool * (games / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
     pooled["n_teams_distinct"] = matrix_for_corr["TEAM"].nunique()
-    kept = pooled["rho_mean"].abs() > CORR_MAGNITUDE_FLOOR
+    kept = rho_pool.abs() > CORR_MAGNITUDE_FLOOR
     return pooled.loc[kept, _SUMMARY_COLUMNS].reset_index(drop=True)
 
 

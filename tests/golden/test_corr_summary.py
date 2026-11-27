@@ -35,26 +35,30 @@ _SUMMARY_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_t
 _LOADER_FALLBACK_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
 
 
-def _league_matrix() -> pd.DataFrame:
-    """Six team-games of two teams, every column rising or falling over all six.
+_UP = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+_DOWN = _UP[::-1]
 
-    A pair of full columns correlates at +1 or -1 on six shared games. ``W2.AST``
-    is missing from the last two games, so its pairs rest on four.
+
+def _league_matrix() -> pd.DataFrame:
+    """Sixty team-games of two teams: six games ten times over, every column rising or falling.
+
+    A pair of full columns correlates at +1 or -1 on sixty shared games. ``W2.AST`` is
+    missing from the last two games of the six, so its pairs rest on forty. Every pair
+    holds the thirty games a pooled value needs to count in full.
     """
-    up = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-    down = up[::-1]
-    return pd.DataFrame(
+    six_games = pd.DataFrame(
         {
             "TEAM": ["ATL"] * 3 + ["BOS"] * 3,
-            "B1.PTS": up,
-            "B1.AST": down,
-            "W1.AST": up,
+            "B1.PTS": _UP,
+            "B1.AST": _DOWN,
+            "W1.AST": _UP,
             "W2.AST": [6.0, 5.0, 4.0, 3.0, np.nan, np.nan],
-            "C1.REB": up,
-            "C2.REB": down,
-            "_OPP_B1.PTS": down,
+            "C1.REB": _UP,
+            "C2.REB": _DOWN,
+            "_OPP_B1.PTS": _DOWN,
         }
     )
+    return pd.concat([six_games] * 10, ignore_index=True)
 
 
 def test_league_pair_summary_pools_slot_pairs_weighted_by_shared_games() -> None:
@@ -64,8 +68,8 @@ def test_league_pair_summary_pools_slot_pairs_weighted_by_shared_games() -> None
     assert (out["n_teams_distinct"] == 2).all()
     keyed = out.set_index(["scope", "market_a", "market_b"])
     # A teammate pair pools over the slots that carry the two markets, each slot pair
-    # weighted by its shared games: (PTS, AST) is B1-W1 at +1 on six games and B1-W2 at
-    # -1 on four, which an unweighted mean would cancel. B1's own PTS and AST are one
+    # weighted by its shared games: (PTS, AST) is B1-W1 at +1 on sixty games and B1-W2 at
+    # -1 on forty, which an unweighted mean would cancel. B1's own PTS and AST are one
     # player's pair and stay out. A pair pooling under the floor is dropped: (PTS, REB),
     # (AST, REB) and opposing (REB, PTS) all cancel exactly.
     assert keyed["rho_mean"].to_dict() == pytest.approx(
@@ -92,17 +96,40 @@ def test_league_pair_summary_pools_slot_pairs_weighted_by_shared_games() -> None
 
 def test_league_pair_summary_ranks_every_teams_games_together() -> None:
     """A pair that falls within each team and rises across them reads as rising."""
-    matrix = pd.DataFrame(
+    six_games = pd.DataFrame(
         {
             "TEAM": ["ATL"] * 3 + ["BOS"] * 3,
             "B1.PTS": [1.0, 2.0, 3.0, 11.0, 12.0, 13.0],
             "W1.AST": [3.0, 2.0, 1.0, 13.0, 12.0, 11.0],
         }
     )
+    # Five times over, for the thirty shared games a pooled value needs to count in full.
+    matrix = pd.concat([six_games] * 5, ignore_index=True)
     out = _league_pair_summary(matrix).set_index(["scope", "market_a", "market_b"])
     # Ranks 1..6 against 3,2,1,6,5,4: Spearman 1 - 6 * 16 / (6 * 35), then the remap.
     stacked = 2 * np.sin(np.pi / 6 * (1 - 96 / 210))
     assert out.loc[("same_team", "PTS", "AST"), "rho_mean"] == pytest.approx(stacked)
+
+
+def test_league_pair_summary_trusts_a_pair_by_the_games_behind_it() -> None:
+    """A pooled value shrinks by its shared games over thirty; the floor reads it unshrunk."""
+    matrix = pd.DataFrame(
+        {
+            "TEAM": ["ATL"] * 3 + ["BOS"] * 3,
+            "B1.PTS": _UP,
+            "W1.AST": [2.0, 5.0, 1.0, 6.0, 4.0, 3.0],
+            "C1.REB": _UP,
+            "C2.REB": _DOWN,
+        }
+    )
+    out = _league_pair_summary(matrix).set_index(["scope", "market_a", "market_b"])["rho_mean"]
+    # Ranks 1..6 against 2,5,1,6,4,3: Spearman 1 - 6 * 28 / (6 * 35) = 0.2, then the remap.
+    pooled = 2 * np.sin(np.pi / 6 * 0.2)
+    # Six games of the thirty: a fifth of the pooled value. That fifth sits under the
+    # floor, which the pooled value itself clears, so the pair stays.
+    assert out[("same_team", "PTS", "AST")] == pytest.approx(pooled / 5)
+    # A same-market pair meets its slot pair in both orders: C1-C2 share six games, not twelve.
+    assert out[("same_team", "REB", "REB")] == pytest.approx(-1.0 / 5)
 
 
 def test_league_pair_summary_reads_the_same_in_either_market_order() -> None:
