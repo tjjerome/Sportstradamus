@@ -2,7 +2,7 @@
 
 (a) The reconstruction self-check rebuilds the persisted test-set probability from real
     rows of one cell per family branch, and trips on a perturbed knob.
-(b) The live-rule replay recommends, row for row, what ``finalize_records`` keeps on the
+(b) The 5 %-edge rule's replay recommends, row for row, what ``finalize_records`` keeps on the
     same slates handed over the way ``model_prob`` builds them, graded at realized's rule.
 (c) The archive is opened read-only, and the rung, consensus and decision-time quote reads
     take the right rows from it.

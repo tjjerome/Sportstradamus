@@ -1018,7 +1018,7 @@ Five further reads, each a candidate edge or a candidate cause:
 ### 11.3 The offline replay on the same rule
 
 `sportstradamus admin realized-replay` prices each cell's held-out rows at the lines the app
-posted, applies the live rule, and keeps the recommended standard picks
+posted, applies the 5 %-edge rule, and keeps the recommended standard picks
 ([ship_gate.md](ship_gate.md), "The realized replay"). I ran it on the dev box's current test
 sets and models, the 11-16 retrain, with its outputs sent to scratch.
 
