@@ -117,6 +117,8 @@ def node_info(leg: Mapping) -> dict:
     win = leg_field_float(leg, "win_prob")
     boost = leg_field_float(leg, "boost", 1.0)
     model_ev = win * float(platform_payout(boost, leg_field(leg, "platform")))
+    player = str(leg_field(leg, "player"))
+    market = _market_name(leg)
     bet = _bet_word(leg_field(leg, "bet"))
     line = float(leg_field(leg, "line"))
     fitted = (
@@ -129,20 +131,10 @@ def node_info(leg: Mapping) -> dict:
         "model_ev": model_ev,
         "pick": is_pick(leg),
         "hover": (
-            f"{leg_field(leg, 'player')} — {_market_name(leg)} {bet} {line:.10g}"
+            f"{player} — {market} {bet} {line:.10g}"
             f"<br>{fitted}<br>Model win {win:.0%} · Model EV {model_ev:.2f}"
         ),
-        "card": [
-            str(leg_field(leg, "player")),
-            _market_name(leg),
-            bet,
-            line,
-            fit,
-            boost,
-            ev,
-            win,
-            model_ev,
-        ],
+        "card": [player, market, bet, line, fit, boost, ev, win, model_ev],
     }
 
 
