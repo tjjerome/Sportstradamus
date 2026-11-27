@@ -1,14 +1,13 @@
 """Golden pins for the corr-summary artifact — the Lab heatmap's data source.
 
-``_market_summary`` aggregates the per-team ``(team, market_a, market_b) -> R``
-blocks the correlation pipeline already produces down to market-pair means;
-``_correlate_teams`` captures same-slot (one player's own) cross-market pairs
-pre-shrink, pre-floor, and ``_same_player_summary`` pools them n-weighted in
-Fisher z with a single credibility shrink at the pooled n — the ``same_player``
-scope the combo-pricing kernel pools rho from; ``_write_corr_outputs`` writes
-it all beside the existing two parquets; ``load_corr_market_summary`` reads it
-back for the dashboard, returning an empty-but-shaped frame for a league with
-no corr data yet.
+``_league_pair_summary`` pools every team's games into one market-pair table for
+the ``same_team`` and ``opposing`` scopes; ``_correlate_teams`` captures same-slot
+(one player's own) cross-market pairs pre-shrink, pre-floor, and
+``_same_player_summary`` pools them n-weighted in Fisher z with a single
+credibility shrink at the pooled n — the ``same_player`` scope the combo-pricing
+kernel pools rho from; ``_write_corr_outputs`` writes it all beside the two
+per-team parquets; ``load_corr_market_summary`` reads it back for the dashboard,
+returning an empty-but-shaped frame for a league with no corr data yet.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from sportstradamus import data
 from sportstradamus.dashboard.data import load_corr_market_summary
 from sportstradamus.training.correlate import (
     _correlate_teams,
-    _market_summary,
+    _league_pair_summary,
     _same_player_summary,
     _write_corr_outputs,
 )
@@ -36,8 +35,122 @@ _SUMMARY_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_t
 _LOADER_FALLBACK_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
 
 
+def _league_matrix() -> pd.DataFrame:
+    """Six team-games of two teams, every column rising or falling over all six.
+
+    A pair of full columns correlates at +1 or -1 on six shared games. ``W2.AST``
+    is missing from the last two games, so its pairs rest on four.
+    """
+    up = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    down = up[::-1]
+    return pd.DataFrame(
+        {
+            "TEAM": ["ATL"] * 3 + ["BOS"] * 3,
+            "B1.PTS": up,
+            "B1.AST": down,
+            "W1.AST": up,
+            "W2.AST": [6.0, 5.0, 4.0, 3.0, np.nan, np.nan],
+            "C1.REB": up,
+            "C2.REB": down,
+            "_OPP_B1.PTS": down,
+        }
+    )
+
+
+def test_league_pair_summary_pools_slot_pairs_weighted_by_shared_games() -> None:
+    out = _league_pair_summary(_league_matrix())
+
+    assert list(out.columns) == _SUMMARY_COLUMNS
+    assert (out["n_teams_distinct"] == 2).all()
+    keyed = out.set_index(["scope", "market_a", "market_b"])
+    # A teammate pair pools over the slots that carry the two markets, each slot pair
+    # weighted by its shared games: (PTS, AST) is B1-W1 at +1 on six games and B1-W2 at
+    # -1 on four, which an unweighted mean would cancel. B1's own PTS and AST are one
+    # player's pair and stay out. A pair pooling under the floor is dropped: (PTS, REB),
+    # (AST, REB) and opposing (REB, PTS) all cancel exactly.
+    assert keyed["rho_mean"].to_dict() == pytest.approx(
+        {
+            ("same_team", "PTS", "AST"): 0.2,
+            ("same_team", "AST", "PTS"): 0.2,
+            ("same_team", "AST", "AST"): -3 / 7,
+            ("same_team", "REB", "REB"): -1.0,
+            # market_a is the team's own market, market_b the opponent's.
+            ("opposing", "PTS", "PTS"): -1.0,
+            ("opposing", "AST", "PTS"): 0.25,
+        }
+    )
+    # n_teams counts the slot pairs pooled, each order of a same-market pair once.
+    assert keyed["n_teams"].to_dict() == {
+        ("same_team", "PTS", "AST"): 2,
+        ("same_team", "AST", "PTS"): 2,
+        ("same_team", "AST", "AST"): 6,
+        ("same_team", "REB", "REB"): 2,
+        ("opposing", "PTS", "PTS"): 1,
+        ("opposing", "AST", "PTS"): 3,
+    }
+
+
+def test_league_pair_summary_ranks_every_teams_games_together() -> None:
+    """A pair that falls within each team and rises across them reads as rising."""
+    matrix = pd.DataFrame(
+        {
+            "TEAM": ["ATL"] * 3 + ["BOS"] * 3,
+            "B1.PTS": [1.0, 2.0, 3.0, 11.0, 12.0, 13.0],
+            "W1.AST": [3.0, 2.0, 1.0, 13.0, 12.0, 11.0],
+        }
+    )
+    out = _league_pair_summary(matrix).set_index(["scope", "market_a", "market_b"])
+    # Ranks 1..6 against 3,2,1,6,5,4: Spearman 1 - 6 * 16 / (6 * 35), then the remap.
+    stacked = 2 * np.sin(np.pi / 6 * (1 - 96 / 210))
+    assert out.loc[("same_team", "PTS", "AST"), "rho_mean"] == pytest.approx(stacked)
+
+
+def test_league_pair_summary_reads_the_same_in_either_market_order() -> None:
+    """With both teams' rows of every game present, (a, b) and (b, a) agree in each scope."""
+    rng = np.random.default_rng(0)
+    pace = rng.normal(size=40)
+    home = pd.DataFrame(
+        {
+            "B1.PTS": pace + 0.5 * rng.normal(size=40),
+            "W1.AST": pace + 0.5 * rng.normal(size=40),
+            "_OPP_B1.PTS": 0.5 * rng.normal(size=40) - pace,
+            "_OPP_W1.AST": 0.5 * rng.normal(size=40) - pace,
+        }
+    )
+    away = home.rename(
+        columns={
+            "B1.PTS": "_OPP_B1.PTS",
+            "W1.AST": "_OPP_W1.AST",
+            "_OPP_B1.PTS": "B1.PTS",
+            "_OPP_W1.AST": "W1.AST",
+        }
+    )
+    matrix = pd.concat([home.assign(TEAM="ATL"), away.assign(TEAM="BOS")], ignore_index=True)
+
+    out = _league_pair_summary(matrix).set_index(["scope", "market_a", "market_b"])["rho_mean"]
+
+    assert set(out.index) == {
+        ("same_team", "PTS", "AST"),
+        ("same_team", "AST", "PTS"),
+        ("opposing", "PTS", "PTS"),
+        ("opposing", "PTS", "AST"),
+        ("opposing", "AST", "PTS"),
+        ("opposing", "AST", "AST"),
+    }
+    mirrored = out.copy()
+    mirrored.index = mirrored.index.swaplevel("market_a", "market_b")
+    assert out.to_dict() == pytest.approx(mirrored.to_dict())
+
+
+def test_league_pair_summary_of_an_empty_matrix_is_empty_and_shaped() -> None:
+    """A league with no team-game records yet (``correlate`` on an empty log) must not raise."""
+    out = _league_pair_summary(pd.DataFrame())
+    assert list(out.columns) == _SUMMARY_COLUMNS
+    assert out.empty
+
+
 def _synthetic_blocks() -> dict[str, pd.Series]:
-    """Two teams, position-prefixed markets, one repeated pair across teams."""
+    """Two teams' stored per-team blocks, one pair repeated across teams."""
     return {
         "CHI": pd.Series(
             {
@@ -48,41 +161,6 @@ def _synthetic_blocks() -> dict[str, pd.Series]:
         ),
         "DAL": pd.Series({("B1.AST", "W1.PTS"): 0.6}),
     }
-
-
-def test_market_summary_hand_computed_means_and_prefix_stripping() -> None:
-    blocks = pd.concat(_synthetic_blocks())
-    out = _market_summary(blocks, "same_team")
-
-    assert list(out.columns) == _SUMMARY_COLUMNS
-    out = out.set_index(["market_a", "market_b"])
-
-    assert out.loc[("AST", "AST"), "rho_mean"] == pytest.approx(1.0)
-    assert out.loc[("AST", "AST"), "n_teams"] == 1
-    assert out.loc[("AST", "AST"), "n_teams_distinct"] == 1
-    assert out.loc[("AST", "PTS"), "rho_mean"] == pytest.approx((0.4 + 0.6) / 2)
-    assert out.loc[("AST", "PTS"), "n_teams"] == 2
-    assert out.loc[("AST", "PTS"), "n_teams_distinct"] == 2
-    assert out.loc[("PTS", "PTS"), "rho_mean"] == pytest.approx(1.0)
-    assert out.loc[("PTS", "PTS"), "n_teams"] == 1
-    assert (out["scope"] == "same_team").all()
-
-
-def test_market_summary_empty_series_returns_empty_shaped_frame() -> None:
-    """An empty blocks Series (the real ``pd.concat({})``-free empty path) must not raise."""
-    out = _market_summary(pd.Series(dtype="float64"), "opposing")
-    assert list(out.columns) == _SUMMARY_COLUMNS
-    assert out.empty
-
-
-def test_market_summary_strips_multiple_position_prefix_formats() -> None:
-    """Prefixes vary by rank/side (B1., W4., B2.) — split-on-dot strips all of them."""
-    blocks = pd.concat(
-        {"LAL": pd.Series({("W4.FG3A", "B2.PF"): 0.5})},
-    )
-    out = _market_summary(blocks, "opposing")
-    assert set(out["market_a"]) == {"FG3A"}
-    assert set(out["market_b"]) == {"PF"}
 
 
 @pytest.fixture
@@ -104,32 +182,30 @@ def _isolated_correlate_data_dir(monkeypatch, tmp_path):
     return tmp_path
 
 
-def test_write_corr_outputs_writes_market_summary_alongside_existing_two(
+def test_write_corr_outputs_summarizes_the_matrix_beside_the_two_per_team_files(
     _isolated_correlate_data_dir,
 ) -> None:
     same_blocks = _synthetic_blocks()
     opposing_blocks = {"CHI": pd.Series({("B1.AST", "_OPP_W1.PTS"): 0.3})}
+    matrix = _league_matrix()
 
-    _write_corr_outputs("NBA", same_blocks, opposing_blocks, pd.DataFrame())
+    _write_corr_outputs("NBA", same_blocks, opposing_blocks, pd.DataFrame(), matrix)
 
     league_dir = _isolated_correlate_data_dir / "leagues" / "nba"
     assert (league_dir / "corr_same_team.parquet").is_file()
     assert (league_dir / "corr_opposing.parquet").is_file()
-    summary_path = league_dir / "corr_market_summary.parquet"
-    assert summary_path.is_file()
-
-    summary = pd.read_parquet(summary_path)
-    assert list(summary.columns) == _SUMMARY_COLUMNS
-    # No captured same-slot pairs passed, so no same_player rows may appear.
+    summary = pd.read_parquet(league_dir / "corr_market_summary.parquet")
+    # The team scopes are the league-wide pool of the matrix, whatever the per-team
+    # blocks hold; no captured same-slot pairs were passed, so no same_player rows.
+    pd.testing.assert_frame_equal(summary, _league_pair_summary(matrix))
     assert set(summary["scope"]) == {"same_team", "opposing"}
-    assert not summary["market_a"].str.contains(".", regex=False).any()
 
 
-def test_write_corr_outputs_empty_blocks_writes_empty_market_summary(
+def test_write_corr_outputs_empty_inputs_write_an_empty_market_summary(
     _isolated_correlate_data_dir,
 ) -> None:
-    """The already-handled empty-``same_team_blocks``/``opposing_blocks`` dict path."""
-    _write_corr_outputs("NBA", {}, {}, pd.DataFrame())
+    """``correlate`` on a league with no records: empty blocks, pairs and matrix."""
+    _write_corr_outputs("NBA", {}, {}, pd.DataFrame(), pd.DataFrame())
 
     league_dir = _isolated_correlate_data_dir / "leagues" / "nba"
     summary = pd.read_parquet(league_dir / "corr_market_summary.parquet")
@@ -137,24 +213,13 @@ def test_write_corr_outputs_empty_blocks_writes_empty_market_summary(
     assert summary.empty
 
 
-def test_write_corr_outputs_one_sided_blocks_only_summarizes_populated_scope(
-    _isolated_correlate_data_dir,
-) -> None:
-    """Same-team populated, opposing empty — summary carries only the same_team scope."""
-    _write_corr_outputs("NBA", _synthetic_blocks(), {}, pd.DataFrame())
-
-    league_dir = _isolated_correlate_data_dir / "leagues" / "nba"
-    summary = pd.read_parquet(league_dir / "corr_market_summary.parquet")
-    assert set(summary["scope"]) == {"same_team"}
-
-
 def _slot_paired_blocks() -> dict[str, pd.Series]:
     """Three teams, slots B1/B2, markets singles/walks/runs.
 
     Carries one R=1.0 self-pair, one cross-player (B1 x B2) pair, and one
-    reversed-ordering pair. Feeds the same_team pins only — the same_player
-    scope now pools from the pre-shrink pairs ``_correlate_teams`` captures,
-    not from these stored blocks.
+    reversed-ordering pair. Feeds the stored per-team file's pin only — the
+    summary pools from the matrix and from the pre-shrink pairs
+    ``_correlate_teams`` captures, not from these stored blocks.
     """
     return {
         "ATL": pd.Series(
@@ -194,12 +259,12 @@ def _same_player_pairs() -> pd.DataFrame:
 def test_write_corr_outputs_same_player_scope_pools_fisher_z(
     _isolated_correlate_data_dir,
 ) -> None:
-    _write_corr_outputs("MLB", _slot_paired_blocks(), {}, _same_player_pairs())
+    _write_corr_outputs("MLB", _slot_paired_blocks(), {}, _same_player_pairs(), _league_matrix())
 
     league_dir = _isolated_correlate_data_dir / "leagues" / "mlb"
     summary = pd.read_parquet(league_dir / "corr_market_summary.parquet")
     assert list(summary.columns) == _SUMMARY_COLUMNS
-    assert set(summary["scope"]) == {"same_team", "same_player"}
+    assert set(summary["scope"]) == {"same_team", "opposing", "same_player"}
 
     sp = summary.loc[summary["scope"] == "same_player"].set_index(["market_a", "market_b"])
     # n-weighted Fisher-z pool of the unshrunk pair correlations; the pooled
@@ -256,11 +321,11 @@ def test_correlate_teams_captures_same_slot_pairs_unshrunk_with_overlap() -> Non
     assert (pairs["team"] == "ATL").all()
 
 
-def test_write_corr_outputs_same_player_scope_leaves_same_team_output_unchanged(
+def test_write_corr_outputs_stores_the_per_team_blocks_as_given(
     _isolated_correlate_data_dir,
 ) -> None:
     blocks = _slot_paired_blocks()
-    _write_corr_outputs("MLB", blocks, {}, _same_player_pairs())
+    _write_corr_outputs("MLB", blocks, {}, _same_player_pairs(), pd.DataFrame())
 
     league_dir = _isolated_correlate_data_dir / "leagues" / "mlb"
     stored = pd.read_parquet(league_dir / "corr_same_team.parquet")["R"]
@@ -268,12 +333,10 @@ def test_write_corr_outputs_same_player_scope_leaves_same_team_output_unchanged(
     assert list(stored.index) == list(expected.index)
     assert list(stored.to_numpy()) == list(expected.to_numpy())
 
+    # The blocks' self-pairs and cross-player rows no longer reach the summary: with no
+    # matrix rows its only scope is the captured same-slot pool.
     summary = pd.read_parquet(league_dir / "corr_market_summary.parquet")
-    st = summary.loc[summary["scope"] == "same_team"].set_index(["market_a", "market_b"])
-    # Same-team pooling still includes cross-player and self-pair rows.
-    assert st.loc[("singles", "walks"), "rho_mean"] == pytest.approx(0.42)
-    assert st.loc[("singles", "walks"), "n_teams"] == 5
-    assert st.loc[("singles", "singles"), "rho_mean"] == pytest.approx(1.0)
+    assert set(summary["scope"]) == {"same_player"}
 
 
 def _has_corr_market_summary(league: str) -> bool:

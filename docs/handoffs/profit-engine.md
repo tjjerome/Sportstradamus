@@ -280,6 +280,31 @@ nightly record before anything is built on them. Three places a game returned �
 −4.2 %, and on slates of one or two games −4.9 % against −1.2 % for a place a team (the lane's
 `research/phase2/`, read 2026-11-26).
 
+**Correlation tables (the builder's half built).** The entry search reads each team's own
+slot-pair correlations (`corr_same_team.parquet`, `corr_opposing.parquet`). A team's pair rests
+on that team's games alone, about 58 in the NBA and NHL and about ten in the NFL at the read
+below, where the median stored correlation was 0.12 in size, the level of the noise, and a
+search that ranks by fitted value picks the largest of them. Replayed walk-forward over 34 game
+dates (2026-10-23 to 11-25; every date searched on tables built from earlier weeks' games;
+about 14,600 graded entries a table; paid per 1 staked at the payout rules the engine assumes,
+§5.4; intervals resample dates), entries searched on the per-team tables claimed 1.164 and paid
+0.986 [0.916, 1.061]. In the NBA they claimed 1.238 and paid 0.917, under the 0.942 a search
+with no correlation paid there. One league-wide table by market pair claimed 0.953 and paid
+0.984 [0.898, 1.075]; no correlation at all claimed 0.933 and paid 0.944. Against no
+correlation, paired by date, the league-wide table earned +0.040 [−0.001, +0.082] and the
+per-team tables +0.042 [−0.048, +0.132]: the money does not separate the tables, and only the
+per-team one claims what it does not pay. League-wide slot detail (a slot pair's own estimate,
+alone or pulled toward its market pair's mean) paid no more than the market-pair mean: +0.005
+to −0.020 [−0.042, +0.001] against it, though on held-out halves of the games the strongest
+slot pairs hold up in the NFL and NHL (the lane's `research/entries/`, read 2026-11-27).
+
+`training/correlate.py` therefore writes the league-wide market-pair table into the `same_team`
+and `opposing` scopes of `corr_market_summary.parquet`: one Spearman pass over every team's
+games, and a market pair's value is the mean of its slot pairs' weighted by their shared games,
+the table the replay read. **Queued:** the entry search reads it in place of the two per-team
+files, which then retire; a league-wide baseline adjusted for a game's offense and defense is
+read against it before anything more is built.
+
 ### 5.4 Stacks: "bet if the app pays at least X"
 
 Underdog pays a same-game entry `table × multipliers × m`, where `m` comes from its own estimate

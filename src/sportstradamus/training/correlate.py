@@ -12,11 +12,12 @@ Outputs (per league, all under ``data/leagues/{league}/``):
   ``(team, team_market, opp_market)``. Both sides keyed by their raw
   (un-prefixed) market names; the file structure encodes the team-vs-opponent
   relationship.
-* ``corr_market_summary.parquet`` — market-level pooled means of the pair
-  correlations, one row per ``(market_a, market_b, scope)`` where scope is
-  ``same_team``, ``opposing``, or ``same_player`` (same-slot pairs — one
-  player's own stat pair — pooled from the unshrunk pre-floor correlations
-  with an n-weighted Fisher-z mean, shrunk once at the pooled overlap).
+* ``corr_market_summary.parquet`` — market-level pair correlations, one row per
+  ``(market_a, market_b, scope)``. ``same_team`` and ``opposing`` pool the whole
+  league: one Spearman pass over every team's games, then each market pair's
+  slot pairs averaged by their shared games. ``same_player`` (same-slot pairs —
+  one player's own stat pair) pools the per-team unshrunk pre-floor correlations
+  with an n-weighted Fisher-z mean, shrunk once at the pooled overlap.
 * ``corr_metadata.json`` — date range covered, per-team observation counts,
   generation timestamp, git SHA.
 
@@ -67,6 +68,12 @@ CORR_MAGNITUDE_FLOOR: float = 0.05
 # can rank-agree perfectly (the Spearman remap hits exactly +/-1, where arctanh
 # diverges), and one infinite z would poison the pooled mean.
 _FISHER_Z_RHO_CAP: float = 1.0 - 1e-6
+
+# Bumped when what an output file holds changes, so a run with unchanged inputs still
+# rebuilds it. 2: the summary's same_team and opposing scopes pool the league.
+_OUTPUTS_VERSION: int = 2
+
+_SUMMARY_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_teams_distinct"]
 
 # Structural invariants (not cache-key tunables): a scored game has exactly two
 # teams, and a correlation needs at least two markets over at least two rows.
@@ -427,8 +434,8 @@ def _build_cache_key(league: str, stat_data) -> dict:
     The key captures everything that, if unchanged since the last successful
     run, makes the previously written outputs still correct: the latest game
     date and row count in the gamelog (data freshness), a hash of the tracked
-    stat lists for the league (schema changes), and the module-level
-    constants that control residualization and shrinkage.
+    stat lists for the league (schema changes), the module-level constants
+    that control residualization and shrinkage, and ``_OUTPUTS_VERSION``.
     """
     date_col = stat_data.log_strings["date"]
     gamelog = stat_data.gamelog
@@ -449,6 +456,7 @@ def _build_cache_key(league: str, stat_data) -> dict:
             "rolling_window_games": ROLLING_WINDOW_GAMES,
             "min_overlap_for_full_weight": MIN_OVERLAP_FOR_FULL_WEIGHT,
             "corr_magnitude_floor": CORR_MAGNITUDE_FLOOR,
+            "outputs_version": _OUTPUTS_VERSION,
         },
     }
 
@@ -795,7 +803,9 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     5. Stratify into same-team and opposing pair series; drop pairs below
        ``CORR_MAGNITUDE_FLOOR``. Same-slot pairs are captured pre-shrink,
        pre-floor for the ``same_player`` summary pool.
-    6. Write the two CSVs and the metadata JSON sidecar.
+    6. Pool every team's games into the summary's ``same_team`` and
+       ``opposing`` market pairs (:func:`_league_pair_summary`).
+    7. Write the three parquets and the metadata JSON sidecar.
 
     Args:
         league: One of NFL/NBA/MLB/NHL/WNBA.
@@ -824,7 +834,9 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     same_team_blocks, opposing_blocks, same_player_pairs, per_team_obs = _correlate_teams(
         matrix_for_corr
     )
-    _write_corr_outputs(league, same_team_blocks, opposing_blocks, same_player_pairs)
+    _write_corr_outputs(
+        league, same_team_blocks, opposing_blocks, same_player_pairs, matrix_for_corr
+    )
     _write_corr_metadata(league, matrix, per_team_obs, cache_key)
 
 
@@ -939,35 +951,50 @@ def _correlate_teams(matrix_for_corr):
     return same_team_blocks, opposing_blocks, same_player_pairs, per_team_obs
 
 
-def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
-    """Aggregate (team, market_a, market_b) → R across teams to market-pair means.
+def _league_pair_summary(matrix_for_corr: pd.DataFrame) -> pd.DataFrame:
+    """Pool every team's games into ``same_team`` and ``opposing`` market-pair rows.
 
-    Position prefixes strip (B1.AST → AST) so the pair grid is market-level;
-    pairs pool with an unweighted mean over the pooled rows. ``n_teams`` is the
-    pooled (team × slot-prefix) row count — the legacy name the dashboard's
-    thin-pair mask reads — and ``n_teams_distinct`` counts the distinct teams
-    behind those rows, so downstream shrinkage can tell 30 teams from 30
-    batting-slot pairs on 4 teams.
+    One Spearman pass over the whole matrix, every team's games stacked, estimates
+    each slot pair league-wide; a market pair's ``rho_mean`` is the mean of its slot
+    pairs' estimates weighted by their shared games. One team's games are too few to
+    tell a pair's correlation from noise, and the entry search picks the largest values
+    (docs/handoffs/profit-engine.md §5.3).
+
+    Same-slot pairs, one player's two markets, are ``_same_player_summary``'s. An
+    ``opposing`` row carries the team's own market as ``market_a``; the matrix holds
+    both teams' rows of every game, so a pair reads the same in either order.
+    ``n_teams`` counts the slot pairs pooled and ``n_teams_distinct`` the teams in
+    the matrix. A pair pooling at or under ``CORR_MAGNITUDE_FLOOR`` is dropped.
     """
-    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_teams_distinct"]
-    if blocks.empty:
-        return pd.DataFrame(columns=columns)
-
-    df = blocks.rename("R").reset_index()
-    df.columns = ["team", "market_a", "market_b", "R"]
-    for market_col in ("market_a", "market_b"):
-        df[market_col] = df[market_col].str.split(".").str[-1]
-    out = (
-        df.groupby(["market_a", "market_b"])
-        .agg(
-            rho_mean=("R", "mean"),
-            n_teams=("R", "size"),
-            n_teams_distinct=("team", "nunique"),
-        )
-        .reset_index()
+    if "TEAM" not in matrix_for_corr.columns:
+        return pd.DataFrame(columns=_SUMMARY_COLUMNS)
+    values = matrix_for_corr.drop(columns="TEAM")
+    values = values.loc[:, values.notna().any(axis=0)]
+    spearman, overlap = _pairwise_spearman_with_overlap(values)
+    rho = 2 * np.sin(np.pi / 6 * spearman.to_numpy())
+    shared_games = overlap.to_numpy()
+    labels = values.columns
+    opp = labels.str.startswith("_OPP_")
+    slots = labels.str.split(".").str[0].to_numpy()
+    markets = labels.str.split(".").str[-1].to_numpy()
+    pair_mask = ~opp[:, None] & ~np.isnan(rho) & (opp[None, :] | (slots[:, None] != slots[None, :]))
+    ii, jj = np.nonzero(pair_mask)
+    pairs = pd.DataFrame(
+        {
+            "scope": np.where(opp[jj], "opposing", "same_team"),
+            "market_a": markets[ii],
+            "market_b": markets[jj],
+            "rho_n": rho[ii, jj] * shared_games[ii, jj],
+            "n": shared_games[ii, jj],
+        }
     )
-    out["scope"] = scope
-    return out[columns]
+    pooled = pairs.groupby(["scope", "market_a", "market_b"], as_index=False).agg(
+        rho_n=("rho_n", "sum"), n=("n", "sum"), n_teams=("n", "size")
+    )
+    pooled["rho_mean"] = pooled["rho_n"] / pooled["n"]
+    pooled["n_teams_distinct"] = matrix_for_corr["TEAM"].nunique()
+    kept = pooled["rho_mean"].abs() > CORR_MAGNITUDE_FLOOR
+    return pooled.loc[kept, _SUMMARY_COLUMNS].reset_index(drop=True)
 
 
 def _same_player_summary(pairs: pd.DataFrame) -> pd.DataFrame:
@@ -986,11 +1013,10 @@ def _same_player_summary(pairs: pd.DataFrame) -> pd.DataFrame:
     (usually 1). ``CORR_MAGNITUDE_FLOOR`` tests the *unshrunk* pooled value, so
     a weak-overlap pair survives once its pooled evidence clears the floor.
     ``n_teams`` is the pooled pair-row count and ``n_teams_distinct`` the
-    distinct teams behind those rows, matching ``_market_summary``'s columns.
+    distinct teams behind those rows.
     """
-    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_teams_distinct"]
     if pairs.empty:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(columns=_SUMMARY_COLUMNS)
 
     z = np.arctanh(pairs["rho"].clip(-_FISHER_Z_RHO_CAP, _FISHER_Z_RHO_CAP))
     agg = (
@@ -1008,30 +1034,22 @@ def _same_player_summary(pairs: pd.DataFrame) -> pd.DataFrame:
     shrink = (agg["n_pool"] / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
     agg["rho_mean"] = rho_pool * shrink
     agg["scope"] = "same_player"
-    return agg.loc[rho_pool.abs() > CORR_MAGNITUDE_FLOOR, columns].reset_index(drop=True)
+    return agg.loc[rho_pool.abs() > CORR_MAGNITUDE_FLOOR, _SUMMARY_COLUMNS].reset_index(drop=True)
 
 
-def _write_corr_outputs(league, same_team_blocks, opposing_blocks, same_player_pairs):
+def _write_corr_outputs(
+    league, same_team_blocks, opposing_blocks, same_player_pairs, matrix_for_corr
+):
     league_dir = pkg_resources.files(data) / "leagues" / league.lower()
     league_dir.mkdir(parents=True, exist_ok=True)
-    same_path = league_dir / "corr_same_team.parquet"
-    opposing_path = league_dir / "corr_opposing.parquet"
-    same_series = pd.concat(same_team_blocks) if same_team_blocks else pd.Series(dtype="float64")
-    opposing_series = pd.concat(opposing_blocks) if opposing_blocks else pd.Series(dtype="float64")
-    if same_team_blocks:
-        same_series.to_frame("R").to_parquet(same_path, compression="zstd")
-    else:
-        pd.DataFrame(columns=["R"]).to_parquet(same_path, compression="zstd")
-    if opposing_blocks:
-        opposing_series.to_frame("R").to_parquet(opposing_path, compression="zstd")
-    else:
-        pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
+    for name, blocks in (
+        ("corr_same_team.parquet", same_team_blocks),
+        ("corr_opposing.parquet", opposing_blocks),
+    ):
+        stored = pd.concat(blocks).to_frame("R") if blocks else pd.DataFrame(columns=["R"])
+        stored.to_parquet(league_dir / name, compression="zstd")
 
-    parts = [
-        _market_summary(same_series, "same_team"),
-        _market_summary(opposing_series, "opposing"),
-        _same_player_summary(same_player_pairs),
-    ]
+    parts = [_league_pair_summary(matrix_for_corr), _same_player_summary(same_player_pairs)]
     non_empty = [p for p in parts if not p.empty]
     summary = pd.concat(non_empty, ignore_index=True) if non_empty else parts[0]
     summary.to_parquet(league_dir / "corr_market_summary.parquet", compression="zstd")

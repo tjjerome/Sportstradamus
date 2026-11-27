@@ -231,6 +231,26 @@ def test_correlate_skips_when_cache_valid(_preserve_nba_correlate_outputs) -> No
     assert first_same_mtime == second_same_mtime, "skip path must not rewrite the parquet"
 
 
+def test_correlate_rebuilds_outputs_written_under_an_older_definition(
+    _preserve_nba_correlate_outputs,
+) -> None:
+    """Unchanged inputs do not keep outputs whose files held something else when written."""
+    stub = _StubStats()
+    metadata_path = Path(str(pkg_resources.files(data) / "leagues" / "nba" / "corr_metadata.json"))
+    correlate("NBA", stub, force=True)
+    metadata = json.loads(metadata_path.read_text())
+    current = metadata["cache_key"]["constants"]["outputs_version"]
+    metadata["cache_key"]["constants"]["outputs_version"] = current - 1
+    metadata["generated_at"] = "an earlier build"
+    metadata_path.write_text(json.dumps(metadata))
+
+    correlate("NBA", stub, force=False)
+
+    rebuilt = json.loads(metadata_path.read_text())
+    assert rebuilt["generated_at"] != "an earlier build"
+    assert rebuilt["cache_key"]["constants"]["outputs_version"] == current
+
+
 def test_correlate_force_bypasses_skip(_preserve_nba_correlate_outputs, caplog) -> None:
     """``force=True`` always rebuilds, even when the cache_key matches."""
     import logging
