@@ -227,8 +227,8 @@ def _render_story_preloader(
     # A preset the fit did not price (or one from before it priced presets) has no fitted
     # joint; a priced one's payout is its ev over that joint.
     if pd.notna(o["ev"]):
-        kind = play_type_for(platform, int(o["bet_size"]))
-        for line in payout_check(o["legs"], kind, o["joint_p"], o["ev"] / o["joint_p"]):
+        play_type = play_type_for(platform, int(o["bet_size"]))
+        for line in payout_check(o["legs"], play_type, o["joint_p"], o["ev"] / o["joint_p"]):
             st.caption(line)
     if st.button("Seed constellation", key="cascade_seed", type="primary"):
         seed_from_story(o["legs"], platform, offers)
