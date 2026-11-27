@@ -337,7 +337,7 @@ def test_corr_partner_lookup_pins_platform_across_markets_and_lines():
     check — two different props on the same player would collide (and, since
     ``filtered`` can hold both platforms at once on Board, so could two books' rows).
     The structured partner record now carries player/market/bet/line, and
-    ``_lift_survivors`` resolves it via ``find_offer_idx`` pinned to the *displayed
+    ``_ranked_partners`` resolves it via ``find_offer_idx`` pinned to the *displayed
     offer's own* platform — the fix threaded through in this task."""
     filtered = pd.DataFrame(
         {

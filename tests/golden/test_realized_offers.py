@@ -183,7 +183,7 @@ def test_legs_price_at_the_platform_payout():
 def test_the_recommended_band_opens_above_even_money_and_closes_at_the_cap():
     payout = pd.Series([1.0, 1.5, RECOMMENDED_PAYOUT_MAX, RECOMMENDED_PAYOUT_MAX + 0.01])
     assert in_recommended_band(payout).tolist() == [False, True, True, False]
-    # The board's rule reads the same band: a .9 claim clears its edge floor wherever a side pays.
+    # The 5 %-edge rule reads the same band: a .9 claim clears its edge floor wherever a side pays.
     claim = pd.Series(0.9, index=payout.index)
     assert recommended(claim, payout).tolist() == [False, True, True, False]
 

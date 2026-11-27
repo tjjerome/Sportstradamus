@@ -106,7 +106,7 @@ def test_ev_edge_marks_a_models_side_whose_lower_bound_pays_inside_the_recommend
         [
             even("A", 0.55),  # .55 x 1.83 = 1.0065
             even("B", 0.54),  # .54 x 1.83 = .9882
-            # The mark does not read the board's own rule.
+            # The mark does not read the 5 %-edge rule's flag.
             even("C", 0.55, Recommended=False),
             sleeper("D", 2.0),  # exactly 1
             sleeper("E", cap),
