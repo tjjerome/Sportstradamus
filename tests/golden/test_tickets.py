@@ -209,10 +209,20 @@ def test_meta_line_carries_platform_play_type_leg_count_and_date():
     assert "2" in t["meta"]
 
 
-def test_ev_and_stake_present_on_every_ticket():
-    t = build_tickets(pd.DataFrame([_slip()]))[0]
-    assert t["ev"] == pytest.approx(0.145)  # model_ev (1.145) - 1, as elsewhere in the app
+def test_a_ticket_carries_the_fitted_ev_beside_the_model_ev_and_the_stake():
+    t = build_tickets(pd.DataFrame([_slip(ev=0.97)]))[0]
+    assert t["ev"] == pytest.approx(0.97)
+    assert t["model_ev"] == pytest.approx(1.145)
     assert t["stake"] == pytest.approx(12.0)
+
+
+def test_a_slip_locked_before_the_fit_has_only_its_model_ev():
+    """Alone, an old slip's frame has no ev column; beside a newer slip, its ev is blank."""
+    (alone,) = build_tickets(pd.DataFrame([_slip()]))
+    _, beside = build_tickets(pd.DataFrame([_slip(ev=0.97), _slip(slip_id="s2")]))
+    for ticket in (alone, beside):
+        assert ticket["ev"] is None
+        assert ticket["model_ev"] == pytest.approx(1.145)
 
 
 def test_empty_frame_returns_empty_list():

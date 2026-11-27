@@ -1,4 +1,4 @@
-"""How an entry's numbers read on the slip rail, the locked shelf and the story preloader.
+"""How an entry's numbers read on the slip rail, the locked shelf, the tickets and the stories.
 
 An entry's fitted value leads as EV with the model's claim beside it as Model EV, in the
 format a leg prints them. An entry with no fitted value (the fit did not price one of its
@@ -17,8 +17,13 @@ from sportstradamus.leg_schema import leg_label
 
 def ev_text(ev: float | None, model_ev: float) -> str:
     """``"EV 0.95 · Model EV 1.12"``, or ``"Model EV 1.12"`` when ``ev`` is None or NaN."""
-    claim = f"Model EV {model_ev:.2f}"
-    return claim if pd.isna(ev) else f"EV {ev:.2f} · {claim}"
+    return " · ".join(f"{label} {value}" for label, value in ev_metrics(ev, model_ev))
+
+
+def ev_metrics(ev: float | None, model_ev: float) -> list[tuple[str, str]]:
+    """:func:`ev_text` as ``(label, value)`` metric pairs: EV then Model EV, or Model EV alone."""
+    claim = ("Model EV", f"{model_ev:.2f}")
+    return [claim] if pd.isna(ev) else [("EV", f"{ev:.2f}"), claim]
 
 
 def rail_lines(score: SlipScore, legs: Sequence[Mapping]) -> list[str]:

@@ -26,7 +26,7 @@ from sportstradamus.dashboard.components.slip_builder import (
     _open_offer_detail,
     slip_shrinkage,
 )
-from sportstradamus.dashboard.components.slip_state import _LEGS, _legs_from_records
+from sportstradamus.dashboard.components.slip_state import _LEGS, _legs_from_records, load_slip
 from sportstradamus.leg_schema import build_leg
 from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 
@@ -236,6 +236,25 @@ def test_stored_legs_find_their_board_row_under_the_leagues_own_market_name():
     # A saved slip's legs were snapshotted from the board, so they carry its names already.
     saved = [build_leg(row) for row in board.to_dict("records") if row["Platform"] == "Underdog"]
     assert _legs_from_records(saved, "Underdog", board) == saved
+
+
+def test_a_reopened_slip_reads_the_fit_off_the_board():
+    """A slip locked before the fit stored legs with no fit_prob, ev or pick; reopening it
+    for edit rebuilds each leg from its board row, so the slip prices on the fit."""
+    board = _pool_df(
+        _offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.96),
+        _offer("B", "REB", "Over", 8.5, "NYK/SAS", "SAS", "Underdog", 0.9, pick=False),
+    )
+    stored = [
+        {k: v for k, v in build_leg(row).items() if k not in ("fit_prob", "ev", "pick")}
+        for row in board.to_dict("records")
+    ]
+    slip = {"platform": "Underdog", "legs": stored, "builder_type": "constellation"}
+    load_slip(slip | {"slip_id": "s1"}, board)
+    assert [(leg["fit_prob"], leg["ev"], leg["pick"]) for leg in st.session_state[_LEGS]] == [
+        (0.48, 0.96, True),
+        (0.45, 0.9, False),
+    ]
 
 
 def test_a_board_row_with_no_market_name_matches_no_leg_and_breaks_none():

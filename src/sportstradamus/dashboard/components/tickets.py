@@ -1,7 +1,7 @@
 """Receipt-ticket builder + thin render for Receipts' "Your slips" section.
 
 ``build_tickets`` is the pure display-precompute step (status/color/stamp,
-per-leg hit/miss/push outcomes, EV/stake/return-vs-to-win) — unit-tested
+per-leg hit/miss/push outcomes, EV beside Model EV, stake, return-vs-to-win) — unit-tested
 directly against hand-built ``user_slips``-shaped fixture rows.
 ``render_tickets`` is the thin Streamlit render: a 2-column card grid, no
 business logic.
@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.components.slip_readout import ev_metrics
 from sportstradamus.leg_schema import leg_label
 
 # Won/lost/partial share the graded look; pending is its own state marker
@@ -67,7 +68,10 @@ def _value(row: pd.Series, status: str) -> tuple[str, float]:
 
 def build_tickets(user_slips: pd.DataFrame) -> list[dict]:
     """One display-ready dict per slip: status/color/stamp, headline, meta
-    line, per-leg ``(label, outcome)`` pairs, EV, stake, and the value/label pair.
+    line, per-leg ``(label, outcome)`` pairs, EV, Model EV, stake, and the value/label pair.
+
+    ``ev`` is the fitted value the slip was locked with, ``None`` on a slip the fit did not
+    price or one locked before it priced slips; ``model_ev`` is the model's claim.
     """
     if user_slips.empty:
         return []
@@ -87,7 +91,8 @@ def build_tickets(user_slips: pd.DataFrame) -> list[dict]:
                 "meta": f"{row['platform']} · {row.get('play_type', '')} · "
                 f"{n_legs} legs · {short_date}".replace("  ", " "),
                 "legs": _leg_outcomes(row),
-                "ev": float(row.get("model_ev", 1.0) or 1.0) - 1.0,
+                "ev": float(row["ev"]) if pd.notna(row.get("ev")) else None,
+                "model_ev": float(row["model_ev"]),
                 "stake": float(row.get("stake", 0.0) or 0.0),
                 "value_label": value_label,
                 "value": value,
@@ -134,7 +139,10 @@ def render_tickets(tickets: list[dict]) -> None:
                 for label, outcome in ticket["legs"]:
                     tag = outcome or "pending"
                     st.caption(f"{label}  :{_OUTCOME_COLOR_KEYWORD[outcome]}[{tag}]")
-                e1, e2, e3 = st.columns(3)
-                e1.metric("EV", f"{ticket['ev']:+.1%}")
-                e2.metric("Stake", f"${ticket['stake']:,.0f}")
-                e3.metric(ticket["value_label"], f"${ticket['value']:,.0f}")
+                metrics = [
+                    *ev_metrics(ticket["ev"], ticket["model_ev"]),
+                    ("Stake", f"${ticket['stake']:,.0f}"),
+                    (ticket["value_label"], f"${ticket['value']:,.0f}"),
+                ]
+                for col, (label, value) in zip(st.columns(len(metrics)), metrics, strict=True):
+                    col.metric(label, value)

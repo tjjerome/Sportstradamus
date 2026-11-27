@@ -2,7 +2,8 @@
 
 Reads ``user_slips.parquet`` (the slips "locked in" from either builder) and
 lists them compactly under the global bankroll control. Each entry carries the
-payout / EV / stake / status at a glance, a **View** dialog that lays out every
+payout / EV beside Model EV / stake / status at a glance (a slip locked before the fit
+priced slips shows its Model EV alone), a **View** dialog that lays out every
 leg (the reminder you read while placing the bet in the Underdog/Sleeper app),
 an **Edit** that reopens it in its builder, and a **Delete**. Grading status is
 filled in by nightly ``reflect``.
@@ -15,6 +16,7 @@ from collections.abc import Mapping
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.slip_readout import ev_metrics, ev_text
 from sportstradamus.dashboard.components.slip_state import bankroll_input, load_slip
 from sportstradamus.dashboard.data import load_current_offers, load_user_slips
 from sportstradamus.helpers.io import delete_user_slip
@@ -45,7 +47,7 @@ def _render_shelf_entry(row: Mapping, offers: pd.DataFrame) -> None:
         )
         st.caption(
             f"{_fnum(row.get('payout_multiplier')):.2f}x · "
-            f"EV {_fnum(row.get('model_ev'), 1.0) - 1:+.0%} · "
+            f"{ev_text(row.get('ev'), row['model_ev'])} · "
             f"${_fnum(row.get('stake')):,.2f} · {row.get('status') or 'pending'}"
         )
         # Content-sized buttons: in three equal columns the sidebar is too narrow for
@@ -78,10 +80,13 @@ def _slip_dialog(row: Mapping) -> None:
     )
     for leg in row["legs"]:
         st.write(f"- {leg_label(leg)}  ·  {leg.get('league', '')}")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Payout", f"{_fnum(row.get('payout_multiplier')):.2f}x")
-    c2.metric("EV", f"{_fnum(row.get('model_ev'), 1.0) - 1:+.1%}")
-    c3.metric("Stake", f"${_fnum(row.get('stake')):,.2f}")
+    metrics = [
+        ("Payout", f"{_fnum(row.get('payout_multiplier')):.2f}x"),
+        *ev_metrics(row.get("ev"), row["model_ev"]),
+        ("Stake", f"${_fnum(row.get('stake')):,.2f}"),
+    ]
+    for col, (label, value) in zip(st.columns(len(metrics)), metrics, strict=True):
+        col.metric(label, value)
     if row.get("payout_approximate"):
         st.caption("Sleeper payout approximate — correlation factor pending.")
 

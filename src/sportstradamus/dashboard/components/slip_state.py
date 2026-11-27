@@ -142,7 +142,8 @@ def lock_in(score: SlipScore, headline: str, shrinkage: float) -> None:
 
     ``legs`` is stored as the canonical structured-leg records themselves (the
     same shape ``nightly._grade_slip`` reads back for grading), not a
-    display-string projection.
+    display-string projection. ``ev`` (the fitted value, ``None`` on a slip the fit did
+    not price) is stored beside ``model_ev`` (the model's claim).
     """
     legs = st.session_state[_LEGS]
     games = {leg["game"] for leg in legs}
@@ -161,6 +162,7 @@ def lock_in(score: SlipScore, headline: str, shrinkage: float) -> None:
         "joint_p": score.joint_p,
         "payout_multiplier": score.payout,
         "payout_approximate": score.payout_approximate,
+        "ev": score.ev,
         "model_ev": score.model_ev,
         "bankroll": float(st.session_state[_BANKROLL]),
         "stake": float(score.stake),

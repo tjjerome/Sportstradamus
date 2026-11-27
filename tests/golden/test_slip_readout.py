@@ -1,7 +1,8 @@
 """Pins for how an entry's numbers read (``dashboard/components/slip_readout.py``).
 
 ``ev_text`` is the one EV-beside-Model-EV format the rail, the shelf and the story
-preloader print; ``rail_lines`` is what both slip rails print under a priced, an unpriced
+preloader print, and ``ev_metrics`` its metric form for the shelf's and the tickets'
+numbers; ``rail_lines`` is what both slip rails print under a priced, an unpriced
 and a refused slip. The scores are built by hand so each number is exact.
 """
 
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sportstradamus.dashboard.components.slip_readout import ev_text, rail_lines
+from sportstradamus.dashboard.components.slip_readout import ev_metrics, ev_text, rail_lines
 from sportstradamus.dashboard.slip_engine import SlipScore
 from sportstradamus.leg_schema import leg_label
 
@@ -45,6 +46,11 @@ def test_ev_text_leads_with_ev_and_shows_model_ev_alone_when_there_is_none():
     assert ev_text(0.951, 1.124) == "EV 0.95 · Model EV 1.12"
     assert ev_text(None, 1.124) == "Model EV 1.12"
     assert ev_text(float("nan"), 1.124) == "Model EV 1.12"
+
+
+def test_ev_metrics_label_the_fit_ev_and_the_claim_model_ev():
+    assert ev_metrics(0.951, 1.124) == [("EV", "0.95"), ("Model EV", "1.12")]
+    assert ev_metrics(float("nan"), 1.124) == [("Model EV", "1.12")]
 
 
 def test_a_priced_slip_leads_with_ev_then_checks_the_payout():

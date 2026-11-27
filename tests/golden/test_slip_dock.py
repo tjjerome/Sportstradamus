@@ -12,6 +12,7 @@ tmp parquet.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from sportstradamus.dashboard.legs import corr_key
@@ -126,3 +127,19 @@ def test_refused_pair_blocks_the_lock(monkeypatch, tmp_path):
     assert "won't pair" in " ".join(m.value for m in at.markdown)
     assert any("won't pair" in w.value for w in at.warning)
     assert at.button(key="slip_dock_lock").disabled
+
+
+def test_lock_stores_the_fitted_ev_beside_the_model_ev(monkeypatch, tmp_path):
+    """A priced slip locks with its ev and its model_ev; an unpriced one with no ev."""
+    path = tmp_path / "user_slips.parquet"
+    monkeypatch.setattr("sportstradamus.helpers.io.USER_SLIPS_PATH", path)
+    priced = [_leg("Jalen Brunson", "PTS", "NYK"), _leg("Jayson Tatum", "PTS", "BOS")]
+    unpriced = [priced[0], priced[1] | {"fit_prob": None, "ev": None}]
+    for legs in (priced, unpriced):
+        at = _dock_test(legs, open_sheet=True)
+        at.button(key="slip_dock_lock").click().run()
+        assert not at.exception
+    slips = pd.read_parquet(path)
+    assert slips["ev"].tolist()[0] == pytest.approx(3.5 * 0.55**2)
+    assert pd.isna(slips["ev"].tolist()[1])
+    assert slips["model_ev"].tolist() == pytest.approx([3.5 * 0.6**2] * 2)
