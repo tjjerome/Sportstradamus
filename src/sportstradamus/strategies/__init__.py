@@ -6,14 +6,11 @@ Phase 3 §3.1 introduces fractional-Kelly sizing here; §3.3 adds the
 
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
-    LIVE_BLEND_FLOOR,
-    LIVE_BLEND_FULL,
     MAX_FRACTION_OF_BANKROLL,
     SHRINKAGE_FLOOR,
     KellyCandidate,
     fractional_kelly_stake,
     joint_kelly_portfolio,
-    resolve_shrinkage,
 )
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
@@ -23,8 +20,6 @@ from sportstradamus.strategies.underdog_pickem import (
 
 __all__ = [
     "DEFAULT_KELLY_FRACTION",
-    "LIVE_BLEND_FLOOR",
-    "LIVE_BLEND_FULL",
     "MAX_FRACTION_OF_BANKROLL",
     "SHRINKAGE_FLOOR",
     "KellyCandidate",
@@ -33,5 +28,4 @@ __all__ = [
     "construct_entries",
     "fractional_kelly_stake",
     "joint_kelly_portfolio",
-    "resolve_shrinkage",
 ]

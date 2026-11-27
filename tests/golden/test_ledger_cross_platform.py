@@ -95,7 +95,7 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
 
 def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
     def _fake_live_load(config, platform, stats):
-        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
 
     def _fake_construct_entries(config, *, parlay_dfs, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
@@ -142,7 +142,7 @@ def test_build_candidate_universe_loads_the_leagues_once_for_both_platforms(monk
 
     def _fake_live_load(config, platform, stats):
         handed.append(stats)
-        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Date"])
+        return {}, pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
 
     monkeypatch.setattr("sportstradamus.stats.load_live_leagues", _load_live_leagues)
     monkeypatch.setattr(ledger, "live_load", _fake_live_load)
@@ -187,6 +187,7 @@ def _offer(player: str, game: str, boost: float, platform: str, win_prob: float 
         "Line": 4.5,
         "Bet": "Over",
         "Win Prob": win_prob,
+        "Fit Prob": win_prob,
         # An even pick's book sits at a coin flip, further from a read worth recommending
         # than the shared leg gate allows. A moved multiplier's book is inside the gate.
         "Market Prob": 0.50 if boost == 1.0 else 0.57,
@@ -223,14 +224,11 @@ def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd
 
 
 def _load_mixed_multiplier_frames(monkeypatch) -> dict:
-    """Fake the league load and ``live_load`` with the frames above, at full model trust so
-    every cross-game combo clears the shared EV floor. Returns the frames by platform."""
+    """Fake the league load and ``live_load`` with the frames above. Returns the frames by
+    platform."""
     frames = {platform: _mixed_multiplier_frames(platform) for platform in ledger._PLATFORMS}
     monkeypatch.setattr("sportstradamus.stats.load_live_leagues", lambda: ({}, []))
     monkeypatch.setattr(ledger, "live_load", lambda config, platform, stats: frames[platform])
-    monkeypatch.setattr(
-        ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (1.0, "training")
-    )
     return frames
 
 
@@ -238,10 +236,6 @@ def test_even_picks_pool_is_underdogs_recommended_even_picks_across_games(monkey
     """One entry: no all-even same-game parlay, no weakly read even pick, no moved
     multiplier, nothing of Sleeper's."""
     _load_mixed_multiplier_frames(monkeypatch)
-    # No cell is trusted at all: the pool prices the served read, so its entry stands.
-    monkeypatch.setattr(
-        ledger._ledger_cross_game, "resolve_market_shrinkage", lambda *a: (0.0, "training")
-    )
 
     pools = ledger.build_candidate_universe(DATE, "morning")
 

@@ -432,7 +432,7 @@ def test_copies_holding_one_candidate_settle_as_their_own_rows_and_bankrolls(
 
 @pytest.mark.parametrize(
     ("policy_version", "late_copy_settles"),
-    [("policy_v1", 0), ("policy_v3", 0), ("policy_v4", 1)],
+    [("policy_v1", 0), ("policy_v3", 0), ("policy_v4", 1), ("policy_v5", 1)],
 )
 def test_late_copy_of_a_settled_candidate_settles_only_since_policy_v4(
     monkeypatch, tmp_path, policy_version, late_copy_settles

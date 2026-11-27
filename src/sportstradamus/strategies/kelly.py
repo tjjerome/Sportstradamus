@@ -4,20 +4,16 @@ Phase 3 §3.1. Public API:
 
 - :func:`fractional_kelly_stake` — single-bet quarter-Kelly with shrinkage.
 - :func:`joint_kelly_portfolio` — multi-bet portfolio via cvxpy SCS.
-- :func:`resolve_shrinkage` — combine live (CLV) and training Brier
-  skill scores into a single ``[0, 1]`` shrinkage weight; rules
-  documented in ``strategies/README.md``.
 
 ``effective_p = p_book + (win_prob - p_book) * shrinkage``, where ``p_book``
 is the book's implied ``1 / payout`` (see :func:`anchored_win_prob`) — shrinkage
 at ``1.0`` is a no-op and ``0.0`` returns the book's own line, which is exactly
-zero edge. Shrinkage is plumbed through every entrypoint so the dashboard can
-audit which source (CLV vs. training) sized any given bet.
+zero edge. Every entrypoint takes the shrinkage, so its caller decides how far
+the model is trusted.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
@@ -25,10 +21,6 @@ import click
 import cvxpy
 import tabulate
 import yaml
-
-from sportstradamus.helpers.logging import get_logger
-
-_logger = get_logger("kelly")
 
 # Quarter-Kelly hedge against win-probability estimate variance (edge-suite §5.1).
 DEFAULT_KELLY_FRACTION: float = 0.25
@@ -41,19 +33,10 @@ MAX_FRACTION_OF_BANKROLL: float = 0.005
 # book's own implied line — exactly zero edge, so the bet is skipped, not staked.
 SHRINKAGE_FLOOR: float = 0.0
 
-# A cell with no measured skill (below the blend-fit cluster floor, or a CLV segment
-# too thin to read) stakes near zero until a measurement exists: serving still runs
-# those cells at model_weight 1.0, so a full-trust default would stake the unmeasured
-# cells hardest.
+# A cell with no measured skill (below the blend-fit cluster floor) stakes near zero
+# until a measurement exists: serving still runs those cells at model_weight 1.0, so a
+# full-trust default would stake the unmeasured cells hardest.
 NO_EVIDENCE_SHRINKAGE: float = 0.01
-
-# CLV-segment leg count below which live BSS is ignored; the segment is
-# still mostly noise at this size even if it cleared CLV_SEGMENT_MIN_N.
-LIVE_BLEND_FLOOR: int = 25
-
-# At this many legs the live signal fully dominates training-time BSS;
-# current-season conditions have moved enough that training is stale.
-LIVE_BLEND_FULL: int = 100
 
 # Smallest representable stake; sub-cent rounds flow into bankroll, not bets.
 _STAKE_QUANTUM: Decimal = Decimal("0.01")
@@ -67,55 +50,6 @@ class KellyCandidate:
     win_prob: float
     payout_multiplier: Decimal
     model_shrinkage: float = 1.0
-
-
-def resolve_shrinkage(
-    *,
-    explicit: float | None = None,
-    training_bss: float | None = None,
-    live_bss: float | None = None,
-    live_n: int = 0,
-) -> float:
-    """Resolve a shrinkage weight in ``[0, 1]`` from the available sources.
-
-    Resolution order (matches ``strategies/README.md``):
-
-    1. ``explicit`` — overrides the blend.
-    2. Both ``training_bss`` and ``live_bss`` present and
-       ``live_n >= LIVE_BLEND_FLOOR`` → blended per the ``w_live`` ramp.
-    3. Only ``training_bss`` (or live below the floor) → training_bss.
-    4. Only ``live_bss`` (training missing) → live_bss.
-    5. Neither → :data:`NO_EVIDENCE_SHRINKAGE`, logged at DEBUG.
-
-    NaNs in ``training_bss`` / ``live_bss`` are treated as missing.
-    Result is clipped to ``[SHRINKAGE_FLOOR, 1.0]``.
-    """
-    if explicit is not None:
-        return _clip01(explicit)
-
-    has_train = training_bss is not None and not math.isnan(training_bss)
-    has_live = live_bss is not None and not math.isnan(live_bss) and live_n > 0
-
-    if has_train and has_live:
-        return _blend_shrinkage(training_bss, live_bss, live_n)
-    if has_train:
-        return _clip01(training_bss)
-    if has_live:
-        return _clip01(live_bss)
-
-    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking near zero")
-    return NO_EVIDENCE_SHRINKAGE
-
-
-def _blend_shrinkage(training_bss: float, live_bss: float, live_n: int) -> float:
-    """Ramp from training BSS to live BSS as live_n crosses the blend window."""
-    if live_n <= LIVE_BLEND_FLOOR:
-        return _clip01(training_bss)
-    if live_n >= LIVE_BLEND_FULL:
-        return _clip01(live_bss)
-    w_live = (live_n - LIVE_BLEND_FLOOR) / (LIVE_BLEND_FULL - LIVE_BLEND_FLOOR)
-    blended = w_live * float(live_bss) + (1.0 - w_live) * float(training_bss)
-    return _clip01(blended)
 
 
 def kelly_edge(win_prob: float, payout_multiplier: float, model_shrinkage: float = 1.0) -> float:

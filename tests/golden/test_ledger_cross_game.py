@@ -1,7 +1,8 @@
 """Pin cross-game candidate generation for the simulated-bettor ledger --
 game-span guard, per-pick multiplier pricing, RNG determinism, beam-width cap,
-the min_ev floor, the ``even_picks`` pool and a leg's league-own stat key of
-``_ledger_cross_game`` (docs/handoffs/sim-bettor-ledger.md §10).
+the min_ev floor, the ``even_picks`` pool, a leg's league-own stat key and its
+price at the fitted chance of ``_ledger_cross_game``
+(docs/handoffs/sim-bettor-ledger.md §10).
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ def _offer_row(
     market: str = "Rebounds",
     league: str = "NBA",
     win_prob: float = 0.60,
+    fit_prob: float | None = None,
     market_prob: float = 0.56,
     line: float = 4.5,
     boost: float = 1.0,
@@ -46,6 +48,7 @@ def _offer_row(
         "Line": line,
         "Bet": "Over",
         "Win Prob": win_prob,
+        "Fit Prob": win_prob if fit_prob is None else fit_prob,
         "Market Prob": market_prob,
         "Boost": boost,
         "Push Prob": push_prob,
@@ -176,8 +179,7 @@ def test_price_combo_wiring_matches_direct_call() -> None:
         ]
     )
     config = PickemConfig(min_ev=-1.0)
-    eligible = offers  # both legs clear filter_legs at these edges/thresholds
-    legs = xg._score_legs(eligible, "Underdog")
+    legs = xg._served_legs(offers, "Underdog")
     rng_direct = xg._pricing_rng(DATE, "morning")
     ev_payout = xg._price_combo(tuple(legs), rng_direct, "Underdog")
 
@@ -191,13 +193,13 @@ def test_price_combo_wiring_matches_direct_call() -> None:
 
 
 def _scored_leg(
-    idx: int, *, win_prob: float, push_prob: float = 0.0, boost: float = 1.0
+    idx: int, *, fit_prob: float, push_prob: float = 0.0, boost: float = 1.0
 ) -> xg._ScoredLeg:
     return xg._ScoredLeg(
         idx=idx,
         player=f"Player {idx}",
         game=f"G{idx}A/G{idx}B",
-        win_prob=win_prob,
+        fit_prob=fit_prob,
         push_prob=push_prob,
         book_devig=0.5,
         line=4.5,
@@ -208,7 +210,7 @@ def _scored_leg(
 
 
 def _guaranteed_push_and_loss_legs() -> tuple[xg._ScoredLeg, xg._ScoredLeg]:
-    return _scored_leg(0, win_prob=0.0, push_prob=1.0), _scored_leg(1, win_prob=0.0)
+    return _scored_leg(0, fit_prob=0.0, push_prob=1.0), _scored_leg(1, fit_prob=0.0)
 
 
 def test_price_combo_sleeper_two_leg_push_refunds_in_full() -> None:
@@ -239,7 +241,7 @@ def test_price_combo_flex_loss_tier_pays_on_the_largest_remaining_multipliers() 
     multipliers whichever pick missed: 1.4 * 1.5 = 2.1. One fused 1.2x on every tier
     would pay 1.68 there and price the entry at 0.96."""
     legs = tuple(
-        _scored_leg(idx, win_prob=0.5, boost=boost)
+        _scored_leg(idx, fit_prob=0.5, boost=boost)
         for idx, boost in enumerate((0.8, 1.0, 1.0, 1.5))
     )
     rng = np.random.default_rng(12345)
@@ -249,12 +251,11 @@ def test_price_combo_flex_loss_tier_pays_on_the_largest_remaining_multipliers() 
     assert ev_payout == pytest.approx(8.64 / 16 + 2.1 * 4 / 16, abs=0.05)
 
 
-def test_candidate_is_sized_on_its_all_hit_payout_and_its_priced_ev(monkeypatch) -> None:
+def test_candidate_is_sized_on_its_all_hit_payout_and_its_priced_ev() -> None:
     """Four 0.60 picks on Underdog's 4-pick Flex, one of them at 1.25x. All four hit
     13% of the time, and 13% of the bare 7.2 tier is under a dollar back, so a stake
     sized on that is nothing. The entry pays 7.2 * 1.25 = 9 when all four hit and is
     worth holding for its one-miss tier; the stake has to see both."""
-    monkeypatch.setattr(xg, "resolve_market_shrinkage", lambda league, market: (1.0, "fallback"))
     offers = _offers_df(
         [
             _offer_row(f"Player {i}", f"G{i}A/G{i}B", market_prob=0.58, boost=boost)
@@ -286,21 +287,6 @@ def test_canonical_legs_carry_each_picks_own_multiplier() -> None:
         "Player A": 0.87,
         "Player B": 1.16,
     }
-
-
-def test_side_the_platform_does_not_post_never_enters_a_candidate() -> None:
-    """An unposted side arrives with a zero multiplier. No entry can hold it, and a
-    Flex loss tier would otherwise drop that zero as the smallest multiplier and
-    pay on the rest."""
-    offers = _offers_df(
-        [_offer_row(f"Posted {i}", f"G{i}A/G{i}B") for i in range(4)]
-        + [_offer_row("Unposted", "BOS/MIA", boost=0.0)]
-    )
-
-    candidates = xg.build_cross_game_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
-
-    assert {c.entry_size for c in candidates} == {2, 3, 4}
-    assert all("Unposted" not in c.players for c in candidates)
 
 
 # --- _pricing_rng / _entropy_from determinism -----------------------------------
@@ -339,7 +325,7 @@ def test_beam_width_cap_holds_with_monkeypatched_narrow_width(monkeypatch) -> No
         game = f"G{i}A/G{i}B"
         rows.append(_offer_row(f"Player {i}", game, win_prob=0.55 + i * 0.01))
     offers = _offers_df(rows)
-    legs = xg._score_legs(offers, "Underdog")
+    legs = xg._served_legs(offers, "Underdog")
 
     by_size = xg._enumerate_cross_game_combos(legs)
 
@@ -353,8 +339,8 @@ def test_beam_width_cap_holds_with_monkeypatched_narrow_width(monkeypatch) -> No
 def test_candidates_below_min_ev_are_dropped() -> None:
     offers = _offers_df(
         [
-            _offer_row("Player A", "BOS/MIA", win_prob=0.58, market_prob=0.54),
-            _offer_row("Player B", "LAL/DEN", win_prob=0.58, market_prob=0.54),
+            _offer_row("Player A", "BOS/MIA", win_prob=0.58, fit_prob=0.54, market_prob=0.54),
+            _offer_row("Player B", "LAL/DEN", win_prob=0.58, fit_prob=0.54, market_prob=0.54),
         ]
     )
     lenient_config = PickemConfig(min_ev=-1.0)
@@ -407,28 +393,6 @@ def test_recommended_even_pick_the_shared_gate_refuses_is_in_the_even_pick_pool(
     (two_leg,) = xg.build_even_pick_candidates(offers, config, DATE, "morning")
     assert two_leg.entry_size == 2
     assert two_leg.players == frozenset({"Player A", "Player B"})
-
-
-def test_even_pick_pool_prices_the_served_read_whatever_the_cells_trust(monkeypatch) -> None:
-    def _no_trust_lookup(league, market):
-        raise AssertionError("the even-pick pool asked for a cell's trust")
-
-    monkeypatch.setattr(xg, "resolve_market_shrinkage", _no_trust_lookup)
-    served = {"Player A": 0.60, "Player B": 0.58}
-    offers = _offers_df(
-        [
-            _offer_row("Player A", "BOS/MIA", win_prob=served["Player A"]),
-            _offer_row("Player B", "LAL/DEN", win_prob=served["Player B"]),
-        ]
-    )
-
-    candidates = xg.build_even_pick_candidates(offers, PickemConfig(), DATE, "morning")
-
-    assert candidates
-    for candidate in candidates:
-        assert candidate.model_probs == tuple(
-            served[leg["player"]] for leg in candidate.canonical_legs
-        )
 
 
 def test_only_recommended_even_picks_enter_the_even_pick_pool() -> None:
@@ -585,25 +549,6 @@ def test_nhl_leg_carries_the_gamelogs_stat_not_the_platform_maps(build) -> None:
     }
 
 
-def test_shared_path_asks_a_cells_trust_under_the_leagues_own_key(monkeypatch) -> None:
-    """The NHL cells are assists and points: asked for AST, no cell answers and the leg
-    is priced on the no-evidence rung. A market the platform map lacks has no cell."""
-    asked: list[tuple[str, str | None]] = []
-
-    def _record(league, market):
-        asked.append((league, market))
-        return 1.0, "training"
-
-    monkeypatch.setattr(xg, "resolve_market_shrinkage", _record)
-    offers = _offers_df(
-        [*_nhl_assists_and_points(), _offer_row("Player C", "LAL/DEN", market="Not A Market")]
-    )
-
-    xg.build_cross_game_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
-
-    assert asked == [("NHL", "assists"), ("NHL", "points"), ("NBA", None)]
-
-
 @pytest.mark.parametrize("build", _BUILDERS)
 def test_market_the_platform_map_lacks_still_builds_a_leg(build) -> None:
     """There is no mapped name to rename, so the leg keeps the stat ``build_leg`` gave it."""
@@ -620,3 +565,41 @@ def test_market_the_platform_map_lacks_still_builds_a_leg(build) -> None:
         "Player A": "Not A Market",
         "Player B": stat_map["Underdog"]["Rebounds"],
     }
+
+
+# --- every pool prices a leg at its fitted chance, and has no leg without one -----
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_every_pool_prices_and_records_a_leg_at_its_fitted_chance(build) -> None:
+    """The served read is the model's claim. The fitted chance, fit on settled posted
+    picks, is what an entry is priced on and what its record keeps."""
+    fitted = {"Player A": 0.52, "Player B": 0.49}
+    offers = _offers_df(
+        [
+            _offer_row("Player A", "BOS/MIA", fit_prob=fitted["Player A"]),
+            _offer_row("Player B", "LAL/DEN", fit_prob=fitted["Player B"]),
+        ]
+    )
+    _, underdog_curve = payout_curve_for("Underdog", "pooled")
+
+    (two_leg,) = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+
+    assert two_leg.model_probs == tuple(fitted[leg["player"]] for leg in two_leg.canonical_legs)
+    assert two_leg.ev + 1 == pytest.approx(0.52 * 0.49 * underdog_curve[2][0], abs=0.05)
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_leg_without_a_fitted_chance_never_enters_a_candidate(build) -> None:
+    """The fit wants both sides posted. A record with one side posted has no fitted chance,
+    and neither has the unposted side's record, which carries a zero multiplier."""
+    one_sided = _offer_row("One Side", "BOS/MIA", fit_prob=float("nan"))
+    offers = _offers_df(
+        [_offer_row(f"Player {i}", f"G{i}A/G{i}B") for i in range(3)]
+        + [one_sided, one_sided | {"Bet": "Under", "Boost": 0.0}]
+    )
+
+    candidates = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+
+    assert {c.entry_size for c in candidates} == {2, 3}
+    assert all("One Side" not in c.players for c in candidates)

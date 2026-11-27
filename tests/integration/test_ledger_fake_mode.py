@@ -88,6 +88,7 @@ def _offers_df(platform: str) -> pd.DataFrame:
             "Bet": "Over",
             "Platform": platform,
             "Win Prob": 0.58,
+            "Fit Prob": 0.58,
             "Market Prob": 0.545,
         },
         {
@@ -103,6 +104,7 @@ def _offers_df(platform: str) -> pd.DataFrame:
             "Bet": "Over",
             "Platform": platform,
             "Win Prob": 0.56,
+            "Fit Prob": 0.56,
             "Market Prob": 0.53,
         },
     ]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from decimal import Decimal
 
 import pytest
@@ -10,15 +9,12 @@ import pytest
 from sportstradamus.strategies import kelly
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
-    LIVE_BLEND_FLOOR,
-    LIVE_BLEND_FULL,
     MAX_FRACTION_OF_BANKROLL,
     NO_EVIDENCE_SHRINKAGE,
     KellyCandidate,
     fractional_kelly_stake,
     joint_kelly_portfolio,
     kelly_edge,
-    resolve_shrinkage,
 )
 
 # --------------------------------------------------------------------------- #
@@ -55,46 +51,6 @@ def test_hard_cap_active():
     )
     cap = Decimal("1000") * Decimal(repr(MAX_FRACTION_OF_BANKROLL))
     assert stake == cap.quantize(Decimal("0.01"))
-
-
-# --------------------------------------------------------------------------- #
-# resolve_shrinkage — blending ramp
-
-
-def test_resolve_explicit_overrides():
-    assert resolve_shrinkage(
-        explicit=0.42, training_bss=0.9, live_bss=0.1, live_n=200
-    ) == pytest.approx(0.42)
-
-
-def test_resolve_midramp_blends_evenly():
-    # n = (25+100)/2 = 62.5 → w_live = (62-25)/75 ≈ 0.4933 (using n=62)
-    n = 62
-    w_live = (n - LIVE_BLEND_FLOOR) / (LIVE_BLEND_FULL - LIVE_BLEND_FLOOR)
-    expected = w_live * 0.2 + (1 - w_live) * 0.8
-    out = resolve_shrinkage(training_bss=0.8, live_bss=0.2, live_n=n)
-    assert out == pytest.approx(expected, abs=1e-9)
-
-
-def test_resolve_neither_logs_debug_and_returns_unmeasured_prior(caplog, monkeypatch):
-    # The structured logger silences DEBUG and disables propagation; swap in
-    # a plain stdlib logger for the duration of this test so caplog can see
-    # the DEBUG record.
-    plain = logging.getLogger("kelly-test")
-    plain.setLevel(logging.DEBUG)
-    monkeypatch.setattr(kelly, "_logger", plain)
-    with caplog.at_level(logging.DEBUG, logger="kelly-test"):
-        out = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert out == NO_EVIDENCE_SHRINKAGE
-    assert out > 0.0  # unmeasured is a small prior, not a measured-worthless 0.0
-    assert any("fallback" in rec.message for rec in caplog.records)
-
-
-def test_resolve_nan_live_below_the_segment_floor_is_no_evidence():
-    # clv.get_segment_calibration hands back (nan, n) under CLV_SEGMENT_MIN_N; that n must
-    # not turn the NaN into live evidence.
-    out = resolve_shrinkage(training_bss=float("nan"), live_bss=float("nan"), live_n=5)
-    assert out == NO_EVIDENCE_SHRINKAGE
 
 
 # --------------------------------------------------------------------------- #
@@ -180,92 +136,15 @@ def test_portfolio_all_filtered_returns_empty():
     assert out == {}
 
 
-# --------------------------------------------------------------------------- #
-# Resolution chain integration: explicit > CLV > training > fallback
-
-
-def test_resolution_chain_via_fractional_kelly_stake():
-    """The single-bet entrypoint accepts already-resolved shrinkage; this
-    test exercises ``resolve_shrinkage`` then plumbs through to the stake
-    function to confirm sources land where the docs say.
-    """
-    # Explicit beats both.
-    s = resolve_shrinkage(explicit=0.0, training_bss=0.9, live_bss=0.9, live_n=200)
-    assert s == 0.0
-    stake = fractional_kelly_stake(
-        bankroll=Decimal("1000"),
-        win_prob=0.7,
-        payout_multiplier=Decimal("3"),
-        model_shrinkage=s,
-    )
-    assert stake == Decimal("0")  # zero-shrinkage forces zero stake.
-
-    # Live wins past the ramp full.
-    s = resolve_shrinkage(training_bss=1.0, live_bss=0.0, live_n=LIVE_BLEND_FULL + 50)
-    assert s == 0.0
-
-    # Training only path.
-    s = resolve_shrinkage(training_bss=0.8, live_bss=None, live_n=0)
-    assert s == pytest.approx(0.8)
-
-    # Final fallback: unmeasured gets a small prior, never full trust. Measured
-    # skill of exactly 0.0 (the rungs above) still means zero trust.
-    s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert s == NO_EVIDENCE_SHRINKAGE
-    assert 0.0 < s < 0.1
-
-
-def test_no_evidence_cell_resolves_to_unmeasured_prior_with_fallback_source(tmp_path, monkeypatch):
-    """A cell with no model_stats row (NaN training BSS) lands on the ``"fallback"``
-    rung whether its CLV segment is absent or thinner than ``CLV_SEGMENT_MIN_N`` —
-    not on 1.0, which handed full trust to exactly the cells with no evidence.
-    """
-    import importlib
-
-    import pandas as pd
-
-    from sportstradamus import clv
-    from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
-
-    # ``sportstradamus.training`` re-exports the ``report`` *function*, shadowing
-    # the submodule attribute — go through sys.modules so the patch lands on the
-    # module resolve_market_shrinkage's lazy from-import reads.
-    report_mod = importlib.import_module("sportstradamus.training.report")
-    monkeypatch.setattr(
-        report_mod,
-        "get_market_calibration",
-        lambda league, market: {"brier_skill_score": float("nan")},
-    )
-    segments = tmp_path / "clv_segments.parquet"
-    monkeypatch.setattr(clv, "_segments_parquet_path", lambda: segments)
-
-    assert resolve_market_shrinkage("WNBA", "PTS") == (NO_EVIDENCE_SHRINKAGE, "fallback")
-
-    pd.DataFrame(
-        [
-            {
-                "League": "WNBA",
-                "Market": "PTS",
-                "Platform": "Underdog",
-                "n": 5,
-                "market_clv": 0.1,
-                "frac_beat_close": 1.0,
-            }
-        ]
-    ).to_parquet(segments, index=False)
-    assert resolve_market_shrinkage("WNBA", "PTS") == (NO_EVIDENCE_SHRINKAGE, "fallback")
-
-
-def test_fallback_source_entry_stakes_zero():
+def test_no_evidence_prior_stakes_a_long_entry_nothing():
     # The manufactured-edge scenario NO_EVIDENCE_SHRINKAGE exists for: a 5-leg
-    # entry's tiny joint probability against a 20x payout. Fallback shrinkage
+    # entry's tiny joint probability against a 20x payout. The no-evidence prior
     # must stake zero through the SHRINKAGE_FLOOR check...
-    s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
     stake = fractional_kelly_stake(
         bankroll=Decimal("1000"),
         win_prob=0.03,
         payout_multiplier=Decimal("20"),
-        model_shrinkage=s,
+        model_shrinkage=NO_EVIDENCE_SHRINKAGE,
     )
     assert stake == Decimal("0")
 
@@ -280,13 +159,20 @@ def test_fallback_source_entry_stakes_zero():
             model_shrinkage=s_any,
         ) == Decimal("0")
 
-    # A model that genuinely beats the book's line still stakes, scaled by trust.
+    # A model that genuinely beats the book's line still stakes, scaled by trust,
+    # and nothing at zero trust.
     assert fractional_kelly_stake(
         bankroll=Decimal("1000"),
         win_prob=0.10,
         payout_multiplier=Decimal("20"),
         model_shrinkage=1.0,
     ) > Decimal("0")
+    assert fractional_kelly_stake(
+        bankroll=Decimal("1000"),
+        win_prob=0.10,
+        payout_multiplier=Decimal("20"),
+        model_shrinkage=0.0,
+    ) == Decimal("0")
 
 
 # --------------------------------------------------------------------------- #

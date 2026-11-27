@@ -30,7 +30,9 @@ from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_en
 
 _logger = get_logger("ledger-commit")
 
-POLICY_VERSION = "policy_v4"
+# Names the rule a record was drawn and sized under; each version keeps its own paper
+# bankrolls, so two rules are never pooled (docs/handoffs/sim-bettor-ledger.md §10).
+POLICY_VERSION = "policy_v5"
 
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
@@ -96,10 +98,9 @@ def build_candidate_universe(
         The candidates each persona draws from, keyed by persona. Every persona
         shares one universe except ``even_picks``, whose pool is built beside it
         from Underdog's offers alone: cross-game entries of the even picks the
-        product recommends on ``date``'s games, at their served read. The shared
-        builders keep few such picks: their leg gate wants a read close to the
-        book, which sits near a coin flip on an even pick, and they cut the read
-        by its cell's trust.
+        product recommends on ``date``'s games. The shared builders keep few such
+        picks: their leg gate wants a read close to the book, which sits near a
+        coin flip on an even pick.
     """
     # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
     from sportstradamus.stats import load_live_leagues

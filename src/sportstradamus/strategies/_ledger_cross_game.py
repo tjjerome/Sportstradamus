@@ -8,12 +8,11 @@ existing same-game parlay search (``prediction.parlay`` /
 combines legs sharing one ``Game`` -- so this module is a deliberately
 separate, independence-assumed path, not a duplicate of that search.
 ``build_cross_game_candidates`` fills the shared universe from the legs the
-pick'em gate keeps, each read cut by its cell's trust;
-``build_even_pick_candidates`` fills the ``even_picks`` persona's pool from the
-slate date's Underdog even picks the product recommends, at their served read,
-its entries dealt evenly over those legs with a game per leg. One pricer sizes
-both. See ``docs/handoffs/sim-bettor-ledger.md`` §10 for the surrounding policy
-design.
+pick'em gate keeps; ``build_even_pick_candidates`` fills the ``even_picks``
+persona's pool from the slate date's Underdog even picks the product recommends,
+its entries dealt evenly over those legs with a game per leg. One pricer prices
+and sizes both, on each leg's fitted chance. See
+``docs/handoffs/sim-bettor-ledger.md`` §10 for the surrounding policy design.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal
 
 import numpy as np
@@ -41,11 +40,7 @@ from sportstradamus.strategies._ledger_selection import (
     _entropy_from,
 )
 from sportstradamus.strategies.kelly import fractional_kelly_stake
-from sportstradamus.strategies.underdog_pickem import (
-    PickemConfig,
-    filter_legs,
-    resolve_market_shrinkage,
-)
+from sportstradamus.strategies.underdog_pickem import PickemConfig, filter_legs
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
@@ -63,20 +58,23 @@ class _ScoredLeg:
     idx: int
     player: str
     game: str
-    win_prob: float  # what the leg is priced at: its served read, or that cut by its cell's trust
+    fit_prob: float  # the fitted chance the leg's side wins: what it is priced and recorded at
     push_prob: float
     book_devig: float  # "Market Prob" column passthrough
     line: float
     boost: float  # the platform's raw multiplier for this pick
     display: str  # leg_label(leg) -- canonical rendering, do not reformat it yourself
     canonical_leg: dict  # build_leg() output, with leg["stat"] patched to cell_market
-    cell_market: str | None = None  # the model cell's market; None when stat_map lacks the label
 
 
 def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
-    """One leg per row of ``offers``, priced at its served ``Win Prob``."""
+    """One leg per row of ``offers`` the fit priced, at its ``Fit Prob``.
+
+    The fit wants both sides posted, so a row with one side posted has no fitted chance
+    and makes no leg.
+    """
     out = []
-    for i, row in offers.reset_index(drop=True).iterrows():
+    for i, row in offers.dropna(subset=["Fit Prob"]).reset_index(drop=True).iterrows():
         leg = build_leg(row)
         cell = cell_market(leg["league"], platform, row["Market"])
         if cell:
@@ -87,26 +85,15 @@ def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
                 idx=i,
                 player=leg["player"],
                 game=leg["game"],
-                win_prob=leg["win_prob"],
+                fit_prob=leg["fit_prob"],
                 push_prob=leg["push_prob"],
                 book_devig=float(row["Market Prob"]),
                 line=leg["line"],
                 boost=leg["boost"],
                 display=leg_label(leg),
                 canonical_leg=leg,
-                cell_market=cell,
             )
         )
-    return out
-
-
-def _score_legs(eligible: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
-    """``eligible``'s legs, each read pulled toward a coin flip by its cell's trust."""
-    out = []
-    for leg in _served_legs(eligible, platform):
-        shrinkage, _source = resolve_market_shrinkage(leg.canonical_leg["league"], leg.cell_market)
-        adj_p = 0.5 + (leg.win_prob - 0.5) * max(0.0, min(1.0, shrinkage))
-        out.append(replace(leg, win_prob=adj_p))
     return out
 
 
@@ -125,7 +112,7 @@ def _expand(legs: list[_ScoredLeg], beam: list[tuple[int, ...]]) -> list[tuple[i
             if len({by_idx[i].game for i in extended}) < 2:
                 continue  # single-game combos are the same-game search's job
             heuristic = math.prod(
-                by_idx[i].win_prob for i in extended
+                by_idx[i].fit_prob for i in extended
             )  # cheap beam-pruning rank only
             scored.append((extended, heuristic))
     scored.sort(key=lambda x: x[1], reverse=True)
@@ -173,13 +160,13 @@ def _pricing_rng(date: datetime.date, run_slot: str) -> np.random.Generator:
 
 
 def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platform: str) -> float:
-    """Expected payout per $1 on the legs' win probs, priced through the
+    """Expected payout per $1 on the legs' fitted chances, priced through the
     push-aware pooled curve rather than as the all-hit probability times the top
     tier, which would miss flex's partial-payout tiers.
     """
     n = len(legs)
     return expected_payout_with_pushes(
-        p_win=np.array([leg.win_prob for leg in legs]),
+        p_win=np.array([leg.fit_prob for leg in legs]),
         p_push=np.array([leg.push_prob for leg in legs]),
         sigma=np.eye(n),
         bet_size=n,
@@ -243,7 +230,7 @@ def _priced_candidates(
                     stake=stake,
                     platform=platform,
                     lines=tuple(leg.line for leg in combo_legs),
-                    model_probs=tuple(leg.win_prob for leg in combo_legs),
+                    model_probs=tuple(leg.fit_prob for leg in combo_legs),
                     book_devig=tuple(leg.book_devig for leg in combo_legs),
                 )
             )
@@ -273,10 +260,7 @@ def build_cross_game_candidates(
     eligible = filter_legs(offers_df, config)
     if eligible.empty:
         return []
-    # A side the platform does not post carries a zero multiplier and no entry can hold
-    # it. Left in, a Flex loss tier would drop that zero as the smallest multiplier and
-    # price a payout nobody can collect.
-    legs = _score_legs(eligible[eligible["Boost"] > 0], platform)
+    legs = _served_legs(eligible, platform)
     by_size = _enumerate_cross_game_combos(legs)
     return _priced_candidates(legs, by_size, config, date, run_slot, platform)
 
@@ -288,11 +272,11 @@ def build_even_pick_candidates(
 
     A leg is a row of Underdog's ``offers_df`` (``Boost`` = the raw pick multiplier)
     at exactly ``UNDERDOG_EVEN_PICK_MULTIPLIER``, for a game on ``date``, whose side Receipts'
-    rule recommends (:func:`sportstradamus.realized.recommended`). It is priced, sized
-    and recorded at its served ``Win Prob``, through neither the pick'em leg gate nor
-    the cell's trust: the bettor tests the recommendation as the dashboard shows it.
-    Entries are dealt evenly over those legs, a game per leg, and each is priced and
-    sized as :func:`build_cross_game_candidates` prices and sizes its own.
+    rule recommends (:func:`sportstradamus.realized.recommended`), through no pick'em leg
+    gate: the pool is the paper record of that rule. Entries are dealt evenly over those
+    legs, a game per leg, and each is priced and sized as
+    :func:`build_cross_game_candidates` prices and sizes its own, at its legs' fitted
+    chances.
 
     Returns:
         One :class:`LedgerCandidate` per dealt entry at or above ``config.min_ev``,

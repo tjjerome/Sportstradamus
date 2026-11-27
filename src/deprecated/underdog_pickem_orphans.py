@@ -57,3 +57,50 @@ def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float
     if not cells:
         return NO_EVIDENCE_SHRINKAGE, "fallback"
     return min((resolve_market_shrinkage(league, cell) for cell in cells), key=lambda r: r[0])
+
+
+# ARCHIVED 2026-11-26 from src/sportstradamus/strategies/underdog_pickem.py
+# Reason: Every ledger pool prices a leg at its fitted chance (policy_v5), so the
+#         ledger's trust cut, this lookup's last caller, was archived
+#         (ledger_cross_game_orphans.py). Its test was deleted from
+#         tests/golden/test_kelly.py (git keeps it).
+# Last live SHA: 30dc28fc
+# Original imports (now unresolved here):
+#   import pandas as pd
+#   from sportstradamus.strategies.kelly import resolve_shrinkage
+
+
+def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
+    """Resolve Kelly shrinkage for one ``(league, market)`` cell.
+
+    Blends live CLV-segment calibration with offline training calibration per
+    ``kelly.resolve_shrinkage``'s explicit>blended>training>clv_segment>fallback
+    chain; the returned source label tells a caller which rung of that chain
+    fired for this cell.
+
+    ``market`` is the league's own cell key (``helpers.cell_market`` resolves a
+    platform's label to it), and the training reader has a row under no other
+    name. The live reader matches history's ``Market``, which is that key except
+    for Underdog's NBA and WNBA fantasy points: history files those rows as
+    ``fantasy points underdog``, so their segment is not read under the cell key.
+
+    Returns:
+        ``(shrinkage, source)`` where ``source`` is one of ``"blended"``,
+        ``"training"``, ``"clv_segment"``, or ``"fallback"``.
+    """
+    # Lazy imports keep torch (via training.report) out of the dashboard import
+    # path — do NOT hoist clv or get_market_calibration to module level.
+    from sportstradamus import clv as _clv
+    from sportstradamus.training.report import get_market_calibration
+
+    live_bss, live_n = _clv.get_segment_calibration(league, market)
+    train_bss = get_market_calibration(league, market)["brier_skill_score"]
+
+    shrinkage = resolve_shrinkage(training_bss=train_bss, live_bss=live_bss, live_n=live_n)
+    has_train = not pd.isna(train_bss)
+    has_live = not pd.isna(live_bss) and live_n > 0
+    if not has_train and not has_live:
+        return shrinkage, "fallback"
+    if has_train and has_live:
+        return shrinkage, "blended"
+    return shrinkage, "training" if has_train else "clv_segment"
