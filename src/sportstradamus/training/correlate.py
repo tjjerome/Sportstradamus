@@ -17,7 +17,8 @@ Outputs (per league, all under ``data/leagues/{league}/``):
   league: one Spearman pass over every team's games, then each market pair's
   slot pairs averaged by their shared games. ``same_player`` (same-slot pairs —
   one player's own stat pair) pools the per-team unshrunk pre-floor correlations
-  with an n-weighted Fisher-z mean, shrunk once at the pooled overlap.
+  with an n-weighted Fisher-z mean. Every scope's pooled value is shrunk once at
+  its pooled overlap.
 * ``corr_metadata.json`` — date range covered, per-team observation counts,
   generation timestamp, git SHA.
 
@@ -719,9 +720,9 @@ def _pairwise_spearman_with_overlap(
 
 
 def _shrink_correlations(
-    corr: pd.DataFrame,
-    overlap: pd.DataFrame,
-) -> pd.DataFrame:
+    corr: pd.DataFrame | pd.Series,
+    overlap: pd.DataFrame | pd.Series,
+) -> pd.DataFrame | pd.Series:
     """Pull pair correlations toward zero in proportion to the overlap deficit.
 
     For pairs with at least ``MIN_OVERLAP_FOR_FULL_WEIGHT`` shared games, the
@@ -730,12 +731,13 @@ def _shrink_correlations(
     hits zero when no games overlap).
 
     Args:
-        corr: Square pairwise correlation DataFrame.
-        overlap: Square pairwise overlap-count DataFrame, same shape and labels.
+        corr: Pair correlations: a team's square DataFrame, or a Series of
+            pooled market-pair values.
+        overlap: Shared-game counts, same shape and labels as ``corr``.
 
     Returns:
-        Correlation DataFrame with shrinkage applied in place of zero-padding
-        for low-sample pairs.
+        ``corr`` with shrinkage applied in place of zero-padding for
+        low-sample pairs.
     """
     weight = (overlap / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
     return corr * weight
@@ -965,8 +967,8 @@ def _league_pair_summary(matrix_for_corr: pd.DataFrame) -> pd.DataFrame:
     both teams' rows of every game, so a pair reads the same in either order.
     ``n_teams`` counts the slot pairs pooled and ``n_teams_distinct`` the teams in
     the matrix. A pair pooling at or under ``CORR_MAGNITUDE_FLOOR`` is dropped; a kept
-    pair resting on fewer than ``MIN_OVERLAP_FOR_FULL_WEIGHT`` shared games is shrunk
-    toward zero by that share, as ``_same_player_summary`` shrinks its own.
+    pair resting on fewer than ``MIN_OVERLAP_FOR_FULL_WEIGHT`` shared games is then
+    shrunk toward zero by ``_shrink_correlations``.
     """
     if "TEAM" not in matrix_for_corr.columns:
         return pd.DataFrame(columns=_SUMMARY_COLUMNS)
@@ -997,7 +999,7 @@ def _league_pair_summary(matrix_for_corr: pd.DataFrame) -> pd.DataFrame:
     # A same-market pair holds every shared game twice: a teammate pair in both slot
     # orders, an opposing pair from both teams' rows of the game.
     games = pooled["n"] / np.where(pooled["market_a"] == pooled["market_b"], 2, 1)
-    pooled["rho_mean"] = rho_pool * (games / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
+    pooled["rho_mean"] = _shrink_correlations(rho_pool, games)
     pooled["n_teams_distinct"] = matrix_for_corr["TEAM"].nunique()
     kept = rho_pool.abs() > CORR_MAGNITUDE_FLOOR
     return pooled.loc[kept, _SUMMARY_COLUMNS].reset_index(drop=True)
@@ -1037,8 +1039,7 @@ def _same_player_summary(pairs: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     rho_pool = np.tanh(agg["nz"] / agg["n_pool"])
-    shrink = (agg["n_pool"] / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
-    agg["rho_mean"] = rho_pool * shrink
+    agg["rho_mean"] = _shrink_correlations(rho_pool, agg["n_pool"])
     agg["scope"] = "same_player"
     return agg.loc[rho_pool.abs() > CORR_MAGNITUDE_FLOOR, _SUMMARY_COLUMNS].reset_index(drop=True)
 
