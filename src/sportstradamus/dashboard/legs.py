@@ -41,12 +41,12 @@ def record_line(record: pd.DataFrame, league: str, kind: str) -> tuple[str, str 
     record.
     """
     title = f"{league} {_KIND_WORDS[kind]} picks"
-    row = record[
+    picks = record[
         record["play"].eq("ev_pick") & record["league"].eq(league) & record["kind"].eq(kind)
     ]
-    if row.empty:
+    if picks.empty:
         return f"{title}: 0 legs yet", None
-    row = row.iloc[0]
+    row = picks.iloc[0]
     hover = (
         f"Settled {row['first_date']} to {row['last_date']}: won {row['hit_rate']:.1%} against "
         f"the {row['breakeven_rate']:.1%} their payouts needed. Return per $1 on each leg "
