@@ -222,7 +222,7 @@ def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod
     p_fit = game_df["Fit Prob"].to_numpy()
     p_lead = np.where(np.isnan(p_fit), p_model, p_fit)
     p_books = game_df["Market Prob"].to_numpy()
-    # ``Push P`` is added by :func:`model_prob` for integer-line discrete markets;
+    # ``Push Prob`` is added by :func:`model_prob` for integer-line discrete markets;
     # missing for combo legs etc. — fill 0.0 so the analytical mvn.cdf path runs.
     if "Push Prob" in game_df.columns:
         p_push = game_df["Push Prob"].fillna(0.0).to_numpy()
@@ -445,11 +445,11 @@ def _annotate_correlation_columns(df, game_df, pool, g, market_map):
     is a structured record (player/market/bet/line/league/mult), not a display
     string — ``leg_schema.leg_label`` renders it on demand.
     """
-    C, V = g.C, g.V
+    C, M, V = g.C, g.M, g.V
     in_pool = game_df.index.isin(pool.index)
     for i, offer in game_df.iterrows():
         # M is 0 on the leg itself, on its player's other legs and on a banned pair.
-        indices = in_pool & (C[:, i] > _DISPLAY_CORR_FLOOR) & (g.M[:, i] > 0)
+        indices = in_pool & (C[:, i] > _DISPLAY_CORR_FLOOR) & (M[:, i] > 0)
         corr = game_df.loc[indices].copy()
         corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
@@ -457,9 +457,8 @@ def _annotate_correlation_columns(df, game_df, pool, g, market_map):
         other = corr.loc[corr["Team"] != offer["Team"]]
         # A (Player, Market) pair can span more than one row (Sleeper alt lines), and
         # the same pair plays again on a series' next date, which is another game.
-        # Broadcasting via a same-length Series (not a bare list, which numpy casts
-        # to a 2D array and mis-shapes on an empty partner list) mirrors the old
-        # scalar-string assignment's broadcast-to-every-matched-row semantics.
+        # Every matched row gets the list, assigned as a same-length Series: a bare
+        # list is cast to a 2D array, which mis-shapes on an empty partner list.
         mask = (
             (df["Player"] == offer["Player"])
             & (df["Market"] == offer["Market"])
@@ -509,7 +508,7 @@ def _collect_game_corr(game_df, C, M, platform, league, game_label, market_map):
 
 
 def _append_story_context(
-    story_sink, platform, league, game, date, g, bet_df, idx, search_payouts, full_payouts
+    story_sink, platform, league, game, date, g, bet_df, pool, search_payouts, full_payouts
 ):
     """Capture one game's scoring bundle for the story-menu generator.
 
@@ -517,7 +516,7 @@ def _append_story_context(
     beam-search-only runs leave it None) and the game's pool holds a leg. The
     bundle lets the generator price story subsets beam search never enumerates.
     """
-    if story_sink is None or idx.empty:
+    if story_sink is None or pool.empty:
         return
     story_sink.append(
         GameScoringContext(
@@ -527,7 +526,7 @@ def _append_story_context(
             date=str(date),
             g=g,
             bet_df=bet_df,
-            leg_indices=tuple(sorted(idx.index.to_numpy())),
+            leg_indices=tuple(sorted(pool.index.to_numpy())),
             full_payouts=full_payouts,
             payout_base_by_size={
                 s: search_payouts[s - 2] for s in range(2, len(search_payouts) + 2)
@@ -571,13 +570,13 @@ def _process_league_games(
         c_map = _build_game_corr_map(team, opp, c_same, c_opp)
         game_df.reset_index(drop=True, inplace=True)
         game_dict = game_df.to_dict("index")
-        idx = _select_bet_offers(game_df)
-        bet_df = idx.to_dict("index")
+        pool = _select_bet_offers(game_df)
+        bet_df = pool.to_dict("index")
 
         g = _build_correlation_matrices(
             game_df, game_dict, c_map, team_mod_map, opp_mod_map, platform
         )
-        _annotate_correlation_columns(df, game_df, idx, g, market_map)
+        _annotate_correlation_columns(df, game_df, pool, g, market_map)
 
         game = "/".join(sorted([team, opp]))
         if corr_sink is not None:
@@ -611,12 +610,12 @@ def _process_league_games(
             date,
             g,
             bet_df,
-            idx,
+            pool,
             search_payouts,
             full_payouts,
         )
         best_bets = beam_search_parlays(
-            idx,
+            pool,
             g,
             search_payouts,
             full_payouts,
@@ -738,9 +737,9 @@ def find_correlation(
             "Indep PB",
         ]
     )
-    # ``search_payouts`` is the single-multiplier-per-size list used inside the
-    # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
-    # driving push-aware EV and the display Boost column.
+    # ``search_payouts`` is the single-multiplier-per-size list the beam search prices each
+    # size at (0.0 where the variant offers none); ``full_payouts`` is the per-(size,
+    # miss-count) lookup driving push-aware EV and the display Boost column.
     search_payouts, full_payouts = payout_curve_for(platform, contest_variant)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
