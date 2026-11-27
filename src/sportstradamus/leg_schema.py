@@ -71,7 +71,7 @@ def leg_field(leg: Mapping, field: str, default=None):
     """Read one leg field off either a canonical leg (lowercase) or a raw
     current_offers row (Title-Case) — the shared identity/display helpers
     (corr_key, find_offer_idx, validate_parlay_legs, the constellation's node
-    fields) run on both a slip's own legs and not-yet-picked offer-row
+    fields) run on both a slip's own legs and not-yet-added offer-row
     candidates from the same pool.
     """
     if field in leg:
