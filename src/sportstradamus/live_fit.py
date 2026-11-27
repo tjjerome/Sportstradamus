@@ -32,7 +32,7 @@ PRIOR_LEGS = 4000
 MIN_FIT_LEGS = 400
 # The trailing game dates a fit reads.
 FIT_WINDOW_DAYS = 90
-# One-sided 95 %: the bound the "+EV" mark and the stake read.
+# One-sided 95 %: the bound the play ``ev_edge`` reads.
 LOWER_BOUND_Z = 1.645
 # Earlier game dates a walk-forward needs before it scores one.
 MIN_TRAIN_DATES = 14

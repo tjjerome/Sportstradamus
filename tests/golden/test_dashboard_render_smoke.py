@@ -216,13 +216,12 @@ def test_tonight_card_counts_the_picks_when_no_story_binds_them(monkeypatch, tmp
     assert "<b>2</b> picks" in cards[0]
 
 
-def test_tonight_badge_leads_with_the_mark_then_the_best_ev(monkeypatch, tmp_path):
+def test_tonight_badge_shows_the_games_best_ev(monkeypatch, tmp_path):
     """The badge reads the fit, never the model's claim, and a pick lights the card.
 
-    Underdog's 1.0 multiplier pays 1.83. NYK/SAS holds a marked pick (bound 0.56 x 1.83
-    clears 1); BOS/LAL's pick has EV 1.05 but a bound that reaches only 0.98 of its payout,
-    so it shows its EV unmarked; DEN/PHX was not priced, so its Model EV 1.20 and Kelly buy
-    it no badge and no light.
+    Underdog's 1.0 multiplier pays 1.83. NYK/SAS's pick has a lower bound that clears its
+    payout (0.56 x 1.83) and BOS/LAL's does not: both show their best EV and no mark.
+    DEN/PHX was not priced, so its Model EV 1.20 and Kelly buy it no badge and no light.
     """
     leg = {**_OFFER_ROWS[0], "Boost": 1.0}
     cards = _tonight_cards(
@@ -256,8 +255,9 @@ def test_tonight_badge_leads_with_the_mark_then_the_best_ev(monkeypatch, tmp_pat
         ],
     )
     by_team = {team: next(c for c in cards if f">{team} " in c) for team in ("NYK", "BOS", "DEN")}
-    assert 'tc-badge tc-g">+EV<' in by_team["NYK"]
+    assert 'tc-badge tc-gray">top EV 1.10<' in by_team["NYK"]
     assert 'tc-badge tc-gray">top EV 1.05<' in by_team["BOS"]
+    assert not any("+EV" in card for card in cards)
     assert 'tc-badge tc-gray">no EV<' in by_team["DEN"]
     assert not by_team["BOS"].startswith('<div class="tonight-card muted"')
     assert by_team["DEN"].startswith('<div class="tonight-card muted"')

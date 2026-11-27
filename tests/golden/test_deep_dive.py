@@ -135,11 +135,11 @@ def test_badge_leads_with_the_fitted_ev_and_shows_the_models_claim():
     assert badge == "**EV 0.95** · Win 52%  \n:gray[Model EV 1.10 · Model win 60%]"
 
 
-def test_badge_marks_a_leg_whose_lower_bound_clears_its_payout_not_its_ev():
-    marked = _ev_badge(_offer(**{"Fit Prob": 0.60, "Fit Prob Low": 0.56, "EV": 1.098}))
-    assert marked.startswith(":green[**+EV**] **EV 1.10**")
-    unmarked = _ev_badge(_offer(**{"Fit Prob": 0.574, "Fit Prob Low": 0.5355, "EV": 1.05}))
-    assert unmarked.startswith("**EV 1.05**")
+def test_badge_wears_no_mark_when_the_lower_bound_clears_the_payout():
+    """The lower bound (0.56 at a 1.83 payout) once earned a "+EV" mark; the badge is the
+    fitted number alone."""
+    badge = _ev_badge(_offer(**{"Fit Prob": 0.60, "Fit Prob Low": 0.56, "EV": 1.098}))
+    assert badge == "**EV 1.10** · Win 60%  \n:gray[Model EV 1.10 · Model win 60%]"
 
 
 def test_badge_on_a_leg_the_fit_did_not_price_shows_only_the_models_claim():

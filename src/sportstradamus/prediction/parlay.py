@@ -237,8 +237,8 @@ def _parlay_row(
         # Display Boost: the payout-inclusive value, so the column matches the
         # EV that drove ranking.
         "Boost": payout,
-        # An entry gets no stake, and no "+EV" mark, until the entries' money record
-        # supports one (docs/handoffs/profit-engine.md 5.3).
+        # An entry gets no stake until the entries' money record supports one
+        # (docs/handoffs/profit-engine.md 5.3).
         "Rec Bet": 0.0,
         "legs": legs,
         "Bet ID": bet_id,

@@ -1,28 +1,10 @@
-"""Pins for the leg helpers every surface shares: the "+EV" mark and the picks' record line."""
+"""Pins for the leg helpers every surface shares: the picks' record line."""
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
-from sportstradamus.dashboard.legs import ev_marked, record_line
-
-
-def test_the_mark_follows_the_lower_bound_at_a_payout_in_the_band():
-    """``EV`` is the fitted chance times the payout; the mark needs the chance's lower bound
-    to clear the payout instead, so a mark drawn off ``EV >= 1`` takes the first leg."""
-    offers = pd.DataFrame(
-        [
-            {"Fit Prob Low": 0.49, "EV": 1.05, "Boost": 2.0, "Platform": "Sleeper"},
-            {"Fit Prob Low": 0.51, "EV": 1.10, "Boost": 2.0, "Platform": "Sleeper"},
-            # Underdog's Boost is its multiplier on the per-pick payout: 1.0 pays 1.83.
-            {"Fit Prob Low": 0.55, "EV": 1.06, "Boost": 1.0, "Platform": "Underdog"},
-            # The bound clears a 3x payout, which sits past the recommended band.
-            {"Fit Prob Low": 0.40, "EV": 1.35, "Boost": 3.0, "Platform": "Sleeper"},
-            {"Fit Prob Low": np.nan, "EV": np.nan, "Boost": 1.5, "Platform": "Sleeper"},
-        ]
-    )
-    assert ev_marked(offers).tolist() == [False, True, True, False, False]
+from sportstradamus.dashboard.legs import record_line
 
 
 def _record(play: str, league: str, kind: str, n: int, roi: float) -> dict:

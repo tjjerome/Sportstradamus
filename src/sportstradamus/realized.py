@@ -31,7 +31,7 @@ COUNT_ONCE_FROM = pd.Timestamp("2026-10-09")
 # ``model_edge`` count a side recommended: the board's rule before EV led it.
 RECOMMENDED_EDGE_MIN: float = 0.05
 # The payout past which a leg's Kelly is zeroed (``MAX_FAVORED_PAYOUT``): the recommended
-# cohort and the "+EV" mark both stop there.
+# cohort and the play ``ev_edge`` both stop there.
 RECOMMENDED_PAYOUT_MAX: float = MAX_FAVORED_PAYOUT
 # 2.5 is RECOMMENDED_PAYOUT_MAX; the bands show whether that cap should move.
 PAYOUT_BAND_EDGES: tuple[float, ...] = (1.0, 1.5, 2.0, 2.5, 3.0)
@@ -98,7 +98,7 @@ def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
 
 
 def ev_marked(fit_prob_low: pd.Series, payout: pd.Series) -> pd.Series:
-    """Whether each side wears the "+EV" mark: the one rule the board and ``ev_edge`` share.
+    """Whether the fit's lower bound clears each side's payout: the play ``ev_edge``'s rule.
 
     The fit's lower bound on the side's win chance, times its payout, reaches 1, at a payout a
     side can be recommended at. A side the fit did not price has no bound and is never marked.

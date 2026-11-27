@@ -152,7 +152,7 @@ def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path)
     assert bands.at["[0.9, 0.94)", "paid"] == pytest.approx((1.7 + 1.6) / 4)
 
     assert "x 10,000" in result.output
-    assert '"+EV" marks (Fit Prob Low x payout at least 1): 0 of 4 legs' in result.output
+    assert "Legs the lower bound clears (Fit Prob Low x payout at least 1): 0 of 4" in result.output
     # The plays win and lose on the same dates, so a date drawn for both leaves a narrow gap:
     # -.1 on two 24ths, 0 on two 25ths. Drawn apart, the gap would run from -1.7 to +1.6.
     assert "ev_rank minus model_edge, return a leg: -0.050 [-0.100, +0.000]" in result.output
@@ -172,7 +172,7 @@ def test_the_fit_check_marks_by_the_lower_bound_and_prints_the_gain_scaled(tmp_p
 
     assert result.exit_code == 0, result.output
     # A lower bound of .55 or .5 pays 1 or more at 2.0; .45 does not, though the fit's .6 would.
-    assert '"+EV" marks (Fit Prob Low x payout at least 1): 2 of 3 legs' in result.output
+    assert "Legs the lower bound clears (Fit Prob Low x payout at least 1): 2 of 3" in result.output
     gain = pd.read_parquet(out / "fit_gain.parquet").set_index(["league", "kind"])
     assert gain.at[("all", "all"), "gain"] == pytest.approx(np.log(0.6 / 0.5))
     assert "+1823.2" in result.output

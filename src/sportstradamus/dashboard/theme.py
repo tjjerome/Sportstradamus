@@ -244,7 +244,6 @@ _APP_CSS_TEMPLATE = """
 .tc-foot{display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap}
 .tc-badge{font-family:'IBM Plex Mono',monospace;padding:1px 8px;border-radius:3px;font-size:13px;
   border:1px solid;white-space:nowrap}
-.tc-badge.tc-g{color:#1F9D55;border-color:#1F9D55}
 .tc-badge.tc-gray{color:#8A91A0;border-color:#2A2E37}
 .tc-meta{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8A91A0}
 .tc-meta b{color:#E6E9EF;font-weight:500}

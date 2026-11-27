@@ -65,12 +65,14 @@ def _gap_to_rule(
 def _fit_check(
     walked: pd.DataFrame, sides: pd.DataFrame, rng: np.random.Generator, out: Path
 ) -> None:
-    """The fit check: the walked fit's gain and band tables, its marks and its rank plays' gaps."""
+    """The fit check: the walked fit's gain and band tables, the legs its lower bound clears
+    and its rank plays' gaps.
+    """
     gain = live_fit.fit_gain(walked, rng)
     bands = live_fit.ev_bands(walked, rng)
     _atomic_write_parquet(gain, out / "fit_gain.parquet")
     _atomic_write_parquet(bands, out / "ev_bands.parquet")
-    marks = (walked["Fit Prob Low"] * walked["Payout"] >= 1).sum()
+    cleared = (walked["Fit Prob Low"] * walked["Payout"] >= 1).sum()
     gaps = {play: _gap_to_rule(sides, play, rng) for play in ("ev_rank", "ev_pick")}
     dates = walked["Date"]
     click.echo(
@@ -84,7 +86,8 @@ def _fit_check(
     click.echo("\nWhat the model's side paid on a unit staked, by band of EV")
     click.echo(bands.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     click.echo(
-        f'\n"+EV" marks (Fit Prob Low x payout at least 1): {marks:,} of {len(walked):,} legs'
+        f"\nLegs the lower bound clears (Fit Prob Low x payout at least 1): {cleared:,} of "
+        f"{len(walked):,}"
     )
     for play, (gap, gap_lo, gap_hi) in gaps.items():
         click.echo(

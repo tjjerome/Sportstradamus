@@ -18,7 +18,6 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.legs import ev_marked
 from sportstradamus.dashboard.narrative import (
     SHAPE_CAPTION,
     SHAPE_DISPLAY,
@@ -119,7 +118,6 @@ if "Game" not in offers.columns:
 # the league's own slate max, so a league with no depth term (MLB tops out at 2.0) competes
 # on equal footing with one that has it.
 picked = offers["Pick"]
-marked = ev_marked(offers)
 league_star_max = offers.loc[picked].groupby("League")["Star"].max()
 
 now = pd.Timestamp.now(tz="UTC")
@@ -156,7 +154,6 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             "star": star,
             "offer_count": len(group),
             "top_ev": group["EV"].max(),
-            "marked": marked[group.index].any(),
             "headline": game_headline(stories, parlays, game=game, date=date_raw),
             "shape": strip["shape"] if strip else "",
             "minutes": minutes,
@@ -175,16 +172,12 @@ for c in cards:
     # A game with no context row has no shape at all, which is the clouded reading too.
     shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
 
-    # A pick lights the card; a game without one drops to the muted state. The badge leads
-    # with the "+EV" mark, else the game's best EV. The prophecy is the oracle voice — the
-    # story headline, or a dim placeholder.
+    # A pick lights the card; a game without one drops to the muted state. The badge shows
+    # the game's best EV. The prophecy is the oracle voice — the story headline, or a dim
+    # placeholder.
     card_class = "tonight-card" if n_picks else "tonight-card muted"
-    if c["marked"]:
-        ev_badge = '<span class="tc-badge tc-g">+EV</span>'
-    elif pd.notna(top_ev):
-        ev_badge = f'<span class="tc-badge tc-gray">top EV {top_ev:.2f}</span>'
-    else:
-        ev_badge = '<span class="tc-badge tc-gray">no EV</span>'
+    ev_text = f"top EV {top_ev:.2f}" if pd.notna(top_ev) else "no EV"
+    ev_badge = f'<span class="tc-badge tc-gray">{ev_text}</span>'
     prophecy = (
         f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]

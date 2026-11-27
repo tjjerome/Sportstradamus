@@ -115,7 +115,8 @@ def _ev_rank(sides: pd.DataFrame) -> pd.Series:
 # ``model_edge`` is the 5 %-edge rule the board ran before EV led it (``realized.recommended``),
 # the cohort Receipts and the live gap read. ``under`` and ``all`` are controls that need no
 # model: what the app's cut costs a bettor who takes every Under on an even pick, or every side
-# it posts. ``ev_edge`` is the board's "+EV" mark (``realized.ev_marked``). ``ev_rank`` spends
+# it posts. ``ev_edge`` takes a side whose payout the fit's lower bound clears
+# (``realized.ev_marked``), the paper test of staking on that bound. ``ev_rank`` spends
 # the board's leg count on the highest ``EV`` instead, and ``ev_pick`` is the board's own picks
 # as each run flagged them (``live_fit.picks``). A new play goes last: ``play_record`` draws its
 # bounds in this order, so the plays before it keep their numbers.

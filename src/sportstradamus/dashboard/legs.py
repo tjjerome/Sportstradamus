@@ -1,17 +1,16 @@
 """Leg helpers every surface shares.
 
-The offer row, the correlation key, the model cell, the "+EV" mark and the picks' record line.
+The offer row, the correlation key, the model cell and the picks' record line.
 """
 
 from collections.abc import Mapping
 
 import pandas as pd
 
-from sportstradamus import realized
-from sportstradamus.helpers import archive_market, platform_payout
+from sportstradamus.helpers import archive_market
 from sportstradamus.leg_schema import leg_field
 
-__all__ = ["corr_key", "ev_marked", "find_offer_idx", "leg_cell_market", "record_line"]
+__all__ = ["corr_key", "find_offer_idx", "leg_cell_market", "record_line"]
 
 # How the record line names each kind of the play record (``helpers.leg_kind``) to a bettor.
 _KIND_WORDS = {
@@ -20,16 +19,6 @@ _KIND_WORDS = {
     "underdog_raised": "raised-payout",
     "underdog_cut": "reduced-payout",
 }
-
-
-def ev_marked(offers: pd.DataFrame) -> pd.Series:
-    """Which offers wear the "+EV" mark: ``realized.ev_marked`` at each offer's own payout.
-
-    ``EV`` never marks a leg on its own, and a leg the fit did not price is never marked.
-    """
-    return realized.ev_marked(
-        offers["Fit Prob Low"], platform_payout(offers["Boost"], offers["Platform"])
-    )
 
 
 def record_line(record: pd.DataFrame, league: str, kind: str) -> tuple[str, str | None]:

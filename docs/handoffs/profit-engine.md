@@ -12,8 +12,8 @@
 The board's recommendations lose money, and model work that lowered error at posted lines has
 not changed that. This lane attacks the loss where it is made: in what the engine recommends and
 what the apps pay for it. Three moves, in order. Score every pick rule in money (the money table,
-§5.2). Let one number fitted on settled posted picks, "EV", lead ranking, the "+EV" mark and
-stakes (§5.1, §5.3). Aim model work at the information the app's price lacks, measured by the
+§5.2). Let one number fitted on settled posted picks, "EV", lead ranking and stakes (§5.1,
+§5.3). Aim model work at the information the app's price lacks, measured by the
 weights that fit reports (§7).
 
 The record covers games from 2026-10-09 to 2026-11-24, each prop counted once
@@ -84,8 +84,8 @@ dates only and prints the fit check. A correct build prints:
 - What the model's side paid, by band of EV: says .871 and paid .887 on 78,213 legs; .915 and
   .916 on 42,030; .948 and .935 on 2,166; .980 and .982 on 173; at 1 or more, says 1.027 and
   paid .803 on 45.
-- "+EV" marks: 0 of 139,279 legs. `ev_rank` minus `model_edge`: +0.028 a leg [−0.003, +0.060],
-  on 7,115 legs each.
+- Legs the lower bound clears: 0 of 139,279. `ev_rank` minus `model_edge`: +0.028 a leg
+  [−0.003, +0.060], on 7,115 legs each.
 - Play `ev_pick`, the walked dates' picks: 1,956 legs, hit .574 against a break-even of .594,
   return −3.6 % [−8.3, +0.8]; NHL 804 legs at +1.8 %, NBA 894 at −5.5 %, NFL 204 at −12.2 %.
   `ev_pick` minus `model_edge`: +0.047 a leg [+0.004, +0.096].
@@ -104,10 +104,11 @@ dates only and prints the fit check. A correct build prints:
 1. Every pick kind and league stays on the board. The aim is to fix what is recommended, not to
    remove it; modified-payout picks are growing and cannot be ignored.
 2. `devel` is the lab: nothing is turned off there. `main` may be gated on a live money test.
-3. The fitted number leads: ranking, the "+EV" mark and stake size follow it, and the dashboard
-   calls it "EV". The model's claim stays visible as "Model EV", except in the Board's grid
-   and phone cards, whose model column is the projected stat (owner, 11-27). Today's 5 %-edge
-   rule keeps running as a tracked paper play (`model_edge`).
+3. The fitted number leads: ranking and stake size follow it, and the dashboard calls it "EV".
+   The model's claim stays visible as "Model EV", except in the Board's grid and phone cards,
+   whose model column is the projected stat (owner, 11-27). The dashboard wears no "+EV" mark:
+   the Board's lenses sort legs by the fitted number instead (owner, 11-27; §5.3). Today's
+   5 %-edge rule keeps running as a tracked paper play (`model_edge`).
 4. Main's money test: a league's recommended even picks over the trailing 90 days, at least 300
    legs and a return at or above zero; it drops off `main` again below −3 %.
 5. The owner reads real payouts in the app. No scripted quotes on the owner's account.
@@ -145,10 +146,10 @@ that the Over hits:
   of history's rows, nearly all alternate rungs, and on one in five of them (7 % of all rows,
   mostly Sleeper's) the posted side is the model's.
 - The side a leg takes stays the model's. The fit values that side; it does not choose it.
-- `EV` is the fitted win chance times the posted payout, and it ranks legs. The "+EV" mark and
-  the stake read the fit's one-sided 95 % lower bound instead: a leg is marked when the bound
-  times the payout reaches 1, and it is staked at half Kelly on the bound. `Win Prob` and
-  `Model EV` keep their meaning.
+- `EV` is the fitted win chance times the posted payout, and it ranks legs. The fit's one-sided
+  95 % lower bound rides beside it (`Fit Prob Low`). No stake reads the bound yet: the paper
+  play `ev_edge` takes a leg when the bound times the payout reaches 1 (§5.2), the record a
+  stake on the bound would rest on. `Win Prob` and `Model EV` keep their meaning.
 
 A scoring run stamps eight columns on each record (`prediction/ev_stamp.stamp_records`):
 `Book Prob`, `Book Count`, `Book Class` and `Book Observed At`, the books' price as that run
@@ -162,12 +163,13 @@ could read it (`book_stamp.fill_history`), so the fit's window is full from its 
 The prior, the lower bound and the side rule come from the research brief
 ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)), walk-forward over the last 33
 game dates. Without the prior the fit loses to the app's own price out of sample, and in a
-simulated world that holds no edge it still marks about a thousand legs "+EV". With the prior it
-beats the app's price in log loss and is no worse in any league and kind, yet the legs it values
-at 1 or more paid 0.79 to 0.90 on fewer than a hundred legs; the lower bound marks none of them.
-Where the fit's better side differs from the model's, taking it returned 2.7 points less a leg.
-So marks and stakes stay rare until the evidence grows, and the board is carried by rank. The
-brief's six acceptance tests and five kill lines (its §3) are this fit's own.
+simulated world that holds no edge it still values about a thousand legs at 1 or more. With the
+prior it beats the app's price in log loss and is no worse in any league and kind, yet the legs
+it values at 1 or more paid 0.79 to 0.90 on fewer than a hundred legs; the lower bound clears
+none of them. Where the fit's better side differs from the model's, taking it returned 2.7
+points less a leg. So a leg the bound clears stays rare until the evidence grows, and the board
+is carried by rank. The brief's six acceptance tests and five kill lines (its §3) are this
+fit's own.
 
 The fit does not double count the model blend. The served number already passes two trust
 stages, the blend of model and book and the `book_pull` knob; the fit sits after both and is
@@ -181,10 +183,10 @@ A **play** is a named rule that picks sides from a day's board (`plays.PLAYS`). 
 `model_edge` (the 5 %-edge rule the board ran before EV led it, `realized.recommended`, so
 Receipts, the live gap and the replay keep their cohort), two controls that need no model,
 `under` (every Under on an even pick) and `all` (every posted side), and the fit's three:
-`ev_edge` (the "+EV" mark of §5.1 in the same payout band), `ev_rank` (per date, league and
-kind, as many legs as `model_edge` took, the highest by EV) and `ev_pick` (the board's picks of
-§5.3, as the scoring run flagged them). A new play registers last, so the plays before it keep
-their bounds.
+`ev_edge` (the lower bound of §5.1 clears the payout, in the same payout band), `ev_rank` (per
+date, league and kind, as many legs as `model_edge` took, the highest by EV) and `ev_pick` (the
+board's picks of §5.3, as the scoring run flagged them). A new play registers last, so the
+plays before it keep their bounds.
 
 `plays.play_record` scores each play per league and pick kind:
 
@@ -210,8 +212,8 @@ row per league, kind and class with its coefficients, their standard errors and 
 are the model lane's scoreboard. `play-replay --walk-forward` prices each game date of a stamped
 history from fits on earlier dates, flags that date's picks by the walked EV and prints the
 fit's checks: its log-loss gain over the app's price, what each band of EV paid, the count of
-"+EV" marks, and `ev_rank` and `ev_pick` against `model_edge` (`live_fit.fit_gain`,
-`live_fit.ev_bands`; §3 holds the known answers).
+legs the lower bound clears, and `ev_rank` and `ev_pick` against `model_edge`
+(`live_fit.fit_gain`, `live_fit.ev_bands`; §3 holds the known answers).
 
 **Keep rule.** The priced-population rule stays as the floor: a change may not make error at the
 posted line worse. Above that floor, a change of any kind (rule, model, feature, data source) is
@@ -229,7 +231,7 @@ floors, the leg-pool floors and the pick'em filter's thresholds are gone.
 - **Legs.** The board lists legs by `EV`, and the slate's picks (below) are the legs it
   recommends. A rung with one side posted carries no EV (§5.1), so it is never a pick, though on
   7 % of rows the model's side is the only one posted: it lists after the legs EV ranks, by
-  `Model EV`, with no mark and no stake.
+  `Model EV`, with no stake.
 - **Same-game entries** (`prediction.correlation.find_correlation`,
   `prediction.parlay.beam_search_parlays`). A game's pool is its priced legs by `EV`, at most 2 a
   player, 12 a team and 24 a game. Per entry size the search exact-prices the first twelve
@@ -240,7 +242,7 @@ floors, the leg-pool floors and the pick'em filter's thresholds are gone.
 - **Stories** (`prediction/stories/menu.py`). A story's presets are its best entry of two or
   three legs (Builder) and its best larger one (Moon), both by fitted value; a game's lead story
   is the one whose Builder is worth most.
-- **An entry carries no "+EV" mark and no stake**: `Rec Bet`, a story's `kelly_stake` and the
+- **An entry carries no stake**: `Rec Bet`, a story's `kelly_stake` and the
   pick'em stake are 0. An entry's fitted value rests on how often its picks hit together, which
   the app prices with a cut of its own (§5.4), and the engine's graded entries paid under 1
   where they claimed 2.2 (§1). A stake waits for the entries' own money record (§5.2).
@@ -253,11 +255,11 @@ floors, the leg-pool floors and the pick'em filter's thresholds are gone.
 - **The dashboard** leads with "EV" and shows "Model EV" beside it, on a leg's detail,
   entries, stories and the slip; the Board lists a leg's `Projection` in its place (the served
   mean for the stat: the model's, pooled with the book consensus where one is quoted, and the
-  consensus alone on a book-fallback leg). A leg wears the "+EV" mark of §5.1 and the board's
-  picks show their play's record (§5.2). The slip rail prices a slip on the fitted chances,
-  stakes it by Kelly on that
-  value (zero at or under 1) and, for an all-or-nothing slip, shows the payout at which it
-  breaks even, for the owner to hold against the app's. [DESIGN.md](../../DESIGN.md) governs
+  consensus alone on a book-fallback leg). The Board's lenses filter on the fitted number
+  (below), and the board's picks show their play's record (§5.2). The slip rail prices a slip
+  on the fitted chances, stakes it by Kelly on that value (zero at or under 1) and, for an
+  all-or-nothing slip, shows the payout at which it breaks even, for the owner to hold against
+  the app's. [DESIGN.md](../../DESIGN.md) governs
   the UI work.
 - **Queued.** Cross-game entries on the board, through a `current_entries` snapshot built only
   at the sizes with the lowest break-even (2-, 3- and 4-pick Power, 4-pick Flex). Entries
@@ -363,7 +365,7 @@ Gate 2 stays. `devel` is never gated by it.
 |---|---|---|
 | Step 0 | Lab › Modifiers loads with a cut-payout leg, so the owner's reads (§5.4) can start | Built |
 | Phase 0 | The money table, offline: `plays.py`, `sportstradamus admin play-replay` | Built |
-| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, score, walk-forward, the fit's checks); the EV stamp on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; the plays `ev_edge` and `ev_rank`; `play-replay --walk-forward`; history records only a board a bettor could act on (§7, M1). The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and passes its acceptance tests on the frozen history (§3) | Built. `EV` is stamped and recorded; ranking, the mark and stakes wait for phase 2 |
+| Phase 1 | EV and the scoreboard: `live_fit.py` (fit, score, walk-forward, the fit's checks); the EV stamp on each scored record; nightly writes `live_fit.parquet` and `play_record.parquet`; the plays `ev_edge` and `ev_rank`; `play-replay --walk-forward`; history records only a board a bettor could act on (§7, M1). The fit follows the research brief ([archive/researcher_ev_fit.md](../archive/researcher_ev_fit.md)) and passes its acceptance tests on the frozen history (§3) | Built. `EV` is stamped and recorded; ranking and stakes wait for phase 2 |
 | Phase 2 | The engine reads EV (§5.3), one subagent per module | In progress. Built: the slate's picks (`live_fit.picks`, the `Pick` stamp, the play `ev_pick`); the entry search, the stories, pick'em, the paper ledger (`policy_v5`) and the dashboard read EV. Queued: cross-game entries on the board; entries graded in money |
 | Phase 3 | Stacks (§5.4), after the owner's reads | Queued |
 | Phase 4 | Main's money test (§5.5) | Queued |
@@ -460,7 +462,7 @@ engine's `Market Prob` as a line-shopping signal.
 
 | Rule | What replaces it |
 |---|---|
-| No adjustment of the served win chance from market data; the trust layer kill (#0d) | The EV fit leads ranking, the "+EV" mark and stakes |
+| No adjustment of the served win chance from market data; the trust layer kill (#0d) | The EV fit leads ranking and stakes |
 | "Realized money is never a live threshold" | `main` gets the money test of §5.5; `devel` is never gated, and iteration stays offline |
 | "No serving change; models only" (Part C) | Engine changes; model work re-aimed by the scoreboard |
 | Entry floors (claimed value at least 2.0), the menu floor, the pick'em filter thresholds | Rank by EV; floors deleted |

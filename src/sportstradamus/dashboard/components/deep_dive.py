@@ -30,7 +30,7 @@ from sportstradamus.dashboard.data import (
     load_current_offer_details,
     load_play_record,
 )
-from sportstradamus.dashboard.legs import ev_marked, record_line
+from sportstradamus.dashboard.legs import record_line
 from sportstradamus.dashboard.narrative import SHAPE_HELP, bet_arrow, context_strip
 from sportstradamus.dashboard.theme import GOLD, GRAY
 from sportstradamus.helpers import leg_kind
@@ -68,14 +68,13 @@ def drop_detail_on_page_change(state, page_id: str) -> None:
 
 
 def _ev_badge(row: pd.Series) -> str:
-    """The fitted EV and win chance, led by the "+EV" mark when the leg wears it, over the
-    model's own claim; a leg the fit did not price shows no EV of its own.
+    """The fitted EV and win chance over the model's own claim; a leg the fit did not
+    price shows no EV of its own.
     """
     model = f":gray[Model EV {row['Model EV']:.2f} · Model win {row['Win Prob']:.0%}]"
     if pd.isna(row["EV"]):
         return f"**No EV**  \n{model}"
-    mark = ":green[**+EV**] " if ev_marked(row.to_frame().T).iloc[0] else ""
-    return f"{mark}**EV {row['EV']:.2f}** · Win {row['Fit Prob']:.0%}  \n{model}"
+    return f"**EV {row['EV']:.2f}** · Win {row['Fit Prob']:.0%}  \n{model}"
 
 
 def _esc_field(row: pd.Series, key: str) -> str:
