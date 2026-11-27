@@ -89,7 +89,7 @@ _UNIT_GROUP_DISPLAY = {
 # correlated legs across at least _STACK_MIN_PLAYERS players, averaging at
 # least _STACK_MEAN_RHO; a unit needs _UNIT_MIN_LEGS legs in one (team, group,
 # direction) whose matchup edge clears _UNIT_EDGE_FLOOR (the DVPOA floor the
-# per-offer "why" uses, not the menu's model-EV floor).
+# per-offer "why" uses).
 _PLAYER_MIN_LEGS: int = 2
 _STACK_MIN_LEGS: int = 3
 _STACK_MIN_PLAYERS: int = 2
