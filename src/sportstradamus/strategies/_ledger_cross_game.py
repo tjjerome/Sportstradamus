@@ -31,7 +31,10 @@ import pandas as pd
 from sportstradamus.helpers import UNDERDOG_EVEN_PICK_MULTIPLIER, cell_market, platform_payout
 from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.payouts import (
+    POWER_MAX_SIZE,
+    SLEEPER_FLEX_CAP,
     SLEEPER_FULL_REFUND_MAX_SIZE,
+    UNDERDOG_FLEX_CAP,
     expected_payout_with_pushes,
     payout_curve_for,
 )
@@ -39,7 +42,8 @@ from sportstradamus.realized import recommended
 from sportstradamus.strategies._ledger_selection import FLAT_STAKE, LedgerCandidate, _entropy_from
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
-_MAX_ENTRY_SIZE: int = 6
+# The largest entry both platforms' pooled payout curves price.
+_MAX_ENTRY_SIZE: int = min(UNDERDOG_FLEX_CAP, SLEEPER_FLEX_CAP)
 # Deals tried per entry size: a small slate has fewer than _CROSS_GAME_BEAM_WIDTH entries to deal.
 _DEALS_PER_SIZE: int = 4000
 
@@ -73,10 +77,10 @@ def _on_slate(offers: pd.DataFrame, date: datetime.date) -> pd.Series:
 
 def _slate_picks(offers: pd.DataFrame, date: datetime.date, platform: str) -> list[_ScoredLeg]:
     """``platform``'s picks (``Pick``) for games on ``date``, as legs at their fitted chances."""
-    return _served_legs(offers[offers["Pick"] & _on_slate(offers, date)], platform)
+    return _fitted_legs(offers[offers["Pick"] & _on_slate(offers, date)], platform)
 
 
-def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
+def _fitted_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
     """One leg per row of ``offers`` the fit priced, at its ``Fit Prob``.
 
     The fit wants both sides posted, so a row with one side posted has no fitted chance
@@ -120,9 +124,8 @@ def _expand(legs: list[_ScoredLeg], beam: list[tuple[int, ...]]) -> list[tuple[i
             extended = (*combo, leg.idx)
             if len({by_idx[i].game for i in extended}) < 2:
                 continue  # single-game combos are the same-game search's job
-            heuristic = math.prod(
-                by_idx[i].fit_prob for i in extended
-            )  # cheap beam-pruning rank only
+            # A cheap beam-pruning rank only; the pricer values the entries the beam keeps.
+            heuristic = math.prod(by_idx[i].fit_prob for i in extended)
             scored.append((extended, heuristic))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [combo for combo, _ in scored[:_CROSS_GAME_BEAM_WIDTH]]
@@ -219,7 +222,7 @@ def _priced_candidates(
                     id=hashlib.sha1(
                         "|".join(sorted(leg.display for leg in combo_legs)).encode()
                     ).hexdigest()[:16],
-                    contest_variant="power" if size <= 3 else "flex",
+                    contest_variant="power" if size <= POWER_MAX_SIZE else "flex",
                     entry_size=size,
                     legs=tuple(leg.display for leg in combo_legs),
                     canonical_legs=tuple(leg.canonical_leg for leg in combo_legs),
@@ -246,8 +249,8 @@ def build_cross_game_candidates(
     The legs are ``platform``'s picks (``Pick``) for games on ``date``, from ``offers_df``
     (``Boost`` = the platform's raw pick multiplier). The beam expands their cross-game
     combos up to ``_MAX_ENTRY_SIZE`` legs, and each is priced on ``platform``'s pooled
-    payout curve at its legs' fitted chances. See the module docstring for why the
-    independence assumption is safe.
+    payout curve at its legs' fitted chances. See ``docs/handoffs/sim-bettor-ledger.md`` §10
+    for why the independence assumption is safe.
 
     Returns:
         One :class:`LedgerCandidate` per combo the beam keeps, in no particular order
@@ -279,7 +282,7 @@ def build_even_pick_candidates(
         & _on_slate(offers_df, date)
     ]
     return _dealt_candidates(
-        _served_legs(picks, "Underdog"), date, run_slot, "Underdog", salt="even_pick_deals"
+        _fitted_legs(picks, "Underdog"), date, run_slot, "Underdog", salt="even_pick_deals"
     )
 
 

@@ -199,7 +199,7 @@ def test_price_combo_wiring_matches_direct_call() -> None:
             _offer_row("Player B", "LAL/DEN", win_prob=0.55, market_prob=0.53),
         ]
     )
-    legs = xg._served_legs(offers, "Underdog")
+    legs = xg._fitted_legs(offers, "Underdog")
     rng_direct = xg._pricing_rng(DATE, "morning")
     ev_payout = xg._price_combo(tuple(legs), rng_direct, "Underdog")
 
@@ -346,7 +346,7 @@ def test_beam_width_cap_holds_with_monkeypatched_narrow_width(monkeypatch) -> No
         game = f"G{i}A/G{i}B"
         rows.append(_offer_row(f"Player {i}", game, win_prob=0.55 + i * 0.01))
     offers = _offers_df(rows)
-    legs = xg._served_legs(offers, "Underdog")
+    legs = xg._fitted_legs(offers, "Underdog")
 
     by_size = xg._enumerate_cross_game_combos(legs)
 
