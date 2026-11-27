@@ -2,10 +2,10 @@
 
 Every number prices ``realized.settled_offers``: sides the platform posted, one bet per
 platform, each graded at the platform's real payout. The hero is the model's recommended
-legs (the rule the story menu and the nightly ledger share) with every posted side as
-context; beneath it the recommended legs' cumulative units, skeptic checks (CLV beat rate,
-Brier, worst month — losers shown, never hidden), the realized-by-side panel, your tracked
-slips, accuracy trends alongside the standard-vs-alt-line reliability diagram, the full CLV
+legs (the 5 %-edge rule the board ran before EV led it) with every posted side as context;
+beneath it the recommended legs' cumulative units, skeptic checks (CLV beat rate, Brier,
+worst month — losers shown, never hidden), the realized-by-side panel, your tracked slips,
+accuracy trends alongside the standard-vs-alt-line reliability diagram, the full CLV
 breakdown, and the folded-in strategy simulator. A skeptic should be able to verify
 profitability unaided.
 """
