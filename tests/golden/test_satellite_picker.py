@@ -6,6 +6,7 @@ verified manually; only the grouping query is unit-pinned here.
 
 import pandas as pd
 
+from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES
 from sportstradamus.dashboard.components.satellite_picker import (
     _PER_GAME_CAP,
     satellite_groups,
@@ -76,6 +77,35 @@ def test_caps_per_game_and_ranks_games_by_best_ev():
     bos = dict(groups)["BOS/MIA"]
     assert len(bos) == _PER_GAME_CAP  # capped per game
     assert [r["Player"] for r in bos] == [f"P{i}" for i in range(_PER_GAME_CAP + 2, 2, -1)]
+
+
+def test_a_legs_alt_lines_count_once_at_their_best_ev():
+    """Alt lines share one leg key, so they are one sky star and take one slot of the cap."""
+    alts = [
+        _offer("Alt", "PTS", "Over", 20.5 + i, "BOS/MIA", "BOS", "Underdog", 0.99 - i * 0.01)
+        for i in range(_PER_GAME_CAP)
+    ]
+    others = [
+        _offer(f"P{i}", "REB", "Over", 8.5, "BOS/MIA", "MIA", "Underdog", 0.80 - i * 0.01)
+        for i in range(_PER_GAME_CAP - 1)
+    ]
+    # Worst alt line first, so keeping a key's first row instead of its best one fails.
+    offers = pd.DataFrame([*reversed(alts), *others])
+    groups = satellite_groups(offers, focus_game="NYK/SAS", platform="Underdog", exclude_keys=set())
+    rows = dict(groups)["BOS/MIA"]
+    assert [r["Player"] for r in rows] == ["Alt", *(f"P{i}" for i in range(_PER_GAME_CAP - 1))]
+    assert rows[0]["Line"] == 20.5
+
+
+def test_offers_only_as_many_games_as_the_wider_lens_draws():
+    offers = pd.DataFrame(
+        [
+            _offer(f"P{i}", "PTS", "Over", 20.5, f"G{i}/H{i}", f"G{i}", "Underdog", 0.80 + i * 0.01)
+            for i in range(WIDER_GAMES + 2)
+        ]
+    )
+    groups = satellite_groups(offers, focus_game="NYK/SAS", platform="Underdog", exclude_keys=set())
+    assert [game for game, _ in groups] == [f"G{i}/H{i}" for i in range(WIDER_GAMES + 1, 1, -1)]
 
 
 def test_empty_when_no_other_game_qualifies():

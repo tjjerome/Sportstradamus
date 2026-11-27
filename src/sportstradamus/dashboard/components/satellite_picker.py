@@ -21,6 +21,7 @@ from collections.abc import Mapping
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.leg_schema import leg_label
 
@@ -40,8 +41,11 @@ def satellite_groups(
 
     Filters ``offers`` to the legs the fit priced on ``platform`` in games other than
     ``focus_game``, drops anything already in the slip (``exclude_keys`` of
-    ``corr_key``), keeps each game's top ``_PER_GAME_CAP`` by ``EV``, and orders the
-    games by their single highest-EV leg so the best options lead.
+    ``corr_key``), keeps each game's top ``_PER_GAME_CAP`` legs by ``EV``, and orders the
+    games by their single highest-EV leg so the best options lead. A leg's alt lines
+    share one ``corr_key`` and the sky draws one star per key, so each leg is offered
+    once, on its best-EV line. Only the ``WIDER_GAMES`` games the lens draws come back:
+    the builder works out a hover card for every row it is handed.
     """
     if offers.empty:
         return []
@@ -50,15 +54,14 @@ def satellite_groups(
     ]
     groups: list[tuple[str, list[dict]]] = []
     for game, block in pool.groupby("Game", sort=False):
-        rows = [
-            row
-            for row in block.sort_values("EV", ascending=False).to_dict("records")
-            if corr_key(row) not in exclude_keys
-        ]
+        best: dict[str, dict] = {}
+        for row in block.sort_values("EV", ascending=False).to_dict("records"):
+            best.setdefault(corr_key(row), row)
+        rows = [row for key, row in best.items() if key not in exclude_keys]
         if rows:
             groups.append((str(game), rows[:_PER_GAME_CAP]))
     groups.sort(key=lambda g: float(g[1][0]["EV"]), reverse=True)
-    return groups
+    return groups[:WIDER_GAMES]
 
 
 def render_added_legs(

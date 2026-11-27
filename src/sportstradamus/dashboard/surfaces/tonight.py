@@ -115,9 +115,9 @@ if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
-# The board's picks are the legs the constellation draws as stars. Their Star prominence is
-# read against the league's own slate max, so a league with no depth term (MLB tops out at
-# 2.0) competes on equal footing with one that has it.
+# A game card reads the board's picks in its game. Their Star prominence is read against
+# the league's own slate max, so a league with no depth term (MLB tops out at 2.0) competes
+# on equal footing with one that has it.
 picked = offers["Pick"]
 marked = ev_marked(offers)
 league_star_max = offers.loc[picked].groupby("League")["Star"].max()

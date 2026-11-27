@@ -91,7 +91,7 @@ def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> di
         for row in pool.to_dict("records"):
             if is_priced(row):
                 # The snapshot is written EV-descending (persist._normalize_offers), so the
-                # first priced row a key meets is its best-EV one, across alt lines and platforms.
+                # first priced row a key meets is the best-EV one of its alt lines.
                 universe.setdefault(corr_key(row), row)
     for leg in slip_legs:
         universe.setdefault(corr_key(leg), leg)
