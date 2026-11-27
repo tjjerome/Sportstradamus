@@ -233,14 +233,14 @@ The σ / IQR_true denominators equal the model row, so the oracle row sizes each
 gate's natural threshold.
 
 **The gates score the bulk, not the recommended tail.** Gate 1 runs where the model and the book
-mostly agree (mean |model − market| .050 on its rows, against .120 on the legs the live rule
+mostly agree (mean |model − market| .050 on its rows, against .120 on the legs the 5 %-edge rule
 recommends), so a cell can pass all six and still overstate its recommended legs. The held-out tail
 also pools line types: a row no sportsbook quoted carries the pipeline's own `max(Avg10, 0.5)` line
 priced at .5, where the model's tail is calibrated against its own average, while at sportsbook and
 pick'em lines it is 13–15 pp over-confident (October 2026 NBA;
 [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5), so read any tail by `QuoteAuthenticity`
 and price band, never pooled.
-`sportstradamus admin tail-scorecard` replays the live recommendation rule on the held-out test rows
+`sportstradamus admin tail-scorecard` replays the 5 %-edge rule on the held-out test rows
 at the DFS rungs the archive held and reports that selected-tail gap. It is a training-time
 diagnostic and an acceptance input for model-information work
 ([handoffs/honest-receipts.md](handoffs/honest-receipts.md) §6). It is never a gate, and nothing in
@@ -263,8 +263,8 @@ Its `posted` scope is the one the tolerance reads. Each dump row is priced at th
 Sleeper rungs the archive ladder held for it, by the dump's own pickle (`--models-dir`); only the
 rungs a prop still held at its last poll count, because a rung the app had moved off was gone from
 the board, and its line had usually moved toward the model (keeping such rungs doubled NFL legs and
-lifted their hit from .537 to .583 on 2026-11-13); the live board's rule (`finalize_records`, then
-`realized.settled_offers`) picks the legs; the recommended legs paying 1.80 to 1.90 inside the live
+lifted their hit from .537 to .583 on 2026-11-13); the board's record build and the 5 %-edge rule (`finalize_records`, then
+`realized.settled_offers`) pick the legs; the recommended legs paying 1.80 to 1.90 inside the live
 window are read against the live legs on the same player-dates. `live_same_version` is the share of
 those live legs the dump's own pickle read. A held-out dump always predates its version's serving,
 so against live it reads two model versions and its `gap_delta` mixes the replay's skew with version
@@ -276,7 +276,7 @@ tolerance is met and the cell order matches live (owner 2026-10-30,
 [handoffs/live-gap-2.md](handoffs/live-gap-2.md) §5 item 5); today it is a report.
 
 The `cell`, `league` and `l2` scopes are the first replay, kept until L2's pre-registered read below
-ends: the live recommendation rule (`realized.recommended`) over each cell's held-out rows dated
+ends: the 5 %-edge rule (`realized.recommended`) over each cell's held-out rows dated
 before `--offline-before` at market lines — pick'em rows and sportsbook rows within .06 of even, never
 a synthetic or EV-derived line, and never a pick'em row the live board itself drops (the
 unquoted-disagreement gate) — at the 1.83 even pick.

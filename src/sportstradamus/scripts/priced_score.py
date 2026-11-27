@@ -3,7 +3,7 @@
 The priced population (CLAUDE.md, "Judging model changes") in two parts. P1 is each cell's
 held-out rows an app or a sportsbook priced (``QuoteAuthenticity`` pickem or authentic), at
 their own ``Line``. P2 is the Underdog and Sleeper rungs each prop still held at its last
-poll: the rungs the ``realized-replay`` posted scope prices, before its live rule. Each arm
+poll: the rungs the ``realized-replay`` posted scope prices, before its 5 %-edge rule. Each arm
 reads its real served probability and mean: the dump re-served through the arm's own pickle
 under the serving convention (``tail_pricing.serve_live``, and ``price_dumps`` at the
 rungs); a refit pickle scores no row dated on or before its ``refit_through``

@@ -447,7 +447,7 @@ The labels, in plain words. **I4** is the trust layer: a second probability fitt
 model's (killed). **I5** makes the parlay builder and the ledger pay what Underdog really pays: the
 per-pick value of a leg, the payout table, the pair bonuses, the settlement. **I6** gives the models
 more information than the market has and makes training see what serving sees. **E** is the tail
-scorecard, the offline replay of the live recommendation rule. A suffix (I5a-1, I6e) names one change
+scorecard, the offline replay of the 5 %-edge rule. A suffix (I5a-1, I6e) names one change
 inside its group; §8 restates each open one as a plain question.
 
 - **I4 trust layer — KILLED with R1 (§5); nothing below is built.** The one piece that needed a new

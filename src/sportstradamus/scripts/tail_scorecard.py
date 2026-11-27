@@ -1,7 +1,9 @@
-"""Tail scorecard: the live recommendation rule replayed on held-out test rows at DFS rungs.
+"""Tail scorecard: the 5 %-edge rule replayed on held-out test rows at DFS rungs.
 
-g1 scores the population where the model agrees with the market, but the legs the live
-rule recommends are the tail where it does not, and they read well above their hit rate.
+The rule is the paper play ``model_edge`` (``realized.recommended``), the one the board
+ran before EV led it. g1 scores the population where the model agrees with the market, but
+the legs that rule recommends are the tail where it does not, and they read well above
+their hit rate.
 ``tail_pricing`` prices every held-out test row at each Underdog and Sleeper rung the
 archive's ladder held for it; this command hands each slate to the live ``finalize_records``
 the way ``model_prob`` does, grades the survivors with ``realized.settled_offers`` and
@@ -196,8 +198,8 @@ def with_live_sides(
     return side_boosts(rungs.merge(live_sides, on=_RUNG_KEY, how="left"))
 
 
-def replay_live_rule(rungs: pd.DataFrame, p_over: pd.Series, knobs: dict) -> pd.DataFrame:
-    """The live recommendation rule on one cell's rungs, graded the way ``realized`` grades.
+def replay_edge_rule(rungs: pd.DataFrame, p_over: pd.Series, knobs: dict) -> pd.DataFrame:
+    """The 5 %-edge rule on one cell's rungs, graded the way ``realized`` grades.
 
     Each (platform, date) slate goes to ``offer_records.finalize_records`` as ``model_prob``
     builds a board, so the 0.90 clip, argmax side, unquoted-disagreement gate, boost cap and
@@ -478,7 +480,7 @@ def _print_tables(
     "replaces only its cells (default: data/training/tail_scorecard.parquet).",
 )
 def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> None:
-    """Replay the live recommendation rule on held-out test rows at the ladder's DFS rungs.
+    """Replay the 5%-edge rule on held-out test rows at the ladder's DFS rungs.
 
     A training-time diagnostic, never a ship gate. Prints the selected-tail gap per cell,
     league and overall beside the live gap over the same window, then the information test,
@@ -523,7 +525,7 @@ def main(leagues: tuple[str, ...], archive: Path, out: Path, parquet: Path) -> N
     by_cell = rungs.groupby("cell")
     for cell, cell_rungs in tqdm(by_cell, desc="replaying slates", total=by_cell.ngroups):
         for arm, frames in replays.items():
-            frames.append(replay_live_rule(cell_rungs, cell_rungs[arm], knobs[cell]))
+            frames.append(replay_edge_rule(cell_rungs, cell_rungs[arm], knobs[cell]))
     selected, trained = (pd.concat(frames, ignore_index=True) for frames in replays.values())
     selected, trained = selected[selected["Recommended"]], trained[trained["Recommended"]]
     posted = selected["Live Bet"].eq(selected["Bet"]) | selected["One Sided"]

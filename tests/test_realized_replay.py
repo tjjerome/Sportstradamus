@@ -1,4 +1,4 @@
-"""The offline realized-money replay: row selection, the live rule at 1.83, scope rows."""
+"""The offline realized-money replay: row selection, the 5 %-edge rule at 1.83, scope rows."""
 
 from __future__ import annotations
 

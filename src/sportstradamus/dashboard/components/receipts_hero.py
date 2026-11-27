@@ -120,7 +120,8 @@ def render_receipts_hero(recommended: dict[str, float], posted: dict[str, float]
         f'<div style="position:relative;overflow:hidden;border:1px solid {BORDER};'
         f'border-radius:4px;padding:18px 20px;background:{_HERO_BG}">'
         f"<div style=\"font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.18em;"
-        f"text-transform:uppercase;color:{GOLD}\">The model's recommendations</div>"
+        f'text-transform:uppercase;color:{GOLD}">The '
+        f"{_MONO.format(f'{realized.RECOMMENDED_EDGE_MIN:.0%}')}-edge rule (old)</div>"
         f'<div style="display:flex;gap:34px;align-items:flex-end;flex-wrap:wrap;'
         f'margin-top:6px">{stats}</div>'
         f'<div style="color:{GRAY};font-size:12px;margin-top:12px">'

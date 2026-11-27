@@ -1,10 +1,11 @@
-"""The offline realized-money replay: the live rule on held-out rows at posted rungs and market lines.
+"""The offline realized-money replay: the 5 %-edge rule on held-out rows at posted rungs and lines.
 
 The ``posted`` scope prices each dump's rows at the Underdog and Sleeper rungs the archive ladder
 held for them (``tail_pricing.price_cell``, the dump's own pickle from ``--models-dir``, which
 leaves out a refit pickle's rows dated on or before its ``refit_through``), keeps the rungs each
-prop still held at its last poll (``still_posted``), runs the live board's rule on them
-(``tail_scorecard.replay_live_rule``) and keeps the recommended even-pick legs dated in the live
+prop still held at its last poll (``still_posted``), builds the board's records from them and
+flags the 5 %-edge rule's legs, the paper play ``model_edge``
+(``tail_scorecard.replay_edge_rule``), and keeps the recommended even-pick legs dated in the live
 window. The live side is the live record's recommended even-pick legs on the same rows (league,
 cell, player, date), and ``live_same_version`` is the share of them the dumps' own pickle read: a
 held-out dump against live mixes model versions (a version serves only after its matrix ends), so
@@ -57,7 +58,7 @@ from sportstradamus.scripts.tail_pricing import (
 from sportstradamus.scripts.tail_scorecard import (
     DEFAULT_ARCHIVE,
     TEST_SETS_DIR,
-    replay_live_rule,
+    replay_edge_rule,
     with_live_sides,
 )
 from sportstradamus.spiderLogger import logger
@@ -251,7 +252,7 @@ def posted_legs(
     since: pd.Timestamp,
     until: pd.Timestamp | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The dumps' rows at the rungs still posted, through the live board's rule.
+    """The dumps' rows at the rungs still posted, through the 5 %-edge rule.
 
     Returns the recommended even-pick legs dated in ``[since, until)``, and every priced row's
     (League, cell, Player, Date) with the version of the pickle that priced it.
@@ -270,7 +271,7 @@ def posted_legs(
     logger.setLevel(logging.ERROR)
     replayed = pd.concat(
         [
-            replay_live_rule(part, part["p_serving"], knobs[stem])
+            replay_edge_rule(part, part["p_serving"], knobs[stem])
             for stem, part in rungs[still_posted(rungs)].groupby("cell")
         ],
         ignore_index=True,
@@ -473,7 +474,7 @@ def main(
     out: Path,
     parquet: Path,
 ) -> None:
-    """Replay the live rule on held-out rows at posted rungs and market lines; read it against live."""
+    """Replay the 5%-edge rule on held-out rows at posted rungs and market lines; read it against live."""
     before, since = pd.Timestamp(offline_before), pd.Timestamp(live_since)
     until = pd.Timestamp(live_until) if live_until else None
     paths = dump_paths(test_sets_dir, {lg.upper() for lg in leagues})

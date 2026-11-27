@@ -1,6 +1,6 @@
 """Price a cell's held-out test rows at every DFS rung the archive ladder held for them.
 
-The pricing half of the tail scorecard; ``tail_scorecard`` replays the live rule on what this
+The pricing half of the tail scorecard; ``tail_scorecard`` replays the 5 %-edge rule on what this
 builds. A test row is re-served from its dump's model-only parameters and the cell pickle's
 serving knobs. The training convention must first rebuild the dump's own ``P`` (the
 self-check that the chain is the pickle's); the serving convention then prices each Underdog

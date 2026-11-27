@@ -46,7 +46,7 @@ from sportstradamus.scripts.tail_scorecard import (
     _summarize,
     _write_sidecar,
     main,
-    replay_live_rule,
+    replay_edge_rule,
     side_boosts,
 )
 
@@ -347,7 +347,7 @@ def test_replay_recommends_what_finalize_records_keeps(monkeypatch):
     slates = pd.read_csv(io.StringIO(_SLATES))
     rungs = slates.drop(columns="p_over").assign(League=_LEAGUE, Market=_MARKET, Projection=np.nan)
 
-    replayed = replay_live_rule(rungs, slates["p_over"], _REPLAY_KNOBS)
+    replayed = replay_edge_rule(rungs, slates["p_over"], _REPLAY_KNOBS)
     replayed = replayed[replayed["Recommended"]]
     expected = _recommended_by_finalize(slates)
 

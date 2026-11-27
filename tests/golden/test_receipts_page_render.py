@@ -57,7 +57,8 @@ def _receipts_page(monkeypatch, tmp_path) -> AppTest:
 
 
 def _hero_text(at: AppTest) -> str:
-    hero = next(m.body for m in at.markdown if "The model's recommendations" in m.body)
+    # The card names its cohort for what it is: the rule the board ran before EV led it.
+    hero = next(m.body for m in at.markdown if "-edge rule (old)" in m.body)
     return re.sub(r"<[^>]+>", "", hero)
 
 

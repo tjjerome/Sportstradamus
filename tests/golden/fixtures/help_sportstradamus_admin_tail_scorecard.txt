@@ -1,7 +1,6 @@
 Usage: sportstradamus admin tail-scorecard [OPTIONS]
 
-  Replay the live recommendation rule on held-out test rows at the ladder's DFS
-  rungs.
+  Replay the 5%-edge rule on held-out test rows at the ladder's DFS rungs.
 
   A training-time diagnostic, never a ship gate. Prints the selected-tail gap
   per cell, league and overall beside the live gap over the same window, then

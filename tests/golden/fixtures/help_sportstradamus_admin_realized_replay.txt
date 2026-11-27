@@ -1,7 +1,7 @@
 Usage: sportstradamus admin realized-replay [OPTIONS]
 
-  Replay the live rule on held-out rows at posted rungs and market lines; read
-  it against live.
+  Replay the 5%-edge rule on held-out rows at posted rungs and market lines;
+  read it against live.
 
 Options:
   --league TEXT                Replay only these leagues (repeatable).
