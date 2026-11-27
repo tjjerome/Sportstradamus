@@ -65,7 +65,7 @@ def _legs_from_records(
 ) -> list[dict]:
     """Re-resolve stored canonical legs against current offers, dropping any that moved.
 
-    Refreshes every field (win_prob/boost/kelly drift as the market moves) from the
+    Refreshes every field (win_prob, fit_prob and boost drift as the market moves) from the
     live offer row rather than trusting the stored snapshot, matching the
     seed/add-time snapshot semantics everywhere else in this module.
     """
