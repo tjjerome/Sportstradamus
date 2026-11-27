@@ -177,12 +177,13 @@ the distribution. `book_pull` retires in M1.
 ### 5.2 Plays and the money table
 
 A **play** is a named rule that picks sides from a day's board (`plays.PLAYS`). Registered:
-`model_edge` (the board's rule, `realized.recommended`, so Receipts, the live gap and the replay
-keep their cohort), two controls that need no model, `under` (every Under on an even pick) and
-`all` (every posted side), and the fit's three: `ev_edge` (the "+EV" mark of §5.1 in the same
-payout band), `ev_rank` (per date, league and kind, as many legs as `model_edge` took, the
-highest by EV) and `ev_pick` (the board's picks of §5.3, as the scoring run flagged them). A new
-play registers last, so the plays before it keep their bounds.
+`model_edge` (the 5 %-edge rule the board ran before EV led it, `realized.recommended`, so
+Receipts, the live gap and the replay keep their cohort), two controls that need no model,
+`under` (every Under on an even pick) and `all` (every posted side), and the fit's three:
+`ev_edge` (the "+EV" mark of §5.1 in the same payout band), `ev_rank` (per date, league and
+kind, as many legs as `model_edge` took, the highest by EV) and `ev_pick` (the board's picks of
+§5.3, as the scoring run flagged them). A new play registers last, so the plays before it keep
+their bounds.
 
 `plays.play_record` scores each play per league and pick kind:
 

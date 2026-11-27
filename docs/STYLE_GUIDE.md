@@ -148,9 +148,9 @@ We pull deliberately from these, cited rather than copied:
 - Imports go at the top of the module; no optional imports (a dependency is
   either a core dep imported at the top or it isn't used). The one exception is
   a deferred, function-local import to keep a heavy transitive dependency out of
-  a specific import path — e.g. `training.report` pulls `torch`, kept out of the
-  dashboard startup path via a function-local import in `strategies/`. Comment
-  why at the import. Don't scatter late imports to dodge a cycle — fix the cycle.
+  a specific import path — e.g. the scoring stack (`prediction.scoring`) pulls
+  `torch`, kept out of the dashboard startup path via a function-local import in
+  `strategies/underdog_pickem.py:live_load`. Comment why at the import. Don't scatter late imports to dodge a cycle — fix the cycle.
 - Remove an unused import in the same commit that orphans it. `ruff`'s `F401`
   catches the obvious cases.
 
