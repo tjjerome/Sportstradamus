@@ -200,10 +200,9 @@ def simulate_kelly_all(
 def extract_sim_returns(sim_df: pd.DataFrame, initial_bankroll: float) -> np.ndarray:
     """Per-event return series ``daily_pnl / start-of-event bankroll``.
 
-    Mirrors :func:`summarize_runs`'s Sharpe computation so callers that
-    want the raw per-event return series (e.g. Memmel paired-Sharpe inference)
-    use the same denominator that ``summarize_runs`` uses. Returns an empty
-    array for an empty simulation result.
+    The series :func:`summarize_runs` takes its Sharpe from, so callers that
+    want the raw per-event returns (e.g. Memmel paired-Sharpe inference) share
+    its denominator. Returns an empty array for an empty simulation result.
 
     Args:
         sim_df: Result frame from :func:`simulate_kelly_all` or
@@ -262,13 +261,7 @@ def summarize_runs(result: pd.DataFrame, initial_bankroll: float) -> dict[str, f
         drawdowns.append(float(dd.max()))
     max_drawdown = float(np.mean(drawdowns)) if drawdowns else 0.0
 
-    daily_returns = result.groupby("run", group_keys=False)[["daily_pnl", "bankroll"]].apply(
-        lambda x: (
-            x["daily_pnl"].values
-            / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
-        )
-    )
-    all_returns = np.concatenate(daily_returns.values)
+    all_returns = extract_sim_returns(result, initial_bankroll)
     sharpe = float(np.mean(all_returns) / np.std(all_returns)) if np.std(all_returns) > 0 else 0.0
 
     daily_outcomes = result.groupby(["run", "date"])["daily_pnl"].sum().reset_index()

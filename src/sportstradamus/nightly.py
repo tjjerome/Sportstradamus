@@ -3,7 +3,7 @@
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
 2. Fill in Actual column in history
-3. Fill in Close Market Prob / Market CLV / Model CLV per offer; persist CLV segments
+3. Fill in Close Market Prob / Market CLV / Model CLV per offer; log the CLV summary
 4. Resolve parlay_hist (Legs Resolved/Misses), user slips and the simulated-bettor ledger
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
