@@ -8,12 +8,14 @@ existing same-game parlay search (``prediction.parlay`` /
 combines legs sharing one ``Game`` -- so this module is a deliberately
 separate, independence-assumed path, not a duplicate of that search.
 ``build_cross_game_candidates`` fills the shared universe from the platform's
-picks on the slate date; ``build_even_pick_candidates`` fills the ``even_picks``
-persona's pool from the slate date's Underdog even picks the product recommends,
-its entries dealt evenly over those legs with a game per leg. One pricer prices
-both, on each leg's fitted chance, and keeps every entry whatever its value: the
-personas' ranks choose among them. See ``docs/handoffs/sim-bettor-ledger.md`` §10
-for the surrounding policy design.
+picks on the slate date, combined by a beam. Two personas' pools are dealt
+instead, evenly over their legs with a game per leg: ``build_even_pick_candidates``
+fills ``even_picks``'s from the slate date's Underdog even picks the product
+recommends, and ``build_ev_pick_candidates`` fills ``ev_picks``'s from a
+platform's picks on the slate date. One pricer prices every pool, on each leg's
+fitted chance, and keeps every entry whatever its value: the personas' ranks
+choose among them. See ``docs/handoffs/sim-bettor-ledger.md`` §10 for the
+surrounding policy design.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ from sportstradamus.strategies._ledger_selection import FLAT_STAKE, LedgerCandid
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
 # Deals tried per entry size: a small slate has fewer than _CROSS_GAME_BEAM_WIDTH entries to deal.
-_EVEN_PICK_DEALS_PER_SIZE: int = 4000
+_DEALS_PER_SIZE: int = 4000
 
 _POOLED_CURVES: dict[str, dict[int, list[float]]] = {
     "Underdog": payout_curve_for("Underdog", "pooled")[1],
@@ -67,6 +69,11 @@ def _on_slate(offers: pd.DataFrame, date: datetime.date) -> pd.Series:
     A leg gets one day, on its game-day read, and its entry settles at the next reflect.
     """
     return offers["Date"].astype(str).str[:10] == date.isoformat()
+
+
+def _slate_picks(offers: pd.DataFrame, date: datetime.date, platform: str) -> list[_ScoredLeg]:
+    """``platform``'s picks (``Pick``) for games on ``date``, as legs at their fitted chances."""
+    return _served_legs(offers[offers["Pick"] & _on_slate(offers, date)], platform)
 
 
 def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
@@ -130,19 +137,22 @@ def _enumerate_cross_game_combos(legs: list[_ScoredLeg]) -> dict[int, list[tuple
     return by_size
 
 
-def _deal_even_pick_combos(
-    legs: list[_ScoredLeg], rng: np.random.Generator
-) -> dict[int, list[tuple[int, ...]]]:
-    """Deal up to ``_CROSS_GAME_BEAM_WIDTH`` entries per size evenly over ``legs``, a game per leg.
+def _dealt_candidates(
+    legs: list[_ScoredLeg], date: datetime.date, run_slot: str, platform: str, salt: str
+) -> list[LedgerCandidate]:
+    """Up to ``_CROSS_GAME_BEAM_WIDTH`` entries per size dealt evenly over ``legs``, a game
+    per leg, each priced on ``platform``'s pooled curve.
 
-    The shared beam keeps the entries with the highest joint read, which would stake this
-    pool on its few strongest legs.
+    The shared beam keeps the entries with the highest joint chance, which would stake a
+    pool on its few strongest legs. ``salt`` seeds the deal apart from the pricing stream
+    and from every other dealt pool, so they share no draws.
     """
+    rng = np.random.default_rng(np.random.SeedSequence(_entropy_from(date, run_slot, salt=salt)))
     games = len({leg.game for leg in legs})
     by_size: dict[int, list[tuple[int, ...]]] = {}
     for size in range(2, min(_MAX_ENTRY_SIZE, games) + 1):
         combos: set[tuple[int, ...]] = set()
-        for _ in range(_EVEN_PICK_DEALS_PER_SIZE):
+        for _ in range(_DEALS_PER_SIZE):
             if len(combos) == _CROSS_GAME_BEAM_WIDTH:
                 break
             picked = sorted(rng.choice(len(legs), size=size, replace=False).tolist())
@@ -153,7 +163,7 @@ def _deal_even_pick_combos(
             if len({legs[i].game for i in picked}) == size:
                 combos.add(tuple(legs[i].idx for i in picked))
         by_size[size] = sorted(combos)
-    return by_size
+    return _priced_candidates(legs, by_size, date, run_slot, platform)
 
 
 def _pricing_rng(date: datetime.date, run_slot: str) -> np.random.Generator:
@@ -243,7 +253,7 @@ def build_cross_game_candidates(
         One :class:`LedgerCandidate` per combo the beam keeps, in no particular order
         (the caller's selection layer does the ranking/sampling).
     """
-    legs = _served_legs(offers_df[offers_df["Pick"] & _on_slate(offers_df, date)], platform)
+    legs = _slate_picks(offers_df, date, platform)
     return _priced_candidates(legs, _enumerate_cross_game_combos(legs), date, run_slot, platform)
 
 
@@ -268,10 +278,27 @@ def build_even_pick_candidates(
         & recommended(offers_df["Win Prob"], payout)
         & _on_slate(offers_df, date)
     ]
-    legs = _served_legs(picks, "Underdog")
-    # Seeded apart from the pricing stream, so the deal and the prices share no draws.
-    deal_rng = np.random.default_rng(
-        np.random.SeedSequence(_entropy_from(date, run_slot, salt="even_pick_deals"))
+    return _dealt_candidates(
+        _served_legs(picks, "Underdog"), date, run_slot, "Underdog", salt="even_pick_deals"
     )
-    by_size = _deal_even_pick_combos(legs, deal_rng)
-    return _priced_candidates(legs, by_size, date, run_slot, "Underdog")
+
+
+def build_ev_pick_candidates(
+    offers_df: pd.DataFrame, date: datetime.date, run_slot: str, platform: str = "Underdog"
+) -> list[LedgerCandidate]:
+    """Build ``platform``'s share of the ``ev_picks`` pool: its picks, dealt into entries.
+
+    The legs are the ones :func:`build_cross_game_candidates` combines, ``platform``'s picks
+    (``Pick``) for games on ``date``, dealt evenly instead, a game per leg, as
+    :func:`build_even_pick_candidates` deals its own.
+
+    Returns:
+        One :class:`LedgerCandidate` per dealt entry, in no particular order.
+    """
+    return _dealt_candidates(
+        _slate_picks(offers_df, date, platform),
+        date,
+        run_slot,
+        platform,
+        salt=f"ev_pick_deals|{platform}",
+    )

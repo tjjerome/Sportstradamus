@@ -279,7 +279,26 @@ def test_a_board_worth_less_than_its_stakes_still_fills_every_pool(monkeypatch) 
 
     assert {c.game_span > 1 for c in pools["safe"]} == {False, True}
     assert pools["even_picks"]
+    assert pools["ev_picks"]
     assert all(c.ev < 0 for pool in pools.values() for c in pool)
+
+
+def test_ev_picks_deals_both_platforms_picks_into_entries_of_one_platform(monkeypatch) -> None:
+    """Every pick on both boards is dealt into the pool, a game per leg, and no entry holds
+    two platforms' picks: an entry is placed on one platform."""
+    frames = _load_mixed_multiplier_frames(monkeypatch)
+
+    pools = ledger.build_candidate_universe(DATE, "morning")
+
+    picks = {platform: set(frames[platform][1]["Player"]) for platform in ledger._PLATFORMS}
+    for entry in pools["ev_picks"]:
+        assert {leg["platform"] for leg in entry.canonical_legs} == {entry.platform}
+        assert entry.players <= picks[entry.platform]
+        assert entry.game_span == entry.entry_size
+    dealt = {platform: set() for platform in ledger._PLATFORMS}
+    for entry in pools["ev_picks"]:
+        dealt[entry.platform] |= entry.players
+    assert dealt == picks
 
 
 # --- stakes: flat but for kelly_growth, which waits for a value above one --------
@@ -369,7 +388,7 @@ def _force_full_draw(monkeypatch) -> None:
 
 
 def _patch_universe(monkeypatch, universe: list[LedgerCandidate]) -> None:
-    pools = dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": []}
+    pools = dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": [], "ev_picks": []}
     monkeypatch.setattr(ledger, "build_candidate_universe", lambda date, run_slot: pools)
 
 

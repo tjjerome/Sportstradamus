@@ -2,9 +2,10 @@
 
 Implements ``docs/handoffs/sim-bettor-ledger.md`` §10: builds the shared
 same-game + cross-game candidate universe once per run -- one live scrape per
-platform (Underdog and Sleeper), combined into a single pool, plus the
-``even_picks`` persona's own pool, cross-game entries of the Underdog even
-picks the product recommends -- then draws and sizes entries for each
+platform (Underdog and Sleeper), combined into a single pool, plus two
+personas' own pools: ``even_picks``'s, cross-game entries of the Underdog even
+picks the product recommends, and ``ev_picks``'s, cross-game entries dealt
+evenly over each platform's picks -- then draws and sizes entries for each
 persona × 40 Monte-Carlo replicates and appends them to the append-only JSONL
 ledger. Pure orchestration over
 :mod:`sportstradamus.strategies._ledger_selection`,
@@ -93,10 +94,13 @@ def build_candidate_universe(
 
     Returns:
         The candidates each persona draws from, keyed by persona. Every persona
-        shares one universe except ``even_picks``, whose pool is built beside it
-        from Underdog's offers alone: cross-game entries of the even picks the
-        product recommends on ``date``'s games, whether or not the board picks them.
-        No pool has a value floor: the personas' ranks choose among its entries.
+        shares one universe except ``even_picks`` and ``ev_picks``, whose pools are
+        built beside it. ``even_picks``'s comes from Underdog's offers alone:
+        cross-game entries of the even picks the product recommends on ``date``'s
+        games, whether or not the board picks them. ``ev_picks``'s holds both
+        platforms' picks on ``date``'s games, dealt into entries of one platform
+        each. No pool has a value floor: the personas' ranks choose among its
+        entries.
     """
     # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
     from sportstradamus.stats import load_live_leagues
@@ -106,14 +110,21 @@ def build_candidate_universe(
     stats, _ = load_live_leagues()
     universe: list[_ledger_selection.LedgerCandidate] = []
     even_picks_pool: list[_ledger_selection.LedgerCandidate] = []
+    ev_picks_pool: list[_ledger_selection.LedgerCandidate] = []
     for platform in _PLATFORMS:
         parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform, stats)
         universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
+        ev_picks_pool.extend(
+            _ledger_cross_game.build_ev_pick_candidates(offers_df, date, run_slot, platform)
+        )
         if platform == "Underdog":
             even_picks_pool = _ledger_cross_game.build_even_pick_candidates(
                 offers_df, date, run_slot
             )
-    return dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": even_picks_pool}
+    return dict.fromkeys(_ledger_selection.PERSONAS, universe) | {
+        "even_picks": even_picks_pool,
+        "ev_picks": ev_picks_pool,
+    }
 
 
 def _committed_record(

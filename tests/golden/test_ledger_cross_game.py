@@ -1,8 +1,8 @@
 """Pin cross-game candidate generation for the simulated-bettor ledger --
 game-span guard, per-pick multiplier pricing, RNG determinism, beam-width cap,
-the board's picks as the shared pool, no value floor, the ``even_picks`` pool,
-a leg's league-own stat key and its price at the fitted chance of
-``_ledger_cross_game``
+the board's picks as the shared pool, no value floor, the dealt ``even_picks``
+and ``ev_picks`` pools, a leg's league-own stat key and its price at the fitted
+chance of ``_ledger_cross_game``
 (docs/handoffs/sim-bettor-ledger.md §10).
 """
 
@@ -62,7 +62,13 @@ def _offers_df(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-_BUILDERS = [xg.build_cross_game_candidates, xg.build_even_pick_candidates]
+_BUILDERS = [
+    xg.build_cross_game_candidates,
+    xg.build_even_pick_candidates,
+    xg.build_ev_pick_candidates,
+]
+_PICK_BUILDERS = [xg.build_cross_game_candidates, xg.build_ev_pick_candidates]
+_DEALERS = [xg.build_even_pick_candidates, xg.build_ev_pick_candidates]
 
 
 # --- game_span guard: cross-game only ------------------------------------------
@@ -116,10 +122,11 @@ def test_canonical_legs_stat_field_is_canonicalized_not_raw_market() -> None:
             assert leg["stat"] == canonical_market
 
 
-# --- the shared pool is the board's picks, at their fitted chance -----------------
+# --- the shared and ev_picks pools are the board's picks, at their fitted chance ---
 
 
-def test_shared_pool_holds_only_the_boards_picks_at_their_fitted_chance() -> None:
+@pytest.mark.parametrize("build", _PICK_BUILDERS)
+def test_a_picks_pool_holds_only_the_boards_picks_at_their_fitted_chance(build) -> None:
     """The board picks by fitted value. A non-pick with the strongest served read stays out,
     where a pool built on the read would take it first."""
     offers = _offers_df(
@@ -127,7 +134,7 @@ def test_shared_pool_holds_only_the_boards_picks_at_their_fitted_chance() -> Non
         + [_offer_row("Strong Read", "BOS/MIA", win_prob=0.80, fit_prob=0.55, pick=False)]
     )
 
-    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
+    candidates = build(offers, DATE, "morning")
 
     assert {c.entry_size for c in candidates} == {2, 3}
     assert all("Strong Read" not in c.players for c in candidates)
@@ -423,7 +430,8 @@ def test_only_recommended_even_picks_enter_the_even_pick_pool() -> None:
     assert {c.players for c in candidates} == {frozenset({"Even A", "Even B"})}
 
 
-def test_even_pick_entry_never_holds_two_legs_of_one_game() -> None:
+@pytest.mark.parametrize("build", _DEALERS)
+def test_a_dealt_entry_never_holds_two_legs_of_one_game(build) -> None:
     """Underdog taxes some same-game pairs and a cross-game record carries pair_modifier
     1.0, so the table payout is exact only with a game per leg. Three games on the
     board then cap an entry at three legs."""
@@ -432,7 +440,7 @@ def test_even_pick_entry_never_holds_two_legs_of_one_game() -> None:
         + [_offer_row("Player D", "LAL/DEN"), _offer_row("Player E", "NYK/CHI")]
     )
 
-    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
+    candidates = build(offers, DATE, "morning")
 
     for candidate in candidates:
         games = [leg["game"] for leg in candidate.canonical_legs]
@@ -452,7 +460,7 @@ def test_even_pick_candidate_is_staked_and_pays_its_sizes_table_tier() -> None:
         assert candidate.stake == FLAT_STAKE
 
 
-# --- the slate date's legs; even picks dealt evenly -------------------------------
+# --- the slate date's legs; the dealt pools spread evenly -------------------------
 
 
 @pytest.mark.parametrize("build", _BUILDERS)
@@ -480,14 +488,15 @@ def _thirty_even_picks() -> pd.DataFrame:
     )
 
 
-def test_even_pick_entries_are_dealt_evenly_over_the_legs(monkeypatch) -> None:
-    """The shared beam keeps the entries with the highest joint read, and the strongest
+@pytest.mark.parametrize("build", _DEALERS)
+def test_dealt_entries_spread_evenly_over_the_legs(monkeypatch, build) -> None:
+    """The shared beam keeps the entries with the highest joint chance, and the strongest
     leg is in most of them. Dealt evenly, a leg is in about a fifth of thirty legs'
     six-pick entries, and no leg is left out of the pool."""
     # A thousand entries take ten seconds to price, and the price is not what is read here.
     monkeypatch.setattr(xg, "_price_combo", lambda legs, rng, platform: 2.0)
 
-    candidates = xg.build_even_pick_candidates(_thirty_even_picks(), DATE, "morning")
+    candidates = build(_thirty_even_picks(), DATE, "morning")
 
     six_pick = [c for c in candidates if c.entry_size == 6]
     assert sum("Player 29" in c.players for c in six_pick) < 0.4 * len(six_pick)
@@ -495,10 +504,11 @@ def test_even_pick_entries_are_dealt_evenly_over_the_legs(monkeypatch) -> None:
     assert set().union(*(c.players for c in candidates)) == {f"Player {i:02d}" for i in range(30)}
 
 
-def test_small_slate_gives_every_entry_it_can_hold_and_none_larger() -> None:
+@pytest.mark.parametrize("build", _DEALERS)
+def test_small_slate_gives_every_entry_it_can_hold_and_none_larger(build) -> None:
     offers = _offers_df([_offer_row(f"Player {i}", f"G{i}A/G{i}B") for i in range(3)])
 
-    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
+    candidates = build(offers, DATE, "morning")
 
     assert sorted(sorted(c.players) for c in candidates) == [
         ["Player 0", "Player 1"],
@@ -508,25 +518,27 @@ def test_small_slate_gives_every_entry_it_can_hold_and_none_larger() -> None:
     ]
 
 
-def test_even_picks_of_one_game_alone_make_no_entry() -> None:
+@pytest.mark.parametrize("build", _DEALERS)
+def test_legs_of_one_game_alone_deal_no_entry(build) -> None:
     offers = _offers_df([_offer_row("Player A", "BOS/MIA"), _offer_row("Player B", "BOS/MIA")])
 
-    assert xg.build_even_pick_candidates(offers, DATE, "morning") == []
+    assert build(offers, DATE, "morning") == []
 
 
-def test_even_pick_deal_is_fixed_by_the_date_and_the_run_slot(monkeypatch) -> None:
+@pytest.mark.parametrize("build", _DEALERS)
+def test_a_deal_is_fixed_by_the_date_and_the_run_slot(monkeypatch, build) -> None:
     monkeypatch.setattr(xg, "_CROSS_GAME_BEAM_WIDTH", 5)  # five entries a size: quick to price
     offers = _thirty_even_picks()
 
     def _ids(run_slot: str) -> list[str]:
-        return [c.id for c in xg.build_even_pick_candidates(offers, DATE, run_slot)]
+        return [c.id for c in build(offers, DATE, run_slot)]
 
     morning = _ids("morning")
     assert _ids("morning") == morning
     assert _ids("afternoon") != morning
 
 
-# --- a leg's stat is its league's own key, on both builders -----------------------
+# --- a leg's stat is its league's own key, on every builder ------------------------
 
 
 def _nhl_assists_and_points() -> list[dict]:

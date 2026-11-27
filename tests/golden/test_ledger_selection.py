@@ -147,10 +147,10 @@ def test_overlapping_candidate_gets_lower_effective_weight_than_disjoint() -> No
 # --- personas: consumption order and ranking -----------------------------------
 
 
-def test_even_picks_draws_last_on_the_shared_stream() -> None:
+def test_ev_picks_draws_last_on_the_shared_stream() -> None:
     """Every persona of a replicate consumes one random stream in this order, so a
     persona placed anywhere but last would move the draws of those after it."""
-    assert sel.PERSONAS == ("safe", "high_ev", "kelly_growth", "even_picks")
+    assert sel.PERSONAS == ("safe", "high_ev", "kelly_growth", "even_picks", "ev_picks")
     assert set(sel.PERSONA_SCORERS) == set(sel.PERSONAS)
 
 

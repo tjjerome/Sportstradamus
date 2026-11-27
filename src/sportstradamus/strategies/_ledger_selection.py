@@ -31,6 +31,7 @@ PERSONAS: tuple[str, ...] = (
     "high_ev",
     "kelly_growth",
     "even_picks",
+    "ev_picks",
 )
 RUN_SLOTS: tuple[str, ...] = ("morning", "afternoon")
 
@@ -191,13 +192,15 @@ def draw_entries(
 # safe ranks by an entry's hit chance; every other persona by its fitted value, as pick'em
 # ranks its entries (_pickem_emit.rank_and_dedupe). kelly_growth's rank is a draw order
 # only: its stakes come from a portfolio solve (ledger._resize_kelly_growth). even_picks
-# ranks like high_ev; what sets it apart is its pool (ledger.build_candidate_universe),
-# Underdog entries of even picks alone.
+# and ev_picks rank like high_ev; what sets each apart is its pool
+# (ledger.build_candidate_universe): entries of Underdog's recommended even picks, and
+# entries dealt evenly over each platform's picks.
 PERSONA_SCORERS: dict[str, Callable[[LedgerCandidate], float]] = {
     "safe": lambda c: c.joint_prob,
     "high_ev": lambda c: c.ev,
     "kelly_growth": lambda c: c.ev,
     "even_picks": lambda c: c.ev,
+    "ev_picks": lambda c: c.ev,
 }
 
 
