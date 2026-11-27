@@ -71,8 +71,6 @@ def emit_yaml(
                 "payout_multiplier": float(e.payout_multiplier),
                 "ev": float(e.ev),
                 "recommended_stake": str(e.recommended_stake),
-                "shrinkage": float(e.shrinkage),
-                "shrinkage_source": e.shrinkage_source,
                 "extras": e.extras,
                 "platform": e.platform,
             }

@@ -14,7 +14,7 @@ which depends on committed ``leagues/{league}/corr_same_team.parquet`` /
 ``corr_opposing.parquet`` matrices that aren't practical to fixture for a
 small synthetic slate. Faking at this seam still exercises the real
 ``ledger_commit`` CLI, ``build_candidate_universe``'s real per-platform loop,
-``construct_entries``'s real ranking/sizing, ``_ledger_cross_game``'s real
+``construct_entries``'s real ranking, ``_ledger_cross_game``'s real
 beam search + pooled-curve pricing, ``run_commit``'s real draw/budget/dedup
 logic, and ``_ledger_store``'s real JSONL write -- everything except the
 league load, the scrape and the correlation search. ``test_ledger_cross_platform.py``
@@ -109,7 +109,7 @@ def _offers_df(platform: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# (Model EV, Boost) chosen so each platform deterministically WINS a
+# (EV, Boost) chosen so each platform deterministically WINS a
 # different persona's draw -- see _fake_live_load's docstring for why an
 # accidental tie or one-sided dominance between platforms is a fixture bug,
 # not something to leave to per-replicate RNG luck.
@@ -138,7 +138,7 @@ def _fake_live_load(
     swamps the other's). Splitting which persona favors which platform makes
     both platforms committed by construction, not RNG luck.
     """
-    model_ev, boost = _PRICING_BY_PLATFORM[platform]
+    ev, boost = _PRICING_BY_PLATFORM[platform]
     player = f"{platform} Same-Game Player"
     row = {
         "League": _LEAGUE_BY_PLATFORM[platform],
@@ -147,7 +147,7 @@ def _fake_live_load(
         "Bet Size": 2,
         "Boost": boost,
         "Boost Pairs": (1.0,),
-        "Model EV": model_ev,
+        "EV": ev,
         "Leg 1": f"{player} Over 22.5 points - 60.0%, 3.0x",
         "Leg 2": f"{platform} Second Leg Over 10.5 rebounds - 58.0%, 3.0x",
         "legs": [

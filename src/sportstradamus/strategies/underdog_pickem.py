@@ -19,14 +19,12 @@ from typing import TYPE_CHECKING, Any
 import click
 import pandas as pd
 
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, cell_market
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
     MAX_FRACTION_OF_BANKROLL,
-    NO_EVIDENCE_SHRINKAGE,
-    fractional_kelly_stake,
     resolve_shrinkage,
 )
 
@@ -65,8 +63,6 @@ class RecommendedEntry:
     ev: float
     recommended_stake: Decimal
     canonical_legs: tuple[dict, ...] = ()
-    shrinkage_source: str = "training"
-    shrinkage: float = 1.0
     extras: dict[str, Any] = field(default_factory=dict)
     platform: str = "Underdog"
     # Product of the entry's same-game pair modifiers, as the search priced it.
@@ -92,54 +88,29 @@ def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
 
 
 def _filter_parlays(parlay_df: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
-    """Apply post-search size + EV filters."""
-    if parlay_df.empty:
-        return parlay_df
-    df = parlay_df.copy()
-    df = df[df["Bet Size"].isin(set(config.entry_sizes))]
-    df = df[(df["Model EV"] - 1.0) >= config.min_ev]
-    return df.reset_index(drop=True)
+    """The entries at one of ``config.entry_sizes``. No value floor: the rank decides."""
+    return parlay_df[parlay_df["Bet Size"].isin(config.entry_sizes)]
 
 
-def _row_to_entry(
-    row: pd.Series,
-    variant: str,
-    bankroll: Decimal,
-    config: PickemConfig,
-    shrinkage_info: tuple[float, str],
-    platform: str = "Underdog",
-) -> RecommendedEntry:
+def _row_to_entry(row: pd.Series, variant: str, platform: str = "Underdog") -> RecommendedEntry:
+    """One search row as an entry, valued at its fitted ``EV``, never its ``Model EV``."""
     payout = float(row["Boost"])
-    model_ev = float(row["Model EV"])
-    joint_prob = model_ev / payout if payout > 0 else 0.0
-    ev = model_ev - 1.0
-    bet_size = int(row["Bet Size"])
     canonical_legs = tuple(row["legs"])
     legs = tuple(leg_label(leg) for leg in canonical_legs)
-    shrinkage, source = shrinkage_info
-
-    stake = fractional_kelly_stake(
-        bankroll=bankroll,
-        win_prob=joint_prob,
-        payout_multiplier=Decimal(repr(payout)),
-        fraction=config.kelly_fraction,
-        model_shrinkage=shrinkage,
-        max_fraction_of_bankroll=config.max_stake_pct_bankroll,
-    )
-
     digest = hashlib.sha1("|".join(legs).encode()).hexdigest()[:12]
     return RecommendedEntry(
         id=digest,
         contest_variant=variant,
-        entry_size=bet_size,
+        entry_size=int(row["Bet Size"]),
         legs=legs,
-        joint_prob=joint_prob,
+        # EV is the value of a unit staked: the win chance the all-hit payout makes worth it.
+        joint_prob=float(row["EV"]) / payout,
         payout_multiplier=payout,
-        ev=ev,
-        recommended_stake=stake,
+        ev=float(row["EV"]) - 1.0,
+        # No entry is staked until the entries' money record supports a stake, the search's
+        # reason for its Rec Bet of 0 (docs/handoffs/profit-engine.md 5.3).
+        recommended_stake=Decimal("0"),
         canonical_legs=canonical_legs,
-        shrinkage=shrinkage,
-        shrinkage_source=source,
         extras={"league": str(row.get("League", "")), "game": str(row.get("Game", ""))},
         platform=platform,
         pair_modifier=float(math.prod(row["Boost Pairs"])),
@@ -189,7 +160,7 @@ def construct_entries(
     parlay_dfs: dict[str, pd.DataFrame] | None = None,
     platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
-    """Build ranked, sized Pick'em entries on ``platform``.
+    """Build Pick'em entries on ``platform``, ranked by their fitted value; none is staked.
 
     ``parlay_dfs`` injection short-circuits the live scraper so tests and
     offline reruns do not hit the network.
@@ -209,41 +180,9 @@ def construct_entries(
         if parlays.empty:
             continue
         parlays = _filter_parlays(parlays, config)
-        entries.extend(_variant_entries(parlays, variant, bankroll, config, platform))
+        entries.extend(_row_to_entry(row, variant, platform) for _, row in parlays.iterrows())
 
     return rank_and_dedupe(entries, config)
-
-
-def _variant_entries(
-    parlays: pd.DataFrame,
-    variant: str,
-    bankroll: Decimal,
-    config: PickemConfig,
-    platform: str = "Underdog",
-) -> list[RecommendedEntry]:
-    entries: list[RecommendedEntry] = []
-    for _, row in parlays.iterrows():
-        league = str(row.get("League", ""))
-        shrinkage_info = _parlay_shrinkage(row, league, platform)
-        entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info, platform))
-    return entries
-
-
-def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float, str]:
-    """Kelly shrinkage for one parlay: the most conservative of its leg markets.
-
-    A parlay cashes only if every leg hits, so it inherits the trust of its
-    least-calibrated market — resolve per distinct leg market and keep the min.
-    Leg ``market`` is the raw platform name (a ``stat_map[platform]`` key);
-    ``cell_market`` gives the cell key (``REB``, ``BLST``, …) that
-    ``resolve_market_shrinkage`` resolves against. Combo / H2H names with no
-    mapping are skipped; a parlay with none left has no cell to vouch for it and
-    sizes on the no-evidence prior.
-    """
-    cells = {cell_market(league, platform, leg["market"]) for leg in row["legs"]} - {None}
-    if not cells:
-        return NO_EVIDENCE_SHRINKAGE, "fallback"
-    return min((resolve_market_shrinkage(league, cell) for cell in cells), key=lambda r: r[0])
 
 
 def leg_player(leg: str) -> str:

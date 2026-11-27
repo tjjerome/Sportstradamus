@@ -164,6 +164,7 @@ def _same_game_parlay(players: tuple[str, str], boosts: tuple[float, float], pla
         "Bet Size": 2,
         "Boost": 3.5 * boosts[0] * boosts[1],
         "Boost Pairs": (1.0,),
+        "EV": 0.95,
         "Model EV": 1.3,
         "legs": [
             _canonical_leg(player, platform=platform) | {"boost": boost}

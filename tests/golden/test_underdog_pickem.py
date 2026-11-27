@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import datetime
-import importlib
 from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from sportstradamus import clv
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
-from sportstradamus.strategies.kelly import NO_EVIDENCE_SHRINKAGE
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
     RecommendedEntry,
@@ -50,6 +47,7 @@ def _parlay(
     legs,
     *,
     bet_size=None,
+    ev=0.9,
     model_ev=2.5,
     payout=3.0,
     league="WNBA",
@@ -57,12 +55,12 @@ def _parlay(
     platform="Underdog",
     pair_modifiers=None,
 ):
-    """Parlay row shaped like ``prediction.parlay``'s beam-search output.
+    """Parlay row shaped like ``prediction.parlay._parlay_row``.
 
     ``legs``: player names, or ``(player, raw platform market)`` pairs; bare
-    names get the platform's raw Points market so shrinkage resolution has a
-    real ``stat_map`` key to map. ``pair_modifiers``: one per leg pair, every
-    pair unmodified when omitted.
+    names get the platform's raw Points market. ``ev`` is the fitted value of a
+    unit staked, ``model_ev`` the model's claim beside it. ``pair_modifiers``: one
+    per leg pair, every pair unmodified when omitted.
     """
     default_market = "Points" if platform == "Underdog" else "points"
     pairs = [(leg, default_market) if isinstance(leg, str) else leg for leg in legs]
@@ -71,11 +69,12 @@ def _parlay(
         "Date": "2026-05-08",
         "League": league,
         "Platform": platform,
+        "EV": ev,
         "Model EV": model_ev,
         "Market EV": model_ev * 0.95,
         "Boost": payout,
         "Boost Pairs": pair_modifiers or (1.0,) * (len(legs) * (len(legs) - 1) // 2),
-        "Rec Bet": 1.0,
+        "Rec Bet": 0.0,
         "Bet Size": bet_size or len(legs),
         "legs": [
             _canonical_leg(p, market=m, league=league, game=game, platform=platform)
@@ -164,32 +163,62 @@ def test_parlays_per_variant_empty_pool_skips_search(monkeypatch):
 # --- parlay-level filter ------------------------------------------------------
 
 
-def test_filter_parlays_size_and_ev():
-    cfg = PickemConfig(min_ev=0.10, entry_sizes=(3,))
+def test_filter_parlays_keeps_every_entry_of_a_kept_size():
+    """No value floor: the rank decides. The last entry sat under the old 5 % floor on
+    the model's claim and is kept."""
+    cfg = PickemConfig(entry_sizes=(3,))
     df = pd.DataFrame(
         [
-            _parlay(["L1", "L2", "L3"], model_ev=1.50),
-            _parlay(["L1", "L2"], model_ev=2.0),  # wrong size
-            _parlay(["L1", "L2", "L3"], model_ev=1.05),  # below min_ev
+            _parlay(["L1", "L2", "L3"], ev=0.95, model_ev=1.50),
+            _parlay(["L1", "L2"], ev=0.95, model_ev=2.0),  # wrong size
+            _parlay(["L1", "L2", "L3"], ev=0.80, model_ev=1.03),
         ]
     )
     out = _filter_parlays(df, cfg)
-    assert len(out) == 1
-    assert out["Bet Size"].iloc[0] == 3
+    assert out["Bet Size"].tolist() == [3, 3]
 
 
 # --- end-to-end with injection -----------------------------------------------
 
 
-@pytest.fixture
-def fake_market_calibration(monkeypatch):
-    monkeypatch.setattr(
-        "sportstradamus.strategies.underdog_pickem.resolve_market_shrinkage",
-        lambda league, market: (0.5, "training"),
+def test_entry_hit_chance_and_value_come_from_the_rows_fitted_ev():
+    """``EV`` is the fitted value of a unit staked; ``Model EV``, the model's claim beside
+    it, prices nothing."""
+    cfg = PickemConfig(entry_sizes=(3,), contest_variants=("power",))
+    parlay_dfs = {
+        "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], ev=0.90, model_ev=1.50, payout=6.0)])
+    }
+
+    (entry,) = construct_entries(Decimal("500"), cfg, parlay_dfs=parlay_dfs)
+
+    assert entry.payout_multiplier == 6.0
+    assert entry.joint_prob == pytest.approx(0.15)
+    assert entry.ev == pytest.approx(-0.10)
+
+
+def test_a_board_with_every_entry_under_one_still_yields_entries_and_stakes_none():
+    """On the live board no entry's fitted value clears 1, and the model's claim here does
+    not either. Every entry is still recommended, by rank, and none is staked until the
+    entries' money record supports one."""
+    parlay_dfs = {
+        "power": pd.DataFrame(
+            [
+                _parlay(["P1", "P2"], ev=0.93, model_ev=0.93),
+                _parlay(["Q1", "Q2", "Q3"], ev=0.88, model_ev=0.88),
+            ]
+        ),
+        "flex": pd.DataFrame([_parlay(["F1", "F2", "F3", "F4", "F5"], ev=0.79, model_ev=0.79)]),
+    }
+
+    out = construct_entries(
+        Decimal("500"), PickemConfig(entry_sizes=(2, 3, 5)), parlay_dfs=parlay_dfs
     )
 
+    assert [round(e.ev, 2) for e in out] == [-0.07, -0.12, -0.21]
+    assert all(e.recommended_stake == Decimal("0") for e in out)
 
-def test_construct_entries_both_variants(fake_market_calibration):
+
+def test_construct_entries_both_variants():
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
@@ -214,7 +243,7 @@ def test_construct_entries_both_variants(fake_market_calibration):
     assert all(leg for e in out for leg in e.legs)
 
 
-def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibration):
+def test_construct_entries_yaml_roundtrip(tmp_path: Path):
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
@@ -250,7 +279,7 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibratio
     assert "payout_multiplier" in payload["entries"][0]
 
 
-def test_dedupe_max_overlap(fake_market_calibration):
+def test_dedupe_max_overlap():
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
@@ -304,7 +333,7 @@ def test_entries_rank_by_their_fitted_value_highest_first():
     assert [e.id for e in ranked] == ["best", "likely", "long_shot"]
 
 
-def test_entry_carries_the_product_of_its_pair_modifiers(fake_market_calibration):
+def test_entry_carries_the_product_of_its_pair_modifiers():
     """The search prices an entry on its legs' multipliers times the product of its
     same-game pair modifiers; the ledger settles a winner on that same product."""
     cfg = PickemConfig(min_ev=0.0, entry_sizes=(3,), contest_variants=("power",))
@@ -319,101 +348,10 @@ def test_entry_carries_the_product_of_its_pair_modifiers(fake_market_calibration
     assert entry.pair_modifier == pytest.approx(0.72)
 
 
-# --- shrinkage resolution -----------------------------------------------------
-
-
-def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
-    from sportstradamus.strategies import underdog_pickem as up
-
-    # Raw Underdog Market names map via stat_map: Rebounds->REB, Steals->STL.
-    # Indexing (not .get) pins that only canonical cell keys reach resolution.
-    shrink = {"REB": (0.80, "training"), "STL": (0.20, "training")}
-    monkeypatch.setattr(up, "resolve_market_shrinkage", lambda league, market: shrink[market])
-    row = pd.Series(_parlay([("A. Player", "Rebounds"), ("B. Player", "Steals")]))
-    shrinkage, source = up._parlay_shrinkage(row, "WNBA", "Underdog")
-    assert shrinkage == 0.20  # min(REB=0.80, STL=0.20) — least-calibrated leg
-    assert source == "training"
-
-
-def test_parlay_shrinkage_unmapped_markets_fall_back(monkeypatch):
-    from sportstradamus.strategies import underdog_pickem as up
-
-    monkeypatch.setattr(
-        up,
-        "resolve_market_shrinkage",
-        lambda league, market: pytest.fail(f"unmapped market resolved: {market}"),
-    )
-    row = pd.Series(_parlay([("A vs. B", "H2H Points")]))
-    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (NO_EVIDENCE_SHRINKAGE, "fallback")
-
-
-def test_parlay_shrinkage_sleeper_uses_sleeper_stat_map(monkeypatch):
-    from sportstradamus.strategies import underdog_pickem as up
-
-    calls = []
-    monkeypatch.setattr(
-        up,
-        "resolve_market_shrinkage",
-        lambda league, market: calls.append(market) or (0.5, "training"),
-    )
-    # Real Sleeper stat_map raw key (disjoint namespace from Underdog's
-    # "Rebounds"): rebounds->REB.
-    row = pd.Series(_parlay([("A. Player", "rebounds")], platform="Sleeper"))
-    assert up._parlay_shrinkage(row, "WNBA", "Sleeper") == (0.5, "training")
-    assert calls == ["REB"]
-    # The same raw name under the Underdog map resolves to nothing -> fallback.
-    assert up._parlay_shrinkage(row, "WNBA", "Underdog") == (NO_EVIDENCE_SHRINKAGE, "fallback")
-
-
-def stub_cell_trust(monkeypatch, cells):
-    """Stand in for the two trust readers: each ``(league, market)`` cell in ``cells``
-    has that training skill, and no cell has a closing-line segment."""
-    # sportstradamus.training re-exports the report function over the submodule, so the
-    # module resolve_market_shrinkage's lazy from-import reads is reached by name.
-    report_mod = importlib.import_module("sportstradamus.training.report")
-    monkeypatch.setattr(
-        report_mod,
-        "get_market_calibration",
-        lambda league, market: {"brier_skill_score": cells.get((league, market), float("nan"))},
-    )
-    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (float("nan"), 0))
-
-
-def test_parlay_shrinkage_asks_a_cells_trust_under_the_leagues_own_market_name(monkeypatch):
-    """``stat_map`` names a market the same for every league and a cell goes by its
-    league's own name: Underdog's NBA Fantasy Points is the ``fantasy points
-    prizepicks`` cell, its NHL Assists the ``assists`` cell. Asked for under the
-    mapped name no cell answers, and the no-evidence rung sizes the parlay to nothing.
-    Goals is already the NHL's own name for its cell."""
-    from sportstradamus.strategies import underdog_pickem as up
-
-    stub_cell_trust(
-        monkeypatch,
-        {
-            ("NBA", "fantasy points prizepicks"): 0.163,
-            ("NHL", "assists"): 0.30,
-            ("NHL", "goals"): 0.45,
-        },
-    )
-
-    resolved = {
-        (league, market): up._parlay_shrinkage(
-            pd.Series(_parlay([("A. Player", market)], league=league)), league, "Underdog"
-        )
-        for league, market in [("NBA", "Fantasy Points"), ("NHL", "Assists"), ("NHL", "Goals")]
-    }
-
-    assert resolved == {
-        ("NBA", "Fantasy Points"): (0.163, "training"),
-        ("NHL", "Assists"): (0.30, "training"),
-        ("NHL", "Goals"): (0.45, "training"),
-    }
-
-
 # --- Sleeper platform threading ------------------------------------------------
 
 
-def test_construct_entries_sleeper_platform(fake_market_calibration):
+def test_construct_entries_sleeper_platform():
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
@@ -439,7 +377,7 @@ def test_construct_entries_sleeper_platform(fake_market_calibration):
     assert all(e.platform == "Sleeper" for e in out)
 
 
-def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
+def test_construct_entries_sleeper_push_case_sizes():
     """Size-2 Sleeper Max (full-refund push) and size-6 Sleeper Flex.
 
     The PickemConfig default entry_sizes=(3, 5) never reaches either edge;
@@ -480,9 +418,7 @@ def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
 
 
 @pytest.mark.parametrize("platform", ["Underdog", "Sleeper"])
-def test_recommended_entry_platform_roundtrips_yaml(
-    tmp_path: Path, fake_market_calibration, platform
-):
+def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
