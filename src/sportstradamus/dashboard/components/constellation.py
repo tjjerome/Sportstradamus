@@ -7,8 +7,8 @@ at most two per player; the rest wait behind *look deeper* — each sized by its
 between the lowest and the highest drawn, so the strongest read biggest. The layout
 is **fixed per game** (the sports-object template the game was dealt, or a
 team-anchored force-directed solve when it is too thin for one) and never moves
-when you pick legs; ``constellation_spacing.settle`` then nudges only
-the stars that would collide, so the biggest keep their vertices exactly. Captions
+when you add legs to the slip; ``constellation_spacing.settle`` then nudges only the
+stars that would collide, so the biggest keep their vertices exactly. Captions
 are sparse for the same reason — the slip's stars plus the biggest few candidates
 carry one, everything else reads from its hover card. A star you've added to the
 slip burns at full team color; a candidate you haven't is the same color
@@ -17,7 +17,7 @@ read as a team color). Stories / Builder / Moon just pre-activate a subset.
 
 Edges are pairwise correlations (gold, width/opacity ∝ |ρ|, dashed when ρ < 0 —
 "fights the thesis"). The whole web is drawn as a **faint base layer** so the
-correlation structure reads before any pick; a tie whose **both stars are in the slip**
+correlation structure reads before any leg is added; a tie whose **both stars are in the slip**
 brightens to full gold — the bright edges are the correlations among your slip's own
 legs, sketched over the rest, and hovering any star faint-previews its other ties. The
 *layout* still springs on the full correlation web, so a star's placement reflects every
@@ -128,7 +128,7 @@ def _pool_field(
     pool: pd.DataFrame | None, slip_legs: Sequence[Mapping], *, column: str, key: str
 ) -> str:
     """A single-valued matchup field — read from the candidate ``pool`` so it's
-    static per game and renders before any leg is picked; falls back to the slip's
+    static per game and renders before any leg is added; falls back to the slip's
     own legs when there is no pool (e.g. an active leg whose offer has expired).
 
     ``column`` names the raw ``pool`` column (``"Game"`` / ``"League"``); ``key``
