@@ -1893,8 +1893,9 @@ justification to `.claude/.state/research_waiver`.
   observables available at decision time carry all of served p's out-of-sample information on posted legs,
   so no probability consumer may anchor on a learned layer (it would be model-free in disguise). Rules that
   survive the kill for any probability consumer: abstain is the no-fit default (below 2,000 legs and 5 dates
-  per league: no recommendation, Kelly 0 — never full trust; `strategies/kelly.py::resolve_shrinkage` still
-  grants `clip(live_bss)` on 1–19 legs and owes this fix); treat a retrain as a regime change (the model's
+  per league: no recommendation, Kelly 0 — never full trust; `strategies/kelly.py::resolve_shrinkage`
+  granted `clip(live_bss)` on 1–19 legs until it was archived on 2026-11-26, when pick'em and the ledger
+  came to read the fitted number); treat a retrain as a regime change (the model's
   information share decays from 0.47–0.61 in a version's first days to 0.05–0.14 a week or two later,
   exploratory); keep the phantom gate and never persist phantom rows. Reopen trigger: the re-run (frozen
   `r1/prereg.py`, same 12-test Holm family, on the I2 decision-time columns, with an lp × version-age term

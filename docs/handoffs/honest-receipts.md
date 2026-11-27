@@ -450,9 +450,12 @@ more information than the market has and makes training see what serving sees. *
 scorecard, the offline replay of the live recommendation rule. A suffix (I5a-1, I6e) names one change
 inside its group; §8 restates each open one as a plain question.
 
-- **I4 trust layer — KILLED with R1 (§5); nothing below is built.** The one piece that needs a new
-  home is the Kelly no-evidence case: `strategies/kelly.py::resolve_shrinkage` still returns
-  `clip(live_bss)` for any `live_n > 0` (full trust on 1–19 legs); R1's abstain rule (no recommendation,
+- **I4 trust layer — KILLED with R1 (§5); nothing below is built.** The one piece that needed a new
+  home was the Kelly no-evidence case: `strategies/kelly.py::resolve_shrinkage` returned
+  `clip(live_bss)` for any `live_n > 0` (full trust on 1–19 legs). It closed on 2026-11-26, when that
+  chain was archived (`src/deprecated/kelly_orphans.py`): pick'em and the ledger read the fitted
+  number, whose no-fit default is the app's fair price, zero edge
+  ([profit-engine.md](profit-engine.md) §5.1). R1's abstain rule (no recommendation,
   Kelly 0, below 2,000 legs and 5 dates per league) is the evidence-backed default. Original sketch,
   for the record (Tier A unlocked I4a–c, e, f; Tier B unlocked I4d; behind a selection knob, off by
   default): `prediction/trust.py` (≤ 250 lines: `trust_features`, `fit_trust`, `apply_trust`; artifact
@@ -652,11 +655,14 @@ inside its group; §8 restates each open one as a plain question.
      last-scored line pushes, an older line of that prop is counted (no push among the 510,933
      settled rows on the training box; nine of them sit on a whole-number line).
   3. **Parlay trust under the league's key.** `correlation._leg_shrinkage` and
-     `underdog_pickem._parlay_shrinkage` look a leg's trust up under the league's own market key,
-     as the ledger's legs have since `policy_v3`; `helpers.cell_market` states the rule once for
-     all three. NBA fantasy points on Underdog resolves its cell's figure (.163 on the training
-     box's files) where it resolved the no-evidence .01, which dropped every parlay holding such
-     a leg; NHL points and assists resolve their cells' 0.
+     `underdog_pickem._parlay_shrinkage` looked a leg's trust up under the league's own market key,
+     as the ledger's legs had since `policy_v3`; `helpers.cell_market` states the rule once. All
+     three lookups were archived on 2026-11-26, when the engine, pick'em and the ledger came to
+     read the fitted number ([profit-engine.md](profit-engine.md) §5.3); the ledger's legs still
+     file their stat under `cell_market`. What the repair changed while they ran: NBA fantasy
+     points on Underdog resolved its cell's figure (.163 on the training box's files) where it
+     had resolved the no-evidence .01, which dropped every parlay holding such a leg; NHL points
+     and assists resolved their cells' 0.
   4. **One dashboard restart per deploy.** `scripts/run_job.sh` notes the commit before its pull
      and compares against it. It compared the checkout's last move, so after a deploy that
      touched dashboard code or a config file every job restarted the dashboard until the next
@@ -718,10 +724,10 @@ eras.
   snapshot of every resolved leg, so its tiles do not follow the sidebar range or the page window (caption says so).
 - The low parlay all-hit rates are real, not a resolution defect: on 898,592 parlays resolved both by
   `parlay_hist` and by history outcomes, `Misses` agrees on 98.4 % and all-hit rates agree within 0.2 pp
-  in every platform × size cell (Sleeper 2-leg .115). Parlay Kelly (`Rec Bet`) sizes from the copula
-  probability, shrunk toward 1/payout by the smallest leg weight but not corrected for the joint
-  (`PARLAY_AUDIT.md` §2.6), while the selected set realizes 0.08 of priced: the parlay path's
-  live-money exposure until I6.
+  in every platform × size cell (Sleeper 2-leg .115). Parlay Kelly (`Rec Bet`) sized from the copula
+  probability, shrunk toward 1/payout by the smallest leg weight but not corrected for the joint,
+  while the selected set realized 0.08 of priced. `Rec Bet` has been 0 since the entry search came
+  to read the fitted number ([profit-engine.md](profit-engine.md) §5.3).
 - R2 open questions: NFL Σ rests on 7–11 games per team (pair-type pooled tetrachoric ρ with hierarchical
   shrinkage is a pre-registered parlay-dependence research item); Underdog's modifier m for MLB / WNBA /
   NHL / NBA pairs is unknown and assumed 1; Sleeper's bans are unverified; Flex calibration cannot be

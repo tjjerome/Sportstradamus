@@ -117,7 +117,7 @@ Sportstradamus/
 | `data.py` | `trim_matrix` — training-data preparation |
 | `markets.py` | `ALL_MARKETS` per-league market lists; `select_markets` narrowing for `--market` |
 | `correlate.py` | `correlate(league, stat_data)` — builds `corr_same_team.parquet`, `corr_opposing.parquet`, and `corr_metadata.json` under `data/leagues/{league}/` from player stat history (intermediate cache at `data/training_data/{LEAGUE}_corr.parquet`) |
-| `report.py` | `report()` — walks model pickles and writes the wide one-row-per-cell `data/training/model_stats.parquet` + `.csv` mirror; `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` |
+| `report.py` | `report()` — walks model pickles and writes the wide one-row-per-cell `data/training/model_stats.parquet` + `.csv` mirror |
 | `scorecard.py` | `compute_gates` — the offline ship gates (paired Brier CI, star/bench z, PIT-KS, debiased ECE, anti-shrinkage), called inline by `report()` and exposed as a standalone A/B CLI that never writes `model_stats.parquet`. Thresholds: [docs/ship_gate.md](ship_gate.md) |
 | `plain_baseline.py` | `fit_plain_baseline` — a plain squared-error LightGBM fit on the cell's own training columns; `plain_diagnostics` scores it beside the served mean: `plain_mse_ratio`, `plain_mse_ratio_priced`, `plain_rounds` in `model_stats` and the dump's `Plain` column. Report-only unless the cell sets `mean_anchor: "plain"`, whose pickle carries the booster as its served mean; `refit_plain_booster` refits that booster on every matrix row for refit-carry (`refit.py`) |
 | `refit.py` | Refit-carry for a cell whose stat_meta sets `refit: "all"`: `resolve_refit` reads the knob and refuses hurdle, affine-expert and holdout-blind runs; `train_market` refits the served booster(s) on every matrix row and `finish_refit` records `refit_through`, `refit_rows`, `refit_rounds` and `sibling_booster_sha256` in the pickle. Gates and dumps stay on the 70 % fit ([docs/ship_gate.md](ship_gate.md)) |
@@ -139,8 +139,8 @@ Sportstradamus/
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization. Temperature and post-hoc price an offer at its authentic sportsbook quote line; an offer at another line moves off that price by the model's own logit gap (`helpers/distributions.anchor_to_reference`; `scripts/tail_pricing.serve` does the same at a test row's authentic `Test Line`) |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `ev_stamp.py` | `stamp_records` — lays the EV stamp on a platform's scored records before `find_correlation` sees them: the sportsbooks' same-line price as this run read the archive (`book_stamp.stamp`), the fitted win chance and `EV` (`live_fit.score` against the nightly `live_fit.parquet`), and the slate's picks by that `EV` (`live_fit.picks`). `EV_STAMP_COLS` names the eight columns, which ride to `current_offers` and history |
-| `correlation.py` | `find_correlation` — loads the per-league correlation parquets, assembles Σ, scores parlay legs (calls `parlay.beam_search_parlays`) |
-| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `leg_market_map` (a platform's market labels under the league's own cell keys), `resolve_leg_stat` |
+| `correlation.py` | `find_correlation` — pools each game's priced legs by `EV`, loads the per-league correlation parquets, assembles Σ and builds the game's entries (calls `parlay.beam_search_parlays`) |
+| `parlay.py` | `beam_search_parlays` (the entry search: per size, the entries the fitted chances value most, each with the model's claim beside it), `GameArrays`, `GameScoringContext`, `leg_market_map` (a platform's market labels under the league's own cell keys), `resolve_leg_stat` |
 | `book_quotes.py` | Per-player book quotes both scoring paths read: admission (a DFS platform's own line is not support), the model path's book leg (`book_evs_for_players`; `apply_rung_book_leg` re-legs it from the sportsbook rungs on a cell whose `stat_meta.json` carries `book_leg: "rung"`), the book-fallback path's prices |
 | `offer_records.py` | `book_over_prob` (devigs the book leg into `Market EV`) and `finalize_records`, the last stage both scoring paths share: boost-aware payouts, the chosen side, per-player dedup |
 | `line_movement.py` | `build_line_movement` — one row per offer from the archive's ladder: the main line and the fair line its price implies, per poll |
@@ -155,12 +155,12 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), `resolve_shrinkage` (explicit > training BSS ramped to live CLV-segment BSS between `LIVE_BLEND_FLOOR` and `LIVE_BLEND_FULL` legs when both exist > training BSS > live BSS > `NO_EVIDENCE_SHRINKAGE`), and the `kelly` CLI for offline re-sizing of a recommendations YAML. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
-| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `bet pickem` command. Pure orchestrator — no math. Covers Power and Flex; emits `data/recommendations/{date}_{platform}.yaml` |
+| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), each taking the trust weight its caller supplies (`model_shrinkage`; `NO_EVIDENCE_SHRINKAGE` is the weight for a cell with no measured skill), and the `kelly` CLI, which sizes a recommendations YAML's entries by Kelly on their fitted hit chance. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `bet pickem` command. Pure orchestrator — no math: it takes the entry search's rows, ranks them by their fitted `EV` and stakes none ([profit-engine.md](handoffs/profit-engine.md) §5.3). Covers Power and Flex; emits `data/recommendations/{date}_{platform}.yaml` |
 | `_pickem_emit.py` | YAML-emit helpers split out of `underdog_pickem.py` |
-| `ledger.py` + `_ledger_*.py` | Simulated-bettor ledger: twice-daily commit orchestrator with selection, cross-game candidate, settlement, bankroll, and JSONL store layers |
+| `ledger.py` + `_ledger_*.py` | Simulated-bettor ledger: twice-daily commit orchestrator with selection, cross-game candidate, settlement, bankroll, and JSONL store layers. The policy in force is [sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) §10 |
 | `profit_sim.py` | Kelly-sized profit / ROI / Sharpe / drawdown backtest |
-| `README.md` | Module-level docs: resolution chain, blending ramp, contest variants |
+| `README.md` | Module-level docs: pick'em entries, the trust weight, dependencies |
 
 ### `collectors/` — Authenticated data collectors
 
@@ -192,8 +192,8 @@ NBA / WNBA / NHL lists) pull the training-side history dev-side; NBA's gamelog u
 | `theme.py` | Non-Streamlit mirror of the design tokens (see [DESIGN.md](../DESIGN.md)) |
 | `assets.py` | Ambient-art loader over `data/assets/ambient/ambient_manifest.json` — a slot renders only when it names a file on disk (downscaled to 1600 px WebP at import), else the token gradient; `placement` picks hero crop vs. the Tonight card-deck tiling (slot catalog: [art_assets.md](art_assets.md)) |
 | `static/` | Hand-authored favicon; the `st.logo` files land here when commissioned |
-| `columns.py`, `legs.py`, `lenses.py`, `narrative.py`, `viewport.py` | Scoring-column semantics, leg lookup, preset filter lenses, narrative display, mobile detection |
-| `slip_engine.py` | Live slip scoring for the builders — the one sanctioned live calc |
+| `columns.py`, `legs.py`, `lenses.py`, `narrative.py`, `viewport.py` | Scoring-column semantics; leg lookup, the "+EV" mark and the picks' record line; preset filter lenses; narrative display; mobile detection |
+| `slip_engine.py` | Live slip scoring for the builders, on the legs' fitted chances with the model's claim beside it, and the payout at which a slip breaks even — the one sanctioned live calc |
 | `surfaces/` | The pages: board, tonight, games, receipts, and the lab_* diagnostics surfaces |
 | `components/` | Reusable widgets: slip dock/builder, offer cards, tickets, deep-dive, gate matrix, and the constellation family — `constellation.py` orchestrates the figure; `_spring` (shapeless layout), `_slate` + `_shapes` (dealt templates), `_traces` (node/edge/label builders), `_spacing` + `_layout` (px geometry), `_deep` + `_deep_layer` and `_wider` + `_sky` (the two lenses) |
 
@@ -212,7 +212,7 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | `books/` | (called from `prediction/cli.py`) | Underdog (`underdog.py:get_ud` — player props, team/game markets, alternate lines) and Sleeper (`sleeper.py:get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
 | `analysis.py` / `clv.py` | — | Outcome resolution for `reflect` (`resolve_history`, `annotate_offer_outcomes`, Kelly at the platform payout), the nightly profit-sim precompute, proper scoring rules (Brier skill, Murphy decomposition, coverage); the flat −110 reporting helpers live in `src/deprecated/analysis_flat_odds.py`; closing-line-value computation, each row's close read as of its kickoff (`clv.commence_times`) |
-| `realized.py` | — | The one pricing truth for realized performance: settled offers the platform posted, priced at the platform payout and counted once per prop from `COUNT_ONCE_FROM` (`settled_offers`; `last_scored_lines` is that count-once mask alone, taken by the Receipts filter before it drops pushes), windows, the posted / recommended cohorts, the by-side ledger and the calibration summary. Receipts, Lab › Diagnostics and `reflect` all read it |
+| `realized.py` | — | The one pricing truth for realized performance: settled offers the platform posted, priced at the platform payout and counted once per prop from `COUNT_ONCE_FROM` (`settled_offers`; `last_scored_lines` is that count-once mask alone, taken by the Receipts filter before it drops pushes), windows, the posted / recommended cohorts (`recommended`), the "+EV" mark's rule (`ev_marked`), the by-side ledger and the calibration summary. Receipts, Lab › Diagnostics and `reflect` all read it |
 | `plays.py` | — | Plays: named rules that pick sides from the board, scored in money. `posted_sides` lays out both sides of every settled offer, each graded at its own payout; `play_record` is the money table (per play, league and pick kind: legs, hit rate against break-even with an anytime-valid bound, return a leg, and the exact return of the one-leg-per-game Power entries those legs could have built); `entry_record` scores the engine's own graded entries. Lane brief: [handoffs/profit-engine.md](handoffs/profit-engine.md) |
 | `live_fit.py` | — | EV's win chance: one penalized logistic fit per league, pick kind and class of sportsbook coverage, on settled posted picks, of the app's fair price, the books' same-line price and the model's (`fit`); `score` prices offers with the table on the side the model took, with a one-sided lower bound; `picks` names a slate's picks by that `EV`; `walk_forward` prices each game date from earlier dates only. Nightly writes the table (`data/runtime/live_fit.parquet`) and prophecize prices each offer's `EV` with it. Design and evidence: [handoffs/profit-engine.md](handoffs/profit-engine.md) §5.1, §5.3 |
 | `book_stamp.py` | — | The sportsbooks' price at an offer's own line, as its scoring run saw the archive's ladder: `stamp` for one run's offers (prophecize), `fill_history` for the history rows no run stamped (nightly). Each takes a loaded `Archive`; none opens one |
@@ -261,11 +261,11 @@ prophecize  (prediction/cli.py)
 
 sportstradamus bet pickem  (strategies/underdog_pickem.py)
   prediction/correlation.find_correlation(contest_variant=...)
-  strategies/kelly.fractional_kelly_stake(...)
+  strategies/_pickem_emit.rank_and_dedupe()   (by fitted EV; no stake)
         │
         ▼
   data/recommendations/{date}_{platform}.yaml
-        └─ sportstradamus bet kelly    (offline re-sizing)
+        └─ sportstradamus bet kelly    (offline sizing)
 ```
 
 **NFL comp data:** Player-comp aggregates for NFL come from FantasyPoints
@@ -287,8 +287,8 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 | Change which books feed consensus lines | `moneylines.py` — `confer` keeps every sportsbook the Odds API returns for the `us` region (`us2` for `US2_ONLY_MARKETS`); `helpers/training_quotes.py:DFS_PLATFORM_BOOKS` keeps pick'em platforms out of the consensus (`helpers/archive.py:_sportsbook_line`) |
 | Add a player name alias | `src/sportstradamus/data/config/name_map.json`, applied by `helpers/text.py:remove_accents`. Point it at the spelling the archive holds the sportsbook quotes under: training joins quotes to the gamelog by name. Moneypuck drops the non-ASCII letters of some NHL names (`Tim Sttzle`), so an NHL rookie whose name has one needs an alias; `StatsNHL.load` respells the stored gamelog and rosters through it |
 | Understand a training stats metric | `training/report.py` (schema owner) + [docs/ship_gate.md](ship_gate.md) for the gate columns |
-| Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → `{kelly_shrinkage, brier_skill_score, model_weight}` from `data/training/model_stats.parquet` |
-| Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `LIVE_BLEND_FLOOR`, `LIVE_BLEND_FULL` |
+| Know where `kelly_shrinkage` is read | `dashboard/components/slip_builder.py:slip_shrinkage` — the slip rail takes the lowest of its legs' cells from `data/training/model_stats.parquet` |
+| Tune the Kelly sizing constants | `strategies/kelly.py` — `DEFAULT_KELLY_FRACTION`, `MAX_FRACTION_OF_BANKROLL`, `NO_EVIDENCE_SHRINKAGE` |
 | Change the Optuna hyperparameter search | `training/hyperparams.py` → `run_hyper_opt` |
 | Change how distributions blend with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
 | Update the season start date for a league | Usually nothing: `Stats.adopt_feed_opener` (run by `Stats.update` and by `meditate --full-rebuild`) adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`) when it falls more than 300 days after the `Stats{League}.season_start` constant ([OPERATIONS.md](OPERATIONS.md)) |
@@ -325,7 +325,7 @@ change is about the seam.
 | Target normalizations | `training/baselines.py` registry — add a slug + forward/decode pair; no pipeline edit | new target transforms |
 | Payout curves | `prediction/payouts.py` + `data/config/underdog_payouts.json`; Sleeper is a per-leg-multiplier EV path, not a table entry | every product pricer |
 | Joint pricing (Σ/copula) | `prediction/joint.py`; Σ is assembled only in `correlation.py` → `GameArrays`; consumed only via `joint.parlay_payout_prob` | parlay pricing; dashboard/stories read-only |
-| Money sizing | `strategies/kelly.py` — `resolve_shrinkage`, `fractional_kelly_stake` | every pricer sizes through these |
+| Money sizing | `strategies/kelly.py` — `fractional_kelly_stake`, `joint_kelly_portfolio` | whatever stakes money sizes through these: the slip rail, `bet kelly`, the ledger's `kelly_growth` persona |
 | Dashboard snapshots | `prediction/persist.py` atomic parquet writers; the dashboard reads parquet only, never `Archive` (golden-enforced) | anything surfacing data in the dashboard |
 | Game scoring bundle | `prediction/parlay.py:GameScoringContext` (subset re-pricing) | story menu, slip engine, product engines |
 

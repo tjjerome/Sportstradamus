@@ -469,8 +469,8 @@ run as **one wide row per `(league, market)` cell**; consumed by:
 * The Streamlit dashboard (`dashboard/surfaces/lab_training.py`) — tab views
   by metric family with `lifecycle_state` joined in from
   `training/graduation.py:lifecycle_table()`.
-* `training.report.get_market_calibration(league, market)` — kelly's
-  per-cell `{kelly_shrinkage, brier_skill_score, model_weight}` getter.
+* The dashboard's slip rail (`dashboard/components/slip_builder.py:slip_shrinkage`)
+  — the lowest `kelly_shrinkage` among a slip's cells is its stake's trust weight.
 * `training.graduation.read_gate1` → `ship graduation` /
   `ship config` for Gate 1 ↔ Gate 2 promotion logic.
 
@@ -502,8 +502,8 @@ consult.
 **Reading the parquet**:
 
 - `brier_skill_score > 0` ⇔ model beats book on Brier;
-  `kelly_shrinkage = clip(brier_skill_score, 0, 1)` — the value
-  `strategies/kelly.py` reads via `training.report.get_market_calibration`.
+  `kelly_shrinkage = clip(brier_skill_score, 0, 1)` — the value the slip
+  rail's stake reads (`slip_shrinkage`).
 - `over_pct_ev_gt` high & `over_pct_ev_lt` low ⇒ EV-positive picks
   actually win more.
 - `shape_ratio` ≈ 1.0 ⇒ well-calibrated dispersion;

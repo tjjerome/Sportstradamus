@@ -244,8 +244,10 @@ floors, the leg-pool floors and the pick'em filter's thresholds are gone.
   where they claimed 2.2 (§1). A stake waits for the entries' own money record (§5.2).
 - **Pick'em** (`sportstradamus bet pickem`) emits the search's entries, ranked by `EV`.
 - **The paper ledger** runs `policy_v5`
-  ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10): every persona prices its legs at the
-  fitted chance, and the persona `ev_picks` deals the board's picks into cross-game entries.
+  ([sim-bettor-ledger.md](sim-bettor-ledger.md) §10): every pool prices its legs at the
+  fitted chance and drops no entry for its value, and the persona `ev_picks` deals the board's
+  picks into cross-game entries. Every persona stakes flat but `kelly_growth`, which commits
+  only an entry whose fitted value clears 1: the paper test of an entry stake.
 - **The dashboard** leads with "EV" and shows "Model EV" beside it, on legs, entries, stories
   and the slip; a leg wears the "+EV" mark of §5.1 and the board's picks show their play's
   record (§5.2). The slip rail prices a slip on the fitted chances, stakes it by Kelly on that

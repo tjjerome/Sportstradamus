@@ -281,7 +281,7 @@ inference-path compatibility checklist in
   (WNBA/MLB), landed before NFL Week 1 (Sept 2026).
 - **Entry:** stage 4 merged to `devel`.
 - **Scope:** observation only; brief + ledger updates.
-- **Acceptance:** `sportstradamus bet pickem --platform sleeper --bankroll <N>`
+- **Acceptance:** `sportstradamus bet pickem --platform sleeper`
   writes Sleeper entries (`data/recommendations/<date>_sleeper.yaml`) on live
   slates (owner, 2026-10-16). The pick'em snapshot it first named was retired
   to `src/deprecated/pickem_snapshot.py` in `1bafd0a5` (2026-10-11).
