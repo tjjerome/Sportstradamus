@@ -116,7 +116,7 @@ def simulate_strategy(
     if df.empty:
         return pd.DataFrame()
 
-    rank_col = RANKING_MAP.get(ranking, "Kelly")
+    rank_col = RANKING_MAP[ranking]
 
     eligible = df.loc[
         (df[prob_col] >= min_model_p)

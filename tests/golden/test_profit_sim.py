@@ -138,6 +138,24 @@ def test_empty_input_returns_empty():
     assert result.empty
 
 
+def test_unknown_ranking_label_raises():
+    # "EV" was a ranking label once. Ranking by Kelly in its place would hand back a
+    # curve for a strategy nobody asked for.
+    with pytest.raises(KeyError, match="EV"):
+        simulate_strategy(
+            _make_offers(n_days=2),
+            prob_col="Win Prob",
+            ranking="EV",
+            min_model_p=0.5,
+            min_books_p=0.0,
+            max_bets_day=5,
+            sizing_pct=1.0,
+            use_kelly=False,
+            initial_bankroll=1000.0,
+            n_mc=1,
+        )
+
+
 def test_threshold_filter_yields_empty_when_unmet():
     df = _make_offers(n_days=2)
     # min_model_p = 0.99 → no row qualifies
