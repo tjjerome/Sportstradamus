@@ -185,31 +185,6 @@ def score_slip(
     )
 
 
-def ev_lift(
-    focus: Mapping,
-    candidate: Mapping,
-    ctxs: Mapping[str, GameCtx],
-    mods: Mapping[str, PairValues],
-    *,
-    platform: str,
-    bankroll: float = 0.0,
-    shrinkage: float = 1.0,
-) -> float:
-    """EV of {focus + candidate} minus focus alone (spec §4.1 Correlated tab).
-
-    Both scored through the same copula path as the slip rail; ~milliseconds
-    per candidate, so the Details tab computes live (no precompute). A candidate
-    the platform refuses beside the focus prices at $0, so it lifts nothing.
-    """
-    pair = score_slip(
-        [focus, candidate], ctxs, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
-    )
-    solo = score_slip(
-        [focus], ctxs, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
-    )
-    return pair.model_ev - solo.model_ev
-
-
 def banned_partners(
     legs: Sequence[Mapping], mods: Mapping[str, PairValues], *, platform: str
 ) -> dict[str, str]:

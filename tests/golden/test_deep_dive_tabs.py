@@ -1,31 +1,35 @@
 """Pure helpers behind the deep-dive tab bodies (``deep_dive_tabs``): the sidecar JSON
 decode, the derived P(over), the comps-tab diverging heatmap buckets, the Other-stats
-percentile gauge geometry, the Correlated tab's positive-EV-lift survivor filter, and
-the ``Corr Same``/``Corr Opp`` → ``find_offer_idx`` platform-pinned lookup.
+percentile gauge geometry, the Correlated tab's ranking of partners by their pair's
+fitted EV, and the ``Corr Same``/``Corr Opp`` → ``find_offer_idx`` platform-pinned lookup.
 
 The render paths (``render_*_tab`` and their private ``_render_*`` helpers) call ``st.*``
-directly and are Streamlit-runtime — verified manually, per the dashboard-wide precedent.
+directly and are Streamlit-runtime — verified manually, per the dashboard-wide precedent —
+except the Correlated tab's, which an AppTest renders to pin how a pair's EV prints.
 These pin the unit logic those renders depend on.
 """
 
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
 import pytest
+from streamlit.testing.v1 import AppTest
 
 from sportstradamus.dashboard.components.deep_dive_tabs import (
+    _CORR_PARTNERS_SHOWN,
     _comps_table_html,
     _decode,
     _gauge_svg,
     _heat_css,
-    _lift_survivors,
     _p_over,
+    _ranked_partners,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
-from sportstradamus.dashboard.slip_engine import modifier_map
+from sportstradamus.dashboard.slip_engine import SlipScore, modifier_map, score_slip
 from sportstradamus.helpers import stat_map
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
 from sportstradamus.leg_schema import build_leg, leg_label
@@ -125,8 +129,8 @@ def test_gauge_svg_fill_is_sequential_not_gold():
 
 def _corr_fixture() -> tuple[pd.DataFrame, dict, dict]:
     """A focus offer (idx 10) + two candidates (11, 12) on a non-0-based index, plus the
-    per-game contexts carrying their positive rho — the shape ``_lift_survivors`` resolves
-    against."""
+    per-game contexts carrying their positive rho — the shape ``_ranked_partners``
+    resolves against. The fit and the claim rank the two pairs in opposite orders."""
     filtered = pd.DataFrame(
         {
             "Player": ["A. Wilson", "J. Young", "A. Boston"],
@@ -140,6 +144,7 @@ def _corr_fixture() -> tuple[pd.DataFrame, dict, dict]:
             "Date": ["2026-07-05", "2026-07-05", "2026-07-05"],
             "Platform": ["Underdog", "Underdog", "Underdog"],
             "Win Prob": [0.61, 0.58, 0.55],
+            "Fit Prob": [0.5, 0.4, 0.46],
             "Boost": [1.0, 1.0, 1.0],
             "Push Prob": [0.0, 0.0, 0.0],
             "Kelly": [0.02, 0.03, 0.01],
@@ -161,40 +166,133 @@ def _corr_fixture() -> tuple[pd.DataFrame, dict, dict]:
 _NO_MODS: dict = {}
 
 
-def test_lift_survivors_resolves_idx_and_returns_multiplier():
+def _item(player: str, market: str, line: float) -> dict:
+    return {"player": player, "market": market, "bet": "Over", "line": line, "mult": 1.1}
+
+
+_YOUNG, _BOSTON = _item("J. Young", "3PM", 2.5), _item("A. Boston", "PTS", 18.5)
+
+
+def _players(ranked: list[tuple[dict, int, SlipScore]]) -> list[str]:
+    return [item["player"] for item, _idx, _pair in ranked]
+
+
+def test_ranked_partners_list_every_priced_pair_best_ev_first():
+    """Both pairs price under 1 and still show, by the fitted EV: the claim would put
+    J. Young first."""
     filtered, focus_leg, ctxs = _corr_fixture()
-    items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    survivors = _lift_survivors(items, filtered, focus_leg, ctxs, _NO_MODS, "Underdog")
-    assert len(survivors) == 1
-    item, idx, lift = survivors[0]
-    assert item["player"] == "J. Young"
-    assert idx == 11  # resolved against the non-0-based grid index
-    # ev_lift returns a raw EV multiplier (near/above 1.0), not a zero-centered delta —
-    # the display is `lift - 1.0`.
-    assert lift > 1.0
+    ranked = _ranked_partners([_YOUNG, _BOSTON], filtered, focus_leg, ctxs, _NO_MODS, "Underdog")
+
+    assert [(item["player"], idx) for item, idx, _pair in ranked] == [
+        ("A. Boston", 12),
+        ("J. Young", 11),
+    ]
+    pairs = [
+        score_slip(
+            [focus_leg, build_leg(filtered.loc[idx])],
+            ctxs,
+            _NO_MODS,
+            platform="Underdog",
+            bankroll=Decimal("0"),
+        )
+        for idx in (12, 11)
+    ]
+    assert [pair.ev for *_, pair in ranked] == pytest.approx([pair.ev for pair in pairs])
+    assert [pair.model_ev for *_, pair in ranked] == pytest.approx(
+        [pair.model_ev for pair in pairs]
+    )
+    assert all(pair.ev < 1 for pair in pairs)
+    assert pairs[1].model_ev > pairs[0].model_ev
 
 
-def test_lift_survivors_drops_missing_and_nonpositive():
+def test_ranked_partners_leave_out_the_missing_the_refused_and_the_unpriced():
     filtered, focus_leg, ctxs = _corr_fixture()
-    # A partner not in the current grid (idx None) has no computable lift — dropped.
-    missing = [{"player": "Nobody", "market": "AST", "bet": "Over", "line": 5.5, "mult": 1.2}]
-    assert _lift_survivors(missing, filtered, focus_leg, ctxs, _NO_MODS, "Underdog") == []
+    # A partner not in the current grid (idx None) has nothing to price.
+    missing = _item("Nobody", "AST", 5.5)
+    assert _ranked_partners([missing], filtered, focus_leg, ctxs, _NO_MODS, "Underdog") == []
 
-    # A low-probability pair prices below the solo baseline (lift <= 1.0) — dropped, so
-    # the "positive-lift rows only" filter isn't silently defeated.
-    cold = filtered.assign(**{"Win Prob": [0.25, 0.25, 0.25], "Kelly": [-0.5, -0.5, -0.5]})
-    cold_focus = build_leg(cold.loc[10])
-    items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    assert _lift_survivors(items, cold, cold_focus, ctxs, _NO_MODS, "Underdog") == []
-
-    # The survivor of the test above, once Underdog refuses it beside the focus: $0 — dropped.
     refused = modifier_map(
         pd.DataFrame(
             [["Underdog", "WNBA", "LVA/IND", "A. Wilson|PTS|Over", "J. Young|3PM|Over", 0.0]],
             columns=PAIR_MODIFIER_COLS,
         )
     )
-    assert _lift_survivors(items, filtered, focus_leg, ctxs, refused, "Underdog") == []
+    assert _players(
+        _ranked_partners([_YOUNG, _BOSTON], filtered, focus_leg, ctxs, refused, "Underdog")
+    ) == ["A. Boston"]
+
+    unpriced = filtered.assign(**{"Fit Prob": [0.5, None, 0.46]})
+    assert _players(
+        _ranked_partners([_YOUNG, _BOSTON], unpriced, focus_leg, ctxs, _NO_MODS, "Underdog")
+    ) == ["A. Boston"]
+
+
+def test_ranked_partners_show_only_the_best_few():
+    """Without a rho on record every pair is independent, so the best pairs are the
+    partners with the highest fitted chance."""
+    filtered, focus_leg, ctxs = _corr_fixture()
+    n = _CORR_PARTNERS_SHOWN + 2
+    board = pd.DataFrame(
+        [{**filtered.loc[11], "Player": f"P{i}", "Fit Prob": 0.3 + 0.01 * i} for i in range(n)],
+        index=range(20, 20 + n),
+    )
+    items = [_item(f"P{i}", "3PM", 2.5) for i in range(n)]
+    ranked = _ranked_partners(items, board, focus_leg, ctxs, _NO_MODS, "Underdog")
+    assert _players(ranked) == [f"P{i}" for i in reversed(range(2, n))]
+
+
+def _corr_tab(row, filtered):  # an AppTest script body: it runs without this module's imports
+    from sportstradamus.dashboard.components.deep_dive_tabs import render_corr_tab
+
+    render_corr_tab(row, filtered)
+
+
+def _render_corr_tab(monkeypatch, filtered: pd.DataFrame, ctxs: dict) -> AppTest:
+    """The Correlated tab for offer 10, J. Young its same-team partner, A. Boston its opponent."""
+    tabs = "sportstradamus.dashboard.components.deep_dive_tabs"
+    monkeypatch.setattr(f"{tabs}.load_game_ctxs", lambda: ctxs)
+    monkeypatch.setattr(f"{tabs}.load_pair_modifiers", lambda: _NO_MODS)
+    row = pd.Series(
+        {**filtered.loc[10], "Opponent": "IND", "Corr Same": [_YOUNG], "Corr Opp": [_BOSTON]},
+        name=10,
+    )
+    at = AppTest.from_function(_corr_tab, args=(row, filtered), default_timeout=15)
+    at.run()
+    assert not at.exception
+    return at
+
+
+def test_corr_tab_prints_each_pairs_ev_over_its_model_ev(monkeypatch):
+    filtered, focus_leg, ctxs = _corr_fixture()
+    at = _render_corr_tab(monkeypatch, filtered, ctxs)
+
+    lines = []
+    for idx in (11, 12):
+        pair = score_slip(
+            [focus_leg, build_leg(filtered.loc[idx])],
+            ctxs,
+            _NO_MODS,
+            platform="Underdog",
+            bankroll=Decimal("0"),
+        )
+        lines.append(f"**EV {pair.ev:.2f}**  \n:gray[Model EV {pair.model_ev:.2f}]")
+    shown = [m.value for m in at.markdown]
+    assert shown == [
+        "**Same team — LVA**",
+        f"**{leg_label(_YOUNG)}**",
+        lines[0],
+        "**Opponent — IND**",
+        f"**{leg_label(_BOSTON)}**",
+        lines[1],
+    ]
+
+
+def test_corr_tab_of_an_offer_the_fit_did_not_price_lists_no_pair(monkeypatch):
+    filtered, _focus_leg, ctxs = _corr_fixture()
+    unpriced = filtered.assign(**{"Fit Prob": [None, 0.4, 0.46]})
+    at = _render_corr_tab(monkeypatch, unpriced, ctxs)
+    assert not at.markdown
+    assert [c.value for c in at.caption] == ["No correlated pair with this offer has an EV."]
 
 
 def _extract_corr_items(raw):

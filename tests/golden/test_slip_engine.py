@@ -9,8 +9,8 @@ asserted only at two legs, where ``multivariate_normal.cdf`` is the closed-form
 bivariate normal (≥3 legs is randomized QMC, ~1e-4 jitter, so those assertions stay
 structural).
 
-``ev_lift`` and ``astrolabe_payload`` are thin reads on top of the same
-``score_slip`` path (spec §4.1, §4.4c); ``banned_partners`` reads the same
+``astrolabe_payload`` is a thin read on top of the same ``score_slip`` path
+(spec §4.4c); ``banned_partners`` reads the same
 pair-modifier slice for the star map; ``payout_check`` is the "pays at least" rule the
 rail and the story preloader print. All pinned below.
 """
@@ -27,7 +27,6 @@ from sportstradamus.dashboard.slip_engine import (
     _block_diagonal_sig,
     astrolabe_payload,
     banned_partners,
-    ev_lift,
     modifier_map,
     payout_check,
     play_type_for,
@@ -407,66 +406,6 @@ def test_mods_off_the_slips_game_or_platform_are_ignored():
     assert score.pair_mods == ()
     assert score.payout == clean.payout
     assert score.ev == pytest.approx(clean.ev, rel=1e-9)
-
-
-def test_ev_lift_matches_hand_built_pair_minus_solo():
-    """The reuse pin: ``ev_lift`` equals a hand-built pair/solo ``score_slip`` diff."""
-    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
-    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
-    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-
-    lift = ev_lift(focus, candidate, corr, _mods([]), platform="Underdog", bankroll=0.0)
-
-    pair = score_slip(
-        [focus, candidate], corr, _mods([]), platform="Underdog", bankroll=Decimal("0")
-    )
-    solo = score_slip([focus], corr, _mods([]), platform="Underdog", bankroll=Decimal("0"))
-    assert lift == pytest.approx(pair.model_ev - solo.model_ev, rel=1e-9)
-    # score_slip's single-leg early return hardcodes model_ev=0.0 (it's a parlay
-    # scorer), so the solo term is always zero and the lift equals the pair EV.
-    assert solo.model_ev == 0.0
-    assert lift == pytest.approx(pair.model_ev, rel=1e-9)
-
-
-def test_ev_lift_positive_rho_exceeds_zero_rho():
-    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
-    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
-
-    positive_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    zero_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
-
-    lift_positive = ev_lift(
-        focus, candidate, positive_rho, _mods([]), platform="Underdog", bankroll=0.0
-    )
-    lift_zero = ev_lift(focus, candidate, zero_rho, _mods([]), platform="Underdog", bankroll=0.0)
-
-    assert lift_positive > lift_zero
-    # Zero-rho collapses to the independent-joint case: same lift as an empty
-    # corr slice and as a cross-game candidate (both default to rho=0).
-    lift_empty_corr = ev_lift(
-        focus, candidate, _corr([]), _mods([]), platform="Underdog", bankroll=0.0
-    )
-    assert lift_zero == pytest.approx(lift_empty_corr, rel=1e-9)
-
-
-def test_ev_lift_prices_the_pair_modifier():
-    """A refused candidate lifts nothing, so it drops off the Correlated tab; a repriced
-    one lifts by its repriced pair EV."""
-    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
-    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
-    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    refused = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
-    repriced = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.85)])
-
-    clean_lift = ev_lift(focus, candidate, corr, _mods([]), platform="Underdog")
-    repriced_lift = ev_lift(focus, candidate, corr, repriced, platform="Underdog")
-    pair = score_slip(
-        [focus, candidate], corr, repriced, platform="Underdog", bankroll=Decimal("0")
-    )
-
-    assert ev_lift(focus, candidate, corr, refused, platform="Underdog") == 0.0
-    assert repriced_lift < clean_lift
-    assert repriced_lift == pytest.approx(pair.model_ev, rel=1e-9)
 
 
 def test_banned_partners_marks_a_satellites_partner_in_its_own_game():

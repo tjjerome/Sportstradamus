@@ -4,15 +4,17 @@ dialog (the Movement tab is ``deep_dive_movement``).
 ``deep_dive.show_detail`` builds the header/case/context strip and the ``st.tabs``
 shell, then calls the five public renderers here. Split out of ``deep_dive.py`` so the
 orchestration and the tab content live in one purpose each; the private helpers
-(``_decode``, ``_heat_css``, ``_gauge_svg``, ``_lift_survivors``, ``_render_stat_row``,
+(``_decode``, ``_heat_css``, ``_gauge_svg``, ``_ranked_partners``, ``_render_stat_row``,
 ``_render_corr_cards``, ``_select_history_df``, ``_p_over``) are used only within this
 file. The Comps / Other-stats tabs read the ``current_offer_details`` sidecar
-prerendered at ``prophecize`` time; the Correlated tab prices each candidate live via
-the copula scorer (``slip_engine.ev_lift``).
+prerendered at ``prophecize`` time; the Correlated tab prices each partner beside the
+offer live through the slip rail's copula scorer (``slip_engine.score_slip``) and lists
+the best pairs by their fitted EV.
 """
 
 import html
 import json
+from decimal import Decimal
 
 import pandas as pd
 import streamlit as st
@@ -34,7 +36,7 @@ from sportstradamus.dashboard.data import (
     load_stat_tooltips,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
-from sportstradamus.dashboard.slip_engine import ev_lift
+from sportstradamus.dashboard.slip_engine import SlipScore, score_slip
 from sportstradamus.dashboard.theme import DIVERGING_COLORS, GRAY, SEQUENTIAL_COLORS
 from sportstradamus.helpers.distributions import resolve_std
 from sportstradamus.leg_schema import build_leg, leg_label
@@ -67,6 +69,10 @@ _GAUGE_FILL = SEQUENTIAL_COLORS[3]
 _GAUGE_TRACK = "#2A2E37"
 _GAUGE_TRACK_Y = 2.0
 _GAUGE_TRACK_H = 26.0
+
+# Partners listed per side in the Correlated tab: under the fitted EV most pairs price
+# below 1, so the tab ranks instead of filtering, and the best few fit the dialog unscrolled.
+_CORR_PARTNERS_SHOWN = 5
 
 
 def _p_over(row: pd.Series) -> float | None:
@@ -214,53 +220,60 @@ def render_other_stats_tab(detail: pd.Series | None, row: pd.Series) -> None:
     st.caption("Gauge: percentile among same-position slate players, low → high.")
 
 
-def _lift_survivors(
+def _ranked_partners(
     items: list[dict],
     filtered: pd.DataFrame,
     focus_leg: dict,
     ctxs: dict,
     mods: dict,
     platform: str | None,
-) -> list[tuple[dict, int, float]]:
-    """``(item, offer_idx, lift)`` for each partner with positive EV lift.
+) -> list[tuple[dict, int, SlipScore]]:
+    """``(item, offer_idx, pair score)`` for the best partners, highest pair EV first.
 
     Resolves each partner back to its offer row (``find_offer_idx`` pinned to the
-    displayed offer's book), builds a canonical candidate leg, and prices the pair
-    against the focus alone. A partner that isn't in the current grid (``idx is None``,
-    e.g. a Board selection narrower than the offer pool) has no computable lift and is
-    dropped, as is any candidate whose lift isn't positive (``ev_lift`` returns a raw EV
-    multiplier, so "positive lift" is ``> 1.0`` — the ``_edge_badge`` convention). A
-    partner the book refuses beside the focus prices at $0, so it drops the same way.
+    displayed offer's book), builds a canonical candidate leg, and prices the two-leg pair
+    the way the slip rail would. A partner that isn't in the current grid (``idx is None``,
+    e.g. a Board selection narrower than the offer pool), one the platform refuses beside
+    the focus, and one the fit did not price have no pair EV, so they stay out. At most
+    ``_CORR_PARTNERS_SHOWN`` come back.
     """
-    survivors = []
+    ranked = []
     for item in items:
         idx = find_offer_idx(item, filtered, platform=platform)
         if idx is None:
             continue
-        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), ctxs, mods, platform=platform or "")
-        if lift > 1.0:
-            survivors.append((item, idx, lift))
-    return survivors
+        pair = score_slip(
+            [focus_leg, build_leg(filtered.loc[idx])],
+            ctxs,
+            mods,
+            platform=platform or "",
+            bankroll=Decimal("0"),
+        )
+        if not pair.banned and pair.ev is not None:
+            ranked.append((item, idx, pair))
+    ranked.sort(key=lambda entry: entry[2].ev, reverse=True)
+    return ranked[:_CORR_PARTNERS_SHOWN]
 
 
 def _render_corr_cards(
-    survivors: list[tuple[dict, int, float]],
+    ranked: list[tuple[dict, int, SlipScore]],
     group_label: str,
     filtered: pd.DataFrame,
     tab_key_prefix: str,
 ) -> None:
-    """Render one correlated-partner group. ``survivors`` are the positive-lift partners
-    ``_lift_survivors`` already resolved to their offer rows, so the row's Boost/View
+    """Render one correlated-partner group. ``ranked`` are the partners
+    ``_ranked_partners`` already resolved to their offer rows, so the row's Boost/View
     lookup is fixed to the displayed offer's own book (``find_correlation`` runs once per
     platform; ``filtered`` can hold both books for a game, so the resolution is pinned).
+    Each pair prints its EV over its Model EV, the way the dialog's header prints a leg's.
     """
-    if not survivors:
+    if not ranked:
         return
     st.markdown(f"**{group_label}**")
-    for i, (item, idx, lift) in enumerate(survivors):
+    for i, (item, idx, pair) in enumerate(ranked):
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         col1.markdown(f"**{leg_label(item)}**")
-        col2.markdown(f":green[**{lift - 1.0:+.1%} EV**]")
+        col2.markdown(f"**EV {pair.ev:.2f}**  \n:gray[Model EV {pair.model_ev:.2f}]")
         if col3.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_view_{i}"):
             st.session_state.detail_stack.append(idx)
             st.session_state.corr_nav = True
@@ -346,7 +359,7 @@ def render_model_tab(row: pd.Series) -> None:
 
 
 def render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
-    """Same-team and opponent partners that clear the positive-EV-lift threshold."""
+    """Same-team and opponent partners, each side's best pairs by fitted EV first."""
     # A parquet round-trip decodes a list<struct> cell to a numpy ndarray, not a
     # list — `x or []` on a >1-element ndarray raises (ambiguous truth value), so
     # branch on identity and convert explicitly instead of relying on truthiness.
@@ -358,9 +371,9 @@ def render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
     focus_leg = build_leg(row)
     ctxs = load_game_ctxs()
     mods = load_pair_modifiers()
-    same = _lift_survivors(same_items, filtered, focus_leg, ctxs, mods, platform)
-    opp = _lift_survivors(opp_items, filtered, focus_leg, ctxs, mods, platform)
+    same = _ranked_partners(same_items, filtered, focus_leg, ctxs, mods, platform)
+    opp = _ranked_partners(opp_items, filtered, focus_leg, ctxs, mods, platform)
     _render_corr_cards(same, f"Same team — {row['Team']}", filtered, "corr_same")
     _render_corr_cards(opp, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
     if not same and not opp:
-        st.caption("No correlated legs cleared the positive-EV-lift threshold for this offer.")
+        st.caption("No correlated pair with this offer has an EV.")
