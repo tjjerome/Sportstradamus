@@ -79,10 +79,10 @@ def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> di
 
     The static node set — it depends on the game's offers, not on which legs are in
     the slip (the slip only decides which stars light up) — so the map never
-    reshuffles on a pick. An active leg that is not, or is no longer, a pick is kept
-    so a slip never loses one of its own stars. Returns the defining row rather than
-    anything derived from it because the two callers want different things out of it:
-    the figure reads a star's whole hover card, the classifier only its team.
+    reshuffles when a leg is added. An active leg that is not, or is no longer, a
+    pick is kept so a slip never loses one of its own stars. Returns the defining row
+    rather than anything derived from it because the two callers want different things
+    out of it: the figure reads a star's whole hover card, the classifier only its team.
     """
     universe: dict[str, Mapping] = {}
     if pool is not None and not pool.empty:
