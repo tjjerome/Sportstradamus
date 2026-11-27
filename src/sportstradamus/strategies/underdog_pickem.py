@@ -98,6 +98,9 @@ def construct_entries(
     """
     config = config or PickemConfig()
     if parlay_dfs is None:
+        # Function-local, as are ``_parlays_per_variant``'s and ``live_load``'s imports: the
+        # dashboard imports ``strategies.kelly`` and the package loads this module with it, so
+        # the league loaders, scrapers and scoring stack stay off the dashboard's import path.
         from sportstradamus.stats import load_live_leagues
 
         # A league whose gamelog update failed is logged by the loader and sits this build
@@ -131,6 +134,8 @@ def _parlays_per_variant(
     and the rank chooses among the entries. An empty board gets an empty parlay
     frame back from ``find_correlation``.
     """
+    # Function-local, see ``construct_entries``; also so a patch of
+    # ``prediction.correlation.find_correlation`` takes effect.
     from sportstradamus.prediction.correlation import find_correlation
 
     scored = scored_offers_df.to_dict("records")
@@ -154,6 +159,8 @@ def live_load(
         platform's raw pick multiplier, the value the parlay rows' ``legs``
         carry.
     """
+    # Function-local, see ``construct_entries``; also so a patch of ``books.get_ud``,
+    # ``books.get_sleeper`` or ``prediction.scoring.process_offers`` takes effect.
     from sportstradamus.books import get_sleeper, get_ud
     from sportstradamus.prediction.scoring import process_offers
 
