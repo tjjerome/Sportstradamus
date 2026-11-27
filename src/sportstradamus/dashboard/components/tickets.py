@@ -125,8 +125,8 @@ def render_tickets(tickets: list[dict]) -> None:
     """Render the ticket grid: 2 cards per row, status-colored rail + stamp badge."""
     for i in range(0, len(tickets), _TICKETS_PER_ROW):
         cols = st.columns(_TICKETS_PER_ROW)
-        for col, ticket in zip(cols, tickets[i : i + _TICKETS_PER_ROW], strict=False):
-            with col, st.container(border=True):
+        for card_col, ticket in zip(cols, tickets[i : i + _TICKETS_PER_ROW], strict=False):
+            with card_col, st.container(border=True):
                 st.markdown(
                     f'<div style="height:{_RAIL_HEIGHT_PX}px;margin:-1px -1px 10px -1px;'
                     f"border-radius:3px 3px 0 0;"
