@@ -30,7 +30,8 @@ replacement: `profit_sim.py` is load-bearing for the S3 supersede gate
 1. [`strategies/underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py)
    — `construct_entries` + the recommendations YAML this policy consumes.
 2. [`strategies/kelly.py`](../../src/sportstradamus/strategies/kelly.py) —
-   sizing the policy reuses (`fractional_kelly_stake`, shrinkage blend).
+   `joint_kelly_portfolio`, which sizes Kelly-growth, and the bankroll cap
+   every other persona's flat stake is set from (§10 Policy v5).
 3. [`clv.py`](../../src/sportstradamus/clv.py) +
    [`nightly.py`](../../src/sportstradamus/nightly.py) `run` (the `reflect`
    command) — the settlement + CLV machinery stage 2 extended
@@ -628,8 +629,74 @@ lookup now uses the league's own market key (honest-receipts decision
 23), so their pool gains NBA Underdog fantasy-points legs when the NBA
 opens.
 
+### Policy v5
+
+Policy v4 with every pool read off the fitted number; whatever v1 to v4
+state and this section does not replace still holds. The commit path stamps
+every new record `policy_v5`, and a v5 copy starts its own trajectory from
+the $5,000 seed (Policy v2, Versions stay apart). What changed from v4, and
+why: the fitted number replaces the served read, as the owner decided
+([`profit-engine.md`](profit-engine.md) §4, decision 3), and on it no leg of
+the live board is worth its stake (fitted EV 0.76 to 0.97), so v4's 5 %
+floor and Kelly stakes would record nothing; v5 ranks instead and stakes
+flat.
+
+**Legs.** Every pool prices a leg at its fitted chance, `Fit Prob`: the
+chance its side wins, fitted on settled posted picks
+([`profit-engine.md`](profit-engine.md) §5.1). The served read and the
+trust figure price nothing. A side posted alone has no fitted chance and is
+never a leg. A cross-game record's `model_probs` keeps its name, since
+records are append-only, and holds the fitted chances its legs were priced
+at; a same-game record leaves it empty, as before, and each of its
+`canonical_legs` carries the leg's `fit_prob`.
+
+**Pools.** No pool drops an entry for its value: the personas' ranks choose
+among what it holds, and its size is bounded by the search's 100 entries a
+platform and the beam's or the deal's 200 a size.
+
+- *Shared universe* (Safe, High-EV, Kelly-growth), per platform: the
+  same-game search's entries over every scored offer, each valued at its
+  fitted `EV` (`construct_entries`, as `bet pickem` builds its own), plus
+  the beam's cross-game combinations of that platform's picks (`Pick`, the
+  board's picks by fitted EV, [`profit-engine.md`](profit-engine.md) §5.3)
+  for games on the slate date.
+- *Even-picks* keeps the Policy v3 pool, the paper record of the old rule:
+  entries dealt evenly over Underdog's even picks that
+  `realized.recommended` recommends on the slate date.
+- *EV-picks* (`ev_picks`), the paper record of the board's picks inside
+  entries: entries dealt evenly, a game per leg, over each platform's picks
+  for games on the slate date, a platform's picks in entries of their own.
+  It draws last on each replicate's shared stream, so the other four
+  personas draw exactly what they would without it.
+
+**Ranks.** Safe ranks by `joint_prob`, every other persona by `ev`, the
+entry's fitted value less 1, as `bet pickem` ranks its entries. EV per
+dollar staked times `joint_prob`, v1's key, ranks a likely entry below a
+long shot worth less once every entry is worth less than its stake. An
+entry's `joint_prob` is its fitted value over what it pays when every pick
+hits.
+
+**Stakes.** Safe, High-EV, Even-picks and EV-picks stake a flat $25 an
+entry (`_ledger_selection.FLAT_STAKE`: the copy's $5,000 times the 0.5 %
+cap v4's Kelly stakes were clipped at). Kelly-growth keeps its joint Kelly
+portfolio, now over the drawn entries' fitted chances: it commits nothing
+until a drawn entry's fitted value clears 1, and that silence is its
+reading. A run in which it commits nothing, or a pool is empty, is no
+error. A same-game entry is staked flat too, though `bet pickem` gives it
+no stake (`recommended_stake` 0: no entry is staked until the entries'
+money record supports one, [`profit-engine.md`](profit-engine.md) §5.3)
+and `construct_entries` takes no bankroll.
+
+**Scar.** The draw weights a pool's lowest-ranked entry at 0, so it never
+draws, and a pool of one entry draws nothing.
+
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-11-26 · policy_v5 · legs at `Fit Prob`, no trust cut · shared
+  cross-game = board's picks · no EV floor, rank decides · flat $25 but
+  kelly_growth · rank by fitted `ev` (safe: `joint_prob`) · + `ev_picks` ·
+  why: live fitted EV < 1, v4 floor + Kelly recorded nothing · detail §10
+  Policy v5 · next: first production run
 - 2026-10-08 · policy_v4 (`0c464fae`) · entry = id + copy, so each of the
   forty copies keeps what it drew · per-replicate retry guard ·
   settlement match by copy from v4, v1 to v3 on id · bankroll chains
