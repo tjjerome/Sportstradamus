@@ -1,10 +1,10 @@
 """The Receipts verdict hero: the model's recommended legs at the platform payout.
 
-The hero is ``realized.cohort_summary`` of the page window's ``Recommended`` legs, the rule
-the story menu and the nightly ledger share; a context row beneath sets every posted side in
-the same window against it, so the tail the model picks reads against the board it picked
-from. ``window_offers`` cuts the page window and ``cohort_figures`` formats one summary, both
-pure; ``render_receipts_hero`` draws the card.
+The hero is ``realized.cohort_summary`` of the page window's ``Recommended`` legs, the 5 %-edge
+rule the board ran before EV led it (the paper play ``model_edge``); a context row beneath sets
+every posted side in the same window against it, so the tail the model picks reads against the
+board it picked from. ``window_offers`` cuts the page window and ``cohort_figures`` formats one
+summary, both pure; ``render_receipts_hero`` draws the card.
 """
 
 from datetime import datetime
@@ -126,8 +126,8 @@ def render_receipts_hero(recommended: dict[str, float], posted: dict[str, float]
         f'<div style="color:{GRAY};font-size:12px;margin-top:12px">'
         f"{_MONO.format(rec['units'])} units across {_MONO.format(rec['n'])} recommended "
         f"legs — model edge ≥ {realized.RECOMMENDED_EDGE_MIN:.0%} at the platform payout, "
-        f"payout ≤ {realized.RECOMMENDED_PAYOUT_MAX:g}x, the rule the story menu and the "
-        "nightly ledger share.</div>"
+        f"payout ≤ {realized.RECOMMENDED_PAYOUT_MAX:g}x: the rule the board ran before EV led it."
+        "</div>"
         f'<div style="color:{GRAY};font-size:12px;margin-top:8px;padding-top:8px;'
         f'border-top:1px solid {BORDER}">All posted sides in the window: '
         f"{_MONO.format(ctx['n'])} legs · hit {_MONO.format(ctx['hit_rate'])} · breakeven "
