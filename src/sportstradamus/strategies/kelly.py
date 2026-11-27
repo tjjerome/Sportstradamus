@@ -1,15 +1,15 @@
-"""Fractional-Kelly stake sizing for Underdog Pick'em recommendations.
+"""Fractional-Kelly stake sizing, for one bet or a portfolio of them.
 
-Phase 3 §3.1. Public API:
+- :func:`fractional_kelly_stake` -- one bet, fractional Kelly with shrinkage. The dashboard's
+  slip engine sizes a slip with it, and ``bet kelly`` re-sizes a ``bet pickem`` recommendations
+  YAML.
+- :func:`joint_kelly_portfolio` -- several bets at once via cvxpy SCS. The ledger's
+  ``kelly_growth`` persona sizes its draw with it.
 
-- :func:`fractional_kelly_stake` — single-bet quarter-Kelly with shrinkage.
-- :func:`joint_kelly_portfolio` — multi-bet portfolio via cvxpy SCS.
-
-``effective_p = p_book + (win_prob - p_book) * shrinkage``, where ``p_book``
-is the book's implied ``1 / payout`` (see :func:`anchored_win_prob`) — shrinkage
-at ``1.0`` is a no-op and ``0.0`` returns the book's own line, which is exactly
-zero edge. Every entrypoint takes the shrinkage, so its caller decides how far
-the model is trusted.
+``effective_p = p_book + (win_prob - p_book) * shrinkage``, where ``p_book`` is the book's
+implied ``1 / payout`` (see :func:`anchored_win_prob`) -- shrinkage at ``1.0`` is a no-op and
+``0.0`` returns the book's own line, which is exactly zero edge. The sizing functions take the
+shrinkage, so the caller decides how far its ``win_prob`` is trusted.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class KellyCandidate:
 def kelly_edge(win_prob: float, payout_multiplier: float, model_shrinkage: float = 1.0) -> float:
     """Shrinkage-adjusted raw Kelly fraction ``f* = (bp - q) / b``.
 
-    ``model_shrinkage`` blends the model's probability toward the book's implied
+    ``model_shrinkage`` blends ``win_prob`` toward the book's implied
     probability ``1 / payout_multiplier`` — i.e. ``p = s * win_prob + (1 - s) * p_book``.
     Anchoring on the book rather than on 0.5 is what makes zero trust mean zero
     edge: a coin-flip anchor scores every payout above 2x as +EV no matter how
@@ -72,7 +72,7 @@ def kelly_edge(win_prob: float, payout_multiplier: float, model_shrinkage: float
 
 
 def anchored_win_prob(win_prob: float, payout_multiplier: float, model_shrinkage: float) -> float:
-    """Model probability blended toward the book's implied line by ``model_shrinkage``.
+    """``win_prob`` blended toward the book's implied line by ``model_shrinkage``.
 
     ``s = 1`` trusts the model outright, ``s = 0`` returns the book's ``1 / payout``.
     Both the scalar edge and the portfolio solver price off this one definition —
@@ -91,14 +91,14 @@ def fractional_kelly_stake(
     model_shrinkage: float = 1.0,
     max_fraction_of_bankroll: float = MAX_FRACTION_OF_BANKROLL,
 ) -> Decimal:
-    """Return the recommended stake for a single bet.
+    """Fractional-Kelly stake for one bet, capped per bet at ``max_fraction_of_bankroll``.
 
     Args:
         bankroll: Total bankroll in dollars.
-        win_prob: Model probability of winning, in ``[0, 1]``.
+        win_prob: Estimated probability of winning, in ``[0, 1]``.
         payout_multiplier: Total payout per dollar staked on a win
-            (e.g. ``Decimal("3")`` for a 3× return — Underdog Power
-            two-leg). Net odds ``b = payout_multiplier - 1``.
+            (e.g. ``Decimal("3")`` for a 3× return). Net odds
+            ``b = payout_multiplier - 1``.
         fraction: Kelly fraction multiplier (default quarter-Kelly).
         model_shrinkage: ``[0, 1]`` weight on the model edge; ``1.0``
             means full trust, ``0.0`` collapses to no-information.
@@ -130,12 +130,10 @@ def joint_kelly_portfolio(
     candidates: list[KellyCandidate],
     fraction: float = DEFAULT_KELLY_FRACTION,
 ) -> dict[str, Decimal]:
-    """Allocate stakes across independent candidates by maximising
-    expected log-bankroll under a Kelly-fraction budget.
+    """Stake independent bets by maximising expected log-bankroll within a Kelly-fraction budget.
 
-    Solves with cvxpy's SCS solver; cvxpy is imported lazily so the core
-    package install does not require it. Bets assumed independent —
-    callers should de-overlap legs before invocation.
+    Solves with cvxpy's SCS solver. The bets are assumed independent, so callers
+    should de-overlap legs before calling.
 
     Args:
         bankroll: Total bankroll in dollars.

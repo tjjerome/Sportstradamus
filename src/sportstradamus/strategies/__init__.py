@@ -1,7 +1,8 @@
-"""Bet-sizing and contest-construction strategies.
+"""Bet sizing, Pick'em entry construction, and the simulated-bettor ledger.
 
-Phase 3 §3.1 introduces fractional-Kelly sizing here; §3.3 adds the
-:mod:`underdog_pickem` orchestrator behind ``bet pickem``.
+``kelly`` sizes stakes, ``underdog_pickem`` builds the entries behind ``bet pickem``, and
+``ledger`` commits the simulated bettors' entries. ``profit_sim`` is the Kelly-sized backtest.
+Underscore-prefixed modules are internal to this package.
 """
 
 from sportstradamus.strategies.kelly import (
