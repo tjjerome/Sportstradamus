@@ -60,8 +60,9 @@ MIN_ROLLING_OBSERVATIONS: int = 3
 MIN_OVERLAP_FOR_FULL_WEIGHT: int = 30
 
 # Pairs with absolute (post-shrinkage) correlation below this magnitude are
-# dropped from the output — keeps the on-disk matrix sparse. The same_player
-# summary instead floors the unshrunk *pooled* value (see _same_player_summary).
+# dropped from the output — keeps the on-disk matrix sparse. The market summary
+# instead floors the unshrunk *pooled* value (see _league_pair_summary and
+# _same_player_summary).
 CORR_MAGNITUDE_FLOOR: float = 0.05
 
 # Fisher-z pooling needs |rho| strictly below 1: tiny-overlap same-slot pairs
