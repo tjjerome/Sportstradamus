@@ -311,8 +311,9 @@ def load_current_game_stories() -> pd.DataFrame:
     )
 
 
+# One cached read for the four parquet files the nightly job (``reflect``) writes.
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_profit_sim_summary_cached(path: Path, mtime: float) -> pd.DataFrame:
+def _load_nightly_cached(path: Path, mtime: float) -> pd.DataFrame:
     return read_parquet_safe(path)
 
 
@@ -323,12 +324,7 @@ def load_profit_sim_summary() -> pd.DataFrame:
     this instead of running the Monte-Carlo backtest at page load; empty when
     ``reflect`` has not written it yet.
     """
-    return _load_profit_sim_summary_cached(PROFIT_SIM_SUMMARY_PATH, _mtime(PROFIT_SIM_SUMMARY_PATH))
-
-
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_calibration_summary_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    return _load_nightly_cached(PROFIT_SIM_SUMMARY_PATH, _mtime(PROFIT_SIM_SUMMARY_PATH))
 
 
 def load_calibration_summary() -> pd.DataFrame:
@@ -339,27 +335,23 @@ def load_calibration_summary() -> pd.DataFrame:
     ``"posted"`` or ``"recommended"``. Receipts reads this instead of re-binning history
     at page load; empty when ``reflect`` has not written it yet.
     """
-    return _load_calibration_summary_cached(
-        CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH)
-    )
-
-
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_nightly_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path)
+    return _load_nightly_cached(CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH))
 
 
 def load_play_record() -> pd.DataFrame:
-    """Each play's record by league and pick kind (``plays.PLAY_RECORD_COLS``) from the
-    nightly job; before its first run, a record with no rows.
+    """Each play's record by league and pick kind, as the nightly job wrote it.
+
+    Columns are ``plays.PLAY_RECORD_COLS``. An empty record (before the job's first run) still
+    carries the key columns ``play``, ``league`` and ``kind`` that ``legs.record_line`` looks up by.
     """
     record = _load_nightly_cached(PLAY_RECORD_PATH, _mtime(PLAY_RECORD_PATH))
     return record if not record.empty else pd.DataFrame(columns=["play", "league", "kind"])
 
 
 def load_live_fit() -> pd.DataFrame:
-    """The EV fit's weights by league, pick kind and book class (``live_fit.FIT_COLS``) from
-    the nightly job; empty before its first run.
+    """The EV fit's weights by league, pick kind and book class, as the nightly job wrote them.
+
+    Columns are ``live_fit.FIT_COLS``; empty before the job's first run.
     """
     return _load_nightly_cached(LIVE_FIT_PATH, _mtime(LIVE_FIT_PATH))
 
