@@ -62,8 +62,8 @@ _POS_MILD, _POS_STRONG = theme.DIVERGING_COLORS[6], theme.DIVERGING_COLORS[7]
 # Absolute |edge − centre| thresholds (in the heatmap column's own units — percentage
 # points for the by-side panel's ROI) that split the buckets: below MILD stays unpainted,
 # MILD..STRONG paints the mild bucket, at/beyond STRONG the saturated one. Absolute, not a
-# fraction of the column max — the old fraction scheme painted the whole first screen the
-# moment the board was edge-sorted (the max set the scale, so everything looked extreme).
+# fraction of the column max — the old fraction scheme painted the whole first screen as soon
+# as the column was sorted high to low (the max set the scale, so everything looked extreme).
 _HEAT_MILD_EDGE = 4.0
 _HEAT_STRONG_EDGE = 10.0
 
