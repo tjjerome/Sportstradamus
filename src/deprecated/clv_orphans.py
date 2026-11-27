@@ -74,3 +74,45 @@ def check_close_sample_freshness(
             int(seg["n"]),
         )
     return grouped
+
+
+# ARCHIVED 2026-11-26 from src/sportstradamus/clv.py
+# Reason: Its one caller, underdog_pickem.resolve_market_shrinkage, was archived when
+#         pick'em and the paper ledger came to read the fitted number (policy_v5), so
+#         nothing reads a segment's live trust. Its four tests were deleted from
+#         tests/golden/test_clv_close_sanity.py (git keeps them).
+# Last live SHA: 41d03f93
+# Original imports (now unresolved here):
+#   import numpy as np
+#   import pandas as pd
+#   from sportstradamus.clv import CLV_SEGMENT_MIN_N, _segments_parquet_path
+
+# From src/sportstradamus/clv.py.
+def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
+    """Return ``(shrinkage, n)`` for one ``(league, market)`` segment.
+
+    Reads ``data/runtime/clv_segments.parquet`` (written by :func:`persist_segments`).
+    The shrinkage weight is ``frac_beat_close`` linearly remapped from
+    ``[0.5, 1.0]`` onto ``[0.0, 1.0]`` and clamped — a segment that beats
+    the close 50% of the time gets no credit; one that beats it every
+    time gets full credit. ``n`` is the number of resolved legs in the
+    segment, surfaced for the Kelly blending ramp.
+
+    The shrinkage is NaN — what ``kelly.resolve_shrinkage`` reads as "no live
+    evidence" — when no parquet exists, the segment is absent (``n`` is 0) or it
+    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). Never
+    ``1.0`` there: that reads as full trust in exactly the cells nothing has measured.
+    """
+    try:
+        seg_df = pd.read_parquet(_segments_parquet_path())
+    except (OSError, ValueError):
+        return np.nan, 0
+    rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
+    if rows.empty:
+        return np.nan, 0
+    n = int(rows["n"].sum())
+    if n < CLV_SEGMENT_MIN_N:
+        return np.nan, n
+    weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
+    shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
+    return shrinkage, n

@@ -1,8 +1,8 @@
 """Training report generation: reads saved model pickles and writes model_stats.{parquet,csv}.
 
 One row per ``(league, market)`` cell. The parquet is the authoritative
-artifact (read by the page-7 dashboard, the kelly calibration getter, the
-graduation gate, and the ship-config promoter); the CSV mirror at
+artifact (read by the dashboard, the graduation gate, and the ship-config
+promoter); the CSV mirror at
 :data:`MODEL_STATS_CSV_PATH` is rewritten alongside the parquet on every
 run so the same numbers are browseable from VSCode without a parquet
 viewer extension.
@@ -496,31 +496,3 @@ def write_model_stats(
         )
     _atomic_write_parquet(df, MODEL_STATS_PATH)
     _atomic_write_csv(df, MODEL_STATS_CSV_PATH)
-
-
-def get_market_calibration(league: str, market: str) -> dict[str, float]:
-    """Return ``{kelly_shrinkage, brier_skill_score, model_weight}`` for one market.
-
-    Reads ``model_stats.parquet``. Returns NaNs when the row is missing so the
-    Kelly resolution chain can fall through to its next source. Kelly imports
-    this getter — never reaches into the parquet directly.
-    """
-    nan_result = {
-        "kelly_shrinkage": float("nan"),
-        "brier_skill_score": float("nan"),
-        "model_weight": float("nan"),
-    }
-    if not MODEL_STATS_PATH.is_file():
-        return nan_result
-    df = pd.read_parquet(MODEL_STATS_PATH)
-    if df.empty:
-        return nan_result
-    sub = df[(df["league"] == league) & (df["market"] == market)]
-    if sub.empty:
-        return nan_result
-    row = sub.iloc[0]
-    return {
-        "kelly_shrinkage": float(row.get("kelly_shrinkage", float("nan"))),
-        "brier_skill_score": float(row.get("brier_skill_score", float("nan"))),
-        "model_weight": float(row.get("model_weight", float("nan"))),
-    }

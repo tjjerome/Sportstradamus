@@ -407,45 +407,15 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
 def persist_segments(grouped: pd.DataFrame) -> None:
     """Write the full per-segment frame to ``data/runtime/clv_segments.parquet``.
 
-    All segments are persisted (not just the reportable ones) so the Kelly
-    shrinkage getter can reason about sample size for low-n segments too.
-    Called explicitly from ``reflect`` after :func:`summarize`.
+    All segments are persisted, not just the reportable ones. Called explicitly from
+    ``reflect`` after :func:`summarize`. Nothing reads the file since the per-segment
+    trust getter was archived (``src/deprecated/clv_orphans.py``).
     """
     if grouped is None or grouped.empty:
         return
     path = _segments_parquet_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     grouped.to_parquet(path, index=False)
-
-
-def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
-    """Return ``(shrinkage, n)`` for one ``(league, market)`` segment.
-
-    Reads ``data/runtime/clv_segments.parquet`` (written by :func:`persist_segments`).
-    The shrinkage weight is ``frac_beat_close`` linearly remapped from
-    ``[0.5, 1.0]`` onto ``[0.0, 1.0]`` and clamped — a segment that beats
-    the close 50% of the time gets no credit; one that beats it every
-    time gets full credit. ``n`` is the number of resolved legs in the
-    segment, surfaced for the Kelly blending ramp.
-
-    The shrinkage is NaN — what ``kelly.resolve_shrinkage`` reads as "no live
-    evidence" — when no parquet exists, the segment is absent (``n`` is 0) or it
-    holds fewer than :data:`CLV_SEGMENT_MIN_N` legs (``n`` is that count). Never
-    ``1.0`` there: that reads as full trust in exactly the cells nothing has measured.
-    """
-    try:
-        seg_df = pd.read_parquet(_segments_parquet_path())
-    except (OSError, ValueError):
-        return np.nan, 0
-    rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
-    if rows.empty:
-        return np.nan, 0
-    n = int(rows["n"].sum())
-    if n < CLV_SEGMENT_MIN_N:
-        return np.nan, n
-    weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
-    shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
-    return shrinkage, n
 
 
 def _normalize_date(date) -> str:

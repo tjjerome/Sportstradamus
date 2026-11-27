@@ -1,4 +1,4 @@
-"""Golden tests for training/report.py write_model_stats + get_market_calibration.
+"""Golden tests for training/report.py write_model_stats.
 
 The parquet is the wide one-row-per-cell schema: each ``(league, market)`` pair
 emits a single row carrying the model's validation-set metrics, the book
@@ -16,10 +16,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from sportstradamus.training.report import (
-    get_market_calibration,
-    write_model_stats,
-)
+from sportstradamus.training.report import write_model_stats
 
 report_module = sys.modules["sportstradamus.training.report"]
 
@@ -218,30 +215,3 @@ def test_default_shipped_is_withheld(patched_paths):
     write_model_stats(league_models, {}, {})  # no stat_shipped argument
     df = pd.read_parquet(patched_paths[0])
     assert df.iloc[0]["shipped"] == "withheld"
-
-
-def test_get_market_calibration_returns_cell_row(patched_paths):
-    league_models = {"NFL": {"player_pass_yds": _make_model()}}
-    write_model_stats(league_models, {}, {})
-    out = get_market_calibration("NFL", "player_pass_yds")
-    assert out["kelly_shrinkage"] == pytest.approx(1 - 0.197 / 0.218)
-    assert out["brier_skill_score"] == pytest.approx(1 - 0.197 / 0.218)
-    assert out["model_weight"] == pytest.approx(0.30)
-
-
-def test_get_market_calibration_missing_returns_nans(patched_paths):
-    league_models = {"NFL": {"player_pass_yds": _make_model()}}
-    write_model_stats(league_models, {}, {})
-    out = get_market_calibration("NBA", "missing_market")
-    assert math.isnan(out["kelly_shrinkage"])
-    assert math.isnan(out["brier_skill_score"])
-    assert math.isnan(out["model_weight"])
-
-
-def test_get_market_calibration_no_parquet(tmp_path):
-    target = tmp_path / "does_not_exist.parquet"
-    with mock.patch.object(report_module, "MODEL_STATS_PATH", target):
-        out = get_market_calibration("NFL", "x")
-    assert math.isnan(out["kelly_shrinkage"])
-    assert math.isnan(out["brier_skill_score"])
-    assert math.isnan(out["model_weight"])
