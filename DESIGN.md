@@ -137,11 +137,11 @@ Altair / Vega-Lite inherit these automatically.
 
 ## 4a. Signature element — the constellation
 
-Correlation rendered as a star map, and the slip editor's primary control. The game's picks
-(the legs the board picks by `EV`) are its stars — the rest wait behind the *deeper* lens — each
+Correlation rendered as a star map, and the slip editor's primary control. The legs the fit
+priced (the ones carrying an `EV`) are a game's stars — the rest wait behind the *deeper* lens — each
 **filled with its team's color** (the two sides of the matchup read at a glance) and **sized by
-its `EV`** between the lowest and the highest drawn (the strongest picks read biggest). The map
-is **static per game** — its stars are the top `DEFAULT_STARS` picks by `EV`, with both teams
+its `EV`** between the lowest and the highest drawn (the strongest legs read biggest). The map
+is **static per game** — its stars are the top `DEFAULT_STARS` priced legs by `EV`, with both teams
 represented and at most `MAX_PER_PLAYER` per player, fixed in place; a slip leg beyond that
 cut still burns as a star, in the place the deeper lens would give it; selecting a leg never re-deals the map — the mains
 hold and every other star keeps the main it orbits, and only the picked star's own glyph, grown

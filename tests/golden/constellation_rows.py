@@ -11,15 +11,15 @@ def offer_row(
     team: str,
     ev: float | None,
     *,
-    pick: bool = True,
     market: str = "PTS",
     game: str = GAME,
     bet: str = "Over",
 ) -> dict:
-    """An offer at ``ev``; ``None`` is a leg the fit did not price, which is never a pick.
+    """An offer at ``ev``; ``None`` is a leg the fit did not price.
 
-    ``Kelly`` is 0 on every row: the map reads the board's pick and its EV, never the
-    model's Kelly, so a map drawn off Kelly comes out empty.
+    ``Kelly`` is 0 on every row and no row carries ``Pick``: the map reads the fitted EV,
+    never the model's Kelly or the board's slate picks, so a map drawn off either comes
+    out empty.
     """
     return {
         "Player": player,
@@ -34,7 +34,6 @@ def offer_row(
         "Boost": BOOST,
         "Fit Prob": None if ev is None else ev / BOOST,
         "EV": ev,
-        "Pick": pick,
     }
 
 

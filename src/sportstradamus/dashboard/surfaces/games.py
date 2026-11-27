@@ -60,13 +60,13 @@ _HERO_BG = ambient_css("ambient_games_hero", _HERO_BG_FALLBACK)
 
 
 def _candidate_games(offers: pd.DataFrame, platform: str) -> dict[str, dict]:
-    """Deduped ``{label: {game, date}}`` for games with a pick on ``platform``.
+    """Deduped ``{label: {game, date}}`` for games with a priced leg on ``platform``.
 
     One entry per ``(Game, Date)`` — the canonical key collapses a matchup's two
     per-team orderings — labelled ``"{home} vs {away} · {date}"`` (home first via
     :func:`home_away`), matching tonight.py's View-game handoff format.
     """
-    pool = offers[(offers["Platform"] == platform) & offers["Pick"]]
+    pool = offers[(offers["Platform"] == platform) & offers["EV"].notna()]
     out: dict[str, dict] = {}
     for _, group in pool.groupby(["Game", "Date"], sort=True):
         home, away = home_away(group)
@@ -261,7 +261,7 @@ def _game_select(games: dict[str, dict], legs: list[dict]) -> tuple[str, str]:
     slip_game = legs[0]["game"] if legs else ""
     if not games:
         if not slip_game:
-            st.info("No picks on this platform right now.")
+            st.info("No priced games on this platform right now.")
         return slip_game, (str(legs[0]["date"]) if legs else "")
     if slip_game:
         _select_slip_label(games, slip_game)

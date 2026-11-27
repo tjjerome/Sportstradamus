@@ -705,11 +705,12 @@ def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):
     assert chips and chips[0].label == "Payout incorrect? Report it"
 
 
-def test_games_lists_the_games_with_a_pick_whatever_their_kelly(monkeypatch, tmp_path):
-    """A game is a candidate when it has a pick on the platform: NYK/SAS's pick claims no
-    Kelly, and BOS/LAL's Kelly buys it no place without one."""
+def test_games_lists_the_games_with_a_priced_leg(monkeypatch, tmp_path):
+    """A game is a candidate when the fit priced one of its legs on the platform. NYK/SAS's
+    leg is no slate pick and claims no Kelly, and it is listed; BOS/LAL's Kelly buys it no
+    place without an EV."""
     rows = [
-        {**_OFFER_ROWS[0], "Kelly": 0.0, "EV": 0.93, "Pick": True},
+        {**_OFFER_ROWS[0], "Kelly": 0.0, "EV": 0.93, "Pick": False},
         {
             **_OFFER_ROWS[0],
             "Team": "BOS",
@@ -718,7 +719,7 @@ def test_games_lists_the_games_with_a_pick_whatever_their_kelly(monkeypatch, tmp
             "Game": "BOS/LAL",
             "Player": "J. Tatum",
             "Kelly": 0.04,
-            "EV": 0.88,
+            "EV": float("nan"),
             "Pick": False,
         },
     ]

@@ -103,10 +103,10 @@ def add_deep_layer(
         pos,
         info,
         sizes=sizes,
-        # A pick the cut left behind is a candidate, just smaller; every other leg
-        # wears the lens's own gray.
+        # A priced leg the cut left behind is a candidate, just smaller; a leg the
+        # fit did not price wears the lens's own gray.
         colors=[
-            desaturate(fill, INACTIVE_DESAT) if info[k]["pick"] else _DEEP_COLOR
+            desaturate(fill, INACTIVE_DESAT) if info[k]["ev"] is not None else _DEEP_COLOR
             for k, fill in zip(deep, team_fills, strict=True)
         ],
         flip_colors=team_fills,

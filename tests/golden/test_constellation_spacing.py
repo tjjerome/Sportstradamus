@@ -1,7 +1,7 @@
 """Pins for the constellation's readability pass: the capped star set, the
 minimum-distance spacing lattice, and sparse captions.
 
-A busy game can offer more picks than a 980x360 box can hold, so the map draws a
+A busy game can offer more priced legs than a 980x360 box can hold, so the map draws a
 bounded default set — the highest EV, both teams represented, no player owning
 it — and everything else waits behind *look deeper*. What is drawn then goes through ``settle``: the biggest stars keep their
 template vertices to the float and only a star that would collide moves, to the
@@ -56,7 +56,8 @@ _TEAMS = ("NYK", "SAS")
 _HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
 
 
-def _row(player: str, team: str, ev: float, market: str = "PTS", *, pick: bool = True) -> dict:
+def _row(player: str, team: str, ev: float | None, market: str = "PTS") -> dict:
+    """An offer at ``ev`` (``None``: the fit did not price it), with no ``Pick`` column."""
     return {
         "Player": player,
         "Market": market,
@@ -66,17 +67,16 @@ def _row(player: str, team: str, ev: float, market: str = "PTS", *, pick: bool =
         "League": "NBA",
         "Team": team,
         # Kelly runs against EV, so a map ranked on the model's Kelly draws the wrong stars.
-        "Kelly": 1.0 - ev,
+        "Kelly": 1.0 - (ev or 0.0),
         "Win Prob": 0.6,
         "Boost": 1.5,
-        "Fit Prob": ev / 1.5,
+        "Fit Prob": None if ev is None else ev / 1.5,
         "EV": ev,
-        "Pick": pick,
     }
 
 
 def _ladder(n: int, *, top: float = 0.9, step: float = 0.03) -> pd.DataFrame:
-    """``n`` one-leg picks, teams alternating, EV strictly descending."""
+    """``n`` one-leg priced offers, teams alternating, EV strictly descending."""
     return pd.DataFrame([_row(f"P{i:02d}", _TEAMS[i % 2], top - i * step) for i in range(n)])
 
 
@@ -262,12 +262,12 @@ def test_in_slip_leg_beyond_the_cut_is_still_a_star():
     assert [card[0] for card in active.customdata] == [_key(DEFAULT_STARS + 2)]
 
 
-def test_a_slip_with_only_a_leg_that_is_no_pick_still_renders():
-    """Nothing in the pool is a pick, so the default cut is empty and the promoted
+def test_a_slip_with_only_a_leg_the_fit_did_not_price_still_renders():
+    """Nothing in the pool is priced, so the default cut is empty and the promoted
     slip leg is the whole map — the one case that hands the spring solve an empty
     node set, which it cannot warm-start.
     """
-    leg = _row("A", "NYK", 0.8, pick=False)
+    leg = _row("A", "NYK", None)
     stars = _stars(constellation_figure([leg], None, pd.DataFrame([leg])))
     assert set(stars) == {"A|PTS|Over"}
 

@@ -92,7 +92,7 @@ def _active_lenses(
 
     "Look deeper" hands back the same unfiltered ``pool`` frame the map already
     has — the figure keeps whatever rows it doesn't already know, and its tier is
-    those plus the picks its own star cut left behind — so no separate
+    those plus the priced legs its own star cut left behind — so no separate
     query. "Look wider" reruns the existing ``satellite_groups`` query. Either
     lens off resolves ``None``.
     """
@@ -142,7 +142,7 @@ def render_constellation_builder(
     platform = st.session_state[_PLATFORM]
     pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
     # Every focus-game leg goes to the map: the figure promotes anything outside its
-    # default star cut — a leg the board did not pick included — so a slip leg is always lit
+    # default star cut — a leg the fit did not price included — so a slip leg is always lit
     # somewhere on the map rather than vanishing from it on add.
     focus_legs = [leg for leg in legs if leg["game"] == focus_game]
     deep_pool, wider_groups = _active_lenses(

@@ -46,9 +46,9 @@ _OFFER_KEYS = {
 # Only the fields the dual-shape helpers below actually read off a raw offer
 # row — league among them, because the constellation resolves a board's display
 # name for its labels, hovers and cards off raw candidate rows as readily as off
-# slip legs; the platform and the fit's three too, because a star's size, card and
-# pick flag read them off either shape. The rest of LEG_FIELDS
-# (stat/game/date/push_prob/kelly) is canonical-only: every call site that needs one of
+# slip legs; the platform and the fit's two too, because a star's size and card
+# read them off either shape. The rest of LEG_FIELDS
+# (stat/game/date/push_prob/kelly/pick) is canonical-only: every call site that needs one of
 # those only ever holds a canonical leg, never a raw offer row, so it indexes
 # directly (leg["game"]) instead of going through leg_field.
 _FIELD_TO_OFFER_COL = {
@@ -63,7 +63,6 @@ _FIELD_TO_OFFER_COL = {
     "boost": "Boost",
     "fit_prob": "Fit Prob",
     "ev": "EV",
-    "pick": "Pick",
 }
 
 
@@ -89,13 +88,12 @@ def leg_field_float(leg: Mapping, field: str, default: float = 0.0) -> float:
     return float(leg_field(leg, field, default) or default)
 
 
-def is_pick(leg: Mapping) -> bool:
-    """Whether the board called the leg one of its picks (``live_fit.picks``) — the
-    star-vs-the-rest split the constellation draws on. Runs on either a canonical
-    leg or a raw current_offers row via leg_field; a leg stored before the flag
-    existed reads as no pick.
+def is_priced(leg: Mapping) -> bool:
+    """Whether the EV fit priced the leg — the star-vs-the-rest split the constellation
+    draws on. Runs on either a canonical leg or a raw current_offers row via leg_field;
+    a one-sided rung, and a leg stored before the fit existed, read as not priced.
     """
-    return bool(leg_field(leg, "pick", False))
+    return bool(pd.notna(leg_field(leg, "ev")))
 
 
 def _numeric_or_default(row: Mapping, col: str, default: float | None) -> float | None:

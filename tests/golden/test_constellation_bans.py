@@ -28,11 +28,11 @@ def _banned(*keys: str) -> dict[str, str]:
 def _figure(**kwargs):
     """Slip leg ``A``, candidates ``B``/``C``, both lenses on — a star in every star trace.
 
-    The deep tier holds a pick and a leg the fit did not price, so its per-point
+    The deep tier holds a priced leg and a leg the fit did not price, so its per-point
     opacities differ.
     """
     pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("B", "SAS", 0.3), _row("C", "NYK", 0.2)])
-    deep_pool = pd.DataFrame([_row("L", "NYK", 0.9), _row("D", "SAS", None, pick=False)])
+    deep_pool = pd.DataFrame([_row("L", "NYK", 0.9), _row("D", "SAS", None)])
     sky = [
         _row("W0", "MIA", 0.3, market="3PM", game=_WIDER_GAME),
         _row("W1", "MIA", 0.25, market="3PM", game=_WIDER_GAME, bet="Under"),

@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from sportstradamus.leg_schema import LEG_FIELDS, build_leg, is_pick, leg_field, leg_label
+from sportstradamus.leg_schema import LEG_FIELDS, build_leg, is_priced, leg_field, leg_label
 
 OFFER_ROW = {
     "Player": "Luka Doncic",
@@ -111,21 +111,21 @@ def test_leg_field_reads_the_fit_off_a_raw_offer_row():
     row = {**OFFER_ROW, "Fit Prob": 0.52, "EV": 0.95, "Pick": True}
     assert leg_field(row, "fit_prob") == 0.52
     assert leg_field(row, "ev") == 0.95
-    assert leg_field(row, "pick") is True
     assert leg_field(row, "platform") == "Underdog"
 
 
-def test_a_pick_is_the_boards_pick_flag_not_a_positive_kelly():
-    # The model's Kelly no longer decides what the board likes: the fitted EV's pick does.
-    liked_by_the_model = {**OFFER_ROW, "Kelly": 0.12, "Pick": False}
-    picked_at_zero_kelly = {**OFFER_ROW, "Kelly": 0.0, "Pick": True}
-    for leg in (liked_by_the_model, build_leg(liked_by_the_model)):
-        assert is_pick(leg) is False
-    for leg in (picked_at_zero_kelly, build_leg(picked_at_zero_kelly)):
-        assert is_pick(leg) is True
+def test_a_leg_is_priced_when_the_fit_gave_it_an_ev():
+    # Neither the model's Kelly nor the board's pick flag decides: a leg under break-even
+    # that is no slate pick is still priced, and a one-sided rung is not.
+    priced = {**OFFER_ROW, "Kelly": 0.0, "Fit Prob": 0.52, "EV": 0.93, "Pick": False}
+    one_sided = {**OFFER_ROW, "Kelly": 0.12, "Fit Prob": float("nan"), "EV": float("nan")}
+    for leg in (priced, build_leg(priced)):
+        assert is_priced(leg) is True
+    for leg in (one_sided, build_leg(one_sided)):
+        assert is_priced(leg) is False
 
 
-def test_a_leg_stored_before_the_pick_flag_is_no_pick():
+def test_a_leg_stored_before_the_fit_is_not_priced():
     stored = {k: v for k, v in build_leg(OFFER_ROW).items() if k not in ("fit_prob", "ev", "pick")}
-    assert is_pick(stored) is False
-    assert is_pick({**stored, "pick": None}) is False
+    assert is_priced(stored) is False
+    assert is_priced({**stored, "ev": None}) is False

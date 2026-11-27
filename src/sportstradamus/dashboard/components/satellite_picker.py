@@ -1,9 +1,9 @@
 """Supplemental leg data — non-star legs that ride along in a same-game slip.
 
 The constellation builder is same-game (DESIGN §4a), so a leg from another game can
-never be one of its stars. A game whose picks sit on only one of its two teams can't
+never be one of its stars. A game whose priced legs sit on only one of its two teams can't
 form a valid parlay alone (``validate_parlay_legs`` needs two distinct teams), so
-:func:`satellite_groups` offers the picks of *other* games on the platform, grouped
+:func:`satellite_groups` offers the priced legs of *other* games on the platform, grouped
 by game — the "look wider" lens (``constellation_wider``) scatters its output
 through the open sky around the map, clustered by game; tapping one adds it as a
 satellite.
@@ -36,17 +36,17 @@ def satellite_groups(
     platform: str,
     exclude_keys: set[str],
 ) -> list[tuple[str, list[dict]]]:
-    """Other games' picks to offer, grouped by game, games ranked by their best EV.
+    """Other games' priced legs to offer, grouped by game, games ranked by their best EV.
 
-    Filters ``offers`` to the picks on ``platform`` in games other than
+    Filters ``offers`` to the legs the fit priced on ``platform`` in games other than
     ``focus_game``, drops anything already in the slip (``exclude_keys`` of
     ``corr_key``), keeps each game's top ``_PER_GAME_CAP`` by ``EV``, and orders the
-    games by their single highest-EV pick so the best options lead.
+    games by their single highest-EV leg so the best options lead.
     """
     if offers.empty:
         return []
     pool = offers[
-        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & offers["Pick"]
+        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & offers["EV"].notna()
     ]
     groups: list[tuple[str, list[dict]]] = []
     for game, block in pool.groupby("Game", sort=False):

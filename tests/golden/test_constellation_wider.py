@@ -49,9 +49,7 @@ def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
 
 
 def _deep_pool(n: int) -> pd.DataFrame:
-    return pd.DataFrame(
-        [_row(f"Q{i:03d}", ("NYK", "SAS")[i % 2], None, pick=False) for i in range(n)]
-    )
+    return pd.DataFrame([_row(f"Q{i:03d}", ("NYK", "SAS")[i % 2], None) for i in range(n)])
 
 
 def _wider_groups(n: int, *, per_game: int = 4) -> list[tuple[str, list[dict]]]:

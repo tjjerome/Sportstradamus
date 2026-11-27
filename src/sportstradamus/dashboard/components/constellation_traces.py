@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 from sportstradamus.dashboard.components.constellation_spacing import X_RANGE, Y_RANGE
 from sportstradamus.dashboard.theme import GRAY, GREEN, RED, team_name
 from sportstradamus.helpers import market_display_name, platform_payout
-from sportstradamus.leg_schema import is_pick, leg_field, leg_field_float
+from sportstradamus.leg_schema import leg_field, leg_field_float
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -104,7 +104,7 @@ def star_label(leg: Mapping) -> str:
 
 
 def node_info(leg: Mapping) -> dict:
-    """Everything a node carries: its caption, team, numbers, pick flag, hover text and card.
+    """Everything a node carries: its caption, team, numbers, hover text and card.
 
     ``ev`` is the fitted EV, None on a leg the fit did not price (one side posted);
     ``model_ev`` is the model's own claim, its win chance times the payout. The hover
@@ -130,7 +130,6 @@ def node_info(leg: Mapping) -> dict:
         "team": leg_field(leg, "team"),
         "ev": ev,
         "model_ev": model_ev,
-        "pick": is_pick(leg),
         "hover": (
             f"{player} — {market} {bet} {line:.10g}"
             f"<br>{fitted}<br>Model win {win:.0%} · Model EV {model_ev:.2f}"

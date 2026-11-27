@@ -46,9 +46,9 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.components.constellation_traces import bet_marker_line
 
-# The legs the board did not pick: a flat cool gray, distinct from both a team color
-# and GRAY (the unknown-team fallback and the label color), so it reads as "not a
-# pick" rather than as one more desaturated candidate.
+# The legs the fit did not price: a flat cool gray, distinct from both a team color
+# and GRAY (the unknown-team fallback and the label color), so it reads as "not
+# priced" rather than as one more desaturated candidate.
 _DEEP_COLOR = "#5f6b80"
 # Over the engraving's FILLER_SIZE (6) so a lens star never reads as decoration,
 # under the main map's floor (SIZE_MIN 14) so it never outranks a real star.
@@ -228,9 +228,9 @@ def add_deep_trace(
     """The deeper lens's own stars, as the one fade-able trace named ``deep``.
 
     Everything arrives per point because the tier carries two readings and a
-    ranking inside each: a pick the cut left behind wears the candidate look, any
-    other leg the cool gray of the lens itself, and EV sets how big and how bright
-    either is. ``flip_colors`` is the full team color each star burns once a click
+    ranking inside each: a priced leg the cut left behind wears the candidate look,
+    sized and lit by its EV, and a leg the fit did not price the cool gray of the lens
+    itself at the tier's floor. ``flip_colors`` is the full team color each star burns once a click
     puts it in the slip; it rides as ``meta`` so the component can paint it before
     the rerun promotes the star.
     """
