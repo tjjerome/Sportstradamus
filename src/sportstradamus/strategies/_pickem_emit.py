@@ -25,11 +25,11 @@ def rank_and_dedupe(
 ) -> list[RecommendedEntry]:
     """Rank by ``ev`` (the fitted value), highest first; drop near-duplicates by leg overlap."""
     kept: list[RecommendedEntry] = []
-    for e in sorted(entries, key=lambda e: e.ev, reverse=True):
-        legs_set = set(e.legs)
-        if any(len(legs_set & set(k.legs)) > config.max_overlap for k in kept):
+    for entry in sorted(entries, key=lambda e: e.ev, reverse=True):
+        legs = set(entry.legs)
+        if any(len(legs & set(other.legs)) > config.max_overlap for other in kept):
             continue
-        kept.append(e)
+        kept.append(entry)
         if len(kept) >= config.top_k:
             break
     return kept
@@ -41,7 +41,7 @@ def emit_yaml(
     config: PickemConfig,
     out_path: Path,
 ) -> Path:
-    """Serialize ``entries`` to ``out_path`` and return the path."""
+    """Write the recommendations YAML that ``bet kelly`` re-sizes, and return its path."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.datetime.now().isoformat(),

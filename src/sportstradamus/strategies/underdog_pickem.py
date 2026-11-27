@@ -2,7 +2,8 @@
 
 Pure orchestrator over ``prediction.scoring.process_offers`` and
 ``prediction.correlation.find_correlation`` (one search per contest
-variant). Rank/dedupe and YAML emit live in :mod:`._pickem_emit` to keep
+variant). Each search row becomes an entry valued at its fitted ``EV`` and
+staked 0; rank/dedupe and YAML emit live in :mod:`._pickem_emit` to keep
 this file under the CLAUDE.md 300-line ceiling.
 """
 
@@ -14,7 +15,7 @@ import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 import pandas as pd
@@ -52,7 +53,7 @@ class RecommendedEntry:
     ev: float
     recommended_stake: Decimal
     canonical_legs: tuple[dict, ...] = ()
-    extras: dict[str, Any] = field(default_factory=dict)
+    extras: dict[str, str] = field(default_factory=dict)
     platform: str = "Underdog"
     # Product of the entry's same-game pair modifiers, as the search priced it.
     pair_modifier: float = 1.0
@@ -66,6 +67,7 @@ def _filter_parlays(parlay_df: pd.DataFrame, config: PickemConfig) -> pd.DataFra
 def _row_to_entry(row: pd.Series, variant: str, platform: str = "Underdog") -> RecommendedEntry:
     """One search row as an entry, valued at its fitted ``EV``, never its ``Model EV``."""
     payout = float(row["Boost"])
+    fitted_ev = float(row["EV"])
     canonical_legs = tuple(row["legs"])
     legs = tuple(leg_label(leg) for leg in canonical_legs)
     digest = hashlib.sha1("|".join(legs).encode()).hexdigest()[:12]
@@ -75,9 +77,9 @@ def _row_to_entry(row: pd.Series, variant: str, platform: str = "Underdog") -> R
         entry_size=int(row["Bet Size"]),
         legs=legs,
         # EV is the value of a unit staked: the win chance the all-hit payout makes worth it.
-        joint_prob=float(row["EV"]) / payout,
+        joint_prob=fitted_ev / payout,
         payout_multiplier=payout,
-        ev=float(row["EV"]) - 1.0,
+        ev=fitted_ev - 1.0,
         # No entry is staked until the entries' money record supports a stake, the search's
         # reason for its Rec Bet of 0 (docs/handoffs/profit-engine.md 5.3).
         recommended_stake=Decimal("0"),
