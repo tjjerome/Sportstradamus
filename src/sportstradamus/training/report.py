@@ -2,10 +2,9 @@
 
 One row per ``(league, market)`` cell. The parquet is the authoritative
 artifact (read by the dashboard, the graduation gate, and the ship-config
-promoter); the CSV mirror at
-:data:`MODEL_STATS_CSV_PATH` is rewritten alongside the parquet on every
-run so the same numbers are browseable from VSCode without a parquet
-viewer extension.
+promoter); the CSV mirror at :data:`MODEL_STATS_CSV_PATH` is rewritten
+alongside the parquet on every run so the same numbers are browseable from
+VSCode without a parquet viewer extension.
 
 Columns owned by ``meditate`` cover the validation-set metrics produced by
 ``training.pipeline._compute_metrics`` (model + book baseline + brier skill
