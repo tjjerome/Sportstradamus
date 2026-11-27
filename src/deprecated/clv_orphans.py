@@ -116,3 +116,34 @@ def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
     weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
     shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
     return shrinkage, n
+
+
+# ARCHIVED 2026-11-27 from src/sportstradamus/clv.py
+# Reason: Nothing has read data/runtime/clv_segments.parquet since get_segment_calibration
+#         (above) was archived, so reflect stopped writing it; summarize's "all_segments"
+#         key, which only this writer took, went with it. Its test was deleted with
+#         tests/golden/test_clv_close_sanity.py (git keeps it).
+# Last live SHA: c7432a95
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   from pathlib import Path
+#   import pandas as pd
+#   from sportstradamus import data as _data_pkg
+
+# From src/sportstradamus/clv.py.
+def _segments_parquet_path() -> Path:
+    return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
+
+
+# From src/sportstradamus/clv.py.
+def persist_segments(grouped: pd.DataFrame) -> None:
+    """Write the full per-segment frame to ``data/runtime/clv_segments.parquet``.
+
+    All segments are persisted, not just the reportable ones. Called explicitly from
+    ``reflect`` after :func:`summarize`.
+    """
+    if grouped is None or grouped.empty:
+        return
+    path = _segments_parquet_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_parquet(path, index=False)

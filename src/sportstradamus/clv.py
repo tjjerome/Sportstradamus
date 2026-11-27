@@ -19,14 +19,11 @@ difference for either side, in no-vig probability units:
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.archive import archive_market
 from sportstradamus.helpers.config import book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_odds
@@ -43,10 +40,6 @@ CLV_SEGMENT_MIN_N = 20
 _COMMENCE_DEFAULT_OFFSET = timedelta(hours=20)
 
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
-
-
-def _segments_parquet_path() -> Path:
-    return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
 
 
 def _fill_offer_rows(history: pd.DataFrame, idx, close_under: float) -> None:
@@ -383,7 +376,6 @@ def _aggregate_clv_segments(legs: list[dict], archive) -> dict:
         "model_clv_mean": model_mean,
         "frac_beat_close": frac_beat,
         "segments": segments,
-        "all_segments": grouped,
     }
 
 
@@ -402,20 +394,6 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
     """
     legs = _collect_clv_legs(history, archive)
     return _aggregate_clv_segments(legs, archive)
-
-
-def persist_segments(grouped: pd.DataFrame) -> None:
-    """Write the full per-segment frame to ``data/runtime/clv_segments.parquet``.
-
-    All segments are persisted, not just the reportable ones. Called explicitly from
-    ``reflect`` after :func:`summarize`. Nothing reads the file since the per-segment
-    trust getter was archived (``src/deprecated/clv_orphans.py``).
-    """
-    if grouped is None or grouped.empty:
-        return
-    path = _segments_parquet_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    grouped.to_parquet(path, index=False)
 
 
 def _normalize_date(date) -> str:

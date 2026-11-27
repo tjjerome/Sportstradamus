@@ -596,7 +596,6 @@ def _resolve_and_clv_history(stats):
     write_history(history)
 
     clv_summary = clv.summarize(history, archive=archive)
-    clv.persist_segments(clv_summary.get("all_segments"))
     if clv_summary["n"]:
         logger.info(
             "CLV legs: %d  Market CLV mean: %+.3f  Model CLV mean: %+.3f  beat-close: %.1f%%",
