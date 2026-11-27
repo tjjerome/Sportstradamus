@@ -91,5 +91,5 @@ def _slip_dialog(row: Mapping) -> None:
         st.caption("Sleeper payout approximate — correlation factor pending.")
 
 
-def _fnum(value, default: float = 0.0) -> float:
-    return float(value) if pd.notna(value) else default
+def _fnum(value) -> float:
+    return float(value) if pd.notna(value) else 0.0
