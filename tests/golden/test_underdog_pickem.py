@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
+from sportstradamus.strategies.kelly import kelly
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
     RecommendedEntry,
@@ -369,3 +371,26 @@ def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
     payload = yaml.safe_load(out_path.read_text())
     assert payload["entries"][0]["platform"] == platform
     assert all(payload["entries"][0]["legs"])
+
+
+def test_bet_kelly_sizes_the_yaml_bet_pickem_emits_on_each_entrys_fitted_chance(tmp_path: Path):
+    """An entry valued above 1 gets a Kelly stake (here the 0.5 % cap of a 1,000 bankroll);
+    one valued under 1 gets none, though the model claims 2.5 for both."""
+    cfg = PickemConfig(entry_sizes=(3,), contest_variants=("power",))
+    parlays = pd.DataFrame(
+        [_parlay(["W1", "W2", "W3"], ev=1.2), _parlay(["L1", "L2", "L3"], ev=0.9)]
+    )
+    out_path = tmp_path / "rec.yaml"
+    emit_yaml(
+        construct_entries(cfg, parlay_dfs={"power": parlays}),
+        datetime.date(2026, 5, 8),
+        cfg,
+        out_path,
+    )
+
+    result = CliRunner().invoke(kelly, ["--bankroll", "1000", "--from", str(out_path)])
+
+    assert result.exit_code == 0, result.output
+    rows = [line.split("|") for line in result.output.splitlines()[2:]]
+    stake_by_ev = {float(cells[6]): float(cells[7]) for cells in rows}
+    assert stake_by_ev == {0.2: 5.0, -0.1: 0.0}

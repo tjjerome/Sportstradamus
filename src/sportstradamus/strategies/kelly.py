@@ -232,7 +232,6 @@ def kelly(bankroll: str, yaml_path: str, fraction: float) -> None:
             win_prob=float(entry.get("joint_prob", 0.0)),
             payout_multiplier=Decimal(str(entry.get("payout_multiplier", 0))),
             fraction=fraction,
-            model_shrinkage=float(entry.get("shrinkage", 1.0)),
         )
         rows.append(
             [
