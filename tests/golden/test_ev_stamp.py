@@ -389,10 +389,10 @@ def test_find_correlation_carries_the_stamp_and_builds_entries_from_it(monkeypat
     assert bare_parlays.empty
 
 
-def _model_led_fit(fit_path) -> None:
-    """A fit table whose one stratum prices an NHL even pick no book quotes at the model's chance."""
+def _model_led_fit(fit_path, league: str = "NHL") -> None:
+    """A fit table whose one stratum prices a league's even pick no book quotes at the model's chance."""
     fitted = dict.fromkeys(live_fit.FIT_COLS, np.nan) | {
-        "league": "NHL",
+        "league": league,
         "kind": "underdog_even",
         "book_class": "C",
         "c": 0.0,

@@ -297,12 +297,8 @@ def test_prophecize_isolates_a_failed_platform(
 # --- helpers --------------------------------------------------------------
 
 
-def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
-    """Intercept every ``prophecize`` disk write; return the per-writer capture lists.
-
-    ``process_offers`` is deliberately left unpatched — it is the one seam the
-    two prophecize tests drive differently.
-    """
+def _stub_prophecize_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``prophecize`` off the network: both platforms post nothing, no capture runs."""
     from sportstradamus.prediction import cli as prediction_cli
 
     monkeypatch.setattr(prediction_cli, "get_ud", lambda capture_dir=None, scored_at=None: {})
@@ -311,6 +307,17 @@ def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]
     monkeypatch.setattr(prediction_cli, "capture_lineups", lambda stats, scored_at: None)
     monkeypatch.setattr(prediction_cli, "capture_weather", lambda stats, scored_at: None)
     monkeypatch.setattr(prediction_cli, "capture_injuries", lambda scored_at: None)
+
+
+def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
+    """Intercept every ``prophecize`` disk write; return the per-writer capture lists.
+
+    ``process_offers`` is deliberately left unpatched — it is the one seam the
+    two prophecize tests drive differently.
+    """
+    from sportstradamus.prediction import cli as prediction_cli
+
+    _stub_prophecize_inputs(monkeypatch)
 
     calls: dict[str, list] = {"offers": [], "corr": [], "context": [], "stories": []}
 
