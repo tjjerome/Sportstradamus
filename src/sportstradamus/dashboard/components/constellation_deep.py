@@ -1,7 +1,7 @@
 """The *look deeper* lens — the game's remaining legs, drawn inside the map.
 
 An optional overlay on ``constellation.py``'s figure that obeys one rule: a lens
-may add stars, never move the ones already drawn. A click grows only the picked
+may add stars, never move the ones already drawn. A click grows only the clicked
 star's own glyph, which may nudge the neighbours it touches, and nothing
 animates. *Look deeper* fades the game's remaining legs in as small stars
 **inside** the constellation, each settled beside the main star it correlates
@@ -230,9 +230,9 @@ def add_deep_trace(
     Everything arrives per point because the tier carries two readings and a
     ranking inside each: a pick the cut left behind wears the candidate look, any
     other leg the cool gray of the lens itself, and EV sets how big and how bright
-    either is. ``flip_colors`` is the full team color each star
-    burns once a click puts it in the slip; it rides as ``meta`` so the component
-    can paint it before the rerun promotes the star.
+    either is. ``flip_colors`` is the full team color each star burns once a click
+    puts it in the slip; it rides as ``meta`` so the component can paint it before
+    the rerun promotes the star.
     """
     if not keys:
         return
