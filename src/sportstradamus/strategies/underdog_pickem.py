@@ -59,11 +59,6 @@ class RecommendedEntry:
     pair_modifier: float = 1.0
 
 
-def _filter_parlays(parlay_df: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
-    """The entries at one of ``config.entry_sizes``. No value floor: the rank decides."""
-    return parlay_df[parlay_df["Bet Size"].isin(config.entry_sizes)]
-
-
 def _row_to_entry(row: pd.Series, variant: str, platform: str = "Underdog") -> RecommendedEntry:
     """One search row as an entry, valued at its fitted ``EV``, never its ``Model EV``."""
     payout = float(row["Boost"])
@@ -115,7 +110,8 @@ def construct_entries(
         parlays = parlay_dfs.get(variant, pd.DataFrame())
         if parlays.empty:
             continue
-        parlays = _filter_parlays(parlays, config)
+        # The size is the only cut: no value floor, the rank decides.
+        parlays = parlays[parlays["Bet Size"].isin(config.entry_sizes)]
         entries.extend(_row_to_entry(row, variant, platform) for _, row in parlays.iterrows())
 
     return rank_and_dedupe(entries, config)

@@ -15,7 +15,6 @@ from sportstradamus.strategies.kelly import kelly
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
     RecommendedEntry,
-    _filter_parlays,
     construct_entries,
 )
 
@@ -122,19 +121,23 @@ def test_an_empty_board_gets_an_empty_parlay_frame_per_variant():
 # --- parlay-level filter ------------------------------------------------------
 
 
-def test_filter_parlays_keeps_every_entry_of_a_kept_size():
+def test_construct_entries_keeps_every_entry_of_a_configured_size_and_drops_other_sizes():
     """No value floor: the rank decides. The last entry sat under the old 5 % floor on
-    the model's claim and is kept."""
+    the model's claim and is kept; the entry of another size is dropped."""
     cfg = PickemConfig(entry_sizes=(3,))
+    # Distinct legs, so the dedupe after the size cut keeps both entries of the kept size.
     df = pd.DataFrame(
         [
-            _parlay(["L1", "L2", "L3"], ev=0.95, model_ev=1.50),
-            _parlay(["L1", "L2"], ev=0.95, model_ev=2.0),  # wrong size
-            _parlay(["L1", "L2", "L3"], ev=0.80, model_ev=1.03),
+            _parlay(["A1", "A2", "A3"], ev=0.95, model_ev=1.50),
+            _parlay(["B1", "B2"], ev=0.95, model_ev=2.0),  # wrong size
+            _parlay(["C1", "C2", "C3"], ev=0.80, model_ev=1.03),
         ]
     )
-    out = _filter_parlays(df, cfg)
-    assert out["Bet Size"].tolist() == [3, 3]
+
+    out = construct_entries(cfg, parlay_dfs={"power": df})
+
+    assert [e.entry_size for e in out] == [3, 3]
+    assert [e.ev for e in out] == pytest.approx([-0.05, -0.20])
 
 
 # --- end-to-end with injection -----------------------------------------------
