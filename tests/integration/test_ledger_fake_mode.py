@@ -68,10 +68,9 @@ def _offers_df(platform: str) -> pd.DataFrame:
     """Minimal offers frame carrying the columns downstream code reads.
 
     Realism only matters as far as ``_ledger_cross_game.build_cross_game_candidates``
-    (which runs for real against whatever ``live_load`` returns) -- its
-    ``filter_legs`` gate needs ``Win Prob``/``Market Prob`` edges to clear
-    ``_SHARED_CONFIG``'s thresholds, and its beam search needs >=2 distinct
-    games to produce a cross-game combo.
+    (which runs for real against whatever ``live_load`` returns) -- it combines the
+    slate date's picks (``Pick``) at their ``Fit Prob``, and its beam search needs >=2
+    distinct games to produce a cross-game combo.
     """
     league = _LEAGUE_BY_PLATFORM[platform]
     rows = [
@@ -89,6 +88,7 @@ def _offers_df(platform: str) -> pd.DataFrame:
             "Platform": platform,
             "Win Prob": 0.58,
             "Fit Prob": 0.58,
+            "Pick": True,
             "Market Prob": 0.545,
         },
         {
@@ -105,6 +105,7 @@ def _offers_df(platform: str) -> pd.DataFrame:
             "Platform": platform,
             "Win Prob": 0.56,
             "Fit Prob": 0.56,
+            "Pick": True,
             "Market Prob": 0.53,
         },
     ]

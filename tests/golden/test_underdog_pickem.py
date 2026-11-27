@@ -221,7 +221,6 @@ def test_construct_entries_both_variants():
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(3,),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -245,7 +244,6 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path):
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(3,),
         contest_variants=("power",),
     )
@@ -279,7 +277,6 @@ def test_dedupe_max_overlap():
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(3,),
         contest_variants=("power",),
         top_k=10,
@@ -330,7 +327,7 @@ def test_entries_rank_by_their_fitted_value_highest_first():
 def test_entry_carries_the_product_of_its_pair_modifiers():
     """The search prices an entry on its legs' multipliers times the product of its
     same-game pair modifiers; the ledger settles a winner on that same product."""
-    cfg = PickemConfig(min_ev=0.0, entry_sizes=(3,), contest_variants=("power",))
+    cfg = PickemConfig(entry_sizes=(3,), contest_variants=("power",))
     parlay_dfs = {
         "power": pd.DataFrame(
             [_parlay(["L1", "L2", "L3"], model_ev=1.5, pair_modifiers=(1.0, 0.9, 0.8))]
@@ -350,7 +347,6 @@ def test_construct_entries_sleeper_platform():
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(3,),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -380,7 +376,6 @@ def test_construct_entries_sleeper_push_case_sizes():
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(2, 3, 4, 5, 6),
         contest_variants=("power", "flex"),
         top_k=10,
@@ -415,7 +410,6 @@ def test_recommended_entry_platform_roundtrips_yaml(tmp_path: Path, platform):
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
-        min_ev=0.0,
         entry_sizes=(3,),
         contest_variants=("power",),
     )

@@ -7,12 +7,13 @@ existing same-game parlay search (``prediction.parlay`` /
 ``prediction.correlation``) structurally cannot produce these -- it only ever
 combines legs sharing one ``Game`` -- so this module is a deliberately
 separate, independence-assumed path, not a duplicate of that search.
-``build_cross_game_candidates`` fills the shared universe from the legs the
-pick'em gate keeps; ``build_even_pick_candidates`` fills the ``even_picks``
+``build_cross_game_candidates`` fills the shared universe from the platform's
+picks on the slate date; ``build_even_pick_candidates`` fills the ``even_picks``
 persona's pool from the slate date's Underdog even picks the product recommends,
 its entries dealt evenly over those legs with a game per leg. One pricer prices
-and sizes both, on each leg's fitted chance. See
-``docs/handoffs/sim-bettor-ledger.md`` §10 for the surrounding policy design.
+both, on each leg's fitted chance, and keeps every entry whatever its value: the
+personas' ranks choose among them. See ``docs/handoffs/sim-bettor-ledger.md`` §10
+for the surrounding policy design.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from sportstradamus.prediction.payouts import (
 )
 from sportstradamus.realized import recommended
 from sportstradamus.strategies._ledger_selection import FLAT_STAKE, LedgerCandidate, _entropy_from
-from sportstradamus.strategies.underdog_pickem import PickemConfig, filter_legs
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
@@ -59,6 +59,14 @@ class _ScoredLeg:
     boost: float  # the platform's raw multiplier for this pick
     display: str  # leg_label(leg) -- canonical rendering, do not reformat it yourself
     canonical_leg: dict  # build_leg() output, with leg["stat"] patched to cell_market
+
+
+def _on_slate(offers: pd.DataFrame, date: datetime.date) -> pd.Series:
+    """Which of ``offers`` are for a game on ``date``.
+
+    A leg gets one day, on its game-day read, and its entry settles at the next reflect.
+    """
+    return offers["Date"].astype(str).str[:10] == date.isoformat()
 
 
 def _served_legs(offers: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
@@ -174,12 +182,11 @@ def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platfor
 def _priced_candidates(
     legs: list[_ScoredLeg],
     by_size: dict[int, list[tuple[int, ...]]],
-    config: PickemConfig,
     date: datetime.date,
     run_slot: str,
     platform: str,
 ) -> list[LedgerCandidate]:
-    """A flat-staked candidate per combo at or above ``config.min_ev`` on the pooled curve."""
+    """A flat-staked candidate per combo, priced on ``platform``'s pooled curve."""
     rng = _pricing_rng(date, run_slot)
     by_idx = {leg.idx: leg for leg in legs}
 
@@ -190,8 +197,6 @@ def _priced_candidates(
             combo_legs = tuple(by_idx[i] for i in combo)
             ev_payout = _price_combo(combo_legs, rng, platform)
             ev = ev_payout - 1.0
-            if ev < config.min_ev:
-                continue
             # Ranked, recorded and sized by kelly_growth as a same-game entry is
             # (underdog_pickem._row_to_entry): on what the entry pays when every pick
             # hits, and the win probability that payout makes worth the priced EV. The
@@ -224,56 +229,44 @@ def _priced_candidates(
 
 
 def build_cross_game_candidates(
-    offers_df: pd.DataFrame,
-    config: PickemConfig,
-    date: datetime.date,
-    run_slot: str,
-    platform: str = "Underdog",
+    offers_df: pd.DataFrame, date: datetime.date, run_slot: str, platform: str = "Underdog"
 ) -> list[LedgerCandidate]:
     """Build independence-assumed (rho=0) parlay candidates spanning >=2 games.
 
-    Filters ``offers_df`` (``Boost`` = the platform's raw pick multiplier)
-    through the same leg gate ``construct_entries`` uses, beam-expands
-    cross-game combos up to ``_MAX_ENTRY_SIZE`` legs, prices each via the
-    pooled payout curve for ``platform``, and drops anything below
-    ``config.min_ev``. See the module docstring for why this independence
-    assumption is safe.
+    The legs are ``platform``'s picks (``Pick``) for games on ``date``, from ``offers_df``
+    (``Boost`` = the platform's raw pick multiplier). The beam expands their cross-game
+    combos up to ``_MAX_ENTRY_SIZE`` legs, and each is priced on ``platform``'s pooled
+    payout curve at its legs' fitted chances. See the module docstring for why the
+    independence assumption is safe.
 
     Returns:
-        One :class:`LedgerCandidate` per surviving combo, in no particular
-        order (the caller's selection layer does the ranking/sampling).
+        One :class:`LedgerCandidate` per combo the beam keeps, in no particular order
+        (the caller's selection layer does the ranking/sampling).
     """
-    eligible = filter_legs(offers_df, config)
-    if eligible.empty:
-        return []
-    legs = _served_legs(eligible, platform)
-    by_size = _enumerate_cross_game_combos(legs)
-    return _priced_candidates(legs, by_size, config, date, run_slot, platform)
+    legs = _served_legs(offers_df[offers_df["Pick"] & _on_slate(offers_df, date)], platform)
+    return _priced_candidates(legs, _enumerate_cross_game_combos(legs), date, run_slot, platform)
 
 
 def build_even_pick_candidates(
-    offers_df: pd.DataFrame, config: PickemConfig, date: datetime.date, run_slot: str
+    offers_df: pd.DataFrame, date: datetime.date, run_slot: str
 ) -> list[LedgerCandidate]:
     """Build the ``even_picks`` pool: cross-game entries of Underdog's recommended even picks.
 
     A leg is a row of Underdog's ``offers_df`` (``Boost`` = the raw pick multiplier)
     at exactly ``UNDERDOG_EVEN_PICK_MULTIPLIER``, for a game on ``date``, whose side Receipts'
-    rule recommends (:func:`sportstradamus.realized.recommended`), through no pick'em leg
-    gate: the pool is the paper record of that rule. Entries are dealt evenly over those
-    legs, a game per leg, and each is priced and sized as
-    :func:`build_cross_game_candidates` prices and sizes its own, at its legs' fitted
-    chances.
+    rule recommends (:func:`sportstradamus.realized.recommended`), whether or not the
+    board picks it: the pool is the paper record of that rule. Entries are dealt evenly
+    over those legs, a game per leg, and each is priced as
+    :func:`build_cross_game_candidates` prices its own, at its legs' fitted chances.
 
     Returns:
-        One :class:`LedgerCandidate` per dealt entry at or above ``config.min_ev``,
-        in no particular order.
+        One :class:`LedgerCandidate` per dealt entry, in no particular order.
     """
     payout = platform_payout(offers_df["Boost"], "Underdog")
     picks = offers_df[
         (offers_df["Boost"] == UNDERDOG_EVEN_PICK_MULTIPLIER)
         & recommended(offers_df["Win Prob"], payout)
-        # A leg gets one day, on its game-day read, and its entry settles at the next reflect.
-        & (offers_df["Date"].astype(str).str[:10] == date.isoformat())
+        & _on_slate(offers_df, date)
     ]
     legs = _served_legs(picks, "Underdog")
     # Seeded apart from the pricing stream, so the deal and the prices share no draws.
@@ -281,4 +274,4 @@ def build_even_pick_candidates(
         np.random.SeedSequence(_entropy_from(date, run_slot, salt="even_pick_deals"))
     )
     by_size = _deal_even_pick_combos(legs, deal_rng)
-    return _priced_candidates(legs, by_size, config, date, run_slot, "Underdog")
+    return _priced_candidates(legs, by_size, date, run_slot, "Underdog")

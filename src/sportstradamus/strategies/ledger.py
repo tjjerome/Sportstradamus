@@ -37,7 +37,6 @@ POLICY_VERSION = "policy_v5"
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
     contest_variants=("power", "flex"),
-    min_ev=0.05,
     top_k=100,
     max_overlap=2,
 )
@@ -72,8 +71,8 @@ def _platform_candidates(
     run_slot: str,
     platform: str,
 ) -> list[_ledger_selection.LedgerCandidate]:
-    """One platform's same-game entries off ``parlay_dfs`` plus cross-game combos off
-    ``offers_df``. Do not call construct_entries without parlay_dfs here -- that would
+    """One platform's same-game entries off ``parlay_dfs`` plus cross-game combos of its
+    picks off ``offers_df``. Do not call construct_entries without parlay_dfs here -- that would
     trigger a second, redundant scrape for whichever platform it's called under.
     """
     entries = construct_entries(_SHARED_CONFIG, parlay_dfs=parlay_dfs, platform=platform)
@@ -81,7 +80,7 @@ def _platform_candidates(
         [_ledger_selection.from_recommended_entry(e) for e in entries]
     )
     cross_game = _ledger_cross_game.build_cross_game_candidates(
-        offers_df, _SHARED_CONFIG, date, run_slot, platform=platform
+        offers_df, date, run_slot, platform=platform
     )
     return same_game + cross_game
 
@@ -96,9 +95,8 @@ def build_candidate_universe(
         The candidates each persona draws from, keyed by persona. Every persona
         shares one universe except ``even_picks``, whose pool is built beside it
         from Underdog's offers alone: cross-game entries of the even picks the
-        product recommends on ``date``'s games. The shared builders keep few such
-        picks: their leg gate wants a read close to the book, which sits near a
-        coin flip on an even pick.
+        product recommends on ``date``'s games, whether or not the board picks them.
+        No pool has a value floor: the personas' ranks choose among its entries.
     """
     # Function-local, so a patch of sportstradamus.stats.load_live_leagues takes effect.
     from sportstradamus.stats import load_live_leagues
@@ -113,7 +111,7 @@ def build_candidate_universe(
         universe.extend(_platform_candidates(parlay_dfs, offers_df, date, run_slot, platform))
         if platform == "Underdog":
             even_picks_pool = _ledger_cross_game.build_even_pick_candidates(
-                offers_df, _SHARED_CONFIG, date, run_slot
+                offers_df, date, run_slot
             )
     return dict.fromkeys(_ledger_selection.PERSONAS, universe) | {"even_picks": even_picks_pool}
 

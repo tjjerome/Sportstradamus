@@ -50,7 +50,6 @@ def emit_yaml(
             "min_model_edge": config.min_model_edge,
             "min_sharp_edge": config.min_sharp_edge,
             "disagreement_threshold": config.disagreement_threshold,
-            "min_ev": config.min_ev,
             "entry_sizes": list(config.entry_sizes),
             "contest_variants": list(config.contest_variants),
             "top_k": config.top_k,

@@ -92,7 +92,7 @@ def _recommended_entry(cand_id: str, player: str, platform: str) -> RecommendedE
 
 def _no_offers() -> pd.DataFrame:
     """A board with no offers, carrying the columns the ledger's builders read."""
-    return pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Date"])
+    return pd.DataFrame(columns=["Boost", "Win Prob", "Fit Prob", "Pick", "Date"])
 
 
 # --- build_candidate_universe combines both platforms' scrapes -----------------
@@ -106,7 +106,7 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
         prefix = "ud" if platform == "Underdog" else "sl"
         return [_recommended_entry(f"{prefix}-same-1", f"{prefix.upper()} Same Player", platform)]
 
-    def _fake_cross_game(offers_df, config, date, run_slot, *, platform):
+    def _fake_cross_game(offers_df, date, run_slot, *, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
         return [
             _candidate(
@@ -192,10 +192,9 @@ def _offer(player: str, game: str, boost: float, platform: str, win_prob: float 
         "Line": 4.5,
         "Bet": "Over",
         "Win Prob": win_prob,
-        "Fit Prob": win_prob,
-        # An even pick's book sits at a coin flip, further from a read worth recommending
-        # than the shared leg gate allows. A moved multiplier's book is inside the gate.
-        "Market Prob": 0.50 if boost == 1.0 else 0.57,
+        "Fit Prob": 0.50,
+        "Pick": True,
+        "Market Prob": 0.50,
         "Boost": boost,
     }
 
@@ -204,7 +203,8 @@ def _mixed_multiplier_frames(platform: str) -> tuple[dict[str, pd.DataFrame], pd
     """What ``live_load`` hands back: same-game parlays and offers, some all even picks,
     some discounted or boosted, one even pick read too weakly to recommend. The Sleeper
     frames carry 1.0 multipliers too, so a pool that admitted them on the multiplier
-    alone would show it.
+    alone would show it. No leg or entry is worth its stake, as none is on the live
+    board: every offer is fitted at a coin flip and every entry valued at 0.95.
     """
     if platform == "Sleeper":
         parlays = [_same_game_parlay(("SL A", "SL B"), (1.0, 1.0), platform)]
@@ -239,7 +239,8 @@ def _load_mixed_multiplier_frames(monkeypatch) -> dict:
 
 def test_even_picks_pool_is_underdogs_recommended_even_picks_across_games(monkeypatch) -> None:
     """One entry: no all-even same-game parlay, no weakly read even pick, no moved
-    multiplier, nothing of Sleeper's."""
+    multiplier, nothing of Sleeper's. The rule recommends on the served read, and the
+    entry is priced at the fitted chance."""
     _load_mixed_multiplier_frames(monkeypatch)
 
     pools = ledger.build_candidate_universe(DATE, "morning")
@@ -248,7 +249,7 @@ def test_even_picks_pool_is_underdogs_recommended_even_picks_across_games(monkey
     assert entry.players == frozenset({"Even X", "Even Y"})
     assert entry.game_span == 2
     assert entry.platform == "Underdog"
-    assert entry.model_probs == (0.60, 0.60)
+    assert entry.model_probs == (0.50, 0.50)
 
 
 def test_shared_universe_is_every_candidate_whatever_its_multipliers(monkeypatch) -> None:
@@ -267,6 +268,18 @@ def test_shared_universe_is_every_candidate_whatever_its_multipliers(monkeypatch
     multipliers = {leg["boost"] for c in pools["safe"] for leg in c.canonical_legs}
     assert {0.87, 0.9, 1.0, 1.1, 1.2} <= multipliers
     assert "Sleeper" in {c.platform for c in pools["safe"]}
+
+
+def test_a_board_worth_less_than_its_stakes_still_fills_every_pool(monkeypatch) -> None:
+    """The personas' ranks choose among entries none of which is worth its stake, so every
+    pool still holds candidates, the shared one of both kinds."""
+    _load_mixed_multiplier_frames(monkeypatch)
+
+    pools = ledger.build_candidate_universe(DATE, "morning")
+
+    assert {c.game_span > 1 for c in pools["safe"]} == {False, True}
+    assert pools["even_picks"]
+    assert all(c.ev < 0 for pool in pools.values() for c in pool)
 
 
 # --- stakes: flat but for kelly_growth, which waits for a value above one --------

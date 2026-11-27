@@ -1,7 +1,8 @@
 """Pin cross-game candidate generation for the simulated-bettor ledger --
 game-span guard, per-pick multiplier pricing, RNG determinism, beam-width cap,
-the min_ev floor, the ``even_picks`` pool, a leg's league-own stat key and its
-price at the fitted chance of ``_ledger_cross_game``
+the board's picks as the shared pool, no value floor, the ``even_picks`` pool,
+a leg's league-own stat key and its price at the fitted chance of
+``_ledger_cross_game``
 (docs/handoffs/sim-bettor-ledger.md §10).
 """
 
@@ -17,7 +18,6 @@ from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
 from sportstradamus.strategies import _ledger_cross_game as xg
 from sportstradamus.strategies._ledger_selection import FLAT_STAKE
-from sportstradamus.strategies.underdog_pickem import PickemConfig
 
 DATE = datetime.date(2026, 7, 12)
 
@@ -35,6 +35,7 @@ def _offer_row(
     boost: float = 1.0,
     push_prob: float = 0.0,
     platform: str = "Underdog",
+    pick: bool = True,
 ) -> dict:
     team, opp = game.split("/")
     return {
@@ -53,11 +54,15 @@ def _offer_row(
         "Market Prob": market_prob,
         "Boost": boost,
         "Push Prob": push_prob,
+        "Pick": pick,
     }
 
 
 def _offers_df(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
+
+
+_BUILDERS = [xg.build_cross_game_candidates, xg.build_even_pick_candidates]
 
 
 # --- game_span guard: cross-game only ------------------------------------------
@@ -72,9 +77,7 @@ def test_never_returns_same_game_combos() -> None:
             _offer_row("Player D", "LAL/DEN"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     assert candidates
     assert all(c.game_span >= 2 for c in candidates)
@@ -88,9 +91,7 @@ def test_produces_at_least_one_two_leg_cross_game_candidate() -> None:
             _offer_row("Player B", "LAL/DEN"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     sizes = {c.entry_size for c in candidates}
     assert 2 in sizes
@@ -106,15 +107,31 @@ def test_canonical_legs_stat_field_is_canonicalized_not_raw_market() -> None:
             _offer_row("Player B", "LAL/DEN", market="Rebounds"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     canonical_market = stat_map["Underdog"]["Rebounds"]
     assert candidates
     for candidate in candidates:
         for leg in candidate.canonical_legs:
             assert leg["stat"] == canonical_market
+
+
+# --- the shared pool is the board's picks, at their fitted chance -----------------
+
+
+def test_shared_pool_holds_only_the_boards_picks_at_their_fitted_chance() -> None:
+    """The board picks by fitted value. A non-pick with the strongest served read stays out,
+    where a pool built on the read would take it first."""
+    offers = _offers_df(
+        [_offer_row(f"Pick {i}", f"G{i}A/G{i}B", fit_prob=0.52) for i in range(3)]
+        + [_offer_row("Strong Read", "BOS/MIA", win_prob=0.80, fit_prob=0.55, pick=False)]
+    )
+
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
+
+    assert {c.entry_size for c in candidates} == {2, 3}
+    assert all("Strong Read" not in c.players for c in candidates)
+    assert {prob for c in candidates for prob in c.model_probs} == {0.52}
 
 
 # --- platform tagging -----------------------------------------------------------
@@ -127,9 +144,7 @@ def test_build_cross_game_candidates_tags_sleeper_platform() -> None:
             _offer_row("Player B", "LAL/DEN", platform="Sleeper"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning", platform="Sleeper")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning", platform="Sleeper")
 
     assert candidates
     assert all(c.platform == "Sleeper" for c in candidates)
@@ -142,9 +157,7 @@ def test_build_cross_game_candidates_defaults_to_underdog_platform() -> None:
             _offer_row("Player B", "LAL/DEN"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     assert candidates
     assert all(c.platform == "Underdog" for c in candidates)
@@ -179,12 +192,11 @@ def test_price_combo_wiring_matches_direct_call() -> None:
             _offer_row("Player B", "LAL/DEN", win_prob=0.55, market_prob=0.53),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
     legs = xg._served_legs(offers, "Underdog")
     rng_direct = xg._pricing_rng(DATE, "morning")
     ev_payout = xg._price_combo(tuple(legs), rng_direct, "Underdog")
 
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
     two_leg = next(c for c in candidates if c.entry_size == 2)
 
     assert two_leg.ev == pytest.approx(ev_payout - 1.0, abs=0.05)
@@ -265,7 +277,7 @@ def test_candidate_is_recorded_on_its_all_hit_payout_and_its_priced_ev() -> None
         ]
     )
 
-    candidates = xg.build_cross_game_candidates(offers, PickemConfig(), DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     four_leg = next(c for c in candidates if c.entry_size == 4)
     assert four_leg.payout_multiplier == pytest.approx(9.0)
@@ -282,7 +294,7 @@ def test_canonical_legs_carry_each_picks_own_multiplier() -> None:
         ]
     )
 
-    candidates = xg.build_cross_game_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning")
 
     (two_leg,) = candidates
     assert {leg["player"]: leg["boost"] for leg in two_leg.canonical_legs} == {
@@ -335,24 +347,23 @@ def test_beam_width_cap_holds_with_monkeypatched_narrow_width(monkeypatch) -> No
         assert len(combos) <= 3, f"size {size} returned {len(combos)} combos, expected <=3"
 
 
-# --- candidates below min_ev are dropped ----------------------------------------
+# --- no value floor: the draw ranks what the pool holds ----------------------------
 
 
-def test_candidates_below_min_ev_are_dropped() -> None:
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_entry_worth_less_than_its_stake_stays_in_the_pool(build) -> None:
+    """On the live board no leg's fitted value clears 1. An entry under the old 5 % floor
+    stays for the persona's rank to weigh, where the floor left the pool empty."""
     offers = _offers_df(
         [
-            _offer_row("Player A", "BOS/MIA", win_prob=0.58, fit_prob=0.54, market_prob=0.54),
-            _offer_row("Player B", "LAL/DEN", win_prob=0.58, fit_prob=0.54, market_prob=0.54),
+            _offer_row("Player A", "BOS/MIA", fit_prob=0.54),
+            _offer_row("Player B", "LAL/DEN", fit_prob=0.54),
         ]
     )
-    lenient_config = PickemConfig(min_ev=-1.0)
-    strict_config = PickemConfig(min_ev=0.05)
 
-    lenient = xg.build_cross_game_candidates(offers, lenient_config, DATE, "morning")
-    strict = xg.build_cross_game_candidates(offers, strict_config, DATE, "morning")
+    (two_leg,) = build(offers, DATE, "morning")
 
-    assert lenient
-    assert strict == []
+    assert two_leg.ev < 0.05
 
 
 # --- Sleeper payout curve wired through end-to-end --------------------------------
@@ -365,9 +376,7 @@ def test_build_cross_game_candidates_sleeper_uses_sleeper_curve_for_payout_multi
             _offer_row("Player B", "LAL/DEN", platform="Sleeper"),
         ]
     )
-    config = PickemConfig(min_ev=-1.0)
-
-    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning", platform="Sleeper")
+    candidates = xg.build_cross_game_candidates(offers, DATE, "morning", platform="Sleeper")
     two_leg = next(c for c in candidates if c.entry_size == 2)
 
     _, sleeper_curve = payout_curve_for("Sleeper", "pooled")
@@ -376,23 +385,21 @@ def test_build_cross_game_candidates_sleeper_uses_sleeper_curve_for_payout_multi
     assert two_leg.payout_multiplier != pytest.approx(underdog_curve[2][0])
 
 
-# --- even picks: the recommended ones, at their served read, a game per leg -------
+# --- even picks: the recommended ones, a game per leg -----------------------------
 
 
-def test_recommended_even_pick_the_shared_gate_refuses_is_in_the_even_pick_pool() -> None:
-    """An even pick's book sits at a coin flip. A read strong enough to recommend the
-    pick (0.60 x 1.83 - 1 = 0.098) is then further from the book than the shared leg
-    gate allows, so the shared builder never sees a recommended even pick."""
+def test_recommended_even_pick_the_board_does_not_pick_is_in_the_even_pick_pool() -> None:
+    """The even-picks pool is the paper record of the old rule (a read of .574 or more on
+    an even pick), whatever the board's picks are by fitted value."""
     offers = _offers_df(
         [
-            _offer_row("Player A", "BOS/MIA", market_prob=0.50),
-            _offer_row("Player B", "LAL/DEN", market_prob=0.50),
+            _offer_row("Player A", "BOS/MIA", pick=False),
+            _offer_row("Player B", "LAL/DEN", pick=False),
         ]
     )
-    config = PickemConfig()
 
-    assert xg.build_cross_game_candidates(offers, config, DATE, "morning") == []
-    (two_leg,) = xg.build_even_pick_candidates(offers, config, DATE, "morning")
+    assert xg.build_cross_game_candidates(offers, DATE, "morning") == []
+    (two_leg,) = xg.build_even_pick_candidates(offers, DATE, "morning")
     assert two_leg.entry_size == 2
     assert two_leg.players == frozenset({"Player A", "Player B"})
 
@@ -411,7 +418,7 @@ def test_only_recommended_even_picks_enter_the_even_pick_pool() -> None:
         ]
     )
 
-    candidates = xg.build_even_pick_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
 
     assert {c.players for c in candidates} == {frozenset({"Even A", "Even B"})}
 
@@ -425,7 +432,7 @@ def test_even_pick_entry_never_holds_two_legs_of_one_game() -> None:
         + [_offer_row("Player D", "LAL/DEN"), _offer_row("Player E", "NYK/CHI")]
     )
 
-    candidates = xg.build_even_pick_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
 
     for candidate in candidates:
         games = [leg["game"] for leg in candidate.canonical_legs]
@@ -437,7 +444,7 @@ def test_even_pick_candidate_is_staked_and_pays_its_sizes_table_tier() -> None:
     offers = _offers_df([_offer_row(f"Player {i}", f"G{i}A/G{i}B") for i in range(4)])
     _, underdog_curve = payout_curve_for("Underdog", "pooled")
 
-    candidates = xg.build_even_pick_candidates(offers, PickemConfig(), DATE, "morning")
+    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
 
     assert {c.entry_size for c in candidates} == {2, 3, 4}
     for candidate in candidates:
@@ -445,21 +452,19 @@ def test_even_pick_candidate_is_staked_and_pays_its_sizes_table_tier() -> None:
         assert candidate.stake == FLAT_STAKE
 
 
-# --- even picks: the slate date's legs, dealt evenly ------------------------------
+# --- the slate date's legs; even picks dealt evenly -------------------------------
 
 
-def test_even_pick_pool_takes_only_legs_of_the_slate_dates_games() -> None:
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_a_pool_takes_only_legs_of_the_slate_dates_games(build) -> None:
     """A pick for a later game is taken on its own day, at that day's read. Taken today
     as well, it is staked on two days and stays open past the next settlement."""
     today = [_offer_row("Player A", "BOS/MIA"), _offer_row("Player B", "LAL/DEN")]
     pick = _offer_row("Player C", "NYK/CHI")
     tomorrow = (DATE + datetime.timedelta(days=1)).isoformat()
-    config = PickemConfig(min_ev=-1.0)
 
-    later = xg.build_even_pick_candidates(
-        _offers_df([*today, pick | {"Date": tomorrow}]), config, DATE, "morning"
-    )
-    game_day = xg.build_even_pick_candidates(_offers_df([*today, pick]), config, DATE, "morning")
+    later = build(_offers_df([*today, pick | {"Date": tomorrow}]), DATE, "morning")
+    game_day = build(_offers_df([*today, pick]), DATE, "morning")
 
     assert {c.players for c in later} == {frozenset({"Player A", "Player B"})}
     assert any("Player C" in c.players for c in game_day)
@@ -482,9 +487,7 @@ def test_even_pick_entries_are_dealt_evenly_over_the_legs(monkeypatch) -> None:
     # A thousand entries take ten seconds to price, and the price is not what is read here.
     monkeypatch.setattr(xg, "_price_combo", lambda legs, rng, platform: 2.0)
 
-    candidates = xg.build_even_pick_candidates(
-        _thirty_even_picks(), PickemConfig(), DATE, "morning"
-    )
+    candidates = xg.build_even_pick_candidates(_thirty_even_picks(), DATE, "morning")
 
     six_pick = [c for c in candidates if c.entry_size == 6]
     assert sum("Player 29" in c.players for c in six_pick) < 0.4 * len(six_pick)
@@ -495,7 +498,7 @@ def test_even_pick_entries_are_dealt_evenly_over_the_legs(monkeypatch) -> None:
 def test_small_slate_gives_every_entry_it_can_hold_and_none_larger() -> None:
     offers = _offers_df([_offer_row(f"Player {i}", f"G{i}A/G{i}B") for i in range(3)])
 
-    candidates = xg.build_even_pick_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = xg.build_even_pick_candidates(offers, DATE, "morning")
 
     assert sorted(sorted(c.players) for c in candidates) == [
         ["Player 0", "Player 1"],
@@ -508,16 +511,15 @@ def test_small_slate_gives_every_entry_it_can_hold_and_none_larger() -> None:
 def test_even_picks_of_one_game_alone_make_no_entry() -> None:
     offers = _offers_df([_offer_row("Player A", "BOS/MIA"), _offer_row("Player B", "BOS/MIA")])
 
-    assert xg.build_even_pick_candidates(offers, PickemConfig(min_ev=-1.0), DATE, "morning") == []
+    assert xg.build_even_pick_candidates(offers, DATE, "morning") == []
 
 
 def test_even_pick_deal_is_fixed_by_the_date_and_the_run_slot(monkeypatch) -> None:
     monkeypatch.setattr(xg, "_CROSS_GAME_BEAM_WIDTH", 5)  # five entries a size: quick to price
     offers = _thirty_even_picks()
-    config = PickemConfig(min_ev=-1.0)
 
     def _ids(run_slot: str) -> list[str]:
-        return [c.id for c in xg.build_even_pick_candidates(offers, config, DATE, run_slot)]
+        return [c.id for c in xg.build_even_pick_candidates(offers, DATE, run_slot)]
 
     morning = _ids("morning")
     assert _ids("morning") == morning
@@ -525,8 +527,6 @@ def test_even_pick_deal_is_fixed_by_the_date_and_the_run_slot(monkeypatch) -> No
 
 
 # --- a leg's stat is its league's own key, on both builders -----------------------
-
-_BUILDERS = [xg.build_cross_game_candidates, xg.build_even_pick_candidates]
 
 
 def _nhl_assists_and_points() -> list[dict]:
@@ -543,7 +543,7 @@ def test_nhl_leg_carries_the_gamelogs_stat_not_the_platform_maps(build) -> None:
     where a missing column settles the leg as a push."""
     offers = _offers_df(_nhl_assists_and_points())
 
-    (two_leg,) = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    (two_leg,) = build(offers, DATE, "morning")
 
     assert {leg["player"]: leg["stat"] for leg in two_leg.canonical_legs} == {
         "Skater A": "assists",
@@ -561,7 +561,7 @@ def test_market_the_platform_map_lacks_still_builds_a_leg(build) -> None:
         ]
     )
 
-    (two_leg,) = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    (two_leg,) = build(offers, DATE, "morning")
 
     assert {leg["player"]: leg["stat"] for leg in two_leg.canonical_legs} == {
         "Player A": "Not A Market",
@@ -585,7 +585,7 @@ def test_every_pool_prices_and_records_a_leg_at_its_fitted_chance(build) -> None
     )
     _, underdog_curve = payout_curve_for("Underdog", "pooled")
 
-    (two_leg,) = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    (two_leg,) = build(offers, DATE, "morning")
 
     assert two_leg.model_probs == tuple(fitted[leg["player"]] for leg in two_leg.canonical_legs)
     assert two_leg.ev + 1 == pytest.approx(0.52 * 0.49 * underdog_curve[2][0], abs=0.05)
@@ -601,7 +601,7 @@ def test_leg_without_a_fitted_chance_never_enters_a_candidate(build) -> None:
         + [one_sided, one_sided | {"Bet": "Under", "Boost": 0.0}]
     )
 
-    candidates = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = build(offers, DATE, "morning")
 
     assert {c.entry_size for c in candidates} == {2, 3}
     assert all("One Side" not in c.players for c in candidates)
@@ -613,7 +613,7 @@ def test_every_candidate_is_staked_flat_though_worth_less_than_its_stake(build) 
     board is. The flat stake records them all the same."""
     offers = _offers_df([_offer_row(f"Player {i}", f"G{i}A/G{i}B", fit_prob=0.5) for i in range(3)])
 
-    candidates = build(offers, PickemConfig(min_ev=-1.0), DATE, "morning")
+    candidates = build(offers, DATE, "morning")
 
     assert candidates
     assert all(c.ev < 0 for c in candidates)
