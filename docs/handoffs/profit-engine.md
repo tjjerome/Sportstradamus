@@ -280,6 +280,30 @@ nightly record before anything is built on them. Three places a game returned �
 −4.2 %, and on slates of one or two games −4.9 % against −1.2 % for a place a team (the lane's
 `research/phase2/`, read 2026-11-26).
 
+**Lenses (built).** The Board's four stance lenses filter on `EV` and on `Market EV`, the
+consensus book's return at the same payout (`dashboard/lenses.py`). The app's cut leaves `EV`
+under 1.00 on nearly every leg, so a cut at break-even lists nothing. Each cut sits where
+walk-forward history separated legs while still listing a workable number: 38 game dates
+(2026-10-19 to 11-25), 138,403 priced legs, about 3,600 a date. Every priced leg returned
+−10.3 % [−10.9, −9.7] and the picks −3.3 % [−7.4, +0.7] at 60 a date.
+
+| Lens | Rule | Legs a date | Returned |
+|---|---|---|---|
+| Sharp edges | `EV` at least 0.93 and `Market EV` at least 0.95 | 70 | −4.3 % [−8.2, 0.0] |
+| Consensus | `EV` at least 0.92 and `Market EV` over 1.00 | 61 | −5.1 % [−8.4, −1.2] |
+| Contrarian | `EV` at least 0.92, a sportsbook line, and `Market EV` under 0.88 | 26 | −7.3 % [−11.3, −3.7] |
+| Longshots | the side pays at least 2.0 and `EV` at least 0.86 | 26 | −7.3 % [−13.6, −0.9] |
+
+`EV` alone sorts: at or above 0.92 legs returned −7.2 %, at 0.93 −6.9 %, at 0.94 −5.6 %; the
+book's return on top of it buys two to three points. How far the fit lifts a leg over the
+app's price, and which way the book leans against the app, select nothing (−7.5 % to −10.2 %).
+Contrarian needs the sportsbook line because a leg no book quotes carries the app's own price
+as `Market EV`. No lens is a profit yet, and Sleeper's legs trail Underdog's inside three of
+them (Sharp edges −7.7 % against −2.1 %, Consensus −9.4 % against +0.7 %, Longshots −17.3 %
+against −1.6 %): the fit still over-claims on Sleeper's long odds. The cuts are read again with
+each change to the fit (the lane's `research/ev_fit/lens_study.py` and `lens_final.py`, read
+2026-11-27).
+
 **Correlation tables (the builder's half built).** The entry search reads each team's own
 slot-pair correlations (`corr_same_team.parquet`, `corr_opposing.parquet`). A team's pair rests
 on that team's games alone, about 58 in the NBA and NHL and about ten in the NFL at the read

@@ -3,8 +3,8 @@
 ``dashboard/components/grid.py`` is the one place the stat grids turn a frame into
 ``gridOptions``. These goldens hold its three promises: numbers never center (DESIGN.md §4),
 every color it paints is a committed design token, and the board lenses / edge derivation
-read the EV columns as edge-vs-DFS (Consensus Edge = ``Market EV − 1``; lens book-agreement
-keys off ``Market EV``), with the board's picks a lens of their own.
+read the EV columns as edge-vs-DFS (Consensus Edge = ``Market EV − 1``; the stance lenses cut
+on the fitted ``EV`` and the book's ``Market EV``), with the board's picks a lens of their own.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -165,42 +166,64 @@ def test_header_tooltips_attached() -> None:
     assert defs[CONSENSUS_EDGE]["headerTooltip"] == "book's view"
 
 
+# One row per case the stance lenses must tell apart. ``Model EV`` rides along as a decoy: it
+# is over break-even exactly where the fitted ``EV`` is under a lens's floor (rows 5 to 7), so
+# a lens that still read the model's claim would list them. ``Boost`` is the payout on Sleeper
+# and a multiplier over the 1.83 baseline on Underdog.
+_LENS_DF = pd.DataFrame(
+    [
+        # EV, Market EV, Consensus Line, Boost, Platform, Model EV, Date, Pick
+        (0.95, 1.02, 10.5, 1.83, "Sleeper", 0.90, "2026-07-04", False),  # 0: book over 1.00 too
+        (0.93, 0.95, 10.5, 1.82, "Sleeper", 0.90, "2026-07-04", True),  # 1: sharp, at both cuts
+        (0.925, 0.87, 4.5, 1.85, "Sleeper", 0.90, "2026-07-05", False),  # 2: book well under
+        (0.925, 0.87, np.nan, 1.85, "Sleeper", 0.90, "2026-07-04", False),  # 3: no book line
+        (0.90, 0.90, 4.5, 1.20, "Underdog", 0.90, "2026-07-05", True),  # 4: pays 2.196x
+        (0.84, 1.10, 4.5, 2.40, "Sleeper", 1.30, "2026-07-05", False),  # 5: EV under the floor
+        (np.nan, 1.00, 4.5, 2.30, "Sleeper", 1.20, "2026-07-05", False),  # 6: fit did not price
+        (0.915, 1.05, 4.5, 1.09, "Underdog", 1.10, "2026-07-05", False),  # 7: pays 1.995x
+    ],
+    columns=["EV", "Market EV", "Consensus Line", "Boost", "Platform", "Model EV", "Date", "Pick"],
+)
+
+
 def test_apply_lens_each_narrows() -> None:
-    df = pd.DataFrame(
-        {
-            "Model EV": [1.20, 0.95, 1.05, 1.40, 1.01],
-            "Market EV": [1.02, 1.00, 1.05, 0.90, 0.98],
-            "Boost": [1.0, 1.0, 1.0, 3.0, 1.0],
-            "Date": ["2026-07-04", "2026-07-04", "2026-07-05", "2026-07-04", "2026-07-05"],
-            "Pick": [False, True, False, False, True],
-        }
-    )
-    assert apply_lens(df, "All").equals(df)
+    assert apply_lens(_LENS_DF, "All").equals(_LENS_DF)
     for lens in LENSES:
         if lens == "All":
             continue
-        out = apply_lens(df, lens)
-        assert set(out.index).issubset(df.index)
-        assert len(out) < len(df), f"{lens} did not narrow the board"
-    # You play against DFS: Contrarian = model +EV vs DFS where the book is under break-even;
-    # Consensus = both the model and the book score it over break-even.
-    # Picks = the board's picks, whatever the model's EV says of them.
-    assert set(apply_lens(df, "Picks").index) == {1, 4}
-    assert set(apply_lens(df, "Contrarian").index) == {3, 4}
-    assert set(apply_lens(df, "Consensus").index) == {0, 2}
+        out = apply_lens(_LENS_DF, lens)
+        assert set(out.index).issubset(_LENS_DF.index)
+        assert len(out) < len(_LENS_DF), f"{lens} did not narrow the board"
+    # Picks = the board's picks, whatever any EV says of them.
+    assert set(apply_lens(_LENS_DF, "Picks").index) == {1, 4}
     # Tonight = the soonest slate date present, so it degrades without wall-clock/timezone
     # parsing — here the minimum Date is 2026-07-04.
-    assert set(apply_lens(df, "Tonight").index) == {0, 1, 3}
+    assert set(apply_lens(_LENS_DF, "Tonight").index) == {0, 1, 3}
+
+
+def test_stance_lenses_cut_on_the_fitted_ev_and_the_books_price() -> None:
+    """You play against DFS, and the fitted ``EV`` sits under break-even on nearly every leg,
+    so each lens cuts where the money record separates legs, not at 1.00.
+
+    Sharp edges = the fit's best legs the book is not against; Consensus = the book itself
+    scores the leg over break-even; Contrarian = a sportsbook prices it well under while the
+    fit still ranks it high; Longshots = a leg paying at least double that the fit does not
+    rank at the bottom.
+    """
+    assert set(apply_lens(_LENS_DF, "Sharp edges").index) == {0, 1}
+    assert set(apply_lens(_LENS_DF, "Consensus").index) == {0}
+    assert set(apply_lens(_LENS_DF, "Contrarian").index) == {2}
+    assert set(apply_lens(_LENS_DF, "Longshots").index) == {4}
 
 
 def test_apply_lens_missing_cols_unchanged() -> None:
-    df = pd.DataFrame({"Model EV": [1.2, 1.0]})
+    df = pd.DataFrame({"EV": [0.95, 0.90]})
     assert apply_lens(df, "Sharp edges").equals(df)
     assert apply_lens(df, "nonsense-lens").equals(df)
 
 
 def test_tonight_lens_missing_date_col_unchanged() -> None:
-    df = pd.DataFrame({"Model EV": [1.2, 1.0], "Market EV": [1.0, 1.0], "Boost": [1.0, 1.0]})
+    df = _LENS_DF.drop(columns="Date")
     assert apply_lens(df, "Tonight").equals(df)
 
 
