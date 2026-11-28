@@ -30,6 +30,7 @@ _BASE = {
     "Platform": "Underdog",
     "Bet": "Over",
     "Line": 20.5,
+    "Consensus Line": 20.5,
     "Boost": 1.0,
     "Win Prob": 0.55,
     "Projection": 23.456,
