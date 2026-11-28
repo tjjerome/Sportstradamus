@@ -8,7 +8,7 @@ lenses cut ``EV`` where the settled record separated legs, not at break-even
 (docs/handoffs/profit-engine.md §5.3, "Lenses"). They sort offers by standing — the fit's
 best legs, legs paying double or more, and whether the book agrees with the fit (Consensus)
 or prices the leg well under it (Contrarian) — before the manual filters apply. Pure:
-``apply_lens(df, lens)`` returns a filtered frame; the registry order is the control's
+each ``LENSES`` entry returns a filtered frame; the registry order is the control's
 display order.
 """
 
@@ -27,13 +27,12 @@ _SHARP_MARKET_EV = 0.95
 # "Consensus" and "Contrarian" read further down the fit's ranking, about its top leg in ten.
 _RANKED_EV = 0.92
 _EV_BREAK_EVEN = 1.0
-# "Contrarian": the book's return sits at least four points under the fit's.
+# "Contrarian": the book's own return sits under this, four points below the fit's floor.
 _CONTRARIAN_MARKET_EV = 0.88
 # "Longshots": the side pays at least double.
 _LONGSHOT_PAYOUT = 2.0
 # Sides that pay double rank lower on EV as a group, so their floor sits lower.
 _LONGSHOT_EV = 0.86
-_LENS_COLUMNS = {"EV", "Market EV", "Consensus Line", "Boost", "Platform"}
 
 
 def _sharp(df: pd.DataFrame) -> pd.DataFrame:
@@ -81,11 +80,3 @@ LENSES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     "Contrarian": _contrarian,
     "Consensus": _consensus,
 }
-
-
-def apply_lens(df: pd.DataFrame, lens: str) -> pd.DataFrame:
-    """Apply a named lens; an unknown lens or a missing lens column leaves the frame unchanged."""
-    fn = LENSES.get(lens)
-    if fn is None or not _LENS_COLUMNS.issubset(df.columns):
-        return df
-    return fn(df)

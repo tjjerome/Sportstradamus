@@ -75,9 +75,9 @@ _RECORD = [
 ]
 
 
-def _board(monkeypatch, tmp_path) -> AppTest:
+def _board(monkeypatch, tmp_path, snapshot=_OFFERS) -> AppTest:
     offers, record = tmp_path / "current_offers.parquet", tmp_path / "play_record.parquet"
-    pd.DataFrame(_OFFERS).to_parquet(offers)
+    pd.DataFrame(snapshot).to_parquet(offers)
     pd.DataFrame(_RECORD).to_parquet(record)
     data_module = importlib.import_module("sportstradamus.dashboard.data")
     monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", offers)
@@ -101,6 +101,13 @@ def _grid_rows(at: AppTest) -> pd.DataFrame:
 def test_board_opens_on_the_picks_in_ev_order(monkeypatch, tmp_path):
     at = _board(monkeypatch, tmp_path)
     assert at.segmented_control(key="board_lens").value == "Picks"
+    assert _grid_rows(at)["Player"].tolist() == ["A. Pick", "B. Pick"]
+
+
+def test_the_picks_view_needs_only_the_columns_it_reads(monkeypatch, tmp_path):
+    """A snapshot without a column only another lens reads still opens on the picks."""
+    snapshot = pd.DataFrame(_OFFERS).drop(columns="Consensus Line")
+    at = _board(monkeypatch, tmp_path, snapshot)
     assert _grid_rows(at)["Player"].tolist() == ["A. Pick", "B. Pick"]
 
 

@@ -21,7 +21,7 @@ from sportstradamus.dashboard.data import (
     sport_filtered,
 )
 from sportstradamus.dashboard.legs import record_line
-from sportstradamus.dashboard.lenses import LENSES, apply_lens
+from sportstradamus.dashboard.lenses import LENSES
 from sportstradamus.dashboard.viewport import is_mobile
 from sportstradamus.helpers import leg_kind, market_display_name
 
@@ -104,7 +104,7 @@ with filter_host:
 
     player_query = st.text_input("Player search", placeholder="e.g. Jokic")
 
-filtered = apply_lens(offers, lens)
+filtered = LENSES[lens](offers)
 if selected_leagues:
     filtered = filtered.loc[filtered["League"].isin(selected_leagues)]
 if selected_platforms and "Platform" in filtered:

@@ -37,7 +37,7 @@ from sportstradamus.dashboard.components.grid import (
     build_themed_grid_options,
 )
 from sportstradamus.dashboard.data import _load_current_line_movement_cached
-from sportstradamus.dashboard.lenses import LENSES, apply_lens
+from sportstradamus.dashboard.lenses import LENSES
 from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -186,19 +186,19 @@ _LENS_DF = pd.DataFrame(
 )
 
 
-def test_apply_lens_each_narrows() -> None:
-    assert apply_lens(_LENS_DF, "All").equals(_LENS_DF)
+def test_each_lens_narrows() -> None:
+    assert LENSES["All"](_LENS_DF).equals(_LENS_DF)
     for lens in LENSES:
         if lens == "All":
             continue
-        out = apply_lens(_LENS_DF, lens)
+        out = LENSES[lens](_LENS_DF)
         assert set(out.index).issubset(_LENS_DF.index)
         assert len(out) < len(_LENS_DF), f"{lens} did not narrow the board"
     # Picks = the board's picks, whatever any EV says of them.
-    assert set(apply_lens(_LENS_DF, "Picks").index) == {1, 4}
+    assert set(LENSES["Picks"](_LENS_DF).index) == {1, 4}
     # Tonight = the soonest slate date present, so it degrades without wall-clock/timezone
     # parsing — here the minimum Date is 2026-07-04.
-    assert set(apply_lens(_LENS_DF, "Tonight").index) == {0, 1, 3}
+    assert set(LENSES["Tonight"](_LENS_DF).index) == {0, 1, 3}
 
 
 def test_stance_lenses_cut_on_the_fitted_ev_and_the_books_price() -> None:
@@ -210,21 +210,15 @@ def test_stance_lenses_cut_on_the_fitted_ev_and_the_books_price() -> None:
     fit still ranks it high; Longshots = a leg paying at least double that the fit does not
     rank at the bottom.
     """
-    assert set(apply_lens(_LENS_DF, "Sharp edges").index) == {0, 1}
-    assert set(apply_lens(_LENS_DF, "Consensus").index) == {0}
-    assert set(apply_lens(_LENS_DF, "Contrarian").index) == {2}
-    assert set(apply_lens(_LENS_DF, "Longshots").index) == {4}
-
-
-def test_apply_lens_missing_cols_unchanged() -> None:
-    df = pd.DataFrame({"EV": [0.95, 0.90]})
-    assert apply_lens(df, "Sharp edges").equals(df)
-    assert apply_lens(df, "nonsense-lens").equals(df)
+    assert set(LENSES["Sharp edges"](_LENS_DF).index) == {0, 1}
+    assert set(LENSES["Consensus"](_LENS_DF).index) == {0}
+    assert set(LENSES["Contrarian"](_LENS_DF).index) == {2}
+    assert set(LENSES["Longshots"](_LENS_DF).index) == {4}
 
 
 def test_tonight_lens_missing_date_col_unchanged() -> None:
     df = _LENS_DF.drop(columns="Date")
-    assert apply_lens(df, "Tonight").equals(df)
+    assert LENSES["Tonight"](df).equals(df)
 
 
 def test_add_consensus_edge_is_market_ev_minus_one() -> None:
