@@ -209,7 +209,6 @@ def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
 _OFFER_DEFAULTS = {
     "Star": 0.0,
     "Fit Prob": np.nan,
-    "Fit Prob Low": np.nan,
     "EV": np.nan,
     "Pick": False,
 }
@@ -236,7 +235,7 @@ def load_current_offers() -> pd.DataFrame:
     A column the snapshot predates reads its ``_OFFER_DEFAULTS`` value, so a dashboard
     restarted on the pull that brought it keeps rendering until the next ``prophecize``
     writes the real values: ``Star`` (player prominence) 0.0, and the EV stamp's
-    ``Fit Prob``, ``Fit Prob Low`` and ``EV`` blank with ``Pick`` False.
+    ``Fit Prob`` and ``EV`` blank with ``Pick`` False.
     """
     return _load_current_offers_cached(CURRENT_OFFERS_PATH, _mtime(CURRENT_OFFERS_PATH))
 

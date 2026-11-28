@@ -51,7 +51,7 @@ def test_offers_loader_reads_a_snapshot_from_before_the_ev_stamp_as_not_priced(
     offers = data_module.load_current_offers()
     assert offers["Pick"].tolist() == [False]
     assert offers["Pick"].dtype == bool
-    assert offers[["Fit Prob", "Fit Prob Low", "EV"]].isna().all().all()
+    assert offers[["Fit Prob", "EV"]].isna().all().all()
 
 
 def test_offers_loader_keeps_the_fitted_numbers_a_snapshot_already_has(monkeypatch, tmp_path):

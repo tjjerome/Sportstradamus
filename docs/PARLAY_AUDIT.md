@@ -190,8 +190,8 @@ up to one of the three entries kept.
 
 ### 2.6 Parlay-path Kelly sizing
 
-`Rec Bet` is 0.0 on every row: an entry gets no stake and no "+EV" mark until the
-entries' money record supports one
+`Rec Bet` is 0.0 on every row: an entry gets no stake until the entries' money record
+supports one
 ([profit-engine.md §5.3](handoffs/profit-engine.md)). Nothing sizes or filters a parlay
 by Kelly; the units score that did is archived in
 `src/deprecated/parlay_search_orphans.py`. Pick'em entries are staked by

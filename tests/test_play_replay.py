@@ -116,8 +116,8 @@ def test_walk_forward_scores_the_walked_dates_and_prints_the_fit_check(tmp_path)
         for date, actual in (("2026-10-24", 4.0), ("2026-10-25", 1.0))
         for pick in (_RULE_PICK, _RANK_PICK)
     ]
-    # A scoring run's own fit columns and pick flags, which the walk replaces: kept, they mark
-    # every leg "+EV" and call every leg a pick.
+    # A scoring run's own fit columns and pick flags, which the walk replaces: kept, every
+    # leg clears the lower bound and reads as a pick.
     stale = {"Fit Prob": 0.99, "Fit Prob Low": 0.99, "EV": 9.9, "Pick": True}
     history = pd.DataFrame(train + walked, columns=HISTORY_COLS).assign(
         **{"Book Prob": np.nan, "Book Class": "C"}, **stale
