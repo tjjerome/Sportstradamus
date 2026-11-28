@@ -4,7 +4,7 @@
 The rest are views of a leg's standing. You play against DFS, so both columns they read are
 returns per $1 at the app's payout: ``EV`` from the fitted win chance and ``Market EV`` from
 the consensus book's. The app's cut leaves ``EV`` under 1.00 on nearly every leg, so the
-lenses cut where the settled record separated legs, not at break-even
+lenses cut ``EV`` where the settled record separated legs, not at break-even
 (docs/handoffs/profit-engine.md §5.3, "Lenses"). They sort offers by standing — the fit's
 best legs, legs paying double or more, and whether the book agrees with the fit (Consensus)
 or prices the leg well under it (Contrarian) — before the manual filters apply. Pure:
@@ -24,7 +24,7 @@ from sportstradamus.helpers import platform_payout
 _SHARP_EV = 0.93
 # ...that the book's own price also puts near the top.
 _SHARP_MARKET_EV = 0.95
-# The two book lenses read further down the fit's ranking, about its top leg in ten.
+# "Consensus" and "Contrarian" read further down the fit's ranking, about its top leg in ten.
 _RANKED_EV = 0.92
 _EV_BREAK_EVEN = 1.0
 # "Contrarian": the book's return sits at least four points under the fit's.

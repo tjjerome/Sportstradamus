@@ -172,9 +172,8 @@ for c in cards:
     # A game with no context row has no shape at all, which is the clouded reading too.
     shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
 
-    # A pick lights the card; a game without one drops to the muted state. The badge shows
-    # the game's best EV. The prophecy is the oracle voice — the story headline, or a dim
-    # placeholder.
+    # A pick lights the card; a game without one drops to the muted state. The prophecy is
+    # the oracle voice — the story headline, or a dim placeholder.
     card_class = "tonight-card" if n_picks else "tonight-card muted"
     ev_text = f"top EV {top_ev:.2f}" if pd.notna(top_ev) else "no EV"
     ev_badge = f'<span class="tc-badge tc-gray">{ev_text}</span>'

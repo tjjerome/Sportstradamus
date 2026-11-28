@@ -101,7 +101,7 @@ def ev_marked(fit_prob_low: pd.Series, payout: pd.Series) -> pd.Series:
     """Whether the fit's lower bound clears each side's payout: the play ``ev_edge``'s rule.
 
     The fit's lower bound on the side's win chance, times its payout, reaches 1, at a payout a
-    side can be recommended at. A side the fit did not price has no bound and is never marked.
+    side can be recommended at. A side the fit did not price has no bound and never clears it.
     """
     return (fit_prob_low * payout >= 1) & in_recommended_band(payout)
 
