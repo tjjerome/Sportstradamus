@@ -18,7 +18,7 @@ from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE
 from sportstradamus.realized import (
     REALIZED_BY_SIDE_COLS,
     compute_realized_by_side,
-    ev_marked,
+    lower_bound_clears,
 )
 
 _NOW = datetime(2026, 10, 3, 12)
@@ -169,12 +169,12 @@ def test_recommended_stops_at_the_favored_payout_cap():
     assert _keys(out, "payout_band", cohort="recommended") == {"2.00-2.50"}
 
 
-def test_the_ev_mark_needs_the_fits_lower_bound_to_clear_a_payout_in_the_band():
+def test_ev_edge_needs_the_fits_lower_bound_to_clear_a_payout_in_the_band():
     # The bound times the payout reaches 1 on the second and third sides; the fourth clears
     # 1 at a payout past the cap, and a side the fit did not price has no bound.
     bound = pd.Series([0.49, 0.50, 0.55, 0.40, np.nan])
     payout = pd.Series([2.0, 2.0, UNDERDOG_BOOST_BASELINE, 3.0, 1.5])
-    assert ev_marked(bound, payout).tolist() == [False, True, True, False, False]
+    assert lower_bound_clears(bound, payout).tolist() == [False, True, True, False, False]
 
 
 def test_breakeven_rate_is_n_over_the_summed_payout():

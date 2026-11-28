@@ -97,7 +97,7 @@ def recommended(win_prob: pd.Series, payout: pd.Series) -> pd.Series:
     return (win_prob * payout - 1 >= RECOMMENDED_EDGE_MIN) & in_recommended_band(payout)
 
 
-def ev_marked(fit_prob_low: pd.Series, payout: pd.Series) -> pd.Series:
+def lower_bound_clears(fit_prob_low: pd.Series, payout: pd.Series) -> pd.Series:
     """Whether the fit's lower bound clears each side's payout: the play ``ev_edge``'s rule.
 
     The fit's lower bound on the side's win chance, times its payout, reaches 1, at a payout a

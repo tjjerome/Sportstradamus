@@ -116,7 +116,7 @@ def _ev_rank(sides: pd.DataFrame) -> pd.Series:
 # the cohort Receipts and the live gap read. ``under`` and ``all`` are controls that need no
 # model: what the app's cut costs a bettor who takes every Under on an even pick, or every side
 # it posts. ``ev_edge`` takes a side whose payout the fit's lower bound clears
-# (``realized.ev_marked``), the paper test of staking on that bound. ``ev_rank`` spends
+# (``realized.lower_bound_clears``), the paper test of staking on that bound. ``ev_rank`` spends
 # the board's leg count on the highest ``EV`` instead, and ``ev_pick`` is the board's own picks
 # as each run flagged them (``live_fit.picks``). A new play goes last: ``play_record`` draws its
 # bounds in this order, so the plays before it keep their numbers.
@@ -124,7 +124,7 @@ PLAYS: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     "model_edge": lambda sides: sides["Recommended"],
     "under": lambda sides: sides["Side"].eq("Under") & sides["Kind"].eq("underdog_even"),
     "all": lambda sides: pd.Series(True, index=sides.index),
-    "ev_edge": lambda sides: realized.ev_marked(sides["Fit Prob Low"], sides["Payout"]),
+    "ev_edge": lambda sides: realized.lower_bound_clears(sides["Fit Prob Low"], sides["Payout"]),
     "ev_rank": _ev_rank,
     # NaN on a row scored before the flag existed.
     "ev_pick": lambda sides: sides["Pick"].eq(True),
